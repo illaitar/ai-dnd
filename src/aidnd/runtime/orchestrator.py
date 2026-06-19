@@ -531,14 +531,51 @@ class GameSession:
         c = self.world.containers[shop]
         if not c.items:
             return {"kind": "system", "text": "Лавка пуста.", "view": self.view()}
-        iid = c.items[0]
+        goods = ", ".join(f"{self._item_name(i)} ({inv.price_of(self.world, self.world.items[i], c, self.player)//100} зм)"
+                          for i in c.items)
+        low = text.lower()
+        iid = next((i for i in c.items if self._item_match(i, low)), None)
+        if iid is None:                               # не назвали товар — покажем ассортимент
+            return {"kind": "shop", "text": f"На прилавке: {goods}. Что берёшь?",
+                    "shop": shop, "view": self.view()}
+        price = inv.price_of(self.world, self.world.items[iid], c, self.player) // 100
+        name = self._item_name(iid)
         try:
             inv.buy(self.world, self.player, shop, iid)
             self._tick()
-            return {"kind": "narration", "text": f"Ты покупаешь {self._item_name(iid)}.",
-                    "view": self.view()}
+            return {"kind": "narration", "text": f"Ты покупаешь {name} за ~{price} зм. "
+                    f"Кошелёк: {self._coins()}.", "view": self.view()}
         except inv.InventoryError as e:
             return {"kind": "system", "text": f"Покупка не удалась: {e}", "view": self.view()}
+
+    def _do_sell(self, action: Action, text: str) -> dict:
+        shop = self._shop_here()
+        if not shop:
+            return {"kind": "system", "text": "Поблизости нет лавки, чтобы продать.", "view": self.view()}
+        carry = self.world.containers.get(f"carry:{ids.name_of(self.player)}")
+        if not carry or not carry.items:
+            return {"kind": "system", "text": "В сумке нечего продавать.", "view": self.view()}
+        low = text.lower()
+        iid = next((i for i in carry.items if self._item_match(i, low)), None)
+        if iid is None:
+            bag = ", ".join(self._item_name(i) for i in carry.items)
+            return {"kind": "shop", "text": f"Что продать? В сумке: {bag}.", "view": self.view()}
+        name = self._item_name(iid)
+        try:
+            inv.sell(self.world, self.player, shop, iid)
+            self._tick()
+            return {"kind": "narration", "text": f"Ты продаёшь {name}. Кошелёк: {self._coins()}.",
+                    "view": self.view()}
+        except inv.InventoryError as e:
+            return {"kind": "system", "text": f"Продажа не удалась: {e}", "view": self.view()}
+
+    def _item_match(self, iid: str, low: str) -> bool:
+        name = self._item_name(iid).split("×")[0].strip().lower()
+        return bool(name) and (name in low or any(w in low for w in name.split() if len(w) > 3))
+
+    def _coins(self) -> str:
+        w = self.world.wallet(self.player)
+        return ", ".join(f"{v} {k}" for k, v in w.items() if v) or "пусто"
 
     def _do_buyinfo(self, action: Action, text: str) -> dict:
         """Покупка картографических сведений у NPC — могут оказаться ложью/неполнотой."""

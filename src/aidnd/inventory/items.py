@@ -46,6 +46,7 @@ class ItemInstance:
     identified: bool = True
     custom_name: str | None = None
     description: str | None = None      # флейвор от item_smith (косметика, не механика)
+    mods: dict = field(default_factory=dict)  # модификации экземпляра (заточка/затупление…)
     affixes: list[str] = field(default_factory=list)
     equipped_slot: str | None = None
     provenance: Provenance | None = None

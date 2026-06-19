@@ -194,14 +194,15 @@ def equipped_weapon_key(world, eid: str) -> str:
 
 
 def attack_bonus_from_equipment(world, eid: str, kind: str) -> int:
-    """Магический бонус (+1 и т.п.) от экипированного оружия (док 07 §6)."""
+    """Бонус к попаданию/урону от экипированного оружия: магия шаблона + instance-моды
+    (заточка/затупление, док 07 §6)."""
     eq = _equipped(world, eid)
     main = eq.get("main_hand")
-    if main:
-        tmpl = world.templates.get(main.template_id)
-        if tmpl:
-            return tmpl.base_stats.get("attack_bonus", 0)
-    return 0
+    if not main:
+        return 0
+    tmpl = world.templates.get(main.template_id)
+    bonus = tmpl.base_stats.get("attack_bonus", 0) if tmpl else 0
+    return bonus + (main.mods or {}).get("attack_bonus", 0)
 
 
 def armor_class(world, eid: str) -> int:
@@ -226,8 +227,83 @@ def armor_class(world, eid: str) -> int:
     return ac
 
 
+_DIE_LADDER = ["1d4", "1d6", "1d8", "1d10", "1d12"]
+
+
+def _step_die(expr: str, steps: int) -> str:
+    """Сдвиг кости урона по лестнице (затупление = вниз, заточка = вверх). Нестандартные
+    выражения (2d6 и т.п.) не трогаем."""
+    if steps and expr in _DIE_LADDER:
+        i = _DIE_LADDER.index(expr)
+        return _DIE_LADDER[max(0, min(len(_DIE_LADDER) - 1, i + steps))]
+    return expr
+
+
 def weapon_damage_expr(world, eid: str) -> tuple[str, str, int]:
-    """(выражение_кости, ability, magic_bonus) для урона оружия (док 09 §5)."""
+    """(выражение_кости, ability, magic_bonus) для урона оружия (док 09 §5).
+    Учитывает instance-моды экипированного оружия (затупление/заточка)."""
     wkey = equipped_weapon_key(world, eid)
     weapon = WEAPONS.get(wkey, WEAPONS["unarmed"])
-    return weapon.damage, weapon.ability, attack_bonus_from_equipment(world, eid, "damage")
+    expr = weapon.damage
+    magic = attack_bonus_from_equipment(world, eid, "damage")
+    main = _equipped(world, eid).get("main_hand")
+    if main and main.mods:
+        expr = _step_die(expr, main.mods.get("damage_die_step", 0))
+        magic += main.mods.get("damage_bonus", 0)
+    return expr, weapon.ability, magic
+
+
+# --------------------------------------------------------------------------- #
+#  Модификация экземпляров + «вытягивание» из БД шаблонов 5e (док 03)          #
+# --------------------------------------------------------------------------- #
+def modify_item(world, instance_id: str, *, name=None, description=None, **mods):
+    """Изменить экземпляр предмета (instance-моды + имя/описание), событийно (реплей)."""
+    inst = world.items.get(instance_id)
+    if not inst:
+        raise InventoryError("предмет не найден")
+    merged = {**(inst.mods or {}), **mods}
+    world.commit("item_modify", "smith", target=instance_id, payload={
+        "mods": merged,
+        "name": name if name is not None else inst.custom_name,
+        "description": description if description is not None else inst.description})
+    return world.items[instance_id]
+
+
+def blunt_weapon(world, instance_id: str):
+    """Притупить клинок: кость урона на ступень ниже и −1 к урону, переименовать."""
+    inst = world.items.get(instance_id)
+    if not inst:
+        raise InventoryError("предмет не найден")
+    tmpl = world.templates.get(inst.template_id)
+    base = inst.custom_name or (tmpl.name if tmpl else "оружие")
+    name = base if base.startswith("затупл") else f"затупленный {base}"
+    cur = inst.mods or {}
+    return modify_item(world, instance_id, name=name,
+                       description="Кромка смята, лезвие село — рубит заметно слабее.",
+                       damage_die_step=cur.get("damage_die_step", 0) - 1,
+                       damage_bonus=cur.get("damage_bonus", 0) - 1, dulled=True)
+
+
+def find_template(world, query: str) -> str | None:
+    """Найти шаблон 5e по id или имени (точно, затем по подстроке)."""
+    q = query.strip().lower()
+    if q in world.templates:
+        return q
+    for tid, t in world.templates.items():
+        if q == tid.lower() or q == t.name.lower():
+            return tid
+    for tid, t in world.templates.items():
+        if q in t.name.lower() or q in tid.lower():
+            return tid
+    return None
+
+
+def pull_item(world, query: str, container_id: str, owner=None, qty: int = 1, model=None) -> str:
+    """Материализовать существующий предмет из БД шаблонов 5e (по имени/id) в контейнер.
+    Опц. item_smith (model) даёт экземпляру имя/описание под контекст."""
+    tid = find_template(world, query)
+    if not tid:
+        raise InventoryError(f"в базе нет предмета «{query}»")
+    from ..gen.item_gen import _smith_for, spawn_item
+    smith = _smith_for(model, f"товар лавки: {world.templates[tid].name}")
+    return spawn_item(world, tid, container_id, qty=qty, owner=owner, source="pulled", smith=smith)

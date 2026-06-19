@@ -205,6 +205,20 @@ class World:
         if ev.payload.get("destroy"):
             self.items.pop(iid, None)
 
+    def _h_item_modify(self, ev: Event) -> None:
+        """Модификация экземпляра предмета (заточка/затупление, имя, описание).
+        Косметику и instance-моды держим в самом ItemInstance — событие воспроизводимо."""
+        inst = self.items.get(ev.target)
+        if not inst:
+            return
+        p = ev.payload
+        if "mods" in p:
+            inst.mods = dict(p["mods"])
+        if p.get("name") is not None:
+            inst.custom_name = p["name"]
+        if p.get("description") is not None:
+            inst.description = p["description"]
+
     def _h_currency_transfer(self, ev: Event) -> None:
         p = ev.payload
         frm, to = p.get("from"), p.get("to")

@@ -121,6 +121,17 @@ def materialize_house(seed: int = config.WORLD_SEED, place: str = "", kind: str 
     return _city_session(seed).discovery.materialize_interior(place, kind_hint=kind or None)
 
 
+@app.get("/city_event")
+def city_event(seed: int = config.WORLD_SEED, step: int = 0, quiet: int = 2,
+               loc: str = "frontier_town") -> dict:
+    """Шаг прогулки по городу → нарративный дизайнер (director) с вероятностью, растущей
+    от затишья (quiet), выдаёт случайный бит или ничего. Детерминирован по seed+step."""
+    s = _city_session(seed)
+    beat = s.director.ambient_beat(int(seed), int(step), f"city:{step}", loc,
+                                   s.scene_context(), int(quiet), True)
+    return {"beat": beat}
+
+
 @app.get("/region_map")
 def region_map_dump(seed: int = config.WORLD_SEED, do: str = "", gold: int = 0) -> dict:
     """Генератор снимка карты: свежая сессия (seed), опц. список команд `do`

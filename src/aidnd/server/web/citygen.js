@@ -30,6 +30,12 @@ export function drawCity(ctx, W, H, opts={}){
   cells.forEach(c=>c.city=dist(c.site,[CX,CY])<Rcity&&!onEdge(c.poly));
   const city=cells.filter(c=>c.city); if(!city.length)return hits;
   let square=city[0]; for(const c of city) if(dist(c.site,[CX,CY])<dist(square.site,[CX,CY]))square=c;
+  // граф улиц: вершины Вороного городских клеток = перекрёстки, рёбра клеток = улицы
+  const nmap=new Map(), nodes=[], adj=[], nkey=p=>Math.round(p[0])+','+Math.round(p[1]);
+  const nid=p=>{const k=nkey(p);if(nmap.has(k))return nmap.get(k);const id=nodes.length;nmap.set(k,id);nodes.push([Math.round(p[0]),Math.round(p[1])]);adj.push([]);return id;};
+  for(const c of city){const p=c.poly;for(let i=0;i<p.length;i++){const a=nid(p[i]),b=nid(p[(i+1)%p.length]);if(a!==b){if(!adj[a].includes(b))adj[a].push(b);if(!adj[b].includes(a))adj[b].push(a);}}}
+  const sc0=centroid(square.poly); let start=0,sd=1e9; for(let i=0;i<nodes.length;i++){const d=Math.hypot(nodes[i][0]-sc0[0],nodes[i][1]-sc0[1]);if(d<sd){sd=d;start=i;}}
+  const streets={nodes,adj,start};
   // фон
   ctx.clearRect(0,0,W,H); ctx.fillStyle='#a9b878'; ctx.fillRect(0,0,W,H);
   ctx.fillStyle='#5f7d42'; cells.filter(c=>!c.city).forEach(c=>{if(rng()<0.55){ctx.beginPath();ctx.arc(c.site[0],c.site[1],3+rng()*3,0,7);ctx.fill();}});
@@ -89,7 +95,7 @@ export function drawCity(ctx, W, H, opts={}){
   const vg=ctx.createRadialGradient(CX,CY*0.95,H*0.34,CX,CY,H*0.85);vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(40,28,12,.34)');ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
   ctx.strokeStyle='#4a3415';ctx.lineWidth=5;ctx.strokeRect(5,5,W-10,H-10);
   if(chrome){ compass(ctx,W); cartouche(ctx,W,opts.title||'Фэндалин'); }
-  return hits;
+  return {hits, streets};
 }
 function rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
 function compass(ctx,W){ctx.save();ctx.translate(W-40,46);ctx.fillStyle='rgba(233,216,175,.85)';ctx.beginPath();ctx.arc(0,0,18,0,7);ctx.fill();ctx.strokeStyle='#4a3415';ctx.lineWidth=1;ctx.stroke();ctx.fillStyle='#4a3415';ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(4,-3);ctx.lineTo(-4,-3);ctx.fill();ctx.font='bold 9px Georgia';ctx.textAlign='center';ctx.fillText('С',0,-22);ctx.restore();}

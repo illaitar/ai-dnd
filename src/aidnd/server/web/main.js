@@ -171,7 +171,7 @@ async function drawCityLevel() {
   const seed = (lastView && lastView.seed) || 1337;
   await ensureTown(seed);
   const cv = $("map-canvas"), ctx = cv.getContext("2d");
-  mapHits = window.drawCity(ctx, cv.width, cv.height, { seed, buildings: townBuildings || [], chrome: true });
+  mapHits = window.drawCity(ctx, cv.width, cv.height, { seed, buildings: townBuildings || [], chrome: true }).hits;
   cv.onclick = (e) => {
     const r = cv.getBoundingClientRect(), W = cv.width, H = cv.height;
     const mx = (e.clientX - r.left) / r.width * W, my = (e.clientY - r.top) / r.height * H;

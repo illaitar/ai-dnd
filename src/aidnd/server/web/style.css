@@ -127,8 +127,14 @@ main { flex: 1; display: flex; gap: 14px; padding: 14px; overflow: hidden; }
 .map-tabs .tab { cursor: pointer; padding: 3px 10px; border-radius: 7px; border: 1px solid var(--line);
   background: var(--panel2); color: var(--ink); }
 .map-tabs .tab.active { background: var(--accent); color: #14110d; border-color: var(--accent); }
-#map-canvas { display: block; margin: 10px 0 4px; border-radius: 8px; cursor: pointer;
-  width: 100%; height: auto; background: #2a2118; }
+.map-stage { position: relative; margin: 10px 0 4px; }
+.map-stage canvas { position: absolute; top: 0; left: 0; width: 100%; height: auto; border-radius: 8px; }
+#map-canvas { position: relative; background: #2a2118; }   /* база (поток задаёт высоту) */
+#map-fx { cursor: pointer; }                               /* слой токена/маршрута/выбора */
+.map-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; }
+.map-actions.hidden { display: none; }
+.map-actions .sp { flex: 1; }
+.map-actions #map-sel { color: var(--gold); }
 /* всплывашка содержимого дома */
 .hpop { position: fixed; right: 18px; top: 96px; width: 300px; z-index: 12;
   background: var(--panel); border: 2px solid var(--accent); border-radius: 10px;

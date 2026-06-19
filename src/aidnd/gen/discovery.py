@@ -252,6 +252,9 @@ class DiscoveryService:
                              model=None) -> dict:
         """Наполнить дом контентом (жильцы, обстановка, описание) ОДИН раз и сохранить.
         Повторный вызов возвращает то же из памяти (recorded=True)."""
+        # каждый осмотр поднимает индекс важности места (даже если содержимое уже в памяти)
+        self.world.commit("interest", self.world.player_id or "dm",
+                          payload={"place": place_id, "amount": 1})
         key = f"interior:{place_id}"
         rec = self.world.resolutions.get(key)
         if rec:

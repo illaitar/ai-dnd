@@ -1,5 +1,6 @@
 """Доразрешение пула сцены: контекст, детерминизм, вечная фиксация (док 06 + main §2)."""
 
+from aidnd import config
 from aidnd.bootstrap import new_session
 from aidnd.gen.discovery import HIDDEN, PRESENCE, DiscoveryService
 
@@ -64,3 +65,21 @@ def test_determinism_same_seed():
     ra = _disc(a).resolve_observers("place:phandalin_square", "pc:hero")
     rb = _disc(b).resolve_observers("place:phandalin_square", "pc:hero")
     assert (ra.present, ra.watching) == (rb.present, rb.watching)   # сид → тот же мир
+
+
+def test_interest_promotes_house_to_key():
+    # повторный осмотр дома поднимает индекс важности; на пороге дом становится ключевым
+    s = new_session(seed=1337, roster_size=2, use_model=False)
+    hid = "house:1337:120_140"
+    for _ in range(config.PLACE_IMPORTANCE_KEY):
+        s.discovery.materialize_interior(hid, kind_hint="home")
+    assert s.world.importance[hid] >= config.PLACE_IMPORTANCE_KEY
+    keys = {k["id"] for k in s.view()["key_houses"]}
+    assert hid in keys
+
+
+def test_one_interaction_not_yet_key():
+    s = new_session(seed=1337, roster_size=2, use_model=False)
+    hid = "house:1337:200_200"
+    s.discovery.materialize_interior(hid, kind_hint="home")          # один осмотр < порога
+    assert hid not in {k["id"] for k in s.view()["key_houses"]}

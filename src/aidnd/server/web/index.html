@@ -98,8 +98,17 @@
     <div class="ui-box">
       <h2>🗺 Карта <span id="map-tabs" class="map-tabs"></span>
         <button class="x" data-close="mapview">✕</button></h2>
-      <canvas id="map-canvas" width="520" height="380"></canvas>
-      <div id="map-hint" class="state">клик по локации — отправиться туда</div>
+      <div class="map-stage">
+        <canvas id="map-canvas" width="560" height="400"></canvas>
+        <canvas id="map-fx" width="560" height="400"></canvas>
+      </div>
+      <div id="map-actions" class="map-actions hidden">
+        <span id="map-sel" class="state"></span>
+        <span class="sp"></span>
+        <button id="map-go" class="cbtn">🚶 Отправиться</button>
+        <button id="map-cancel" class="cbtn">Отмена</button>
+      </div>
+      <div id="map-hint" class="state">клик по дому или перекрёстку — выбрать, затем «Отправиться»</div>
     </div>
   </div>
 

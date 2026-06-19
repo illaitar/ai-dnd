@@ -236,7 +236,9 @@ class CombatEngine:
         # фаза урона
         self._apply_damage(attacker, target, result.total, roll=result.to_record(p["request"].dice))
         self.pending = None
-        return {"outcome": f"{self._name(attacker)} наносит {result.total} урона {self._name(target)}.",
+        weapon, dt = self._weapon_phrase(attacker)
+        return {"outcome": f"{self._name(attacker)} наносит {result.total} {dt} урона "
+                           f"{self._name(target)} ({weapon}).",
                 "damage": result.total, "next_request": None, "done": True}
 
     def _perform_attack(self, attacker: str, target: str) -> str:
@@ -251,8 +253,19 @@ class CombatEngine:
         expr, dmod = self._weapon_damage(attacker, verdict["crit"])
         dmg = self.dice.roll_seeded("damage", expr, modifier=dmod, roller=attacker)
         self._apply_damage(attacker, target, dmg.total, roll=dmg.to_record(expr))
+        weapon, dt = self._weapon_phrase(attacker)
         return (f"{'крит! ' if verdict['crit'] else ''}{self._name(attacker)} наносит "
-                f"{dmg.total} урона {self._name(target)}.")
+                f"{dmg.total} {dt} урона {self._name(target)} ({weapon}).")
+
+    def _weapon_phrase(self, attacker: str) -> tuple[str, str]:
+        """(имя оружия, тип урона по-русски) экипированного оружия — чтобы нарратор
+        описывал ИМЕННО его, а не выдумывал стихию/дальность."""
+        from ..inventory.container import equipped_weapon_key
+        from ..rules.srd import WEAPONS
+        w = WEAPONS.get(equipped_weapon_key(self.world, attacker), WEAPONS["unarmed"])
+        dt = {"slashing": "рубящего", "piercing": "колющего",
+              "bludgeoning": "дробящего"}.get(w.damage_type, "")
+        return w.name, dt
 
     def _weapon_damage(self, attacker: str, crit: bool) -> tuple[str, int]:
         expr, ability, magic = weapon_damage_expr(self.world, attacker)

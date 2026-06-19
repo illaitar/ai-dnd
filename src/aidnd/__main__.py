@@ -130,12 +130,18 @@ def play() -> None:
 def doctor() -> None:
     from .inference import ModelManager
     print("AI-DnD doctor")
-    print("  OLLAMA_HOST:", config.OLLAMA_HOST)
-    print("  BASE_MODEL :", config.BASE_MODEL)
+    print("  OLLAMA_HOST :", config.OLLAMA_HOST)
+    print("  BASE_MODEL  :", config.BASE_MODEL, "(нарратив, когниция, бой…)")
+    print("  INTENT_MODEL:", config.INTENT_MODEL, "(лёгкий классификатор интента)")
     m = ModelManager()
-    print("  сервер доступен:", m.available())
-    if m.available():
-        print("  модели:", m.client.list_models())
+    ok = m.available()
+    print("  сервер доступен:", ok)
+    if ok:
+        models = m.client.list_models()
+        print("  модели на сервере:", models)
+        for label, name in (("base", config.BASE_MODEL), ("intent", config.INTENT_MODEL)):
+            present = any(name.split(":")[0] in mm for mm in models) or name in models
+            print(f"   - {label} «{name}»:", "OK" if present else "НЕ НАЙДЕНА → ollama pull " + name)
     else:
         print("  (нет туннеля — движок работает на детерминированных фоллбэках)")
 

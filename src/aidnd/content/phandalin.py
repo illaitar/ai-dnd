@@ -177,9 +177,10 @@ def _build_named_npcs(world: World) -> None:
              place="building:townmaster_hall", traits=["ambitious", "manipulative"],
              secrets=[{"fact": "I run the Zhentarim cell here",
                        "reveal_conditions": ["trust>0.6"], "consequence_tags": ["faction"]}])
-    _add_npc(world, "npc:sildar_hallwinter", "Sildar Hallwinter", "knight", "srd:veteran",
-             faction="faction:lords_alliance", traits=["noble", "weary"],
-             place="building:stonehill_inn")
+    sildar = _add_npc(world, "npc:sildar_hallwinter", "Sildar Hallwinter", "knight", "srd:veteran",
+                      faction="faction:lords_alliance", traits=["noble", "weary"],
+                      place="building:stonehill_inn")
+    world.ecs.get(sildar, Persona).companion = True   # эскорт LMoP: следует за партией и бьётся рядом
     _add_npc(world, "npc:gundren_rockseeker", "Gundren Rockseeker", "prospector", "srd:commoner",
              race="dwarf", traits=["excitable", "secretive"], place="place:cragmaw_klarg_cave")
     # антагонист — социальный босс Redbrand Hideout

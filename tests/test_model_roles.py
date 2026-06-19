@@ -110,7 +110,6 @@ def test_reflection_triggers_with_accumulated_experience():
 def test_choose_tactic_offline_guard_and_engine_wiring():
     assert agents.choose_tactic(None, "digest", "npc:x") is None     # нет сервера → None
     s = _sess()
-    s.combat  # инициализация откладывается до боя; просто проверим методы движка
     from aidnd.combat.engine import CombatEngine
     eng = CombatEngine(s.world, s.dice, s.model, s.cognition, s.lod)
     assert hasattr(eng, "_model_tactic") and hasattr(eng, "_tactic_digest")

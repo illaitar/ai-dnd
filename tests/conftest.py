@@ -1,6 +1,7 @@
 """Общие фикстуры тестов. pythonpath=src задан в pyproject."""
 
 import pytest
+
 from aidnd.bootstrap import new_session
 from aidnd.content import build_world, register_quests
 from aidnd.gen import QuestSystem

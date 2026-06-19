@@ -156,7 +156,8 @@ async def ws(sock: WebSocket) -> None:
         return
 
 
-def run(host: str = "127.0.0.1", port: int = 8000) -> None:
+def run(host: str = "127.0.0.1", port: int | None = None) -> None:
     import uvicorn
+    port = port or int(os.environ.get("PORT", "8000"))   # PORT env → удобно для preview/прокси
     print(f"AI-DnD веб-сервер: http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")

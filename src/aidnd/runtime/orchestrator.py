@@ -679,6 +679,96 @@ class GameSession:
             "sites": sites,
         }
 
+    def shop_view(self) -> dict | None:
+        """Read-model лавки для торгового интерфейса: товар с ценами/описанием,
+        кошелёк игрока и что из его сумки можно продать (с учётом deals_in). None —
+        рядом нет лавки."""
+        shop_id = self._shop_here()
+        if not shop_id:
+            return None
+        c = self.world.containers[shop_id]
+        goods = [{"id": i, "name": self._item_name(i),
+                  "price_gp": max(1, inv.price_of(self.world, self.world.items[i], c, self.player) // 100),
+                  "desc": self.world.items[i].description} for i in c.items]
+        sellable = []
+        carry = self.world.containers.get(f"carry:{ids.name_of(self.player)}")
+        for i in (carry.items if carry else []):
+            inst = self.world.items[i]
+            tmpl = self.world.templates.get(inst.template_id)
+            if not tmpl or "unsellable" in (tmpl.tags or ()) or inst.equipped_slot:
+                continue
+            if c.deals_in and tmpl.category not in c.deals_in:
+                continue
+            sellable.append({"id": i, "name": self._item_name(i),
+                             "price_gp": max(1, int(tmpl.base_value * inst.quantity * c.buy_rate) // 100)})
+        return {"shop": shop_id, "merchant": self._display(c.owner_ref) if c.owner_ref else "лавка",
+                "deals_in": list(c.deals_in or []), "wallet": self._coins(),
+                "goods": goods, "sellable": sellable}
+
+    def map_levels(self) -> dict:
+        """Многоуровневая карта: континент/регион → город (улицы) → интерьер (комнаты).
+        Узлы каждого уровня расставлены по сторонам света (dx,dy) для мини-карты;
+        фронт даёт вкладки уровней и переход кликом."""
+        from ..world.spatial import DIR_RU, DIRECTIONS, LAYOUT_OFFSETS
+        sp = self.world.spatial
+        place = self.current_place()
+        cur = sp.places.get(place)
+        parent = sp.places.get(cur.parent) if (cur and cur.parent) else None
+
+        def occ(pid):
+            return [self._display(e) for e in sp.occupants(pid)
+                    if e != self.player and self.world.is_alive(e)]
+
+        # --- регион: сайты по сторонам света + город-хаб ---------------------
+        rm = self.region_map()
+        SQ = "place:phandalin_square"
+        region = [{"id": SQ, "name": "Фэндалин", "kind": "settlement", "dx": 0, "dy": 0,
+                   "dir_ru": "", "current": place in (SQ,), "display": "explored",
+                   "go": "идти на площадь"}]
+        for s in rm["sites"]:
+            region.append({"id": s["place"], "name": s["label"], "kind": "site",
+                           "dx": s["dx"], "dy": s["dy"], "dir_ru": s["dir_ru"],
+                           "current": s["place"] == place, "display": s["display"],
+                           "go": ("идти в " + s["label"]) if s["display"] != "unknown" else None})
+        levels = [{"id": "region", "title": "Окрестности Фэндалина", "nodes": region}]
+
+        # --- город: площадь-хаб + здания по компасу --------------------------
+        town = [{"id": SQ, "name": self._place_name(SQ), "kind": "room", "dx": 0, "dy": 0,
+                 "dir_ru": "", "current": place == SQ, "go": "идти на площадь", "occupants": occ(SQ)}]
+        for d, dest in sp.exits_of(SQ).items():
+            if d not in DIRECTIONS:
+                continue
+            dx, dy = DIRECTIONS[d]
+            town.append({"id": dest, "name": self._place_name(dest),
+                         "kind": sp.places[dest].kind if dest in sp.places else "",
+                         "dx": dx, "dy": dy, "dir_ru": DIR_RU.get(d, ""), "current": place == dest,
+                         "go": "идти в " + self._place_name(dest), "occupants": occ(dest)})
+        levels.append({"id": "town", "title": "Фэндалин — улицы", "nodes": town})
+
+        # --- интерьер: дочерние комнаты текущего здания/сайта (если есть) -----
+        host = parent if (parent and cur and cur.kind == "room" and parent.kind in ("building", "site")) else cur
+        if host:
+            rooms = [c for c in (host.children or []) if c in sp.places and sp.places[c].kind == "room"]
+            if rooms:
+                inner = [{"id": host.place_id, "name": host.name, "kind": host.kind, "dx": 0, "dy": 0,
+                          "dir_ru": "", "current": place == host.place_id, "go": None, "occupants": occ(host.place_id)}]
+                for rid in rooms:
+                    d = sp.direction_to(host.place_id, rid) or "deeper"
+                    dx, dy = LAYOUT_OFFSETS.get(d, (0, 1))
+                    inner.append({"id": rid, "name": self._place_name(rid), "kind": "room",
+                                  "dx": dx, "dy": dy, "dir_ru": DIR_RU.get(d, ""), "current": place == rid,
+                                  "go": "идти в " + self._place_name(rid), "occupants": occ(rid)})
+                levels.append({"id": "interior", "title": host.name, "nodes": inner})
+
+        # текущий уровень для открытия вкладки
+        if cur and cur.parent == "region:phandalin" and cur.kind in ("site", "wilds"):
+            level = "region"
+        elif cur and cur.kind == "room" and parent and parent.kind == "site":
+            level = "interior"
+        else:
+            level = "town"
+        return {"current": place, "current_level": level, "levels": levels}
+
     def _do_inventory(self, action: Action, text: str) -> dict:
         return {"kind": "inventory", "text": self._inventory_text(), "view": self.view()}
 
@@ -1377,6 +1467,8 @@ class GameSession:
             "pending_roll": self._roll_req_dict(self.pending_roll["request"]) if self.pending_roll else None,
             "connectivity": self.connectivity(),
             "region_map": self.region_map(),
+            "map_levels": self.map_levels(),
+            "shop": self.shop_view(),
             "pacing": {"quiet": self.quiet_ticks},
             "scene": self.scene_context().to_dict(),
             "context": self.context_line(),

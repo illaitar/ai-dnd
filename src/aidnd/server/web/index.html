@@ -80,6 +80,29 @@
     </div>
   </div>
 
+  <!-- торговля (отдельный интерфейс) -->
+  <div id="trade" class="overlay hidden">
+    <div class="ui-box">
+      <h2>🛒 <span id="trade-merchant">Лавка</span>
+        <button class="x" data-close="trade">✕</button></h2>
+      <div id="trade-wallet" class="state"></div>
+      <div class="trade-cols">
+        <div><h3>Купить</h3><div id="trade-goods" class="trade-list"></div></div>
+        <div><h3>Продать</h3><div id="trade-sell" class="trade-list"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- карта по уровням: континент → город → интерьер -->
+  <div id="mapview" class="overlay hidden">
+    <div class="ui-box">
+      <h2>🗺 Карта <span id="map-tabs" class="map-tabs"></span>
+        <button class="x" data-close="mapview">✕</button></h2>
+      <canvas id="map-canvas" width="520" height="380"></canvas>
+      <div id="map-hint" class="state">клик по локации — отправиться туда</div>
+    </div>
+  </div>
+
   <script src="/static/main.js"></script>
 </body>
 </html>

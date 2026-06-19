@@ -5,7 +5,7 @@
       "name": "aidnd",
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["-m", "aidnd", "serve"],
-      "port": 8000
+      "autoPort": true
     }
   ]
 }

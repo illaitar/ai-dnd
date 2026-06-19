@@ -66,6 +66,8 @@ function updateView(v) {
   $("journal").innerHTML = (v.journal || []).slice().reverse().map(e =>
     `<div class="jentry">${esc(e)}</div>`).join("") || "<span class='state'>пусто</span>";
   renderConnectivity(v.connectivity);
+  if (!$("trade").classList.contains("hidden")) renderTrade(v.shop);   // живое обновление при открытом окне
+  if (!$("mapview").classList.contains("hidden")) renderMap(v.map_levels);
 }
 
 // информационное представление связности локаций (вместо тайл-карты)
@@ -97,10 +99,11 @@ function renderNpcs(npcs) {
   bindChips();
 }
 function renderQuick() {
-  $("quick").innerHTML = [
-    ["осмотреться", "осмотреться"], ["обыскать", "обыскать комнату"],
-    ["инвентарь", "инвентарь"], ["ждать", "ждать"],
-  ].map(([l, c]) => `<span class="chip" data-cmd="${c}">${l}</span>`).join("");
+  const cmds = [["осмотреться", "осмотреться"], ["обыскать", "обыскать комнату"],
+    ["инвентарь", "инвентарь"], ["ждать", "ждать"]];
+  $("quick").innerHTML = cmds.map(([l, c]) => `<span class="chip" data-cmd="${c}">${l}</span>`).join("")
+    + `<span class="chip" data-open="mapview">🗺 карта</span>`
+    + `<span class="chip" data-open="trade">🛒 лавка</span>`;
   bindChips();
 }
 function bindChips() {
@@ -114,6 +117,81 @@ function bindChips() {
     logEntry(`<span class="you">→ ${esc(c.dataset.cmd)}</span>`, "you");
     send({ cmd: "input", text: c.dataset.cmd });
   });
+  document.querySelectorAll("[data-open]").forEach(c => c.onclick = () => openOverlay(c.dataset.open));
+}
+
+// ---------------------------------------------------- торговля + карта ----
+function openOverlay(id) {
+  if (id === "trade") {
+    if (!lastView || !lastView.shop) { logSystem("Рядом нет лавки."); return; }
+    renderTrade(lastView.shop);
+  }
+  if (id === "mapview" && lastView) renderMap(lastView.map_levels);
+  $(id).classList.remove("hidden");
+}
+function closeOverlay(id) { $(id).classList.add("hidden"); }
+
+function renderTrade(shop) {
+  if (!shop) { $("trade-goods").innerHTML = "<span class='state'>лавка закрыта</span>"; $("trade-sell").innerHTML = ""; return; }
+  $("trade-merchant").textContent = shop.merchant;
+  $("trade-wallet").textContent = `Кошелёк: ${shop.wallet} · торгует: ${shop.deals_in.join(", ") || "всем"}`;
+  const row = (g, verb) => {
+    const bare = g.name.split("×")[0].trim();
+    const desc = g.desc ? `<small>${esc(g.desc)}</small>` : "";
+    return `<div class="trade-row"><span class="nm">${esc(g.name)}${desc}</span>`
+      + `<span class="pr">${g.price_gp} зм</span>`
+      + `<button data-trade="${verb} ${esc(bare)}">${verb === "купить" ? "Купить" : "Продать"}</button></div>`;
+  };
+  $("trade-goods").innerHTML = (shop.goods || []).map(g => row(g, "купить")).join("") || "<span class='state'>пусто</span>";
+  $("trade-sell").innerHTML = (shop.sellable || []).map(g => row(g, "продать")).join("") || "<span class='state'>нечего продать</span>";
+  document.querySelectorAll("[data-trade]").forEach(b => b.onclick = () => {
+    logEntry(`<span class="you">→ ${esc(b.dataset.trade)}</span>`, "you");
+    send({ cmd: "input", text: b.dataset.trade });
+  });
+}
+
+let mapLevel = null;
+function renderMap(ml) {
+  if (!ml || !ml.levels || !ml.levels.length) return;
+  if (!mapLevel || !ml.levels.some(l => l.id === mapLevel)) mapLevel = ml.current_level;
+  $("map-tabs").innerHTML = ml.levels.map(l =>
+    `<span class="tab ${l.id === mapLevel ? "active" : ""}" data-lvl="${l.id}">${esc(l.title)}</span>`).join("");
+  $("map-tabs").querySelectorAll("[data-lvl]").forEach(t => t.onclick = () => { mapLevel = t.dataset.lvl; renderMap(ml); });
+  drawMap(ml.levels.find(l => l.id === mapLevel));
+}
+function drawMap(level) {
+  if (!level) return;
+  const cv = $("map-canvas"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+  ctx.fillStyle = "#2a2118"; ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2, Rx = W * 0.34, Ry = H * 0.30;
+  const pos = (n) => { const L = Math.hypot(n.dx, n.dy) || 0; return [L ? cx + n.dx / L * Rx : cx, L ? cy + n.dy / L * Ry : cy]; };
+  for (const n of level.nodes) {                       // рёбра от хаба
+    const L = Math.hypot(n.dx, n.dy); if (!L) continue;
+    const [x, y] = pos(n);
+    ctx.strokeStyle = "rgba(200,170,90,.45)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke();
+  }
+  const hit = [];
+  for (const n of level.nodes) {
+    const [x, y] = pos(n);
+    const col = n.current ? "#d8b15a" : n.display === "unknown" ? "#6b6450"
+      : n.kind === "settlement" ? "#3a6ea5" : n.kind === "site" ? "#9a6a32" : "#4a6a3a";
+    ctx.beginPath(); ctx.arc(x, y, 14, 0, 7); ctx.fillStyle = "#1d1812"; ctx.fill();
+    ctx.lineWidth = n.current ? 3.5 : 2; ctx.strokeStyle = col; ctx.stroke();
+    ctx.fillStyle = "#efe6d2"; ctx.font = "12px Georgia, serif"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    const nm = n.name.length > 18 ? n.name.slice(0, 17) + "…" : n.name;
+    ctx.fillText(nm, x, y + 17);
+    if (n.dir_ru) { ctx.fillStyle = "#b8a877"; ctx.font = "10px Georgia, serif"; ctx.fillText(n.dir_ru, x, y - 27); }
+    if (n.occupants && n.occupants.length) { ctx.fillStyle = "#cd9a6a"; ctx.fillText("• " + n.occupants.length, x + 16, y - 6); }
+    if (n.go) hit.push({ x, y, r: 17, go: n.go });
+  }
+  cv.onclick = (e) => {
+    const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) / r.width * W, my = (e.clientY - r.top) / r.height * H;
+    for (const o of hit) if (Math.hypot(mx - o.x, my - o.y) <= o.r) {
+      logEntry(`<span class="you">→ ${esc(o.go)}</span>`, "you");
+      send({ cmd: "input", text: o.go }); closeOverlay("mapview"); break;
+    }
+  };
 }
 
 // --------------------------------------------------------------- combat ----
@@ -273,4 +351,5 @@ $("input-form").onsubmit = (e) => {
   $("input").value = "";
 };
 
+document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closeOverlay(b.dataset.close));
 connect();

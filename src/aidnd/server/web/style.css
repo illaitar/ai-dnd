@@ -102,6 +102,33 @@ main { flex: 1; display: flex; gap: 14px; padding: 14px; overflow: hidden; }
 .cbtn:hover { border-color: var(--accent); }
 .cbtn.active { background: var(--accent); color: #14110d; border-color: var(--accent); }
 .combat-box h2, .dice-box h2 { color: var(--gold); margin-top: 0; }
+
+/* торговля + карта по уровням */
+.ui-box { background: var(--panel); border: 2px solid var(--accent); border-radius: 12px;
+  padding: 18px 20px; width: 600px; max-width: 94vw; max-height: 92vh; overflow-y: auto;
+  box-shadow: 0 0 40px rgba(0,0,0,.7); }
+.ui-box h2 { color: var(--gold); margin-top: 0; display: flex; align-items: center; gap: 10px; }
+.ui-box h3 { margin: 6px 0; font-size: 14px; color: var(--ink); }
+.ui-box .x { margin-left: auto; cursor: pointer; background: var(--panel2); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px; padding: 2px 9px; font-size: 13px; }
+.ui-box .x:hover { border-color: var(--danger); color: var(--danger); }
+.trade-cols { display: flex; gap: 18px; }
+.trade-cols > div { flex: 1; min-width: 0; }
+.trade-list { display: flex; flex-direction: column; gap: 6px; }
+.trade-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px;
+  background: var(--panel2); border: 1px solid var(--line); }
+.trade-row .nm { flex: 1; min-width: 0; }
+.trade-row .nm small { display: block; color: var(--gold); opacity: .8; font-style: italic; }
+.trade-row .pr { color: var(--gold); white-space: nowrap; }
+.trade-row button { cursor: pointer; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--accent); color: #14110d; padding: 3px 10px; font-size: 12px; }
+.trade-row button:hover { filter: brightness(1.1); }
+.map-tabs { display: inline-flex; gap: 6px; font-size: 13px; }
+.map-tabs .tab { cursor: pointer; padding: 3px 10px; border-radius: 7px; border: 1px solid var(--line);
+  background: var(--panel2); color: var(--ink); }
+.map-tabs .tab.active { background: var(--accent); color: #14110d; border-color: var(--accent); }
+#map-canvas { display: block; margin: 10px 0 4px; border-radius: 8px; cursor: pointer;
+  width: 100%; height: auto; background: #2a2118; }
 #initiative { list-style: none; padding: 0; margin: 0 0 12px; }
 #initiative li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; }
 #initiative li.current { background: var(--panel2); border-left: 3px solid var(--accent); }

@@ -48,54 +48,51 @@ deterministic fallback. All are wired into the live loop.
 
 ## The turn pipeline
 
-What happens after the player types text (roles in **bold**):
+What happens after the player types text. Node colour marks the kind of step:
+🟣 **LLM-backed** (each has a deterministic fallback) · 🟡 **decision** · 🟢 **in / out**.
 
 ```mermaid
 flowchart TD
-  IN([player types text]) --> H["GameSession.handle(text)"]
-  H --> CB{combat active?}
-  CB -- yes --> CMB["combat commands only"] --> V
-  CB -- no --> PI["_parse_intent"]
+  IN([Player types text]):::io --> H["GameSession.handle"]:::core
+  H --> CB{In combat?}:::dec
+  CB -- yes --> CMB["Combat commands only"]:::core --> OUT
+  CB -- no --> KW["Keyword parser<br/>observer? · buyinfo? · direction?<br/>attack · intimidate · persuade before talk"]:::core
 
-  subgraph PARSE["intent parsing — keyword-first, LLM-validated"]
-    PI --> KW["_keyword_intent\nobserver? buyinfo? direction?\nVERB_KEYWORDS (attack/intimidate/persuade before talk)"]
-    KW -- match --> ACT["Action(verb, target, tone)"]
-    KW -- no match --> LLM["**intent**: agents.parse_intent\nvalidate verb in _VERBS"]
-    LLM -- ok --> ACT
-    LLM -- none/invalid --> DEF["address NPC? then talk\nelse freeform"]
-    DEF --> ACT
-  end
+  KW -- clear command --> ACT["Action<br/>verb · target · tone"]:::core
+  KW -- unclear --> LLM["intent model — small Qwen<br/>map free text → closest command"]:::llm
+  LLM -- confident --> ACT
+  LLM -- unsure / other --> DEF["named NPC → talk<br/>else → freeform"]:::core
+  DEF --> ACT
 
-  ACT --> DISP{dispatch _do_verb}
-  DISP --> MOVE["move: path_between then travel time/risk"]
-  DISP --> TALK["talk: cognition.retrieve then\n**cognition** policy then\n**narrator** render_dialogue then\n**reflection** maybe_reflect"]
-  DISP --> SOC["persuade/intimidate:\nfear-gate or skill check"]
-  DISP --> ATK["attack: start combat\n(**tactician** on monster turns)"]
-  DISP --> SRCH["search/loot/scan:\ndiscovery (seeded+persisted)\nplus **item_smith**"]
-  DISP --> BUY["buy/buyinfo:\nmap beliefs (true/false/incomplete)"]
-  DISP --> FREE["freeform:\n**plausibility** feasibility gate then\n**narrator** render_scene"]
+  ACT --> DISP{Dispatch verb}:::dec
+  DISP --> MOVE["move<br/>path-find · travel time & risk"]:::core
+  DISP --> TALK["talk<br/>cognition policy · narrator · reflection"]:::llm
+  DISP --> SOC["persuade / intimidate<br/>fear-gate or skill check"]:::core
+  DISP --> ATK["attack → combat<br/>tactician drives monsters"]:::llm
+  DISP --> SRCH["search / loot / scan<br/>seeded discovery · item_smith"]:::llm
+  DISP --> BUY["buy / buyinfo<br/>map beliefs: true · false · partial"]:::core
+  DISP --> FREE["freeform<br/>feasibility gate (plausibility) · narrator"]:::llm
 
-  subgraph RESOLVE["resolution (roll mid-step)"]
-    NEED{roll needed?} -- yes --> SUS["_suspend then RollRequest"] --> ROLL["player/server roll"] --> ADJ["submit_roll then adjudicate"]
-    NEED -- no --> ADJ
-  end
-
-  SOC --> RESOLVE
-  ATK --> RESOLVE
-  SRCH --> RESOLVE
-  ADJ --> COMMIT
-  TALK --> COMMIT
+  SOC --> ROLL{Roll needed?}:::dec
+  ATK --> ROLL
+  SRCH --> ROLL
+  ROLL -- yes --> SUS["suspend → RollRequest<br/>→ roll → adjudicate"]:::core --> COMMIT
+  ROLL -- no --> COMMIT
   MOVE --> COMMIT
+  TALK --> COMMIT
   BUY --> COMMIT
   FREE --> COMMIT
 
-  COMMIT["world.commit(verb) then append Event then apply _h_*"]
-  COMMIT --> COG["cognition.observe/appraise\n(relationship sliders)\nplus **lore_keeper** validates new content"]
-  COG --> NARR["**narrator**: render outcome (numbers unchanged)"]
-  NARR --> POST["_post: eventful? reset quiet\nelse quiet++ then **director** ambient_beat (pacing)"]
-  POST --> VV["build view:\nscene, region_map, pacing, journal, quests"]
-  VV --> OUT([response to player])
-  V[ ] --> OUT
+  COMMIT["world.commit → Event → apply<br/>event-sourced · lore_keeper validates content"]:::core
+  COMMIT --> COG["cognition observe / appraise<br/>relationship sliders"]:::core
+  COG --> NARR["narrator renders outcome<br/>numbers never change"]:::llm
+  NARR --> POST["pacing — quiet streak<br/>director ambient_beat"]:::llm
+  POST --> OUT([Response to player]):::io
+
+  classDef io fill:#1f6f4a,stroke:#5fd39a,color:#eafff4,font-weight:bold;
+  classDef llm fill:#3a2f6b,stroke:#9d8cff,color:#efeaff;
+  classDef dec fill:#7a5b16,stroke:#e6b84a,color:#fff7e6;
+  classDef core fill:#2b2f37,stroke:#6b7480,color:#eef1f5;
 ```
 
 Full write-up: [`docs/architecture.md`](docs/architecture.md).

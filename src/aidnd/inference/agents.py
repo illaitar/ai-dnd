@@ -28,7 +28,9 @@ PROMPTS = {
         "mechanical Outcome and the speaking NPC's persona and voice. Render the "
         "result in vivid second-person narration and in-character dialogue. NEVER "
         "change any numbers, hit/miss, damage, or state from the Outcome. NEVER invent "
-        "new mechanical results. GROUND STRICTLY in the given facts: never invent shared "
+        "new mechanical results. Use ONLY the weapon and damage type named in the Outcome; "
+        "do NOT add fire, lightning, magic, ranged shots, or any effect not stated. GROUND "
+        "STRICTLY in the given facts: never invent shared "
         "history, prior meetings, or past deeds between the NPC and the player. If the NPC "
         "does not know the player, portray a first meeting with a stranger. Never put words "
         "in the player's mouth or narrate the player's choices. Do not echo these "
@@ -101,9 +103,9 @@ SCHEMAS = {
         "name": "emit_intent",
         "parameters": {"type": "object", "properties": {
             "actor": {"type": "string"},
-            "verb": {"type": "string", "enum": ["talk", "attack", "move", "inspect",
-                     "use_item", "persuade", "intimidate", "steal", "give", "cast",
-                     "search", "loot", "buy", "sell", "inventory", "wait", "other"]},
+            "verb": {"type": "string", "enum": ["move", "talk", "attack", "inspect",
+                     "search", "persuade", "intimidate", "loot", "buy", "sell",
+                     "inventory", "wait", "map", "scan", "buyinfo", "other"]},
             "target": {"type": ["string", "null"]},
             "params": {"type": "object"},
             "tone": {"type": "string", "enum": ["neutral", "friendly", "hostile",
@@ -203,16 +205,21 @@ def _call(manager, role: str, schema_name: str, user: str, required: list[str]):
     schema = SCHEMAS[schema_name]
     messages = [{"role": "system", "content": PROMPTS[role]},
                 {"role": "user", "content": user}]
+    # структурные решения детерминируем (temp 0) — классификация/выбор не должны
+    # «плавать» от запуска к запуску; качество и стабильность важнее разнообразия
+    opts = {"temperature": 0}
     try:
         if config.USE_NATIVE_TOOLS:
             resp = manager.client.chat(manager.model_for(role), messages,
-                                       tools=[{"type": "function", "function": schema}])
+                                       tools=[{"type": "function", "function": schema}],
+                                       options=opts)
         else:
             # structured output: грамматико-ограниченный декодинг по JSON Schema
             # (Ollama format = guided_json/XGrammar, main §6.3) — гарантирует
             # валидный JSON и соблюдение enum, снимает retry-циклы.
             resp = manager.client.chat(manager.model_for(role), messages,
-                                       fmt=sanitize_for_ollama(schema["parameters"]))
+                                       fmt=sanitize_for_ollama(schema["parameters"]),
+                                       options=opts)
     except OllamaError:
         return None
     out = conform_to_schema(extract(resp, schema["name"]), schema["parameters"])
@@ -222,11 +229,48 @@ def _call(manager, role: str, schema_name: str, user: str, required: list[str]):
 # --------------------------------------------------------------------------- #
 #  Высокоуровневые вызовы ролей                                                #
 # --------------------------------------------------------------------------- #
-def parse_intent(manager, text: str, actor: str, options: list[str] | None = None):
-    user = (f"Actor: {actor}\nVisible targets/options: {options or []}\n"
-            f"Player input: {text}\nEmit the intent JSON (call emit_intent).")
-    return _call(manager, "intent", "emit_intent", user,
-                 ["actor", "verb", "needs_clarification"])
+_INTENT_COMMANDS = (
+    "move (go to a place/exit), talk (speak to an NPC), attack, inspect (look around / "
+    "examine), search (look for hidden things here), persuade, intimidate, loot (take from "
+    "a container/corpse), buy (goods from a shop), sell, inventory (check your own items), "
+    "wait (rest / pass time), map (view the region map / where can I go / how to get "
+    "somewhere), scan (check if someone is watching me), buyinfo (buy directions or rumors "
+    "about a place FROM an NPC), other (nothing fits)"
+)
+
+
+# few-shot для маленькой модели-классификатора (резко поднимает точность на словоформах)
+_INTENT_SHOTS = (
+    "Examples (input -> verb):\n"
+    "«осмотрюсь по сторонам» -> inspect\n"
+    "«обыщу комнату на тайники» -> search\n"
+    "«пошарю по углам в поисках чего-нибудь» -> search\n"
+    "«идём к логову Крэгмо» -> move\n"
+    "«двину на запад» -> move\n"
+    "«покажи карту» / «куда мне идти» / «где я» -> map\n"
+    "«спрошу трактирщика, что слышно» -> talk\n"
+    "«разузнать у него дорогу к пещере» -> buyinfo\n"
+    "«проверю, не следит ли кто за мной» -> scan\n"
+    "«отдохну и выпью эля» -> wait\n"
+    "«ударю гоблина» -> attack\n"
+    "«гляну, что у меня в сумке» -> inventory\n"
+)
+
+
+def parse_intent(manager, text: str, actor: str, options: list[str] | None = None,
+                 context: str = ""):
+    """Лёгкий классификатор интента: сопоставляет свободный текст игрока ОДНОЙ ближайшей
+    команде движка. Возвращает {actor, verb, target, tone, needs_clarification} или None."""
+    user = (f"Map the player's input to the SINGLE closest game command.\n"
+            f"Commands: {_INTENT_COMMANDS}.\n"
+            f"{_INTENT_SHOTS}"
+            f"Scene: {context or 'n/a'}\nVisible NPCs: {options or []}\n"
+            f"Player input: «{text}»\n"
+            f"Choose the closest command and a target if one is named. Almost always pick a "
+            f"real command; use 'other' or needs_clarification ONLY for impossible/nonsensical "
+            f"input. Call emit_intent.")
+    # только verb обязателен: малые модели часто опускают actor/needs_clarification
+    return _call(manager, "intent", "emit_intent", user, ["verb"])
 
 
 def render_scene(manager, outcome_summary: str, persona, dialogue_topic: str = ""):

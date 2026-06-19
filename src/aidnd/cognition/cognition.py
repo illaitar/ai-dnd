@@ -50,7 +50,8 @@ class Cognition:
                              tone: str | None, summary: str) -> None:
         self.observe(npc_id, summary, importance=6 if verb in ("attack", "give", "help") else 4)
         self.appraise(npc_id, actor_id, verb, tone)
-        self.maybe_reflect(npc_id)
+        if verb != "attack":          # в бою не рефлексируем на каждый удар (лаг + шум)
+            self.maybe_reflect(npc_id)
 
     def maybe_reflect(self, npc_id: str, every: int = 4) -> list[dict]:
         """Накопив опыт, NPC периодически синтезирует рефлексии (роль reflection).
@@ -105,11 +106,20 @@ class Cognition:
         if self.model is not None:
             from ..inference.agents import emit_reflections
             out = emit_reflections(self.model, npc_id, recent, self.world)
-            if out:
-                for r in out:
-                    mem.add_reflection(r["statement"], r.get("evidence_ids", []),
-                                       self.world.clock.tick, r.get("importance", 7))
-                return out
+            made = []
+            for r in out or []:                       # модель может переименовать поля
+                if not isinstance(r, dict):
+                    continue
+                stmt = (r.get("statement") or r.get("text") or r.get("summary")
+                        or r.get("reflection"))
+                if not stmt:
+                    continue
+                ev = r.get("evidence_ids") or []
+                mem.add_reflection(stmt, ev, self.world.clock.tick, r.get("importance", 7))
+                made.append({"statement": stmt, "evidence_ids": ev,
+                             "importance": r.get("importance", 7)})
+            if made:
+                return made
         # фоллбэк: одна агрегирующая рефлексия по последним наблюдениям
         recent.sort(key=lambda n: n.t)
         ev = [n.node_id for n in recent[-5:]]

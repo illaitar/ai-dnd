@@ -87,6 +87,12 @@ class GameSession:
         """Связанные локации из графа связности (порталы текущего узла)."""
         return self.world.spatial.connections(self.current_place())
 
+    def _companions(self) -> list[str]:
+        """Спутники партии (Persona.companion) — следуют за игроком и бьются рядом."""
+        return [n for n in self.world.npcs()
+                if (p := self.world.ecs.get(n, Persona)) and p.companion
+                and self.world.is_alive(n)]
+
     # человекочитаемые взаимодействия с окружением по аффордансам места
     AFFORD_LABEL = {
         "inn": "отдохнуть и перекусить", "drink": "выпить", "eat": "поесть",
@@ -223,6 +229,9 @@ class GameSession:
         ticks, region_travel = self._travel_cost(path)
         self.world.commit("set_position", self.player, target=self.player,
                           payload={"region": "region:phandalin", "place": dest})
+        for comp in self._companions():               # спутники идут с игроком
+            self.world.commit("set_position", comp, target=comp,
+                              payload={"region": "region:phandalin", "place": dest})
         hours = ticks * config.SIM_MINUTES_PER_TICK // 60
         self._log_journal(f"Перешёл в «{self._place_name(dest)}»"
                           + (f" (путь ~{hours} ч)" if region_travel and hours else "") + ".")
@@ -636,6 +645,12 @@ class GameSession:
     def _do_inventory(self, action: Action, text: str) -> dict:
         return {"kind": "inventory", "text": self._inventory_text(), "view": self.view()}
 
+    def _do_map(self, action: Action, text: str) -> dict:
+        """Показать карту региона: связность нодами (текст) + структурированный
+        region_map для веб-виджета. Это РАЗНОЕ с buyinfo (покупкой наводок у NPC)."""
+        return {"kind": "map", "text": self.map_text(),
+                "region_map": self.region_map(), "view": self.view()}
+
     def _do_wait(self, action: Action, text: str) -> dict:
         self._tick(2)
         fast_forward(self.world, self.player)
@@ -667,7 +682,10 @@ class GameSession:
         meta = load_meta(place)
         grid = BattleGrid.from_meta(meta) if meta else BattleGrid.empty()
         self.combat = CombatEngine(self.world, self.dice, self.model, self.cognition, self.lod)
-        cs = self.combat.start([self.player], enemy_ids, grid=grid,
+        # спутники, оказавшиеся рядом, вступают в бой на стороне игрока (не соло против группы)
+        allies = [c for c in self._companions()
+                  if (pos := self.world.position(c)) and pos.place_id == place]
+        cs = self.combat.start([self.player, *allies], enemy_ids, grid=grid,
                                init_surfaces=(meta or {}).get("surfaces"))
         self.dialogue_partner = None
         self._log_journal("Вступил в бой: " + ", ".join(self._display(e) for e in enemy_ids) + ".")
@@ -837,10 +855,12 @@ class GameSession:
 
     # допустимые глаголы движка (валидация выхода LLM-парсера)
     _VERBS = {"move", "talk", "attack", "inspect", "search", "persuade", "intimidate",
-              "loot", "buy", "sell", "inventory", "wait", "scan", "buyinfo"}
+              "loot", "buy", "sell", "inventory", "wait", "scan", "buyinfo", "map"}
     _MAPINFO_KW = ["сведен", "наводк", "карт", "о дороге", "о пути", "путь к", "дорог к",
                    "что знаешь о", "слух о", "разузнать"]
 
+    _MAP_KW = ["карт", " map", "карту", "карты", "карте", "куда идти", "куда можно",
+               "куда пойти", "где я", "местност", "локаци", "окрестност"]
     _OBSERVER_KW = ["наблюда", "следит", "следят", "соглядат", "за мной", "за нами",
                     "кто-то рядом", "кто-нибудь рядом", "не видит ли", "не смотрит ли",
                     "кто-то смотрит", "watching", "следил"]
@@ -856,6 +876,9 @@ class GameSession:
                 and any(k in low for k in self._MAPINFO_KW)):
             return Action(actor=self.player, verb="buyinfo", tone="neutral",
                           target=self._match_npc(text))
+        # показать карту/местность — РАНЬШЕ осмотра: «посмотреть карту» ≠ inspect
+        if any(k in low for k in self._MAP_KW):
+            return Action(actor=self.player, verb="map", tone="neutral")
         # сторона света как команда движения («на север», «вглубь», «N»)
         if self._direction_in(low):
             return Action(actor=self.player, verb="move", tone="neutral")
@@ -867,30 +890,49 @@ class GameSession:
         return None
 
     def _parse_intent(self, text: str) -> Action:
-        # 1) ключевые слова — детерминированно и надёжно (фикс «/inv → talk»)
+        # 1) ЛЁГКАЯ модель-классификатор интента — первой, когда сервер доступен.
+        #    Её единственная задача: понять смысл и выбрать БЛИЖАЙШУЮ команду движка
+        #    (роль intent → config.INTENT_MODEL, маленький Qwen). Так естественные
+        #    формулировки не зависят от хрупких ключевых слов.
+        if self.model is not None and self.model.available():
+            act = self._model_intent(text)
+            if act is not None:
+                return act
+        # 2) офлайн / модель не уверена → детерминированный keyword-парсер (фоллбэк)
         kw = self._keyword_intent(text)
         if kw:
             return kw
-        # 2) свободный творческий текст → LLM-парсер, но с ВАЛИДАЦИЕЙ глагола
-        if self.model is not None:
-            from ..inference.agents import parse_intent
-            opts = [self._display(n) for n in self.npcs_here()]
-            out = parse_intent(self.model, text, self.player, opts)
-            if out and not out.get("needs_clarification") and out.get("verb") in self._VERBS:
-                return Action(actor=self.player, verb=out["verb"],
-                              target=self._match_npc(out.get("target") or ""),
-                              tone=out.get("tone", "neutral"),
-                              targets_npc=bool(out.get("target")))
         # 3) обращение к присутствующему NPC (по имени или вопрос при ком-то рядом) —
-        #    это реплика; идёт диалог — продолжаем его; иначе осматриваемся.
-        #    (фикс: «Toblen, что слышно?» раньше уходило в inspect → выдавало стат-блок)
+        #    это реплика; идёт диалог — продолжаем его; иначе свободное действие.
         named = self._match_npc(text)
         if self.dialogue_partner or named or ("?" in text and self.npcs_here()):
             return Action(actor=self.player, verb="talk",
                           target=named or self.dialogue_partner)
-        # нераспознанный нетривиальный ввод — свободное действие (пройдёт гейт
-        # выполнимости), а не молчаливый «осмотр»
         return Action(actor=self.player, verb="freeform")
+
+    def _model_intent(self, text: str) -> Action | None:
+        """Классификация интента лёгкой моделью → ближайшая команда движка, или None
+        (модель не уверена / вернула 'other' / не из набора команд → пусть решит фоллбэк)."""
+        from ..inference.agents import parse_intent
+        out = parse_intent(self.model, text, self.player,
+                           [self._display(n) for n in self.npcs_here()],
+                           context=self._intent_context())
+        if not out or out.get("needs_clarification"):
+            return None
+        verb = out.get("verb")
+        if verb not in self._VERBS:
+            return None
+        return Action(actor=self.player, verb=verb,
+                      target=self._match_npc(out.get("target") or text),
+                      tone=out.get("tone", "neutral"),
+                      targets_npc=bool(out.get("target")))
+
+    def _intent_context(self) -> str:
+        """Краткий контекст сцены для классификатора интента."""
+        place = self._place_name(self.current_place())
+        exits = ", ".join(self._place_name(e) for e in self.exits()) or "—"
+        affs = ", ".join(a["label"] for a in self.affordances_here()) or "—"
+        return f"место={place}; выходы=[{exits}]; можно=[{affs}]"
 
     def _rel_summary(self, rel, first_meeting: bool) -> str:
         if first_meeting:

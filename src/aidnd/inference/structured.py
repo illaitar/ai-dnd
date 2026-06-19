@@ -106,8 +106,42 @@ def _stringify(val) -> str:
     return str(val)
 
 
+# синонимы полей: малые модели часто переименовывают ключи под собственный «вкус»
+_FIELD_SYNONYMS = {
+    "verb": ["action", "command", "intent", "intent_verb"],
+    "target": ["target_entity", "target_id", "object", "entity", "who", "npc"],
+    "actor": ["subject", "who_acts"],
+    "needs_clarification": ["ambiguous", "unclear", "needs_clarify", "clarify"],
+    "narration": ["text", "output", "result"],
+}
+
+
+def _unwrap_payload(obj: dict, params: dict) -> dict:
+    """Достаёт полезную нагрузку из «обёрток» малых моделей: разворачивает вложенный
+    словарь (напр. {"intent": {...}}) и подтягивает синонимичные имена полей к схеме.
+    Грамматика Ollama нестрога, поэтому нормализуем форму у себя (main §6.3)."""
+    if not isinstance(obj, dict):
+        return obj
+    props = set(params.get("properties", {}))
+    # 1) если на верхнем уровне нет ни одного поля схемы — нырнуть в первый вложенный
+    #    словарь, который содержит схему (обёртки вида {"intent": {...}}/{"result": {...}})
+    if props and not (props & set(obj)):
+        for v in obj.values():
+            if isinstance(v, dict) and (props & set(v)):
+                obj = dict(v)
+                break
+    # 2) подтянуть синонимичные ключи к каноническим именам схемы
+    for canon, alts in _FIELD_SYNONYMS.items():
+        if canon in props and canon not in obj:
+            for a in alts:
+                if a in obj and obj[a] is not None:
+                    obj[canon] = obj[a]
+                    break
+    return obj
+
+
 def conform_to_schema(obj: dict | None, params: dict) -> dict | None:
-    """Приводит выход модели к схеме (enum-снаппинг + типы) — downstream-валидация.
+    """Приводит выход модели к схеме (разворот обёрток + синонимы + enum-снаппинг + типы).
 
     Constrained decoding на vLLM+XGrammar гарантировало бы формат на уровне токенов;
     `format` Ollama делает это нестрого, поэтому конформируем на нашей стороне
@@ -115,6 +149,7 @@ def conform_to_schema(obj: dict | None, params: dict) -> dict | None:
     """
     if obj is None:
         return None
+    obj = _unwrap_payload(obj, params)
     for key, spec in params.get("properties", {}).items():
         if key not in obj:
             continue

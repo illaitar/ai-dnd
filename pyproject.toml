@@ -39,11 +39,13 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
 # pyflakes(F) + isort(I) + pyupgrade(UP) + bugbear(B) + warnings(W); the dense
 # one-statement-per-line style is intentional, so pycodestyle E-style nags are off.
 select = ["F", "I", "UP", "B", "W"]
 ignore = ["B905"]       # zip(strict=) — not required here
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 # package __init__.py files are re-export surfaces; do NOT strip "unused" imports
 "**/__init__.py" = ["F401"]

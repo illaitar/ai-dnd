@@ -64,6 +64,7 @@ class OllamaClient:
         self, model: str, messages: list[dict], on_token: Callable[[str], None],
         think: bool = False, on_think: Callable[[str], None] | None = None,
         tools: list[dict] | None = None, fmt: dict | None = None,
+        options: dict | None = None,
     ) -> dict:
         """Стримит ответ модели; вызывает on_token(piece).
 
@@ -80,6 +81,8 @@ class OllamaClient:
             payload["tools"] = tools
         if fmt:
             payload["format"] = fmt
+        if options:
+            payload["options"] = options    # напр. {"temperature": 0} для классификации
         full: list[str] = []
         tool_calls: list[dict] = []
         try:
@@ -109,10 +112,10 @@ class OllamaClient:
         return {"content": "".join(full), "tool_calls": tool_calls}
 
     def chat(self, model: str, messages: list[dict], tools: list[dict] | None = None,
-             think: bool = False, fmt: dict | None = None) -> dict:
+             think: bool = False, fmt: dict | None = None, options: dict | None = None) -> dict:
         """Не-стриминговая обёртка: собирает полный ответ."""
         return self.chat_stream(model, messages, on_token=lambda _p: None,
-                                think=think, tools=tools, fmt=fmt)
+                                think=think, tools=tools, fmt=fmt, options=options)
 
 
 class ModelManager:

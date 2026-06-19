@@ -6,6 +6,7 @@
 """
 
 import pytest
+
 from aidnd.bootstrap import new_session
 from aidnd.cognition import gate_open
 from aidnd.eval.conversations import load_cases, run_conversation

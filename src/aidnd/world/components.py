@@ -1,0 +1,138 @@
+"""ECS-компоненты (main §3.1).
+
+Сущность — голый id. Поведение и данные лежат в компонентах. NPC, предмет,
+дверь — это просто разные наборы компонентов. LOD-тиры тоже компоненты,
+которые система симуляции добавляет и снимает.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Position:
+    region_id: str
+    place_id: str | None = None           # узел графа локаций (building/room/site)
+
+
+@dataclass
+class ScheduleBlock:
+    t: str                  # "06:00"
+    place: str              # place/building id
+    affordance: str         # work | eat | home | sleep | serve | drink ...
+
+
+@dataclass
+class Schedule:
+    routine: list[ScheduleBlock] = field(default_factory=list)
+
+
+@dataclass
+class RelEdge:
+    """Вектор аффекта к сущности (main §5.4)."""
+
+    affinity: float = 0.0   # -1..1 симпатия
+    trust: float = 0.0      # -1..1 доверие
+    fear: float = 0.0       #  0..1 страх
+    respect: float = 0.0    # -1..1 уважение
+    tags: list[str] = field(default_factory=list)  # "saved_my_life", ...
+
+    def clamp(self) -> None:
+        self.affinity = max(-1.0, min(1.0, self.affinity))
+        self.trust = max(-1.0, min(1.0, self.trust))
+        self.fear = max(0.0, min(1.0, self.fear))
+        self.respect = max(-1.0, min(1.0, self.respect))
+
+
+@dataclass
+class Relationships:
+    edges: dict[str, RelEdge] = field(default_factory=dict)  # target_id -> RelEdge
+
+
+@dataclass
+class LODState:
+    tier: int = 0           # 0..3
+    salience: float = 0.0
+    last_promoted_tick: int = 0
+    last_active_tick: int = 0
+
+
+@dataclass
+class Stats5e:
+    """Лист характеристик 5e (используется PC и боевыми NPC)."""
+
+    str_: int = 10
+    dex: int = 10
+    con: int = 10
+    int_: int = 10
+    wis: int = 10
+    cha: int = 10
+    proficiency: int = 2
+    level: int = 1
+    max_hp: int = 10
+    hp: int = 10
+    temp_hp: int = 0
+    speed: int = 30
+    ac_base: int = 10                       # без брони/щита (док 04 пересчитает)
+    proficient_skills: list[str] = field(default_factory=list)
+    proficient_saves: list[str] = field(default_factory=list)
+    spell_slots: dict[str, int] = field(default_factory=dict)   # "1": 2
+    spell_ability: str = "int"
+
+    def ability(self, key: str) -> int:
+        return {
+            "str": self.str_, "dex": self.dex, "con": self.con,
+            "int": self.int_, "wis": self.wis, "cha": self.cha,
+        }[key]
+
+
+@dataclass
+class Persona:
+    """Персона NPC (main §3.1, расширена в доке 02 §3)."""
+
+    name: str
+    archetype: str = "commoner"
+    race: str = "human"
+    gender: str = "unknown"
+    age: int = 30
+    profession: str | None = None
+    traits: list[str] = field(default_factory=list)
+    ideal: str = ""
+    bond: str = ""
+    flaw: str = ""
+    voice: str | None = None            # лениво заполняется при первом L3
+    appearance: list[str] = field(default_factory=list)
+    stat_block_ref: str = "srd:commoner"
+    faction: str | None = None
+    faction_rank: str | None = None
+    epithet: str | None = None          # "the Black Spider", "Glasstaff"
+    knowledge: list[dict] = field(default_factory=list)  # KnowledgeItem-словари
+    secrets: list[dict] = field(default_factory=list)
+    enriched: bool = False              # прошёл ли first-L3 обогащение моделью
+
+
+@dataclass
+class Profession:
+    job: str
+    workplace_ref: str | None = None    # инвариант: профессия ⟹ workplace
+    residence_ref: str | None = None    # инвариант: профессия ⟹ residence
+    skill_level: str = "journeyman"     # apprentice | journeyman | master
+
+
+@dataclass
+class Faction:
+    """Компонент фракции на сущности-фракции."""
+
+    name: str
+    members: list[str] = field(default_factory=list)
+    controls: list[str] = field(default_factory=list)
+    relations: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class GoalPlan:
+    """Дневной план L3-NPC (main §5.5)."""
+
+    day_goal: str = ""
+    blocks: list[str] = field(default_factory=list)

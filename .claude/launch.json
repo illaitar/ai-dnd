@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aidnd",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "aidnd", "serve"],
+      "port": 8000
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI-DnD Engine — Phandalin</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>⚔️ AI-DnD <span class="sub">вертикальный срез LMoP</span></h1>
+    <div id="server-badge" class="badge">…</div>
+  </header>
+
+  <main>
+    <!-- центр: нарратив + ввод -->
+    <section id="scene">
+      <div id="place-bar">
+        <span id="place-name">—</span>
+        <span id="clock">🕑 —</span>
+      </div>
+      <div id="context"></div>
+      <div id="log" aria-live="polite"></div>
+
+      <div id="exits" class="chips"></div>
+      <div id="npcs" class="chips"></div>
+      <div id="quick" class="chips"></div>
+
+      <form id="input-form">
+        <input id="input" type="text" autocomplete="off"
+               placeholder="Что ты делаешь? (например: поговорить с Toblen, идти в логово, обыскать)">
+        <button type="submit">▶</button>
+      </form>
+    </section>
+
+    <!-- правый сайдбар: персонаж + связность + квесты -->
+    <aside id="sidebar">
+      <div class="panel" id="char-panel">
+        <h2>Лист персонажа</h2>
+        <div id="char"></div>
+        <div class="hpbar"><div id="hpfill"></div><span id="hptext"></span></div>
+      </div>
+      <div class="panel" id="map-panel">
+        <h2>Связность локаций</h2>
+        <div id="connectivity"></div>
+      </div>
+      <div class="panel" id="quest-panel">
+        <h2>Квесты</h2>
+        <ul id="quests"></ul>
+      </div>
+      <div class="panel" id="journal-panel">
+        <h2>Журнал событий</h2>
+        <div id="journal"></div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- боевой трекер -->
+  <div id="combat" class="overlay hidden">
+    <div class="combat-box">
+      <h2>⚔️ Бой — раунд <span id="round">1</span></h2>
+      <div class="combat-grid">
+        <canvas id="battle-canvas"></canvas>
+        <div class="combat-side">
+          <ul id="initiative"></ul>
+          <div id="combat-log"></div>
+        </div>
+      </div>
+      <div id="combat-actions"></div>
+    </div>
+  </div>
+
+  <!-- лоток кубов (док 07 §10) -->
+  <div id="dice-tray" class="overlay hidden">
+    <div class="dice-box">
+      <h2>🎲 Бросок</h2>
+      <div id="dice-info"></div>
+      <div id="dice-result"></div>
+      <button id="roll-btn">Бросить</button>
+    </div>
+  </div>
+
+  <script src="/static/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,162 @@
+"""L9 Presentation: FastAPI + WebSocket (main §11).
+
+Backend держит живое состояние (event log на сервере), шлёт дельты и нарратив,
+фронт рендерит. Никакого browser storage — всё состояние на сервере. Броски —
+server-authoritative animated (док 07 §8): сервер кидает, клиент анимирует.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+
+from .. import config
+from ..bootstrap import new_session
+from ..rules.dice import roll_expr
+
+WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
+app = FastAPI(title="AI-DnD Engine")
+
+
+@app.middleware("http")
+async def _no_cache(request, call_next):
+    """Не кэшировать статику (dev): preview всегда берёт свежие JS/CSS/карты."""
+    resp = await call_next(request)
+    if request.url.path.startswith("/static") or request.url.path == "/":
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.get("/")
+def index() -> HTMLResponse:
+    with open(os.path.join(WEB_DIR, "index.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+if os.path.isdir(WEB_DIR):
+    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+
+# --------------------------------------------------------------------------- #
+#  Интерфейс правки диалоговых кейсов: реплики + ожидаемый результат           #
+# --------------------------------------------------------------------------- #
+@app.get("/eval")
+def eval_page() -> HTMLResponse:
+    with open(os.path.join(WEB_DIR, "eval.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/eval/cases")
+def eval_cases():
+    from ..eval.conversations import load_raw_cases
+    return {"cases": load_raw_cases()}
+
+
+@app.post("/eval/save")
+async def eval_save(request: Request) -> dict:
+    from ..eval.conversations import save_cases
+    data = await request.json()
+    save_cases(data.get("cases", []))
+    return {"saved": len(data.get("cases", []))}
+
+
+@app.get("/map")
+def map_page() -> HTMLResponse:
+    with open(os.path.join(WEB_DIR, "map.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/region_map")
+def region_map_dump(seed: int = config.WORLD_SEED, do: str = "", gold: int = 0) -> dict:
+    """Генератор снимка карты: свежая сессия (seed), опц. список команд `do`
+    (через «;») и опц. подкрутка золота `gold` для демонстрации покупок сведений.
+    Возвращает region_map() — то, по чему рисует страница /map (любой момент партии)."""
+    session = new_session(seed=seed, roster_size=12, use_model=False)
+    if gold > 0:
+        session.world.wallet("pc:hero").update({"gp": gold})
+    for cmd in (c.strip() for c in do.split(";")):
+        if cmd:
+            session.handle(cmd)
+    return session.region_map()
+
+
+@app.post("/eval/run")
+async def eval_run(request: Request) -> dict:
+    from ..eval.conversations import run_case_dict, transcript_to_dict
+    from ..inference import ModelManager
+    case = await request.json()
+    use_model = ModelManager().available()
+    t = run_case_dict(case, use_model=use_model)
+    return {"online": use_model, "transcript": transcript_to_dict(t)}
+
+
+def _auto_roll(rr: dict, salt: int) -> list[int]:
+    from ..gen.seeds import subseed  # стабильный сид (не builtin hash)
+    seed = subseed(0, rr["request_id"], salt) & 0x7FFFFFFF
+    return roll_expr(rr["request_id"], rr["dice"], seed, source="server_ui").raw
+
+
+@app.websocket("/ws")
+async def ws(sock: WebSocket) -> None:
+    await sock.accept()
+    session = new_session(seed=config.WORLD_SEED, roster_size=12, use_model=True)
+    salt = {"n": 1}
+
+    async def send(result: dict) -> None:
+        await sock.send_text(json.dumps(result, ensure_ascii=False, default=str))
+
+    online = bool(session.model and session.model.available())
+    intro = session.look()
+    intro["server_online"] = online
+    await send(intro)
+
+    try:
+        while True:
+            msg = json.loads(await sock.receive_text())
+            cmd = msg.get("cmd")
+            if cmd == "input":
+                result = session.handle(msg.get("text", ""))
+            elif cmd == "look":
+                result = session.look()
+            elif cmd == "combat_attack":
+                result = session.combat_attack(msg["target"])
+            elif cmd == "combat_move":
+                result = session.combat_move(msg["cell"])
+            elif cmd == "combat_action":
+                result = session.combat_action(msg.get("action"), target=msg.get("target"),
+                                               cell=msg.get("cell"), spell=msg.get("spell"))
+            elif cmd == "combat_end_turn":
+                result = session.combat_end_turn()
+            elif cmd == "roll":
+                # server-animated: один бросок к серверному результату
+                rr = session.pending_roll["request"] if session.pending_roll else None
+                if not rr:
+                    result = {"kind": "error", "text": "Нет ожидающего броска.",
+                              "view": session.view()}
+                else:
+                    faces = _auto_roll({"request_id": rr.request_id, "dice": rr.dice}, salt["n"])
+                    salt["n"] += 1
+                    result = session.submit_roll(faces)
+                    result["rolled_faces"] = faces
+            elif cmd == "roll_manual":
+                result = session.submit_roll(msg.get("faces", []))
+            elif cmd == "new":
+                session = new_session(seed=msg.get("seed", config.WORLD_SEED),
+                                      roster_size=12, use_model=True)
+                result = session.look()
+            else:
+                result = {"kind": "error", "text": f"неизвестная команда {cmd}",
+                          "view": session.view()}
+            await send(result)
+    except WebSocketDisconnect:
+        return
+
+
+def run(host: str = "127.0.0.1", port: int = 8000) -> None:
+    import uvicorn
+    print(f"AI-DnD веб-сервер: http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port, log_level="info")

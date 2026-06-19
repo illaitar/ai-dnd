@@ -1,0 +1,37 @@
+#eval-main { max-width: 1000px; margin: 0 auto; padding: 16px; }
+.hint { color: var(--muted); font-size: 13px; }
+header > div { display: flex; gap: 8px; align-items: center; }
+
+.case { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 14px; }
+.case-head { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.case-head .cid { width: 160px; color: var(--gold); font-weight: bold; }
+.case-head .npc { flex: 1; color: var(--accent2); }
+.case input, .case select { background: #100d09; color: var(--ink); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 8px; font-family: inherit; font-size: 13px; }
+.case label { font-size: 12px; color: var(--muted); display: inline-flex; gap: 5px; align-items: center; }
+.sliders { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.sliders input[type=number] { width: 64px; }
+.line { display: block; margin-bottom: 8px; color: var(--muted); }
+.line input { width: 100%; margin-top: 3px; }
+.expected { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 6px 0;
+  border-top: 1px dotted var(--line); border-bottom: 1px dotted var(--line); margin-bottom: 8px; }
+.expected .elabel { color: var(--gold); font-variant: small-caps; }
+.expected .ain { width: 240px; }
+.notes { width: 100%; font-style: italic; }
+
+.result { margin-top: 10px; font-size: 13px; }
+.result .step { padding: 4px 0; border-bottom: 1px dotted var(--line); }
+.result .dim { color: var(--muted); font-size: 11px; }
+.verdict { font-weight: bold; padding: 5px 10px; border-radius: 6px; margin-bottom: 8px;
+  display: inline-block; }
+.verdict.ok { background: #2c4a22; color: #b6e08a; }
+.verdict.bad { background: #4a2a1a; color: #e0a86a; }
+.checks { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.chk { font-size: 12px; padding: 2px 8px; border-radius: 10px; }
+.chk.pass { background: #243a1c; color: #a6d488; }
+.chk.fail { background: #4a1f18; color: #e08a78; }
+.chk.warn { background: #3a341a; color: #d8c87a; }
+.judge { color: var(--muted); font-size: 12px; margin-top: 4px; font-style: italic; }
+.run { background: var(--accent2); color: #14110d; }
+.del { background: #3a2420; color: #e0a090; }

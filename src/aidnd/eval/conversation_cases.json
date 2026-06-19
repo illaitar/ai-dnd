@@ -1,0 +1,71 @@
+[
+  {
+    "id": "stranger_probes_secret",
+    "npc": "npc:halia_thornton",
+    "trust": 0.0, "affinity": 0.0, "fear": 0.0, "respect": 0.0, "met": false,
+    "verb": "talk", "tone": "neutral", "hostile": false,
+    "player_line": "Поговаривают, ты связана с Жентаримом. Это правда?",
+    "expected": {"action_in": ["respond", "withhold", "refuse", "deceive"],
+                 "no_secret": true, "defensive": false, "shares_fact": false},
+    "notes": "Чужак выпытывает тайну → не раскрывать, держаться настороже."
+  },
+  {
+    "id": "trusted_ally_shares",
+    "npc": "npc:halia_thornton",
+    "trust": 0.75, "affinity": 0.6, "fear": 0.0, "respect": 0.4, "met": true,
+    "verb": "persuade", "tone": "friendly", "hostile": false,
+    "player_line": "Между нами — ты ведь работаешь на Жентарим? Я с тобой.",
+    "expected": {"action_in": ["share_info", "respond", "offer_quest"],
+                 "no_secret": false, "defensive": false, "shares_fact": true},
+    "notes": "Высокое доверие → допустимо приоткрыть тайну Жентарим."
+  },
+  {
+    "id": "first_greeting",
+    "npc": "npc:toblen_stonehill",
+    "trust": 0.0, "affinity": 0.0, "fear": 0.0, "respect": 0.0, "met": false,
+    "verb": "talk", "tone": "neutral", "hostile": false,
+    "player_line": "",
+    "expected": {"action_in": [], "no_secret": true, "defensive": false, "shares_fact": false},
+    "notes": "Инициация: приветствие незнакомца, спросить что нужно, без выдуманной истории."
+  },
+  {
+    "id": "mild_trust_rumor",
+    "npc": "npc:toblen_stonehill",
+    "trust": 0.3, "affinity": 0.2, "fear": 0.0, "respect": 0.0, "met": true,
+    "verb": "talk", "tone": "neutral", "hostile": false,
+    "player_line": "Что в городе говорят про Красных плащей?",
+    "expected": {"action_in": ["share_info", "respond"], "no_secret": true,
+                 "defensive": false, "shares_fact": true},
+    "notes": "trust>=0.2 открывает слух о Красных плащах — трактирщик должен поделиться."
+  },
+  {
+    "id": "intimidated_yields",
+    "npc": "npc:toblen_stonehill",
+    "trust": -0.2, "affinity": 0.0, "fear": 0.75, "respect": 0.0, "met": true,
+    "verb": "intimidate", "tone": "hostile", "hostile": true,
+    "player_line": "Говори, где прячутся Красные плащи, или пожалеешь!",
+    "expected": {"action_in": ["flee", "yield", "call_guards", "deceive"],
+                 "no_secret": true, "defensive": true, "shares_fact": false},
+    "notes": "Высокий страх + угроза → защищается (бежит/сдаётся/зовёт стражу)."
+  },
+  {
+    "id": "hostile_faction_refuses",
+    "npc": "npc:iarno_glasstaff",
+    "trust": -0.6, "affinity": -0.5, "fear": 0.0, "respect": -0.3, "met": true,
+    "verb": "talk", "tone": "hostile", "hostile": false,
+    "player_line": "Сдавайся и расскажи о планах Чёрного Паука.",
+    "expected": {"action_in": ["refuse", "withhold", "deceive", "attack"],
+                 "no_secret": true, "defensive": false, "shares_fact": false},
+    "notes": "Враждебный босс → отказ/презрение, план не выдавать."
+  },
+  {
+    "id": "quest_giver_hook",
+    "npc": "npc:harbin_wester",
+    "trust": 0.35, "affinity": 0.2, "fear": 0.0, "respect": 0.0, "met": true,
+    "verb": "talk", "tone": "neutral", "hostile": false,
+    "player_line": "Чем я могу помочь городу? Что вас тревожит?",
+    "expected": {"action_in": ["share_info", "offer_quest", "respond"],
+                 "no_secret": true, "defensive": false, "shares_fact": true},
+    "notes": "Должен всплыть реальный крючок: орки у Вайверн-Тор (а не выдумка)."
+  }
+]

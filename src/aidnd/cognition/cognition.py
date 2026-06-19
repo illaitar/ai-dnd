@@ -1,0 +1,118 @@
+"""Когнитивный слой L3 (main §5.6).
+
+Пайплайн парсинг-оценка-отыгрыш в части NPC: retrieve (память+отношения),
+policy (предложение действия NPC с гейтами отношений), observe (запись памяти),
+appraise (эволюция отношений), reflect (синтез рефлексий). LLM-пути имеют
+детерминированные фоллбэки (док 08 §9), поэтому работают без сервера.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from ..world.components import Persona, RelEdge
+from .memory import CognitionStore
+from .relationships import appraise as _appraise
+from .relationships import edge, gate_open
+
+
+@dataclass
+class RetrievedContext:
+    persona: Persona | None
+    rel: RelEdge
+    memories: list = field(default_factory=list)
+    topic: str = ""
+
+
+class Cognition:
+    def __init__(self, world, store: CognitionStore | None = None, model=None) -> None:
+        self.world = world
+        self.store = store or CognitionStore()
+        self.model = model
+
+    # --- retrieve (main §5.2) --------------------------------------------- #
+    def retrieve(self, npc_id: str, query: str, player_id: str | None = None) -> RetrievedContext:
+        mem = self.store.memory(npc_id)
+        nodes = mem.retrieve(query, self.world.clock.tick)
+        rel = edge(self.world, npc_id, player_id) if player_id else RelEdge()
+        persona = self.world.ecs.get(npc_id, Persona)
+        return RetrievedContext(persona=persona, rel=rel, memories=nodes, topic=query)
+
+    # --- observe / appraise (main §5.4) ----------------------------------- #
+    def observe(self, npc_id: str, text: str, importance: int = 5) -> None:
+        self.store.memory(npc_id).add_observation(text, self.world.clock.tick, importance)
+
+    def appraise(self, npc_id: str, actor_id: str, verb: str, tone: str | None = None,
+                 success: bool | None = None) -> dict:
+        return _appraise(self.world, npc_id, actor_id, verb, tone, success)
+
+    def observe_and_appraise(self, npc_id: str, actor_id: str, verb: str,
+                             tone: str | None, summary: str) -> None:
+        self.observe(npc_id, summary, importance=6 if verb in ("attack", "give", "help") else 4)
+        self.appraise(npc_id, actor_id, verb, tone)
+        self.maybe_reflect(npc_id)
+
+    def maybe_reflect(self, npc_id: str, every: int = 4) -> list[dict]:
+        """Накопив опыт, NPC периодически синтезирует рефлексии (роль reflection).
+        Память когниции вне state_hash, так что реплей не страдает."""
+        mem = self.store.memory(npc_id)
+        obs = [n for n in mem.nodes.values() if n.kind == "observation"]
+        if len(obs) >= 3 and len(obs) % every == 0:
+            return self.reflect(npc_id)
+        return []
+
+    # --- policy (NPC action proposer, main §12.2) ------------------------- #
+    def policy(self, npc_id: str, player_verb: str, tone: str, ctx: RetrievedContext,
+               player_id: str) -> dict:
+        """Предлагает действие NPC. LLM при наличии модели, иначе детерминированный
+        фоллбэк с гейтами отношений."""
+        if self.model is not None:
+            from ..inference.agents import propose_action
+            out = propose_action(self.model, npc_id, player_verb, tone, ctx, self.world)
+            if out:
+                return out
+        return self._fallback_policy(npc_id, player_verb, tone, ctx, player_id)
+
+    def _fallback_policy(self, npc_id, player_verb, tone, ctx, player_id) -> dict:
+        rel = ctx.rel
+        # враждебные намерения
+        if player_verb in ("attack", "threaten", "intimidate"):
+            if gate_open(self.world, npc_id, player_id, "flee"):
+                return {"action": "flee", "rationale_tags": ["high_fear"]}
+            if rel.respect < -0.2 or player_verb == "attack":
+                return {"action": "call_guards", "rationale_tags": ["threatened"]}
+            return {"action": "yield", "rationale_tags": ["intimidated"]}
+        if player_verb == "steal":
+            return {"action": "call_guards", "rationale_tags": ["theft"]}
+        if player_verb in ("persuade", "talk"):
+            if gate_open(self.world, npc_id, player_id, "share_secret"):
+                return {"action": "share_info", "info_disclosed": ["secret"],
+                        "rationale_tags": ["trusts_player"]}
+            if gate_open(self.world, npc_id, player_id, "share_info"):
+                return {"action": "share_info", "info_disclosed": ["rumor"],
+                        "rationale_tags": ["mild_trust"]}
+            return {"action": "withhold", "rationale_tags": ["distrust"]}
+        if player_verb == "trade":
+            return {"action": "trade", "rationale_tags": ["merchant"]}
+        return {"action": "respond", "rationale_tags": ["neutral"]}
+
+    # --- reflect (main §5.5, §12.7) --------------------------------------- #
+    def reflect(self, npc_id: str) -> list[dict]:
+        mem = self.store.memory(npc_id)
+        recent = [n for n in mem.nodes.values() if n.kind == "observation"]
+        if len(recent) < 3:
+            return []
+        if self.model is not None:
+            from ..inference.agents import emit_reflections
+            out = emit_reflections(self.model, npc_id, recent, self.world)
+            if out:
+                for r in out:
+                    mem.add_reflection(r["statement"], r.get("evidence_ids", []),
+                                       self.world.clock.tick, r.get("importance", 7))
+                return out
+        # фоллбэк: одна агрегирующая рефлексия по последним наблюдениям
+        recent.sort(key=lambda n: n.t)
+        ev = [n.node_id for n in recent[-5:]]
+        statement = "Игрок недавно активно влиял на мою жизнь."
+        mem.add_reflection(statement, ev, self.world.clock.tick, 6)
+        return [{"statement": statement, "evidence_ids": ev, "importance": 6}]

@@ -1,0 +1,29 @@
+# Documentation site config (Zensical / MkDocs-compatible).
+# Build:  uv run zensical build      Serve:  uv run zensical serve
+site_name: AI-DnD Engine
+site_description: Text-tactical D&D 5e with a persistent simulated world and local LLM agents
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep purple
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Agent roles: agents.md
+  - Gameplay: gameplay.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format

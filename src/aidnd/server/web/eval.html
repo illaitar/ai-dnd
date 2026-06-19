@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI-DnD — редактор диалоговых кейсов</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/eval.css">
+</head>
+<body>
+  <header>
+    <h1>🧪 AI-DnD <span class="sub">редактор диалоговых кейсов</span></h1>
+    <div>
+      <span id="server-badge" class="badge">…</span>
+      <button id="save-btn" class="cbtn">💾 Сохранить всё</button>
+      <button id="add-btn" class="cbtn">＋ Кейс</button>
+      <a href="/" class="cbtn" style="text-decoration:none">← В игру</a>
+    </div>
+  </header>
+  <main id="eval-main">
+    <p class="hint">Правь реплику игрока, слайдеры отношения и ожидаемый результат, затем
+      «Прогнать» — кейс уйдёт на живую модель (или фоллбэк), а проверки покажут, совпало ли
+      поведение с ожиданием. «Сохранить всё» пишет в <code>conversation_cases.json</code>.</p>
+    <div id="cases"></div>
+  </main>
+  <script src="/static/eval.js"></script>
+</body>
+</html>

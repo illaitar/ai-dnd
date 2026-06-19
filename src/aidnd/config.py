@@ -1,0 +1,79 @@
+"""Глобальная конфигурация движка.
+
+Адрес Ollama и параметры запроса модели взяты из проекта ai-dnd (это
+единственное, что переиспользуется оттуда). Остальные параметры — из
+открытых решений основного диздока §8 и доков 06-09.
+"""
+
+from __future__ import annotations
+
+import os
+
+# --------------------------------------------------------------------------- #
+#  Инференс. Запрос модели с сервера (механизм из ai-dnd/ollama_client.py).    #
+# --------------------------------------------------------------------------- #
+# Сервер Ollama обычно проброшен SSH-туннелем на localhost:
+#   ssh -L 11434:localhost:11434 nikalutis@192.168.3.26
+# поэтому по умолчанию ходим на localhost. Доступа к серверу пока нет —
+# движок работает на детерминированных фоллбэках (док 08 §9), а при наличии
+# сервера те же вызовы пойдут к модели.
+OLLAMA_HOST: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+
+# Базовая модель (открытое решение §8). По дизайну — Qwen3-8B / Qwen3.5-9B.
+BASE_MODEL: str = os.environ.get("AIDND_MODEL", "qwen3.5:9b")
+# Крошечная модель интент-парсера держится отдельно ради мгновенности (док 08 §3).
+INTENT_MODEL: str = os.environ.get("AIDND_INTENT_MODEL", "qwen3.5:2b")
+
+KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
+HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))
+
+# Режим reasoning у qwen3.x: тысячи скрытых токенов → +15-20 c. По умолчанию off.
+THINK_DEFAULT: bool = os.environ.get("AIDND_THINK", "0") == "1"
+
+# Нативные tool-calls Ollama. Маленькие модели ломаются → по умолчанию текстовый
+# маркер-протокол. Включить для крупных моделей с надёжным function calling.
+USE_NATIVE_TOOLS: bool = os.environ.get("AIDND_NATIVE_TOOLS", "0") == "1"
+
+# Если сервер недоступен — не падать, а использовать детерминированные фоллбэки.
+# Это позволяет всему движку работать end-to-end без модели.
+LLM_REQUIRED: bool = os.environ.get("AIDND_LLM_REQUIRED", "0") == "1"
+
+# --------------------------------------------------------------------------- #
+#  Мир и детерминизм                                                           #
+# --------------------------------------------------------------------------- #
+WORLD_SEED: int = int(os.environ.get("AIDND_SEED", "1337"))
+SAVE_DIR: str = os.environ.get("AIDND_SAVE_DIR", os.path.expanduser("~/.aidnd/save"))
+
+# Язык нарратива (открытое решение §8). Системные промпты на английском для
+# качества, язык вывода игроку — отдельный конфиг.
+NARRATIVE_LANGUAGE: str = os.environ.get("AIDND_LANG", "ru")
+
+# Режим доверия бросков (док 07 §8): trust | server_animated | manual_physical.
+DICE_TRUST_MODE: str = os.environ.get("AIDND_DICE_MODE", "server_animated")
+
+# --------------------------------------------------------------------------- #
+#  LOD-симуляция (main §4.2)                                                   #
+# --------------------------------------------------------------------------- #
+TAU_HIGH: float = 0.7        # порог промоушна в L3 (с диалогом)
+TAU_MID: float = 0.35        # порог L2
+AOI_HOPS: int = 2            # окрестность интереса: переходы по графу локаций
+MAX_L3_NPCS: int = 3         # кап дорогих когниций за тик (main §4.2)
+DEMOTE_COOLDOWN_TICKS: int = 30  # гистерезис демоушна с L3
+
+# Веса salience
+W_DIST, W_ROLE, W_RECENT, W_ACTIVE = 0.4, 0.3, 0.2, 0.3
+
+# --------------------------------------------------------------------------- #
+#  Время и окружение (док 08 §8)                                              #
+# --------------------------------------------------------------------------- #
+SIM_MINUTES_PER_TICK: int = 10
+START_SEASON: str = os.environ.get("AIDND_SEASON", "autumn")  # стартовый сезон
+DAYS_PER_SEASON: int = 28
+
+# --------------------------------------------------------------------------- #
+#  Память (main §5.2-5.3)                                                      #
+# --------------------------------------------------------------------------- #
+MEM_RECENCY_LAMBDA: float = 0.01   # спад recency
+MEM_ALPHA, MEM_BETA, MEM_GAMMA = 1.0, 1.0, 1.0  # recency/importance/relevance
+MEM_FORGET_TAU: float = 200.0
+MEM_TOPK: int = 12

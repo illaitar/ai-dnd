@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI-DnD — карта мира</title>
+  <style>
+    body{margin:0;background:#cdb98a;color:#2c2113;font-family:Georgia,'Iowan Old Style',serif}
+    header{display:flex;gap:10px;align-items:center;padding:10px 14px;background:#c2a96f;border-bottom:2px solid #5a4222}
+    header h1{font-size:17px;margin:0;font-style:italic;font-weight:500}.sp{flex:1}
+    .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 14px;background:#dac79a;border-bottom:1px solid #5a4222}
+    .ctl input{font:inherit;font-size:13px;padding:3px 6px;border:1px solid #5a4222;border-radius:4px;background:#f4ecd4;width:90px}
+    .btn{font:inherit;font-size:13px;cursor:pointer;padding:4px 12px;border:1px solid #5a4222;border-radius:6px;background:#caa44a;color:#241d08}
+    a.btn{text-decoration:none}
+    .wrap{padding:12px 14px;max-width:1020px}
+    canvas{width:100%;height:auto;display:block;border-radius:8px;box-shadow:0 3px 14px rgba(40,28,12,.35)}
+    .hint{font-size:12px;color:#6b4a22;font-style:italic;padding:6px 14px 0}
+  </style>
+</head>
+<body>
+  <header><h1>🗺️ AI-DnD <span style="font-size:12px;opacity:.7">карта мира — террейн</span></h1><span class="sp"></span><a href="/" class="btn">← В игру</a></header>
+  <div class="ctl"><label>seed <input id="seed" type="number" value="1337"></label><button class="btn" id="gen">Сгенерировать</button><span class="hint" id="meta"></span></div>
+  <div class="wrap"><canvas id="c" width="1000" height="700"></canvas></div>
+  <div class="hint">Высотное поле + теневая отмывка + гипсометрия + реки; точки региона по сторонам света и их состояние на карте игрока.</div>
+<script type="module">
+import {drawWorld} from "/static/worldgen.js";
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const W=cv.width,H=cv.height,dpr=Math.min(2,window.devicePixelRatio||1);
+cv.width=W*dpr;cv.height=H*dpr;cv.style.aspectRatio=W+'/'+H;ctx.scale(dpr,dpr);
+async function generate(){
+  const seed=+document.getElementById('seed').value||0;
+  let d={sites:[],player_place:""};
+  try{const r=await fetch('/region_map?seed='+seed);if(r.ok)d=await r.json();}catch(e){}
+  const nodes=[{name:'Фэндалин',dx:0,dy:0,display:'explored',current:d.player_place==='place:phandalin_square',go:'идти на площадь'}];
+  for(const s of (d.sites||[])) nodes.push({name:s.label,dx:s.dx,dy:s.dy,display:s.display,current:s.place===d.player_place,go:s.display!=='unknown'?('идти в '+s.label):null});
+  document.getElementById('meta').textContent=(d.settlement||'Регион')+' · '+(d.sites||[]).length+' точек';
+  drawWorld(ctx,W,H,{seed,nodes,title:'Окрестности Фэндалина'});
+}
+document.getElementById('gen').onclick=generate; generate();
+</script>
+</body>
+</html>

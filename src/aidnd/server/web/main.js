@@ -164,6 +164,7 @@ function renderMap(ml) {
     `<span class="tab ${l.id === mapLevel ? "active" : ""}" data-lvl="${l.id}">${esc(l.title)}</span>`).join("");
   $("map-tabs").querySelectorAll("[data-lvl]").forEach(t => t.onclick = () => { mapLevel = t.dataset.lvl; renderMap(ml); });
   if (mapLevel === "town" && window.drawCity) drawCityLevel();        // красивый процедурный город
+  else if (mapLevel === "region" && window.drawWorld) drawWorldLevel(ml);
   else drawMap(ml.levels.find(l => l.id === mapLevel));               // нод-граф для региона/интерьера
 }
 async function drawCityLevel() {
@@ -179,6 +180,19 @@ async function drawCityLevel() {
     if (!best) return;
     if (best.landmark && best.go) { logEntry(`<span class="you">→ ${esc(best.go)}</span>`, "you"); send({ cmd: "input", text: best.go }); closeOverlay("mapview"); }
     else { send({ cmd: "materialize", place: best.id, kind: best.kind }); }   // наполнить дом
+  };
+}
+function drawWorldLevel(ml) {
+  const lvl = ml.levels.find(l => l.id === "region"); if (!lvl) return;
+  const cv = $("map-canvas"), ctx = cv.getContext("2d");
+  const seed = (lastView && lastView.seed) || 1337;
+  mapHits = window.drawWorld(ctx, cv.width, cv.height, { seed, nodes: lvl.nodes, chrome: true });
+  cv.onclick = (e) => {
+    const r = cv.getBoundingClientRect(), W = cv.width, H = cv.height;
+    const mx = (e.clientX - r.left) / r.width * W, my = (e.clientY - r.top) / r.height * H;
+    let best = null, bd = 1e9;
+    for (const h of mapHits) { const d = Math.hypot(mx - h.x, my - h.y); if (d < h.r + 4 && d < bd) { bd = d; best = h; } }
+    if (best && best.go) { logEntry(`<span class="you">→ ${esc(best.go)}</span>`, "you"); send({ cmd: "input", text: best.go }); closeOverlay("mapview"); }
   };
 }
 function renderHouse(h) {

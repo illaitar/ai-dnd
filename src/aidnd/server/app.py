@@ -76,6 +76,12 @@ def city_page() -> HTMLResponse:
         return HTMLResponse(f.read())
 
 
+@app.get("/world")
+def world_page() -> HTMLResponse:
+    with open(os.path.join(WEB_DIR, "world.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
 @app.get("/town_layout")
 def town_layout(seed: int = config.WORLD_SEED) -> dict:
     """Список достопримечательностей города (здания+направления) для процедурной

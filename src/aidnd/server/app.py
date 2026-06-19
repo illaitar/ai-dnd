@@ -70,6 +70,30 @@ def map_page() -> HTMLResponse:
         return HTMLResponse(f.read())
 
 
+@app.get("/city")
+def city_page() -> HTMLResponse:
+    with open(os.path.join(WEB_DIR, "city.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/town_layout")
+def town_layout(seed: int = config.WORLD_SEED) -> dict:
+    """Список достопримечательностей города (здания+направления) для процедурной
+    карты: реальные узлы графа якорят сгенерированный город (улицы/дома)."""
+    session = new_session(seed=seed, roster_size=12, use_model=False)
+    ml = session.map_levels()
+    town = next((lvl for lvl in ml["levels"] if lvl["id"] == "town"), {"nodes": []})
+    sp = session.world.spatial
+    buildings = []
+    for n in town["nodes"]:
+        p = sp.places.get(n["id"])
+        buildings.append({"id": n["id"], "name": n["name"], "kind": n["kind"],
+                          "dir": n.get("dir_ru", ""), "dx": n["dx"], "dy": n["dy"],
+                          "affordances": list(p.affordances) if p else [],
+                          "go": n.get("go")})
+    return {"seed": int(seed), "settlement": "Фэндалин", "buildings": buildings}
+
+
 @app.get("/region_map")
 def region_map_dump(seed: int = config.WORLD_SEED, do: str = "", gold: int = 0) -> dict:
     """Генератор снимка карты: свежая сессия (seed), опц. список команд `do`

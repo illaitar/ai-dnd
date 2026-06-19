@@ -94,6 +94,27 @@ def town_layout(seed: int = config.WORLD_SEED) -> dict:
     return {"seed": int(seed), "settlement": "Фэндалин", "buildings": buildings}
 
 
+# кэш сессий по сиду: чтобы материализация дома сохранялась в памяти между запросами
+_CITY_SESSIONS: dict[int, object] = {}
+
+
+def _city_session(seed: int):
+    s = _CITY_SESSIONS.get(seed)
+    if s is None:
+        s = new_session(seed=seed, roster_size=12, use_model=False)
+        _CITY_SESSIONS[seed] = s
+    return s
+
+
+@app.get("/materialize")
+def materialize_house(seed: int = config.WORLD_SEED, place: str = "", kind: str = "") -> dict:
+    """Ленивая материализация наполнения конкретного дома + сохранение в память.
+    Повтор по тому же дому возвращает то же содержимое (recorded=True)."""
+    if not place:
+        return {"error": "no place"}
+    return _city_session(seed).discovery.materialize_interior(place, kind_hint=kind or None)
+
+
 @app.get("/region_map")
 def region_map_dump(seed: int = config.WORLD_SEED, do: str = "", gold: int = 0) -> dict:
     """Генератор снимка карты: свежая сессия (seed), опц. список команд `do`

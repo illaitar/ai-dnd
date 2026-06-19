@@ -19,6 +19,12 @@
     canvas{width:100%;height:auto;display:block;border-radius:8px;box-shadow:0 3px 14px rgba(40,28,12,.35)}
     #err{color:#8a2b1e;font-size:12px;padding:0 14px}
     .hint{font-size:12px;color:#6b4a22;font-style:italic;padding:6px 14px 0}
+    #house{position:fixed;right:18px;top:120px;width:300px;background:#f4ecd4;border:2px solid #5a4222;
+      border-radius:10px;padding:12px 14px;box-shadow:0 6px 26px rgba(40,28,12,.45);display:none;font-size:13px;line-height:1.4}
+    #house h3{margin:0 0 6px;font-size:15px}
+    #house .x{float:right;cursor:pointer;border:1px solid #5a4222;border-radius:5px;background:#e3cda0;padding:0 7px}
+    #house .occ{margin:3px 0} #house .tag{color:#6b4a22;font-style:italic}
+    #house .mem{margin-top:8px;color:#2e7d32;font-size:11.5px}
   </style>
 </head>
 <body>
@@ -34,7 +40,8 @@
   </div>
   <div id="err"></div>
   <div class="wrap"><canvas id="c" width="980" height="700"></canvas></div>
-  <div class="hint">Watabou-стиль: Вороной → кварталы → усадка → дома; стены по контуру; достопримечательности привязаны к сторонам света реального графа.</div>
+  <div class="hint">Watabou-стиль: Вороной → кварталы → усадка → дома; стены по контуру; достопримечательности привязаны к сторонам света реального графа. <b>Клик по дому — наполнить контентом (сохраняется в память).</b></div>
+  <div id="house"><span class="x" onclick="document.getElementById('house').style.display='none'">✕</span><div id="house-body"></div></div>
 
 <script type="module">
 import {Delaunay} from "https://esm.sh/d3-delaunay@6";
@@ -43,6 +50,26 @@ const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const W = cv.width, H = cv.height, CX = W/2, CY = H/2;
 const dpr = Math.min(2, window.devicePixelRatio||1);
 cv.width = W*dpr; cv.height = H*dpr; cv.style.aspectRatio = W+'/'+H; ctx.scale(dpr,dpr);
+let HITS=[], SEED=1337;
+const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function kindFromAff(affs){affs=affs||[];if(affs.includes('inn')||affs.includes('drink'))return'inn';
+  for(const a of['shop','shrine','townhall','manor','farm'])if(affs.includes(a))return a;
+  return affs.includes('hideout')?'manor':'home';}
+async function materializeHouse(hit){
+  try{
+    const r=await fetch(`/materialize?seed=${SEED}&place=${encodeURIComponent(hit.id)}&kind=${hit.kind}`);
+    const d=await r.json(); if(d.error)return;
+    const occ=(d.occupants||[]).map(o=>`<div class="occ">• <b>${esc(o.name)}</b> — ${esc(o.role)} <span class="tag">(${esc(o.trait)}, ${o.age})</span></div>`).join('')||'<div class="tag">никого нет</div>';
+    document.getElementById('house-body').innerHTML=
+      `<h3>${esc(hit.name||'Дом')} <span class="tag">(${esc(d.kind)})</span></h3>`+
+      `<div>${esc(d.description||'')}</div>`+
+      `<div style="margin:6px 0"><b>Внутри:</b> ${esc((d.items||[]).join(', ')||'—')}</div>`+
+      `<b>Кто здесь:</b>${occ}`+
+      (d.recorded?'<div class="mem">✓ уже наполнен — из памяти</div>':'<div class="mem">✦ только что наполнен и сохранён</div>');
+    document.getElementById('house').style.display='block';
+    ctx.strokeStyle='#d8b15a'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(hit.x,hit.y,hit.r+2,0,7); ctx.stroke();
+  }catch(e){}
+}
 
 // ---- утилиты ----
 function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
@@ -66,6 +93,7 @@ async function generate(){
 
 function draw(seed, landmarks){
   const rng = mulberry(seed||1);
+  SEED = seed; HITS = [];
   // 1) точки, плотнее к центру
   const N = 150, pts = [];
   for(let i=0;i<N;i++){ const a=rng()*6.2832, rr=Math.pow(rng(),0.7)*Math.min(W,H)*0.52; pts.push([CX+Math.cos(a)*rr, CY+Math.sin(a)*rr*0.92]); }
@@ -103,7 +131,7 @@ function draw(seed, landmarks){
     const ward = shrink(c.poly, 0.86);
     // земля квартала чуть темнее (стрит-гэп = земля города)
     ctx.fillStyle='#cdb585'; path(ward); ctx.fill();
-    scatterHouses(ward, rng);
+    tileWard(ward, rng, seed);
   }
   // площадь
   drawSquare(square.poly, rng);
@@ -121,36 +149,53 @@ function draw(seed, landmarks){
   const vg=ctx.createRadialGradient(CX,CY*0.95,H*0.34,CX,CY,H*0.85); vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(40,28,12,.34)'); ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
   ctx.strokeStyle='#4a3415'; ctx.lineWidth=5; ctx.strokeRect(5,5,W-10,H-10);
   compass(); cartouche('Фэндалин');
+
+  // клик по дому → ленивая материализация содержимого (и сохранение в память)
+  cv.onclick = (e)=>{
+    const r=cv.getBoundingClientRect(), mx=(e.clientX-r.left)/r.width*W, my=(e.clientY-r.top)/r.height*H;
+    let best=null,bd=1e9;
+    for(const h of HITS){ const d=Math.hypot(mx-h.x,my-h.y); if(d<h.r+4 && d<bd){bd=d;best=h;} }
+    if(best) materializeHouse(best);
+  };
 }
 
-function scatterHouses(ward, rng){
-  const a = area(ward); if(a<300) return;
-  const want = Math.min(26, Math.max(2, Math.floor(a/430)));
-  const placed=[];
-  let tries=0;
-  while(placed.length<want && tries<want*12){
-    tries++;
-    const c=centroid(ward);
-    const px=c[0]+(rng()-0.5)*Math.sqrt(a)*1.7, py=c[1]+(rng()-0.5)*Math.sqrt(a)*1.7;
-    if(!inPoly([px,py],ward)) continue;
-    const w=7+rng()*7, h=6+rng()*6, ang=(rng()<0.5?0:Math.PI/2)+(rng()-0.5)*0.5;
-    if(placed.some(q=>Math.hypot(q[0]-px,q[1]-py)<Math.max(w,h)*0.95)) continue;
-    placed.push([px,py]);
-    house(px,py,w,h,ang,rng);
-  }
+// --- замощение квартала плотами (рекурсивное деление полигона) ---
+function normalize(v){const L=Math.hypot(v[0],v[1])||1;return [v[0]/L,v[1]/L];}
+function longestEdge(p){let bi=0,bl=-1;for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length];const l=Math.hypot(b[0]-a[0],b[1]-a[1]);if(l>bl){bl=l;bi=i;}}return [p[bi],p[(bi+1)%p.length]];}
+function clipHalf(poly,P,nx,ny,keepPos){
+  const out=[],sd=q=>{const d=(q[0]-P[0])*nx+(q[1]-P[1])*ny;return keepPos?d>=-1e-9:d<=1e-9;};
+  for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],sa=sd(a),sb=sd(b);
+    if(sa)out.push(a);
+    if(sa!==sb){const da=(a[0]-P[0])*nx+(a[1]-P[1])*ny,db=(b[0]-P[0])*nx+(b[1]-P[1])*ny,t=da/(da-db);
+      out.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t]);}}
+  return out;
 }
-function house(x,y,w,h,ang,rng){
-  ctx.save(); ctx.translate(x,y); ctx.rotate(ang);
-  // тень
-  ctx.fillStyle='rgba(40,28,12,.22)'; ctx.fillRect(-w/2+1.2,-h/2+1.2,w,h);
-  // стены
-  ctx.fillStyle='#d7c0a0'; ctx.fillRect(-w/2,-h/2,w,h);
-  // крыша (двускатная — две трапеции по длинной стороне)
-  const roof=['#9c4a2e','#a85a36','#7d5a3a','#8a4f3a'][Math.floor(rng()*4)];
-  ctx.fillStyle=roof; ctx.fillRect(-w/2,-h/2,w,h*0.5);
-  ctx.fillStyle='rgba(0,0,0,.12)'; ctx.fillRect(-w/2,-h/2+h*0.5-0.6,w,1.2);
-  ctx.strokeStyle='rgba(40,28,12,.5)'; ctx.lineWidth=0.7; ctx.strokeRect(-w/2,-h/2,w,h);
-  ctx.restore();
+function subdivide(poly,minA,rng,out,depth){
+  if(depth>11||area(poly)<minA){out.push(poly);return;}
+  const [a,b]=longestEdge(poly),dir=normalize([b[0]-a[0],b[1]-a[1]]);
+  const c=centroid(poly),span=Math.sqrt(area(poly)),t=(rng()-0.5)*0.3*span;
+  const P=[c[0]+dir[0]*t,c[1]+dir[1]*t];                       // рез перпендикулярно длинной оси
+  const Lp=clipHalf(poly,P,dir[0],dir[1],true),Rp=clipHalf(poly,P,dir[0],dir[1],false);
+  if(Lp.length>=3&&Rp.length>=3){ subdivide(Lp,minA,rng,out,depth+1); subdivide(Rp,minA,rng,out,depth+1); }
+  else out.push(poly);
+}
+const ROOFS=['#a8542f','#b56a3c','#8a5630','#9c6b44','#7a4a30','#86603e','#94472a','#a36240'];
+function tileWard(ward,rng,seed){
+  const plots=[]; subdivide(ward, 120+rng()*90, rng, plots, 0);
+  for(const pl of plots){
+    if(pl.length<3) continue;
+    const inset=shrink(pl,0.82); if(area(inset)<18) continue;
+    if(rng()<0.07){ ctx.fillStyle='#9fae6e'; path(inset); ctx.fill();   // дворик/огород
+      ctx.strokeStyle='rgba(60,80,40,.4)'; ctx.lineWidth=0.7; path(inset); ctx.stroke(); continue; }
+    ctx.save(); ctx.translate(1.1,1.4); ctx.fillStyle='rgba(40,28,12,.22)'; path(inset); ctx.fill(); ctx.restore(); // тень
+    ctx.fillStyle=ROOFS[(rng()*ROOFS.length)|0]; path(inset); ctx.fill();                                          // крыша
+    const [a,b]=longestEdge(inset),dir=normalize([b[0]-a[0],b[1]-a[1]]),c=centroid(inset),L=Math.sqrt(area(inset))*0.42;
+    ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=1; ctx.beginPath();                                           // конёк
+    ctx.moveTo(c[0]-dir[0]*L,c[1]-dir[1]*L); ctx.lineTo(c[0]+dir[0]*L,c[1]+dir[1]*L); ctx.stroke();
+    ctx.strokeStyle='rgba(40,28,12,.5)'; ctx.lineWidth=0.8; path(inset); ctx.stroke();                             // карниз
+    HITS.push({x:c[0],y:c[1],r:Math.max(7,Math.sqrt(area(inset))*0.55),
+      id:`house:${seed}:${Math.round(c[0])}_${Math.round(c[1])}`, kind:"home"});       // кликабельный дом
+  }
 }
 function drawSquare(poly, rng){
   const sq=shrink(poly,0.9);
@@ -225,6 +270,7 @@ function drawLandmarks(landmarks, city, square, rng){
     ctx.fillStyle='rgba(245,236,212,.95)'; ctx.strokeStyle='#5a4222'; ctx.lineWidth=0.8;
     rr(c[0]-w/2-6,c[1]-37,w+12,17,4); ctx.fill(); ctx.stroke();
     ctx.fillStyle='#2c2113'; ctx.fillText(b.name,c[0],c[1]-23);
+    HITS.push({x:c[0],y:c[1],r:16,id:b.id,name:b.name,kind:kindFromAff(b.affordances)});
   }
 }
 function Min(){return Math.min(W,H)*0.30;}

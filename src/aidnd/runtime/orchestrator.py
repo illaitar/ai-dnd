@@ -1462,6 +1462,7 @@ class GameSession:
                 "level": st.level if st else 1,
             },
             "place": place, "place_name": self._place_name(place),
+            "seed": self.world.seed,
             "time": self.world.clock.hhmm(),
             "in_combat": bool(self.combat and self.combat.state.mode == "active"),
             "pending_roll": self._roll_req_dict(self.pending_roll["request"]) if self.pending_roll else None,

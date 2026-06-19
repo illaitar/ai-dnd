@@ -16,7 +16,7 @@
     .btn:hover{background:#d9b85e}
     a.btn{text-decoration:none}
     .wrap{padding:12px 14px;max-width:1000px}
-    canvas{width:100%;height:auto;display:block;border-radius:8px;box-shadow:0 3px 14px rgba(40,28,12,.35)}
+    canvas{width:100%;height:auto;display:block;border-radius:8px;box-shadow:0 3px 14px rgba(40,28,12,.35);cursor:pointer}
     #err{color:#8a2b1e;font-size:12px;padding:0 14px}
     .hint{font-size:12px;color:#6b4a22;font-style:italic;padding:6px 14px 0}
     #house{position:fixed;right:18px;top:120px;width:300px;background:#f4ecd4;border:2px solid #5a4222;
@@ -40,22 +40,25 @@
   </div>
   <div id="err"></div>
   <div class="wrap"><canvas id="c" width="980" height="700"></canvas></div>
-  <div class="hint">Watabou-стиль: Вороной → кварталы → усадка → дома; стены по контуру; достопримечательности привязаны к сторонам света реального графа. <b>Клик по дому — наполнить контентом (сохраняется в память).</b></div>
+  <div class="hint">Watabou-стиль: Вороной → кварталы → усадка → дома; стены по контуру; достопримечательности по сторонам света реального графа. <b>Клик по дому — наполнить контентом (сохраняется в память).</b></div>
   <div id="house"><span class="x" onclick="document.getElementById('house').style.display='none'">✕</span><div id="house-body"></div></div>
 
 <script type="module">
-import {Delaunay} from "https://esm.sh/d3-delaunay@6";
-
-const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const W = cv.width, H = cv.height, CX = W/2, CY = H/2;
-const dpr = Math.min(2, window.devicePixelRatio||1);
-cv.width = W*dpr; cv.height = H*dpr; cv.style.aspectRatio = W+'/'+H; ctx.scale(dpr,dpr);
-let HITS=[], SEED=1337;
+import {drawCity} from "/static/citygen.js";
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const W=cv.width, H=cv.height, dpr=Math.min(2,window.devicePixelRatio||1);
+cv.width=W*dpr; cv.height=H*dpr; cv.style.aspectRatio=W+'/'+H; ctx.scale(dpr,dpr);
 const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-function kindFromAff(affs){affs=affs||[];if(affs.includes('inn')||affs.includes('drink'))return'inn';
-  for(const a of['shop','shrine','townhall','manor','farm'])if(affs.includes(a))return a;
-  return affs.includes('hideout')?'manor':'home';}
-async function materializeHouse(hit){
+let HITS=[], SEED=1337;
+
+async function generate(){
+  const seed=+document.getElementById('seed').value||0; SEED=seed;
+  document.getElementById('err').textContent='';
+  let buildings=[];
+  try{ const r=await fetch('/town_layout?seed='+seed); if(r.ok){ const d=await r.json(); buildings=d.buildings||[]; document.getElementById('meta').textContent=d.settlement+' · '+buildings.length+' зданий'; } }catch(e){}
+  HITS = drawCity(ctx, W, H, {seed, buildings, title:'Фэндалин'});
+}
+async function materialize(hit){
   try{
     const r=await fetch(`/materialize?seed=${SEED}&place=${encodeURIComponent(hit.id)}&kind=${hit.kind}`);
     const d=await r.json(); if(d.error)return;
@@ -70,214 +73,10 @@ async function materializeHouse(hit){
     ctx.strokeStyle='#d8b15a'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(hit.x,hit.y,hit.r+2,0,7); ctx.stroke();
   }catch(e){}
 }
-
-// ---- утилиты ----
-function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
-function area(p){let s=0;for(let i=0,n=p.length;i<n;i++){const a=p[i],b=p[(i+1)%n];s+=a[0]*b[1]-b[0]*a[1];}return Math.abs(s)/2;}
-function centroid(p){let x=0,y=0,a=0;for(let i=0,n=p.length;i<n;i++){const A=p[i],B=p[(i+1)%n];const cr=A[0]*B[1]-B[0]*A[1];x+=(A[0]+B[0])*cr;y+=(A[1]+B[1])*cr;a+=cr;}a*=3;return a?[x/a,y/a]:p[0];}
-function dist(a,b){return Math.hypot(a[0]-b[0],a[1]-b[1]);}
-function shrink(p,f){const c=centroid(p);return p.map(q=>[c[0]+(q[0]-c[0])*f,c[1]+(q[1]-c[1])*f]);}
-function inPoly(pt,poly){let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];if(((yi>pt[1])!=(yj>pt[1]))&&(pt[0]<(xj-xi)*(pt[1]-yi)/(yj-yi)+xi))inside=!inside;}return inside;}
-function path(p){ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);for(let i=1;i<p.length;i++)ctx.lineTo(p[i][0],p[i][1]);ctx.closePath();}
-
-async function generate(){
-  const seed = +document.getElementById('seed').value || 0;
-  document.getElementById('err').textContent = '';
-  let landmarks = [];
-  try{
-    const r = await fetch('/town_layout?seed='+seed);
-    if(r.ok){ const d = await r.json(); landmarks = d.buildings||[]; document.getElementById('meta').textContent = d.settlement+' · '+landmarks.length+' зданий'; }
-  }catch(e){ /* офлайн — нарисуем город без подписей */ }
-  draw(seed, landmarks);
-}
-
-function draw(seed, landmarks){
-  const rng = mulberry(seed||1);
-  SEED = seed; HITS = [];
-  // 1) точки, плотнее к центру
-  const N = 150, pts = [];
-  for(let i=0;i<N;i++){ const a=rng()*6.2832, rr=Math.pow(rng(),0.7)*Math.min(W,H)*0.52; pts.push([CX+Math.cos(a)*rr, CY+Math.sin(a)*rr*0.92]); }
-  // 2) Ллойд-релаксация
-  let cells;
-  for(let it=0; it<2; it++){
-    const d=Delaunay.from(pts), v=d.voronoi([6,6,W-6,H-6]);
-    for(let i=0;i<pts.length;i++){ const poly=v.cellPolygon(i); if(poly) pts[i]=centroid(poly); }
-  }
-  const del=Delaunay.from(pts), vor=del.voronoi([6,6,W-6,H-6]);
-  cells=[];
-  for(let i=0;i<pts.length;i++){ let poly=vor.cellPolygon(i); if(!poly)continue; poly=poly.slice(0,poly.length-1); cells.push({i,site:pts[i],poly}); }
-  // 3) город = клетки внутри радиуса и не у края
-  const Rcity = Math.min(W,H)*0.40;
-  const edge = (poly)=>poly.some(q=>q[0]<=8||q[0]>=W-8||q[1]<=8||q[1]>=H-8);
-  cells.forEach(c=>{ c.city = dist(c.site,[CX,CY])<Rcity && !edge(c.poly); });
-  const city = cells.filter(c=>c.city);
-  // рыночная площадь — центральная клетка
-  let square=city[0]; for(const c of city) if(dist(c.site,[CX,CY])<dist(square.site,[CX,CY])) square=c;
-
-  // ===== РЕНДЕР =====
-  ctx.clearRect(0,0,W,H);
-  // фон-поля
-  ctx.fillStyle='#a9b878'; ctx.fillRect(0,0,W,H);
-  // деревья снаружи города
-  ctx.fillStyle='#5f7d42';
-  cells.filter(c=>!c.city).forEach(c=>{ if(rng()<0.55){ const t=c.site; ctx.beginPath(); ctx.arc(t[0],t[1],3+rng()*3,0,7); ctx.fill(); } });
-  // земля города (улицы) — общий контур-заливка по городским клеткам
-  ctx.fillStyle='#d8c39a';
-  city.forEach(c=>{ path(c.poly); ctx.fill(); });
-
-  // 4) кварталы: усадка + дома; площадь — мостовая
-  for(const c of city){
-    if(c===square) continue;
-    const ward = shrink(c.poly, 0.86);
-    // земля квартала чуть темнее (стрит-гэп = земля города)
-    ctx.fillStyle='#cdb585'; path(ward); ctx.fill();
-    tileWard(ward, rng, seed);
-  }
-  // площадь
-  drawSquare(square.poly, rng);
-
-  // 5) стены по граничным рёбрам города + башни + ворота
-  drawWalls(city, rng);
-
-  // 6) река (мягкая дуга) + мост
-  drawRiver(rng);
-
-  // 7) достопримечательности по сторонам света
-  drawLandmarks(landmarks, city, square, rng);
-
-  // рамка/виньетка/компас/картуш
-  const vg=ctx.createRadialGradient(CX,CY*0.95,H*0.34,CX,CY,H*0.85); vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(40,28,12,.34)'); ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
-  ctx.strokeStyle='#4a3415'; ctx.lineWidth=5; ctx.strokeRect(5,5,W-10,H-10);
-  compass(); cartouche('Фэндалин');
-
-  // клик по дому → ленивая материализация содержимого (и сохранение в память)
-  cv.onclick = (e)=>{
-    const r=cv.getBoundingClientRect(), mx=(e.clientX-r.left)/r.width*W, my=(e.clientY-r.top)/r.height*H;
-    let best=null,bd=1e9;
-    for(const h of HITS){ const d=Math.hypot(mx-h.x,my-h.y); if(d<h.r+4 && d<bd){bd=d;best=h;} }
-    if(best) materializeHouse(best);
-  };
-}
-
-// --- замощение квартала плотами (рекурсивное деление полигона) ---
-function normalize(v){const L=Math.hypot(v[0],v[1])||1;return [v[0]/L,v[1]/L];}
-function longestEdge(p){let bi=0,bl=-1;for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length];const l=Math.hypot(b[0]-a[0],b[1]-a[1]);if(l>bl){bl=l;bi=i;}}return [p[bi],p[(bi+1)%p.length]];}
-function clipHalf(poly,P,nx,ny,keepPos){
-  const out=[],sd=q=>{const d=(q[0]-P[0])*nx+(q[1]-P[1])*ny;return keepPos?d>=-1e-9:d<=1e-9;};
-  for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],sa=sd(a),sb=sd(b);
-    if(sa)out.push(a);
-    if(sa!==sb){const da=(a[0]-P[0])*nx+(a[1]-P[1])*ny,db=(b[0]-P[0])*nx+(b[1]-P[1])*ny,t=da/(da-db);
-      out.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t]);}}
-  return out;
-}
-function subdivide(poly,minA,rng,out,depth){
-  if(depth>11||area(poly)<minA){out.push(poly);return;}
-  const [a,b]=longestEdge(poly),dir=normalize([b[0]-a[0],b[1]-a[1]]);
-  const c=centroid(poly),span=Math.sqrt(area(poly)),t=(rng()-0.5)*0.3*span;
-  const P=[c[0]+dir[0]*t,c[1]+dir[1]*t];                       // рез перпендикулярно длинной оси
-  const Lp=clipHalf(poly,P,dir[0],dir[1],true),Rp=clipHalf(poly,P,dir[0],dir[1],false);
-  if(Lp.length>=3&&Rp.length>=3){ subdivide(Lp,minA,rng,out,depth+1); subdivide(Rp,minA,rng,out,depth+1); }
-  else out.push(poly);
-}
-const ROOFS=['#a8542f','#b56a3c','#8a5630','#9c6b44','#7a4a30','#86603e','#94472a','#a36240'];
-function tileWard(ward,rng,seed){
-  const plots=[]; subdivide(ward, 120+rng()*90, rng, plots, 0);
-  for(const pl of plots){
-    if(pl.length<3) continue;
-    const inset=shrink(pl,0.82); if(area(inset)<18) continue;
-    if(rng()<0.07){ ctx.fillStyle='#9fae6e'; path(inset); ctx.fill();   // дворик/огород
-      ctx.strokeStyle='rgba(60,80,40,.4)'; ctx.lineWidth=0.7; path(inset); ctx.stroke(); continue; }
-    ctx.save(); ctx.translate(1.1,1.4); ctx.fillStyle='rgba(40,28,12,.22)'; path(inset); ctx.fill(); ctx.restore(); // тень
-    ctx.fillStyle=ROOFS[(rng()*ROOFS.length)|0]; path(inset); ctx.fill();                                          // крыша
-    const [a,b]=longestEdge(inset),dir=normalize([b[0]-a[0],b[1]-a[1]]),c=centroid(inset),L=Math.sqrt(area(inset))*0.42;
-    ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=1; ctx.beginPath();                                           // конёк
-    ctx.moveTo(c[0]-dir[0]*L,c[1]-dir[1]*L); ctx.lineTo(c[0]+dir[0]*L,c[1]+dir[1]*L); ctx.stroke();
-    ctx.strokeStyle='rgba(40,28,12,.5)'; ctx.lineWidth=0.8; path(inset); ctx.stroke();                             // карниз
-    HITS.push({x:c[0],y:c[1],r:Math.max(7,Math.sqrt(area(inset))*0.55),
-      id:`house:${seed}:${Math.round(c[0])}_${Math.round(c[1])}`, kind:"home"});       // кликабельный дом
-  }
-}
-function drawSquare(poly, rng){
-  const sq=shrink(poly,0.9);
-  ctx.fillStyle='#c9b486'; path(sq); ctx.fill();
-  // брусчатка
-  ctx.strokeStyle='rgba(90,66,34,.25)'; ctx.lineWidth=0.6;
-  const c=centroid(sq), R=Math.sqrt(area(sq));
-  for(let gx=-R;gx<R;gx+=9){ ctx.beginPath(); ctx.moveTo(c[0]+gx,c[1]-R); ctx.lineTo(c[0]+gx,c[1]+R); ctx.stroke(); }
-  for(let gy=-R;gy<R;gy+=9){ ctx.beginPath(); ctx.moveTo(c[0]-R,c[1]+gy); ctx.lineTo(c[0]+R,c[1]+gy); ctx.stroke(); }
-  // колодец в центре
-  ctx.fillStyle='#7a6238'; ctx.beginPath(); ctx.arc(c[0],c[1],5,0,7); ctx.fill();
-  ctx.fillStyle='#3a2c18'; ctx.beginPath(); ctx.arc(c[0],c[1],2.4,0,7); ctx.fill();
-}
-
-function drawWalls(city, rng){
-  // граничные рёбра = встречаются один раз среди городских клеток
-  const seen=new Map(); const key=(a,b)=>{const r=p=>[Math.round(p[0]),Math.round(p[1])];const A=r(a),B=r(b);return A[0]<B[0]||(A[0]===B[0]&&A[1]<=B[1])?A+'|'+B:B+'|'+A;};
-  for(const c of city){ const p=c.poly; for(let i=0;i<p.length;i++){ const a=p[i],b=p[(i+1)%p.length]; const k=key(a,b); const e=seen.get(k); if(e)e.n++; else seen.set(k,{a,b,n:1}); } }
-  const bnd=[...seen.values()].filter(e=>e.n===1);
-  // ворота: ребро ближе всего к низу-центру
-  let gate=bnd[0]; for(const e of bnd){ const m=[(e.a[0]+e.b[0])/2,(e.a[1]+e.b[1])/2]; const gm=[(gate.a[0]+gate.b[0])/2,(gate.a[1]+gate.b[1])/2]; if(m[1]>gm[1] && Math.abs(m[0]-CX)<W*0.25) gate=e; }
-  ctx.strokeStyle='#6b5836'; ctx.lineWidth=6; ctx.lineCap='round';
-  for(const e of bnd){ if(e===gate) continue; ctx.beginPath(); ctx.moveTo(e.a[0],e.a[1]); ctx.lineTo(e.b[0],e.b[1]); ctx.stroke(); }
-  ctx.strokeStyle='#4a3c22'; ctx.lineWidth=2;
-  for(const e of bnd){ if(e===gate) continue; ctx.beginPath(); ctx.moveTo(e.a[0],e.a[1]); ctx.lineTo(e.b[0],e.b[1]); ctx.stroke(); }
-  // башни на узлах
-  const verts=new Map(); for(const e of bnd){ for(const v of [e.a,e.b]){ const k=Math.round(v[0])+','+Math.round(v[1]); verts.set(k,v);} }
-  ctx.fillStyle='#5a4a2c'; ctx.strokeStyle='#352a16'; ctx.lineWidth=1;
-  for(const v of verts.values()){ ctx.fillRect(v[0]-3.5,v[1]-3.5,7,7); ctx.strokeRect(v[0]-3.5,v[1]-3.5,7,7); }
-  // ворота: столбы
-  ctx.fillStyle='#4a3c22'; for(const v of [gate.a,gate.b]){ ctx.fillRect(v[0]-3,v[1]-3,6,6); }
-  // дорога из ворот наружу
-  const gm=[(gate.a[0]+gate.b[0])/2,(gate.a[1]+gate.b[1])/2];
-  ctx.strokeStyle='#cdb585'; ctx.lineWidth=8; ctx.beginPath(); ctx.moveTo(gm[0],gm[1]); ctx.lineTo(gm[0]+(gm[0]-CX)*0.5, H-8); ctx.stroke();
-}
-
-function drawRiver(rng){
-  ctx.strokeStyle='rgba(70,120,160,.85)'; ctx.lineWidth=10; ctx.lineCap='round';
-  ctx.beginPath();
-  const y0=H*(0.2+rng()*0.1);
-  ctx.moveTo(-10,y0);
-  ctx.bezierCurveTo(W*0.3,y0+40,W*0.45,CY+60,W*0.62,CY+20);
-  ctx.bezierCurveTo(W*0.8,CY-20,W*0.9,H*0.7,W+10,H*0.62);
-  ctx.stroke();
-  ctx.strokeStyle='rgba(150,200,225,.6)'; ctx.lineWidth=2.5; ctx.stroke();
-}
-
-// тип здания → цвет крыши достопримечательности
-const LM_ROOF={inn:'#b07a1e',drink:'#b07a1e',shop:'#2f6fb0',shrine:'#d8d0e0',
-  townhall:'#9a7b30',manor:'#7a3a3a',farm:'#5f7d42'};
-function drawLandmarks(landmarks, city, square, rng){
-  const used=new Set([square]);
-  for(const b of landmarks){
-    if(b.kind!=='building') continue;
-    const L=Math.hypot(b.dx,b.dy)||0;
-    const target = L? [CX+b.dx/L*Min(), CY+b.dy/L*Min()*0.92] : [CX,CY];
-    let best=null,bd=1e9;
-    for(const c of city){ if(used.has(c)) continue; const d=dist(c.site,target); if(d<bd){bd=d;best=c;} }
-    if(!best) continue; used.add(best);
-    const c=centroid(best.poly);
-    const roof=(b.affordances||[]).map(a=>LM_ROOF[a]).find(Boolean)||'#a8472b';
-    // выделенное здание: крупнее, золотая обводка, флажок
-    ctx.fillStyle='rgba(40,28,12,.3)'; ctx.fillRect(c[0]-10,c[1]-9,22,22);
-    ctx.fillStyle='#e3cda0'; ctx.fillRect(c[0]-11,c[1]-11,22,22);
-    ctx.fillStyle=roof; ctx.fillRect(c[0]-11,c[1]-11,22,9);
-    ctx.strokeStyle='#d8b15a'; ctx.lineWidth=2.2; ctx.strokeRect(c[0]-11,c[1]-11,22,22);
-    ctx.strokeStyle='#3a2c14'; ctx.lineWidth=1.2; ctx.beginPath(); ctx.moveTo(c[0]+11,c[1]-11); ctx.lineTo(c[0]+11,c[1]-20); ctx.stroke();
-    ctx.fillStyle='#c0492c'; ctx.beginPath(); ctx.moveTo(c[0]+11,c[1]-20); ctx.lineTo(c[0]+18,c[1]-17.5); ctx.lineTo(c[0]+11,c[1]-15); ctx.fill();
-    // подпись
-    ctx.font='12px Georgia'; ctx.textAlign='center'; ctx.textBaseline='bottom';
-    const w=ctx.measureText(b.name).width;
-    ctx.fillStyle='rgba(245,236,212,.95)'; ctx.strokeStyle='#5a4222'; ctx.lineWidth=0.8;
-    rr(c[0]-w/2-6,c[1]-37,w+12,17,4); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#2c2113'; ctx.fillText(b.name,c[0],c[1]-23);
-    HITS.push({x:c[0],y:c[1],r:16,id:b.id,name:b.name,kind:kindFromAff(b.affordances)});
-  }
-}
-function Min(){return Math.min(W,H)*0.30;}
-function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
-function compass(){ctx.save();ctx.translate(W-40,46);ctx.fillStyle='rgba(233,216,175,.85)';ctx.beginPath();ctx.arc(0,0,18,0,7);ctx.fill();ctx.strokeStyle='#4a3415';ctx.lineWidth=1;ctx.stroke();ctx.fillStyle='#4a3415';ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(4,-3);ctx.lineTo(-4,-3);ctx.fill();ctx.font='bold 9px Georgia';ctx.textAlign='center';ctx.fillText('С',0,-22);ctx.restore();}
-function cartouche(t){ctx.fillStyle='rgba(202,164,74,.92)';ctx.strokeStyle='#5a4222';ctx.lineWidth=1.4;rr(CX-130,14,260,28,5);ctx.fill();ctx.stroke();ctx.fillStyle='#2c2113';ctx.font='italic 16px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('Город '+t,CX,29);}
-
+cv.onclick=(e)=>{ const r=cv.getBoundingClientRect(), mx=(e.clientX-r.left)/r.width*W, my=(e.clientY-r.top)/r.height*H;
+  let best=null,bd=1e9; for(const h of HITS){ const d=Math.hypot(mx-h.x,my-h.y); if(d<h.r+4&&d<bd){bd=d;best=h;} }
+  if(best) materialize(best);
+};
 document.getElementById('gen').onclick=generate;
 generate();
 </script>

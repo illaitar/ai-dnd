@@ -38,6 +38,7 @@ function render(r) {
     logEntry(head + esc(r.text), cls);
   }
   if (r.rolled_faces) logEntry(`🎲 выпало: [${r.rolled_faces.join(", ")}]`, "mech");
+  if (r.kind === "house" && r.house) renderHouse(r.house);
   if (r.view) updateView(r.view);
   if (r.kind === "look") { renderExits(r.exits); renderNpcs(r.npcs); renderQuick(); }
   if (r.combat) renderCombat(r.combat);
@@ -150,14 +151,42 @@ function renderTrade(shop) {
   });
 }
 
-let mapLevel = null;
+let mapLevel = null, townBuildings = null, townSeed = null, mapHits = [];
+async function ensureTown(seed) {
+  if (townSeed === seed && townBuildings) return;
+  try { const r = await fetch("/town_layout?seed=" + seed); if (r.ok) { townBuildings = (await r.json()).buildings || []; townSeed = seed; } }
+  catch (e) { townBuildings = []; }
+}
 function renderMap(ml) {
   if (!ml || !ml.levels || !ml.levels.length) return;
   if (!mapLevel || !ml.levels.some(l => l.id === mapLevel)) mapLevel = ml.current_level;
   $("map-tabs").innerHTML = ml.levels.map(l =>
     `<span class="tab ${l.id === mapLevel ? "active" : ""}" data-lvl="${l.id}">${esc(l.title)}</span>`).join("");
   $("map-tabs").querySelectorAll("[data-lvl]").forEach(t => t.onclick = () => { mapLevel = t.dataset.lvl; renderMap(ml); });
-  drawMap(ml.levels.find(l => l.id === mapLevel));
+  if (mapLevel === "town" && window.drawCity) drawCityLevel();        // красивый процедурный город
+  else drawMap(ml.levels.find(l => l.id === mapLevel));               // нод-граф для региона/интерьера
+}
+async function drawCityLevel() {
+  const seed = (lastView && lastView.seed) || 1337;
+  await ensureTown(seed);
+  const cv = $("map-canvas"), ctx = cv.getContext("2d");
+  mapHits = window.drawCity(ctx, cv.width, cv.height, { seed, buildings: townBuildings || [], chrome: true });
+  cv.onclick = (e) => {
+    const r = cv.getBoundingClientRect(), W = cv.width, H = cv.height;
+    const mx = (e.clientX - r.left) / r.width * W, my = (e.clientY - r.top) / r.height * H;
+    let best = null, bd = 1e9;
+    for (const h of mapHits) { const d = Math.hypot(mx - h.x, my - h.y); if (d < h.r + 4 && d < bd) { bd = d; best = h; } }
+    if (!best) return;
+    if (best.landmark && best.go) { logEntry(`<span class="you">→ ${esc(best.go)}</span>`, "you"); send({ cmd: "input", text: best.go }); closeOverlay("mapview"); }
+    else { send({ cmd: "materialize", place: best.id, kind: best.kind }); }   // наполнить дом
+  };
+}
+function renderHouse(h) {
+  const occ = (h.occupants || []).map(o => `<div class="occ">• <b>${esc(o.name)}</b> — ${esc(o.role)} <span class="tag">(${esc(o.trait)}, ${o.age})</span></div>`).join("") || '<div class="tag">никого нет</div>';
+  $("house-body").innerHTML = `<h3>Дом <span class="tag">(${esc(h.kind)})</span></h3><div>${esc(h.description || "")}</div>`
+    + `<div style="margin:6px 0"><b>Внутри:</b> ${esc((h.items || []).join(", ") || "—")}</div><b>Кто здесь:</b>${occ}`
+    + (h.recorded ? '<div class="mem">✓ из памяти</div>' : '<div class="mem">✦ наполнен и сохранён</div>');
+  $("house").classList.remove("hidden");
 }
 function drawMap(level) {
   if (!level) return;

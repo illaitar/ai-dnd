@@ -187,6 +187,10 @@ async def ws(sock: WebSocket) -> None:
                     salt["n"] += 1
                     result = session.submit_roll(faces)
                     result["rolled_faces"] = faces
+            elif cmd == "materialize":
+                house = session.discovery.materialize_interior(msg.get("place", ""),
+                                                               kind_hint=msg.get("kind"))
+                result = {"kind": "house", "house": house, "view": session.view()}
             elif cmd == "roll_manual":
                 result = session.submit_roll(msg.get("faces", []))
             elif cmd == "new":

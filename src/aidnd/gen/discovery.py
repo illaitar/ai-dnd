@@ -100,6 +100,19 @@ class DiscoveryService:
         # активная враждебная фракция в регионе → выше шанс слежки
         if any("redbrands" in f or "watched" in f for f in self.world.flags):
             watch_mod *= 2.0
+        # фракция контролирует это место → реагирует на стояние игрока
+        from ..world.components import Affiliation, Faction
+        pid = self.world.player_id
+        aff = self.world.ecs.get(pid, Affiliation) if pid else None
+        for fid in self.world.factions:
+            fac = self.world.ecs.get(fid, Faction)
+            if not fac or place_id not in fac.controls:
+                continue
+            rep = self.world.reputation.get(fid, 0.0)
+            if (aff and aff.membership == fid) or rep >= 0.5:
+                watch_mod *= 0.6                         # свои/уважаемые — за тобой не следят
+            elif rep <= -0.3:
+                watch_mod *= 1.6                         # враги — глаз не сводят
         return presence_mod, watch_mod
 
     def _fixed_others_here(self, place_id: str, exclude: str) -> list[str]:

@@ -93,9 +93,11 @@ def assemble_modifier(
     role = "own_attacks" if is_attack else "own_checks"
     adv = advantage_from_conditions(conditions_of(world, eid), role)
 
-    # отношения для социальных проверок
+    # отношения + фракции для социальных проверок
     if skill in SOCIAL_SKILLS and target:
         adv += relationship_advantage(world, target, eid)
+        from .factions import social_reaction
+        mod += round(social_reaction(world, eid, target) * 2)   # своя/вражеская фракция: ±2
 
     return mod, max(-1, min(1, adv))
 

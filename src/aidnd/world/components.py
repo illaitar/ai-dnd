@@ -139,12 +139,31 @@ class Profession:
 
 @dataclass
 class Faction:
-    """Компонент фракции на сущности-фракции."""
+    """Компонент фракции на сущности-фракции (генерируется per-world, обогащается LLM)."""
 
     name: str
+    kind: str = "guild"                 # thieves_guild|merchant_guild|aristocracy|temple|watch|arcane|criminal|...
+    blurb: str = ""                     # короткое описание (LLM)
+    goals: list[str] = field(default_factory=list)     # к чему стремится
+    values: list[str] = field(default_factory=list)    # что одобряет/осуждает
+    emblem: str = "🏳"                  # герб-эмодзи
+    leader: str | None = None           # npc id главы
     members: list[str] = field(default_factory=list)
     controls: list[str] = field(default_factory=list)
-    relations: dict[str, float] = field(default_factory=dict)
+    relations: dict[str, float] = field(default_factory=dict)   # faction_id -> [-1..1]
+    ranks: list[str] = field(default_factory=list)     # тиры стояния (низший→высший)
+    join_min_rep: float = 0.25          # порог репутации для вступления
+    joinable: bool = True               # можно ли вступить игроку
+    enriched: bool = False              # применено ли LLM-обогащение
+
+
+@dataclass
+class Affiliation:
+    """Принадлежность персонажа к фракциям: членство, ранг и склонности."""
+
+    membership: str | None = None                      # текущая фракция (id)
+    rank: int = 0                                       # индекс в Faction.ranks
+    affinity: dict[str, float] = field(default_factory=dict)   # faction_id -> склонность [-1..1]
 
 
 @dataclass

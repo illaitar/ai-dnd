@@ -103,11 +103,23 @@ def transfer_currency(world, src: str | None, dst: str | None, coins: dict[str, 
 # --------------------------------------------------------------------------- #
 #  Торговля (док 04 §7, цены из док 03 §7)                                     #
 # --------------------------------------------------------------------------- #
+def _faction_reaction(world, shop: Container, buyer: str) -> float:
+    """Отношение фракции торговца к покупателю [-1..1] (скидка своим, наценка врагам)."""
+    if not shop.owner_ref:
+        return 0.0
+    try:
+        from ..rules.factions import social_reaction
+        return social_reaction(world, buyer, shop.owner_ref)
+    except Exception:
+        return 0.0
+
+
 def price_of(world, inst: ItemInstance, shop: Container, buyer: str) -> int:
-    """Цена покупки в медяках: base × merchant_mod (упрощённо)."""
+    """Цена покупки в медяках: base × фракционный множитель (свои дешевле, враги дороже)."""
     tmpl = world.templates.get(inst.template_id)
     base = (tmpl.base_value if tmpl else 0) * inst.quantity
-    return max(1, int(base * 1.0))
+    mult = max(0.8, min(1.25, 1.0 - _faction_reaction(world, shop, buyer) * 0.15))
+    return max(1, int(base * mult))
 
 
 def buy(world, player: str, shop_id: str, instance_id: str) -> None:
@@ -128,7 +140,8 @@ def sell(world, player: str, shop_id: str, instance_id: str) -> None:
     tmpl = world.templates.get(inst.template_id)
     if shop.deals_in and tmpl and tmpl.category not in shop.deals_in:
         raise InventoryError("торговец этим не торгует")
-    payout = int((tmpl.base_value if tmpl else 0) * inst.quantity * shop.buy_rate)
+    mult = max(0.8, min(1.25, 1.0 + _faction_reaction(world, shop, player) * 0.15))
+    payout = int((tmpl.base_value if tmpl else 0) * inst.quantity * shop.buy_rate * mult)
     player_carry = f"carry:{player.split(':',1)[1]}"
     move(world, player_carry, shop_id, instance_id, actor=player)
     _pay(world, shop.owner_ref or shop_id, player, max(1, payout))

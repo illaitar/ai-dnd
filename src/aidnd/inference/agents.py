@@ -95,6 +95,12 @@ PROMPTS = {
         "cosmetic property tags. You MUST NOT change mechanical power, rarity, bonuses, or any "
         f"numbers — those are fixed by the template. Write in {LANG}. Output ONLY the JSON."
     ),
+    "faction_gen": (
+        "You flesh out one faction for a frontier fantasy town, consistent with its archetype "
+        "(thieves guild, merchant guild, aristocracy, temple, town watch, arcane circle). Invent "
+        "an evocative name, a one-sentence blurb, 2 concrete goals and 2-3 values that guide who "
+        f"they favour or oppose. Grounded, no anachronisms. Write in {LANG}. Output ONLY the JSON."
+    ),
 }
 
 # --------------------------------------------------------------------------- #
@@ -194,6 +200,15 @@ SCHEMAS = {
             "name": {"type": "string"},
             "description": {"type": "string"},
             "properties": {"type": "array", "items": {"type": "string"}}},
+            "required": ["name"]},
+    },
+    "forge_faction": {
+        "name": "forge_faction",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string"},
+            "blurb": {"type": "string"},
+            "goals": {"type": "array", "items": {"type": "string"}},
+            "values": {"type": "array", "items": {"type": "string"}}},
             "required": ["name"]},
     },
 }
@@ -359,6 +374,14 @@ def enrich_persona(manager, persona, world):
 def choose_tactic(manager, state_digest: str, monster_id: str):
     user = f"Monster: {monster_id}\nBattle state: {state_digest}\nCall choose_tactic."
     return _call(manager, "tactician", "choose_tactic", user, ["intent"])
+
+
+def forge_faction(manager, faction):
+    user = (f"Faction archetype kind: {faction.kind}. Default name: {faction.name}. "
+            f"Seed goals: {faction.goals}. Seed values: {faction.values}. "
+            f"Town: фронтирный городок Фэндалин у Мечового Берега. "
+            f"Give a fitting name, blurb, 2 goals and 2-3 values. Call forge_faction.")
+    return _call(manager, "faction_gen", "forge_faction", user, ["name"])
 
 
 def emit_reflections(manager, npc_id: str, observations, world):

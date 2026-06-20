@@ -51,6 +51,10 @@
         <h2>Квесты</h2>
         <ul id="quests"></ul>
       </div>
+      <div class="panel" id="faction-panel">
+        <h2>Фракции <span id="fac-open" class="panel-link">подробнее ▸</span></h2>
+        <div id="factions"></div>
+      </div>
       <div class="panel" id="journal-panel">
         <h2>Журнал событий</h2>
         <div id="journal"></div>
@@ -164,6 +168,15 @@
         <span id="lvl-msg" class="state"></span><span class="sp"></span>
         <button class="cbtn" id="lvl-apply">Подтвердить</button>
       </div>
+    </div>
+  </div>
+
+  <!-- фракции: детали, вступление, репутация -->
+  <div id="factionview" class="overlay hidden">
+    <div class="ui-box">
+      <h2>⚜ Фракции <span id="fac-membership" class="state"></span>
+        <button class="x" data-close="factionview">✕</button></h2>
+      <div id="fac-list" class="fac-list"></div>
     </div>
   </div>
 

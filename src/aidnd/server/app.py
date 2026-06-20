@@ -233,6 +233,12 @@ async def ws(sock: WebSocket) -> None:
                 result["server_online"] = bool(session.model and session.model.available())
             elif cmd == "levelup":
                 result = session.apply_levelup(msg.get("selections") or {})
+            elif cmd == "faction_join":
+                result = session.join_faction(msg.get("faction", ""))
+            elif cmd == "faction_leave":
+                result = session.leave_faction()
+            elif cmd == "faction_inspect":
+                result = session.inspect_faction(msg.get("faction", ""))
             elif cmd == "save":
                 from ..runtime.persistence import list_saves, save_session
                 card = save_session(session, msg.get("name", "Без названия"))

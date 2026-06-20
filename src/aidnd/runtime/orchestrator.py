@@ -1531,6 +1531,103 @@ class GameSession:
         res["text"] = f"⬆ {self._display(self.player)} достигает {target} уровня!"
         return res
 
+    # ----------------------------------------------------- фракции ---------- #
+    def _affiliation(self):
+        from ..world.components import Affiliation
+        aff = self.world.ecs.get(self.player, Affiliation)
+        if aff is None:
+            aff = Affiliation()
+            self.world.ecs.add(self.player, aff)
+        return aff
+
+    def _faction_list(self) -> list[str]:
+        return sorted(self.world.factions.keys())
+
+    def _factions_view(self) -> dict | None:
+        from ..rules.factions import rank_for_rep, standing_tier
+        from ..world.components import Faction
+        aff = self._affiliation()
+        items = []
+        for fid in self._faction_list():
+            fac = self.world.ecs.get(fid, Faction)
+            if not fac:
+                continue
+            rep = self.world.reputation.get(fid, 0.0)
+            label, color = standing_tier(rep)
+            is_member = aff.membership == fid
+            rank = (fac.ranks[rank_for_rep(fac, rep)] if fac.ranks and is_member else None)
+            rels = [{"name": self.world.ecs.get(o, Faction).name if self.world.ecs.get(o, Faction) else o,
+                     "value": v} for o, v in fac.relations.items()]
+            items.append({
+                "id": fid, "name": fac.name, "kind": fac.kind, "emblem": fac.emblem,
+                "blurb": fac.blurb, "goals": list(fac.goals), "values": list(fac.values),
+                "standing": round(rep, 2), "standing_label": label, "standing_color": color,
+                "affinity": round(aff.affinity.get(fid, 0.0), 2),
+                "member": is_member, "rank": rank, "members": len(fac.members),
+                "relations": rels, "controls": list(fac.controls),
+                "joinable": fac.joinable, "join_min_rep": fac.join_min_rep,
+                "can_join": fac.joinable and not is_member and rep >= fac.join_min_rep,
+            })
+        return {"membership": aff.membership, "list": items}
+
+    def faction_reaction(self, npc_id: str) -> float:
+        """Отношение NPC к игроку через призму фракций (своя +, вражеская −, репутация)."""
+        from ..rules.factions import social_reaction
+        return social_reaction(self.world, self.player, npc_id)
+
+    def inspect_faction(self, fid: str) -> dict:
+        """Открыть фракцию: лениво обогатить LLM (если есть модель) и вернуть вид."""
+        from ..gen.faction_gen import enrich_faction
+        if fid in self.world.factions:
+            enrich_faction(self.world, fid, self.model)
+        return {"kind": "factions", "view": self.view()}
+
+    def join_faction(self, fid: str) -> dict:
+        from ..world.components import Faction
+        fac = self.world.ecs.get(fid, Faction)
+        if not fac or not fac.joinable:
+            return {"kind": "error", "text": "В эту фракцию нельзя вступить.", "view": self.view()}
+        aff = self._affiliation()
+        if aff.membership == fid:
+            return {"kind": "system", "text": f"Ты уже в «{fac.name}».", "view": self.view()}
+        rep = self.world.reputation.get(fid, 0.0)
+        if rep < fac.join_min_rep:
+            need = round(fac.join_min_rep - rep, 2)
+            return {"kind": "system", "text": f"«{fac.name}» пока не доверяет тебе "
+                    f"(нужно ещё +{need} репутации).", "view": self.view()}
+        prev = aff.membership
+        if prev:                                            # смена фракции
+            self.world.commit("faction_leave", self.player, payload={"faction": prev})
+        self.world.commit("faction_join", self.player, payload={"faction": fid})
+        # соперники реагируют на вступление: репутация падает по их неприязни
+        for ofid, val in fac.relations.items():
+            if val < 0:
+                self.world.commit("faction_rep", self.player,
+                                  payload={"faction": ofid, "delta": val * 0.3})
+        self.world.commit("faction_affinity", self.player, payload={"faction": fid, "delta": 0.3})
+        self._log_journal(f"Вступление во фракцию «{fac.name}».")
+        res = self.look()
+        res["text"] = (f"Ты вступаешь в «{fac.name}»."
+                       + (f" Прежняя верность «{self._faction_name(prev)}» разорвана." if prev else ""))
+        return res
+
+    def leave_faction(self) -> dict:
+        aff = self._affiliation()
+        if not aff.membership:
+            return {"kind": "system", "text": "Ты не состоишь ни в одной фракции.", "view": self.view()}
+        fid = aff.membership
+        name = self._faction_name(fid)
+        self.world.commit("faction_leave", self.player, payload={"faction": fid})
+        self._log_journal(f"Выход из фракции «{name}».")
+        res = self.look()
+        res["text"] = f"Ты покидаешь «{name}»."
+        return res
+
+    def _faction_name(self, fid: str | None) -> str:
+        from ..world.components import Faction
+        fac = self.world.ecs.get(fid, Faction) if fid else None
+        return fac.name if fac else (fid or "—")
+
     def view(self) -> dict:
         st = self.world.get_stats(self.player)
         place = self.current_place()
@@ -1547,6 +1644,7 @@ class GameSession:
             },
             "progression": prog_v,
             "levelup": self.pending_levelup(),
+            "factions": self._factions_view(),
             "place": place, "place_name": self._place_name(place),
             "seed": self.world.seed,
             "time": self.world.clock.hhmm(),

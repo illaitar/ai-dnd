@@ -73,6 +73,7 @@ class World:
         self.flags: set[str] = set()
         self.resolutions: dict[str, dict] = {}           # зафиксированные факты доразрешения сцены
         self.importance: dict[str, int] = {}             # индекс важности места (визиты/осмотры)
+        self.reputation: dict[str, float] = {}           # стояние игрока с фракцией [-1..1]
         self.player_maps: dict[str, dict] = {}           # карта в голове игрока (может врать)
         self.name_registry: set[str] = set()
         self.conditions: dict[str, list] = {}            # entity_id -> [Condition]
@@ -325,6 +326,106 @@ class World:
         lvl = str(ev.payload.get("level", 0))
         if st and int(lvl) > 0 and st.spell_slots.get(lvl, 0) > 0:
             st.spell_slots[lvl] -= 1
+
+    # ------------------------------------------------- фракции -------------- #
+    def _faction(self, fid: str):
+        from .components import Faction
+        return self.ecs.get(fid, Faction)
+
+    def _h_faction_define(self, ev: Event) -> None:
+        """Создать/обновить фракцию (для рантайм-созданных; пре-ген фракции строятся прямо)."""
+        from .components import Faction
+        p = ev.payload
+        fid = p["id"]
+        fac = self._faction(fid)
+        if fac is None:
+            self.ecs.spawn(fid)
+            fac = Faction(name=p.get("name", fid))
+            self.ecs.add(fid, fac)
+        for key in ("name", "kind", "blurb", "emblem", "leader", "join_min_rep", "joinable"):
+            if key in p:
+                setattr(fac, key, p[key])
+        for key in ("goals", "values", "controls", "ranks"):
+            if key in p:
+                setattr(fac, key, list(p[key]))
+        if "relations" in p:
+            fac.relations = dict(p["relations"])
+        self.factions[fid] = fac
+
+    def _h_faction_enrich(self, ev: Event) -> None:
+        """LLM-обогащение фракции (имя/описание/цели/ценности) — событийно, переживает лоад."""
+        p = ev.payload
+        fac = self._faction(p["id"])
+        if not fac:
+            return
+        if p.get("name"):
+            fac.name = p["name"]
+        if p.get("blurb"):
+            fac.blurb = p["blurb"]
+        if p.get("goals"):
+            fac.goals = list(p["goals"])
+        if p.get("values"):
+            fac.values = list(p["values"])
+        if p.get("emblem"):
+            fac.emblem = p["emblem"]
+        fac.enriched = True
+
+    def _h_faction_join(self, ev: Event) -> None:
+        from ..rules.factions import rank_for_rep
+        from .components import Affiliation, Persona
+        fid = ev.payload["faction"]
+        aff = self.ecs.get(ev.actor, Affiliation)
+        if aff is None:
+            aff = Affiliation()
+            self.ecs.add(ev.actor, aff)
+        aff.membership = fid
+        aff.affinity[fid] = max(aff.affinity.get(fid, 0.0), 0.5)
+        fac = self._faction(fid)
+        if fac:
+            if ev.actor not in fac.members:
+                fac.members.append(ev.actor)
+            aff.rank = rank_for_rep(fac, self.reputation.get(fid, 0.0))
+        persona = self.ecs.get(ev.actor, Persona)
+        if persona:
+            persona.faction = fid
+
+    def _h_faction_leave(self, ev: Event) -> None:
+        from .components import Affiliation, Persona
+        fid = ev.payload["faction"]
+        aff = self.ecs.get(ev.actor, Affiliation)
+        if aff and aff.membership == fid:
+            aff.membership = None
+            aff.rank = 0
+        fac = self._faction(fid)
+        if fac and ev.actor in fac.members:
+            fac.members.remove(ev.actor)
+        persona = self.ecs.get(ev.actor, Persona)
+        if persona and persona.faction == fid:
+            persona.faction = None
+
+    def _h_faction_rep(self, ev: Event) -> None:
+        """Стояние игрока с фракцией ± дельта (зажато в [-1..1])."""
+        p = ev.payload
+        fid = p["faction"]
+        cur = self.reputation.get(fid, 0.0)
+        self.reputation[fid] = max(-1.0, min(1.0, cur + float(p.get("delta", 0.0))))
+
+    def _h_faction_affinity(self, ev: Event) -> None:
+        from .components import Affiliation
+        p = ev.payload
+        aff = self.ecs.get(ev.actor, Affiliation)
+        if aff is None:
+            aff = Affiliation()
+            self.ecs.add(ev.actor, aff)
+        fid = p["faction"]
+        cur = aff.affinity.get(fid, 0.0)
+        aff.affinity[fid] = max(-1.0, min(1.0, cur + float(p.get("delta", 0.0))))
+
+    def _h_faction_relation(self, ev: Event) -> None:
+        p = ev.payload
+        fac = self._faction(p["a"])
+        if fac:
+            fac.relations[p["b"]] = float(p.get("value", 0.0))
 
     def _h_map_update(self, ev: Event) -> None:
         """Добавляет/обновляет запись в карте игрока (может быть ложной/неполной)."""

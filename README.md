@@ -5,9 +5,7 @@ A text-tactical **D&D 5e** engine with a persistent, simulated world, level-of-d
 architecture from the AI-DnD design package as a vertical slice of *Lost Mine of
 Phandalin* (Phandalin town + the Cragmaw region).
 
-Backend in Python, presentation in JS. Only one thing is reused from the older `ai-dnd`
-project: the **model-request client** (`OllamaClient`). Everything else is written from
-the design docs.
+Backend in Python, presentation in JS.
 
 ---
 

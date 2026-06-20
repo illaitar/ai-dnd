@@ -94,6 +94,7 @@ function updateView(v) {
   if (!$("mapview").classList.contains("hidden")) renderMap(v.map_levels);
   if (!$("factionview").classList.contains("hidden")) renderFactionsOverlay(v.factions);
   if (!$("board").classList.contains("hidden")) renderBoard(v.board);
+  if (!$("inv").classList.contains("hidden")) renderInventory(v.inventory);
 }
 
 // ------------------------------------------------ доска объявлений ---------
@@ -115,6 +116,30 @@ function renderBoard(b) {
   }).join("");
   box.querySelectorAll("[data-accept]").forEach(el => el.onclick = () => send({ cmd: "quest_accept", quest: el.dataset.accept }));
   box.querySelectorAll("[data-turnin]").forEach(el => el.onclick = () => send({ cmd: "quest_turnin", quest: el.dataset.turnin }));
+}
+
+// ----------------------------------------------- инвентарь / экипировка ----
+function renderInventory(inv) {
+  if (!inv) return;
+  $("inv-ac").textContent = "КД " + inv.ac;
+  $("inv-wallet").textContent = "Кошелёк: " + inv.wallet;
+  $("inv-slots").innerHTML = Object.entries(inv.slots).map(([slot, name]) =>
+    `<div class="inv-slot"><div class="sl">${esc(slot)}</div><div class="it">${name ? esc(name) : '<span class="empty">— пусто —</span>'}</div></div>`).join("");
+  const box = $("inv-list");
+  box.innerHTML = inv.items.map(it => {
+    let act = "";
+    if (it.equipped) act += `<button class="leave" data-uneq="${it.id}">Снять</button>`;
+    else if (it.equippable) act += `<button data-eq="${it.id}">Надеть</button>`;
+    if (it.usable) act += `<button data-use="${it.id}">Использовать</button>`;
+    const tag = it.equipped ? ` · надето (${esc(it.slot_ru)})` : "";
+    return `<div class="fac-card ${it.equipped ? "member" : ""}"><h3>${esc(it.name)}<span class="sp"></span>`
+      + `<span class="stand" style="color:var(--muted)">${esc(it.category)}${tag}</span></h3>`
+      + (it.desc ? `<div class="blurb">${esc(it.desc)}</div>` : "")
+      + (act ? `<div class="acts">${act}</div>` : "") + `</div>`;
+  }).join("") || "<div class='saves-empty'>Сумка пуста.</div>";
+  box.querySelectorAll("[data-eq]").forEach(b => b.onclick = () => send({ cmd: "equip", item: b.dataset.eq }));
+  box.querySelectorAll("[data-uneq]").forEach(b => b.onclick = () => send({ cmd: "unequip", item: b.dataset.uneq }));
+  box.querySelectorAll("[data-use]").forEach(b => b.onclick = () => send({ cmd: "use_item", item: b.dataset.use }));
 }
 
 // ----------------------------------------------------------- фракции -------
@@ -185,9 +210,9 @@ function renderNpcs(npcs) {
   bindChips();
 }
 function renderQuick() {
-  const cmds = [["осмотреться", "осмотреться"], ["обыскать", "обыскать комнату"],
-    ["инвентарь", "инвентарь"], ["ждать", "ждать"]];
+  const cmds = [["осмотреться", "осмотреться"], ["обыскать", "обыскать комнату"], ["ждать", "ждать"]];
   $("quick").innerHTML = cmds.map(([l, c]) => `<span class="chip" data-cmd="${c}">${l}</span>`).join("")
+    + `<span class="chip" data-open="inv">🎒 инвентарь</span>`
     + `<span class="chip" data-open="mapview">🗺 карта</span>`
     + `<span class="chip" data-open="trade">🛒 лавка</span>`
     + ((lastView && lastView.board) ? `<span class="chip" data-open="board">📜 доска</span>` : "");
@@ -215,12 +240,13 @@ function openOverlay(id) {
   }
   if (id === "mapview" && lastView) renderMap(lastView.map_levels);
   if (id === "board" && lastView) renderBoard(lastView.board);
+  if (id === "inv" && lastView) renderInventory(lastView.inventory);
   $(id).classList.remove("hidden");
 }
 function closeOverlay(id) { $(id).classList.add("hidden"); }
 
 // ----------------------------------------------- меню / новая игра / сейвы ----
-let ngOpts = null, ngSel = { scenario: null, klass: null, kit: null, skills: [] }, lvlSel = {}, menuShown = false;
+let ngOpts = null, ngSel = { scenario: null, klass: null, kit: null, skills: [], l1: {} }, lvlSel = {}, menuShown = false;
 
 async function ensureNgOptions() {
   if (!ngOpts) {
@@ -246,10 +272,25 @@ function renderNgForm() {
     const sel = ngSel.skills.includes(sk.id), dim = !sel && ngSel.skills.length >= need;
     return `<span class="ng-chip ${sel ? "sel" : ""} ${dim ? "dim" : ""}" data-skill="${sk.id}">${esc(sk.name)}</span>`;
   }).join("") : "";
-  document.querySelectorAll("#newgame .ng-card").forEach(el => el.onclick = () => {
+  // особенность 1 уровня (стиль воина / домен жреца / экспертиза плута)
+  const l1 = (cls && cls.l1) || [];
+  $("ng-l1-wrap").style.display = l1.length ? "" : "none";
+  $("ng-l1").innerHTML = l1.map(ch => {
+    const opts = ch.from === "skills"
+      ? ngSel.skills.map(sid => { const sk = cls.skills.find(x => x.id === sid); return { id: sid, name: sk ? sk.name : sid, desc: "" }; })
+      : ch.options;
+    const multi = ch.pick > 1 || ch.id === "expertise";
+    const sel = ngSel.l1[ch.id];
+    const cards = opts.length ? opts.map(o => {
+      const on = multi ? (Array.isArray(sel) && sel.includes(o.id)) : sel === o.id;
+      return `<div class="ng-card ${on ? "sel" : ""}" data-opt="${o.id}"><div class="t">${esc(o.name)}</div>${o.desc ? `<div class="d">${esc(o.desc)}</div>` : ""}</div>`;
+    }).join("") : `<div class="d" style="color:var(--muted)">сначала выбери навыки</div>`;
+    return `<div><h4>${esc(ch.label)}</h4><div class="ng-cards" data-l1="${ch.id}" data-pick="${ch.pick}" data-multi="${multi ? 1 : 0}">${cards}</div></div>`;
+  }).join("");
+  document.querySelectorAll("#newgame .ng-card[data-grp]").forEach(el => el.onclick = () => {
     const g = el.dataset.grp, id = el.dataset.id;
     if (g === "scenario") ngSel.scenario = id;
-    else if (g === "klass") { ngSel.klass = id; ngSel.skills = []; const c = ngOpts.classes.find(x => x.id === id); if (c) ngSel.kit = c.kit; }  // класс задаёт снаряжение и сбрасывает навыки
+    else if (g === "klass") { ngSel.klass = id; ngSel.skills = []; ngSel.l1 = {}; const c = ngOpts.classes.find(x => x.id === id); if (c) ngSel.kit = c.kit; }  // класс сбрасывает навыки и особенность
     else ngSel.kit = id;
     renderNgForm();
   });
@@ -259,10 +300,19 @@ function renderNgForm() {
     else if (ngSel.skills.length < need) ngSel.skills.push(id);
     renderNgForm();
   });
+  document.querySelectorAll("#ng-l1 .ng-cards").forEach(g => {
+    const cid = g.dataset.l1, pick = +g.dataset.pick, multi = g.dataset.multi === "1";
+    g.querySelectorAll(".ng-card").forEach(card => card.onclick = () => {
+      const opt = card.dataset.opt;
+      if (multi) { const arr = ngSel.l1[cid] || []; ngSel.l1[cid] = arr.includes(opt) ? arr.filter(x => x !== opt) : (arr.length < pick ? [...arr, opt] : arr); }
+      else ngSel.l1[cid] = opt;
+      renderNgForm();
+    });
+  });
 }
 function startNewGame() {
   send({ cmd: "new_game", scenario: ngSel.scenario, klass: ngSel.klass, kit: ngSel.kit,
-         skills: ngSel.skills, name: $("ng-name").value || "Герой" });
+         skills: ngSel.skills, l1: ngSel.l1, name: $("ng-name").value || "Герой" });
   closeOverlay("newgame"); closeOverlay("menu"); logSystem("🆕 Новая игра…");
 }
 // ---- повышение уровня (выборы 5e) ----

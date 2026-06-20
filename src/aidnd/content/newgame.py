@@ -129,18 +129,54 @@ def resolve_pc_spec(spec: dict | None) -> dict:
             break
         if s not in out:
             out.append(s)
+    skills = out[:cls["skill_count"]]
     return {"klass": klass, "kit": kit, "name": (spec.get("name") or "Герой")[:24],
-            "race": spec.get("race", "human"), "skills": out[:cls["skill_count"]]}
+            "race": spec.get("race", "human"), "skills": skills,
+            "l1": _resolve_l1(klass, spec.get("l1") or {}, skills)}
+
+
+def _resolve_l1(klass: str, l1: dict, skills: list[str]) -> dict:
+    """Выборы 1 уровня (стиль/домен/компетентность). Невалидное → разумный дефолт."""
+    from ..rules.progression import FIGHTING_STYLES, SUBCLASSES
+    if klass == "fighter":
+        fs = l1.get("fighting_style")
+        return {"fighting_style": fs if fs in FIGHTING_STYLES else "defense"}
+    if klass == "cleric":
+        doms = SUBCLASSES.get("cleric", {})
+        sub = l1.get("subclass")
+        return {"subclass": sub if sub in doms else next(iter(doms), None)}
+    if klass == "rogue":
+        ex = [s for s in (l1.get("expertise") or []) if s in skills]
+        return {"expertise": ex[:2] if len(ex) >= 2 else skills[:2]}
+    return {}
+
+
+def creation_choices(class_id: str) -> list[dict]:
+    """Выборы 1 уровня для экрана создания (стиль воина, домен жреца, экспертиза плута)."""
+    from ..rules.progression import FIGHTING_STYLES, SUBCLASSES
+    if class_id == "fighter":
+        return [{"id": "fighting_style", "label": "Боевой стиль", "pick": 1,
+                 "options": [{"id": k, "name": v["name"], "desc": v["desc"]}
+                             for k, v in FIGHTING_STYLES.items()]}]
+    if class_id == "cleric":
+        return [{"id": "subclass", "label": "Жреческий домен", "pick": 1,
+                 "options": [{"id": k, "name": v["name"], "desc": v["desc"]}
+                             for k, v in SUBCLASSES["cleric"].items()]}]
+    if class_id == "rogue":
+        return [{"id": "expertise", "label": "Компетентность (×2 мастерство): выбери 2 навыка",
+                 "pick": 2, "from": "skills"}]
+    return []
 
 
 def options() -> dict:
-    """Данные для экрана новой игры (классы с навыками, снаряжение, сценарии)."""
+    """Данные для экрана новой игры (классы с навыками, выборами 1 ур., снаряжение, сценарии)."""
     from ..rules.progression import CLASSES as PROG
     from ..rules.progression import SKILL_RU
     return {
         "classes": [{"id": k, "name": v["name"], "desc": v["desc"], "kit": v["kit"],
                      "caster": bool(PROG[k]["caster"]), "skill_count": PROG[k]["skill_count"],
-                     "skills": [{"id": s, "name": SKILL_RU.get(s, s)} for s in PROG[k]["skills"]]}
+                     "skills": [{"id": s, "name": SKILL_RU.get(s, s)} for s in PROG[k]["skills"]],
+                     "l1": creation_choices(k)}
                     for k, v in CLASSES.items()],
         "kits": [{"id": k, "name": v["name"], "blurb": v["blurb"]} for k, v in KITS.items()],
         "scenarios": [{"id": k, "name": v["name"], "desc": v["desc"]}

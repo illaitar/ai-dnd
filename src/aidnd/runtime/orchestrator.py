@@ -1175,6 +1175,94 @@ class GameSession:
         coins = ", ".join(f"{v} {k}" for k, v in wallet.items() if v)
         return f"Инвентарь: {', '.join(items) or 'пусто'}. Кошелёк: {coins or 'пусто'}."
 
+    # --------------------------------------------- инвентарь/экипировка ----- #
+    _EQUIP_SLOTS = ["main_hand", "off_hand", "armor"]
+    _SLOT_RU = {"main_hand": "основная рука", "off_hand": "вторая рука", "armor": "броня"}
+
+    def _slot_for(self, tmpl, eq: dict) -> str | None:
+        """В какой слот встаёт предмет (с учётом занятых): оружие/щит/броня."""
+        if not tmpl:
+            return None
+        tags = tmpl.tags or ()
+        if "shield" in tags:
+            return "off_hand"
+        if tmpl.category == "armor":
+            return "armor"
+        if tmpl.category == "weapon":
+            if "two_handed" in tags:
+                return "main_hand"
+            return "off_hand" if "main_hand" in eq else "main_hand"
+        return None
+
+    def inventory_view(self) -> dict:
+        from ..inventory import container as invc
+        carry = self.world.containers.get(f"carry:{ids.name_of(self.player)}")
+        eq = invc._equipped(self.world, self.player)
+        items = []
+        for iid in (carry.items if carry else []):
+            inst = self.world.items.get(iid)
+            if not inst:
+                continue
+            tmpl = self.world.templates.get(inst.template_id)
+            equipped = inst.equipped_slot is not None
+            target = None if equipped else self._slot_for(tmpl, eq)
+            items.append({
+                "id": iid, "name": self._item_name(iid),
+                "category": tmpl.category if tmpl else "", "qty": inst.quantity,
+                "desc": inst.description or "", "equipped": equipped,
+                "slot_ru": self._SLOT_RU.get(inst.equipped_slot or "", ""),
+                "equippable": target is not None,
+                "usable": bool(tmpl and tmpl.category == "consumable")})
+        slots = {self._SLOT_RU[s]: (self._item_name(eq[s].instance_id) if s in eq else None)
+                 for s in self._EQUIP_SLOTS}
+        return {"slots": slots, "items": items, "wallet": self._coins(),
+                "ac": invc.armor_class(self.world, self.player)}
+
+    def equip_item(self, iid: str) -> dict:
+        from ..inventory import container as invc
+        inst = self.world.items.get(iid)
+        tmpl = self.world.templates.get(inst.template_id) if inst else None
+        if not inst:
+            return {"kind": "system", "text": "Нет такого предмета.", "view": self.view()}
+        slot = self._slot_for(tmpl, invc._equipped(self.world, self.player))
+        if not slot:
+            return {"kind": "system", "text": "Это нельзя экипировать.", "view": self.view()}
+        try:
+            invc.equip(self.world, self.player, iid, slot)
+        except invc.InventoryError as e:
+            return {"kind": "system", "text": f"Не удалось: {e}", "view": self.view()}
+        res = self.look()
+        res["text"] = (f"Ты берёшь {self._item_name(iid)} ({self._SLOT_RU[slot]}). "
+                       f"AC {invc.armor_class(self.world, self.player)}.")
+        return res
+
+    def unequip_item(self, iid: str) -> dict:
+        from ..inventory import container as invc
+        invc.unequip(self.world, self.player, iid)
+        res = self.look()
+        res["text"] = f"Ты убираешь {self._item_name(iid)}. AC {invc.armor_class(self.world, self.player)}."
+        return res
+
+    def use_item(self, iid: str) -> dict:
+        from ..gen.seeds import subseed
+        from ..rules.dice import roll_expr
+        inst = self.world.items.get(iid)
+        tmpl = self.world.templates.get(inst.template_id) if inst else None
+        if not inst or not tmpl or tmpl.category != "consumable":
+            return {"kind": "system", "text": "Это нельзя использовать.", "view": self.view()}
+        text = f"Ты используешь {self._item_name(iid)}."
+        if "potion_healing" in inst.template_id:
+            seed = subseed(self.world.seed, "use", iid, self.world.clock.tick) & 0x7FFFFFFF
+            heal = roll_expr("use_potion", "2d4+2", seed, source="server_seeded").total
+            self.world.commit("heal", self.player, target=self.player, payload={"amount": heal})
+            text += f" Восстановлено {heal} HP."
+        self.world.commit("item_consume", self.player,
+                          payload={"container": f"carry:{ids.name_of(self.player)}",
+                                   "instance": iid, "amount": 1})
+        res = self.look()
+        res["text"] = text
+        return res
+
     def _display(self, eid: str) -> str:
         p = self.world.ecs.get(eid, Persona)
         if p:
@@ -1743,6 +1831,7 @@ class GameSession:
             "levelup": self.pending_levelup(),
             "factions": self._factions_view(),
             "board": self.board_view(),
+            "inventory": self.inventory_view(),
             "place": place, "place_name": self._place_name(place),
             "seed": self.world.seed,
             "time": self.world.clock.hhmm(),

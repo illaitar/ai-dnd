@@ -151,6 +151,10 @@
         <h3>Навыки <span id="ng-skill-hint" class="state"></span></h3>
         <div id="ng-skills" class="ng-chips"></div>
       </div>
+      <div class="ng-skills-wrap" id="ng-l1-wrap" style="display:none">
+        <h3>Особенность класса</h3>
+        <div id="ng-l1" class="ng-grid"></div>
+      </div>
       <div class="ng-foot">
         <label>Имя героя <input id="ng-name" type="text" value="Герой" maxlength="24"></label>
         <span class="sp"></span>
@@ -168,6 +172,17 @@
         <span id="lvl-msg" class="state"></span><span class="sp"></span>
         <button class="cbtn" id="lvl-apply">Подтвердить</button>
       </div>
+    </div>
+  </div>
+
+  <!-- инвентарь и экипировка -->
+  <div id="inv" class="overlay hidden">
+    <div class="ui-box">
+      <h2>🎒 Инвентарь <span id="inv-ac" class="state"></span>
+        <button class="x" data-close="inv">✕</button></h2>
+      <div id="inv-slots" class="inv-slots"></div>
+      <div id="inv-list" class="fac-list"></div>
+      <div id="inv-wallet" class="state"></div>
     </div>
   </div>
 

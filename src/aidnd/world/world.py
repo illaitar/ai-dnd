@@ -208,6 +208,19 @@ class World:
         if ev.payload.get("destroy"):
             self.items.pop(iid, None)
 
+    def _h_item_consume(self, ev: Event) -> None:
+        """Расход стакаемого предмета (выпить зелье): -amount, при 0 — убрать совсем."""
+        p = ev.payload
+        inst = self.items.get(p["instance"])
+        if not inst:
+            return
+        inst.quantity -= int(p.get("amount", 1))
+        if inst.quantity <= 0:
+            c = self.containers.get(p.get("container"))
+            if c and p["instance"] in c.items:
+                c.items.remove(p["instance"])
+            self.items.pop(p["instance"], None)
+
     def _h_item_modify(self, ev: Event) -> None:
         """Модификация экземпляра предмета (заточка/затупление, имя, описание).
         Косметику и instance-моды держим в самом ItemInstance — событие воспроизводимо."""

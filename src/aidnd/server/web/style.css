@@ -205,6 +205,15 @@ main { flex: 1; display: flex; gap: 14px; padding: 14px; overflow: hidden; }
 .save-row button.del { background: var(--panel); color: var(--danger); border-color: var(--danger); }
 .saves-empty { color: var(--muted); font-style: italic; padding: 8px 2px; }
 
+/* инвентарь */
+.inv-slots { display: flex; gap: 10px; margin-bottom: 12px; }
+.inv-slot { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: var(--panel2); }
+.inv-slot .sl { font-size: 11px; color: var(--muted); font-variant: small-caps; }
+.inv-slot .it { color: var(--gold); font-size: 13px; }
+.inv-slot .it .empty { color: var(--muted); }
+#inv-wallet { margin-top: 10px; }
+#ng-l1 h4 { margin: 0 0 6px; font-size: 13px; color: var(--ink); }
+
 /* фракции */
 .panel-link { float: right; font-size: 11px; color: var(--accent); cursor: pointer; font-variant: normal; }
 .panel-link:hover { color: var(--gold); }

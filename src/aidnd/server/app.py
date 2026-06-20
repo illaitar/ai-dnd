@@ -225,7 +225,8 @@ async def ws(sock: WebSocket) -> None:
                 result = session.submit_roll(msg.get("faces", []))
             elif cmd == "new_game":
                 pc_spec = {"klass": msg.get("klass"), "kit": msg.get("kit"),
-                           "name": msg.get("name"), "skills": msg.get("skills")}
+                           "name": msg.get("name"), "skills": msg.get("skills"),
+                           "l1": msg.get("l1")}
                 session = new_session(seed=int(msg.get("seed", config.WORLD_SEED)),
                                       roster_size=12, use_model=True,
                                       scenario=msg.get("scenario"), pc_spec=pc_spec)
@@ -243,6 +244,12 @@ async def ws(sock: WebSocket) -> None:
                 result = session.accept_quest(msg.get("quest", ""))
             elif cmd == "quest_turnin":
                 result = session.turn_in_quest(msg.get("quest", ""))
+            elif cmd == "equip":
+                result = session.equip_item(msg.get("item", ""))
+            elif cmd == "unequip":
+                result = session.unequip_item(msg.get("item", ""))
+            elif cmd == "use_item":
+                result = session.use_item(msg.get("item", ""))
             elif cmd == "save":
                 from ..runtime.persistence import list_saves, save_session
                 card = save_session(session, msg.get("name", "Без названия"))

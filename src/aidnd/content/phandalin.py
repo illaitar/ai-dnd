@@ -316,17 +316,18 @@ def _create_pc(world: World, pc_spec: dict | None = None,
                               spell_slots=slots_for(spec["klass"], 1),
                               spell_ability=caster or "int"))
     world.ecs.add(pc, LODState(tier=3))
-    # прокачка: авто-фичи 1 уровня + дефолтные выборы 1 уровня
+    # прокачка: авто-фичи 1 уровня + выборы 1 уровня (из создания персонажа)
     prog = Progression(class_id=spec["klass"])
     feats1 = cls["features"].get(1, [])
     prog.features = [fid for fid, kind in feats1 if not kind]
+    l1 = spec.get("l1") or {}
     if any(fid == "fighting_style" for fid, _ in feats1):
-        prog.fighting_style = "defense"
+        prog.fighting_style = l1.get("fighting_style") or "defense"
         prog.features.append("fighting_style")
     if any(fid == "expertise" for fid, _ in feats1):
-        prog.expertise = list(spec["skills"][:2])
+        prog.expertise = list(l1.get("expertise") or spec["skills"][:2])
     if any(fid == "subclass" for fid, _ in feats1):          # клерик: домен на 1 уровне
-        prog.subclass = next(iter(SUBCLASSES.get(spec["klass"], {})), None)
+        prog.subclass = l1.get("subclass") or next(iter(SUBCLASSES.get(spec["klass"], {})), None)
     if caster:
         prog.cantrips = list(CLASS_SPELLS[spec["klass"]][0][:CANTRIPS_KNOWN[1]])
         prog.spells_known = list(available_spells(spec["klass"], 1)[:spells_to_learn(spec["klass"], 1)])

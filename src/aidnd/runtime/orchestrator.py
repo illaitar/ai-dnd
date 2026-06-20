@@ -236,6 +236,7 @@ class GameSession:
         self._log_journal(f"Перешёл в «{self._place_name(dest)}»"
                           + (f" (путь ~{hours} ч)" if region_travel and hours else "") + ".")
         self._record_explored(dest)
+        self.world.commit("interest", self.player, payload={"place": dest, "amount": 1})  # частые визиты ↑ важность
         debunked = self._verify_map_here(dest)        # сверка купленных наводок с реальностью
         self._tick(ticks)
         look = self.look()
@@ -1451,6 +1452,19 @@ class GameSession:
     # ===================================================================== #
     #  Снимок состояния для UI                                              #
     # ===================================================================== #
+    def _key_houses(self) -> list[dict]:
+        """Дома, чей индекс важности достиг порога → стали ключевыми (подпись на карте)."""
+        th = config.PLACE_IMPORTANCE_KEY
+        out = []
+        for pid, c in self.world.importance.items():
+            if c < th or not pid.startswith("house:"):
+                continue
+            rec = self.world.resolutions.get(f"interior:{pid}", {})
+            occ = rec.get("occupants") or []
+            name = f"Дом — {occ[0]['name']}" if occ else "Приметный дом"
+            out.append({"id": pid, "importance": c, "kind": rec.get("kind", "home"), "name": name})
+        return out
+
     def view(self) -> dict:
         st = self.world.get_stats(self.player)
         place = self.current_place()
@@ -1462,6 +1476,7 @@ class GameSession:
                 "level": st.level if st else 1,
             },
             "place": place, "place_name": self._place_name(place),
+            "seed": self.world.seed,
             "time": self.world.clock.hhmm(),
             "in_combat": bool(self.combat and self.combat.state.mode == "active"),
             "pending_roll": self._roll_req_dict(self.pending_roll["request"]) if self.pending_roll else None,
@@ -1469,6 +1484,7 @@ class GameSession:
             "region_map": self.region_map(),
             "map_levels": self.map_levels(),
             "shop": self.shop_view(),
+            "key_houses": self._key_houses(),
             "pacing": {"quiet": self.quiet_ticks},
             "scene": self.scene_context().to_dict(),
             "context": self.context_line(),

@@ -72,6 +72,7 @@ class World:
         self.factions: dict[str, object] = {}
         self.flags: set[str] = set()
         self.resolutions: dict[str, dict] = {}           # зафиксированные факты доразрешения сцены
+        self.importance: dict[str, int] = {}             # индекс важности места (визиты/осмотры)
         self.player_maps: dict[str, dict] = {}           # карта в голове игрока (может врать)
         self.name_registry: set[str] = set()
         self.conditions: dict[str, list] = {}            # entity_id -> [Condition]
@@ -253,6 +254,11 @@ class World:
         """Фиксирует факт доразрешения сцены (eager persistence): повторный запрос
         по тому же ключу вернёт тот же ответ навсегда (main §2, док 06 §6)."""
         self.resolutions[ev.payload["key"]] = dict(ev.payload)
+
+    def _h_interest(self, ev: Event) -> None:
+        """Накопить индекс важности места при взаимодействии (визит/осмотр)."""
+        p = ev.payload
+        self.importance[p["place"]] = self.importance.get(p["place"], 0) + int(p.get("amount", 1))
 
     def _h_map_update(self, ev: Event) -> None:
         """Добавляет/обновляет запись в карте игрока (может быть ложной/неполной)."""

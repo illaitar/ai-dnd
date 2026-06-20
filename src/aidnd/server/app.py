@@ -70,6 +70,68 @@ def map_page() -> HTMLResponse:
         return HTMLResponse(f.read())
 
 
+@app.get("/city")
+def city_page() -> HTMLResponse:
+    with open(os.path.join(WEB_DIR, "city.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/world")
+def world_page() -> HTMLResponse:
+    with open(os.path.join(WEB_DIR, "world.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/town_layout")
+def town_layout(seed: int = config.WORLD_SEED) -> dict:
+    """Список достопримечательностей города (здания+направления) для процедурной
+    карты: реальные узлы графа якорят сгенерированный город (улицы/дома)."""
+    session = new_session(seed=seed, roster_size=12, use_model=False)
+    ml = session.map_levels()
+    town = next((lvl for lvl in ml["levels"] if lvl["id"] == "town"), {"nodes": []})
+    sp = session.world.spatial
+    buildings = []
+    for n in town["nodes"]:
+        p = sp.places.get(n["id"])
+        buildings.append({"id": n["id"], "name": n["name"], "kind": n["kind"],
+                          "dir": n.get("dir_ru", ""), "dx": n["dx"], "dy": n["dy"],
+                          "affordances": list(p.affordances) if p else [],
+                          "go": n.get("go")})
+    return {"seed": int(seed), "settlement": "Фэндалин", "buildings": buildings}
+
+
+# кэш сессий по сиду: чтобы материализация дома сохранялась в памяти между запросами
+_CITY_SESSIONS: dict[int, object] = {}
+
+
+def _city_session(seed: int):
+    s = _CITY_SESSIONS.get(seed)
+    if s is None:
+        s = new_session(seed=seed, roster_size=12, use_model=False)
+        _CITY_SESSIONS[seed] = s
+    return s
+
+
+@app.get("/materialize")
+def materialize_house(seed: int = config.WORLD_SEED, place: str = "", kind: str = "") -> dict:
+    """Ленивая материализация наполнения конкретного дома + сохранение в память.
+    Повтор по тому же дому возвращает то же содержимое (recorded=True)."""
+    if not place:
+        return {"error": "no place"}
+    return _city_session(seed).discovery.materialize_interior(place, kind_hint=kind or None)
+
+
+@app.get("/city_event")
+def city_event(seed: int = config.WORLD_SEED, step: int = 0, quiet: int = 2,
+               loc: str = "frontier_town") -> dict:
+    """Шаг прогулки по городу → нарративный дизайнер (director) с вероятностью, растущей
+    от затишья (quiet), выдаёт случайный бит или ничего. Детерминирован по seed+step."""
+    s = _city_session(seed)
+    beat = s.director.ambient_beat(int(seed), int(step), f"city:{step}", loc,
+                                   s.scene_context(), int(quiet), True)
+    return {"beat": beat}
+
+
 @app.get("/region_map")
 def region_map_dump(seed: int = config.WORLD_SEED, do: str = "", gold: int = 0) -> dict:
     """Генератор снимка карты: свежая сессия (seed), опц. список команд `do`
@@ -142,6 +204,10 @@ async def ws(sock: WebSocket) -> None:
                     salt["n"] += 1
                     result = session.submit_roll(faces)
                     result["rolled_faces"] = faces
+            elif cmd == "materialize":
+                house = session.discovery.materialize_interior(msg.get("place", ""),
+                                                               kind_hint=msg.get("kind"))
+                result = {"kind": "house", "house": house, "view": session.view()}
             elif cmd == "roll_manual":
                 result = session.submit_roll(msg.get("faces", []))
             elif cmd == "new":

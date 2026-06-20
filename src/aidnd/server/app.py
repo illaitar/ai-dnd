@@ -239,6 +239,10 @@ async def ws(sock: WebSocket) -> None:
                 result = session.leave_faction()
             elif cmd == "faction_inspect":
                 result = session.inspect_faction(msg.get("faction", ""))
+            elif cmd == "quest_accept":
+                result = session.accept_quest(msg.get("quest", ""))
+            elif cmd == "quest_turnin":
+                result = session.turn_in_quest(msg.get("quest", ""))
             elif cmd == "save":
                 from ..runtime.persistence import list_saves, save_session
                 card = save_session(session, msg.get("name", "Без названия"))

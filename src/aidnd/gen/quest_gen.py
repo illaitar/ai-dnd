@@ -38,6 +38,9 @@ class Predicate:
     def _p_KnowsFact(self, world) -> bool:
         return f"knows:{self.args[0]}:{self.args[1]}" in world.flags
 
+    def _p_TalkedTo(self, world) -> bool:
+        return f"talked:{self.args[0]}" in world.flags
+
     def _p_HasItem(self, world) -> bool:
         owner, template = self.args[0], self.args[1]
         carry = world.containers.get(f"carry:{owner.split(':',1)[1]}")

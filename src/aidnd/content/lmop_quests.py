@@ -78,3 +78,5 @@ def _wyvern_tor_quest() -> Quest:
 def register_quests(world, quest_system: QuestSystem) -> None:
     for q in (_main_plot(), _lionshield_quest(), _wyvern_tor_quest()):
         quest_system.register(q)
+    from .board import register_board_quests
+    register_board_quests(world, quest_system)          # простые задания с доски объявлений

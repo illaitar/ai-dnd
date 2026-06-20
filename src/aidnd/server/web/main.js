@@ -93,6 +93,28 @@ function updateView(v) {
   if (!$("trade").classList.contains("hidden")) renderTrade(v.shop);   // живое обновление при открытом окне
   if (!$("mapview").classList.contains("hidden")) renderMap(v.map_levels);
   if (!$("factionview").classList.contains("hidden")) renderFactionsOverlay(v.factions);
+  if (!$("board").classList.contains("hidden")) renderBoard(v.board);
+}
+
+// ------------------------------------------------ доска объявлений ---------
+function renderBoard(b) {
+  const box = $("board-list");
+  if (!b || !b.quests || !b.quests.length) { box.innerHTML = "<div class='saves-empty'>Объявлений нет.</div>"; return; }
+  box.innerHTML = b.quests.map(q => {
+    let act;
+    if (q.can_accept) act = `<button data-accept="${q.id}">Взять</button>`;
+    else if (q.can_turn_in) act = `<button data-turnin="${q.id}">Сдать</button>`;
+    else if (q.state === "active") act = `<span class="note">в работе…</span>`;
+    else if (q.state === "completed") act = `<span class="note">✓ сдано</span>`;
+    else act = "";
+    return `<div class="fac-card ${q.state === "completed" ? "member" : ""}"><h3>📜 ${esc(q.title)}<span class="sp"></span>`
+      + `<span class="stand" style="color:var(--gold)">${esc(q.reward)}</span></h3>`
+      + `<div class="blurb">${esc(q.framing)}</div>`
+      + `<div class="meta"><b>Задача:</b> ${esc(q.objective)}</div>`
+      + `<div class="acts">${act}</div></div>`;
+  }).join("");
+  box.querySelectorAll("[data-accept]").forEach(el => el.onclick = () => send({ cmd: "quest_accept", quest: el.dataset.accept }));
+  box.querySelectorAll("[data-turnin]").forEach(el => el.onclick = () => send({ cmd: "quest_turnin", quest: el.dataset.turnin }));
 }
 
 // ----------------------------------------------------------- фракции -------
@@ -167,7 +189,8 @@ function renderQuick() {
     ["инвентарь", "инвентарь"], ["ждать", "ждать"]];
   $("quick").innerHTML = cmds.map(([l, c]) => `<span class="chip" data-cmd="${c}">${l}</span>`).join("")
     + `<span class="chip" data-open="mapview">🗺 карта</span>`
-    + `<span class="chip" data-open="trade">🛒 лавка</span>`;
+    + `<span class="chip" data-open="trade">🛒 лавка</span>`
+    + ((lastView && lastView.board) ? `<span class="chip" data-open="board">📜 доска</span>` : "");
   bindChips();
 }
 function bindChips() {
@@ -191,6 +214,7 @@ function openOverlay(id) {
     renderTrade(lastView.shop);
   }
   if (id === "mapview" && lastView) renderMap(lastView.map_levels);
+  if (id === "board" && lastView) renderBoard(lastView.board);
   $(id).classList.remove("hidden");
 }
 function closeOverlay(id) { $(id).classList.add("hidden"); }

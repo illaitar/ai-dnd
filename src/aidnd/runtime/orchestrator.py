@@ -343,6 +343,7 @@ class GameSession:
         rel = ctx0.rel
         topic = self._extract_topic(text, npc)
         self.dialogue_partner = npc
+        self.world.commit("set_flag", self.player, payload={"flag": f"talked:{npc}"})  # для квестов «поговорить с …»
 
         if not topic:
             # ИНИЦИАЦИЯ: NPC приветствует и сам спрашивает, что нужно — без реакции
@@ -739,12 +740,13 @@ class GameSession:
         town = [{"id": SQ, "name": self._place_name(SQ), "kind": "room", "dx": 0, "dy": 0,
                  "dir_ru": "", "current": place == SQ, "go": "идти на площадь", "occupants": occ(SQ)}]
         for d, dest in sp.exits_of(SQ).items():
-            if d not in DIRECTIONS:
-                continue
-            dx, dy = DIRECTIONS[d]
+            if d in DIRECTIONS:
+                dx, dy, dir_ru = *DIRECTIONS[d], DIR_RU.get(d, "")
+            else:
+                dx, dy, dir_ru = 0.0, -0.55, ""          # внекомпасные (доска объявлений) — у центра
             town.append({"id": dest, "name": self._place_name(dest),
                          "kind": sp.places[dest].kind if dest in sp.places else "",
-                         "dx": dx, "dy": dy, "dir_ru": DIR_RU.get(d, ""), "current": place == dest,
+                         "dx": dx, "dy": dy, "dir_ru": dir_ru, "current": place == dest,
                          "go": "идти в " + self._place_name(dest), "occupants": occ(dest)})
         levels.append({"id": "town", "title": "Фэндалин — улицы", "nodes": town})
 
@@ -1664,6 +1666,65 @@ class GameSession:
                 fids.add(fid)
         return self._reveal_factions(fids)
 
+    # ------------------------------------------- доска объявлений ----------- #
+    def _at_board(self) -> bool:
+        p = self.world.spatial.places.get(self.current_place())
+        return bool(p and "board" in (p.affordances or []))
+
+    def _reward_text(self, r) -> str:
+        parts = []
+        if r.currency:
+            parts.append(", ".join(f"{v} {k}" for k, v in r.currency.items()))
+        if r.xp:
+            parts.append(f"{r.xp} XP")
+        for fid, d in (r.faction_rep or {}).items():
+            parts.append(f"реп. {self._faction_name(fid)} {'+' if d >= 0 else ''}{d}")
+        return " · ".join(parts) or "—"
+
+    def board_view(self) -> dict | None:
+        """Список простых заданий на доске (только когда игрок у доски объявлений)."""
+        if not self._at_board():
+            return None
+        items = []
+        for q in self.world.quests.values():
+            if getattr(q, "kind", "") != "board":
+                continue
+            cur = next((q.stage(s).objective for s in q.current_stages if q.stage(s)),
+                       q.stages[0].objective if q.stages else "")
+            items.append({
+                "id": q.quest_id, "title": q.title, "framing": q.framing, "objective": cur,
+                "state": q.state, "reward": self._reward_text(q.rewards),
+                "req_kind": getattr(q, "req_kind", ""),
+                "can_accept": q.state in ("offered", "not_offered"),
+                "can_turn_in": q.state == "active" and "turnin" in q.current_stages,
+            })
+        return {"place": self._place_name(self.current_place()), "quests": items}
+
+    def accept_quest(self, qid: str) -> dict:
+        q = self.world.quests.get(qid)
+        if not q or getattr(q, "kind", "") != "board" or q.state not in ("offered", "not_offered"):
+            return {"kind": "system", "text": "Это задание сейчас нельзя принять.", "view": self.view()}
+        first = q.stages[0].stage_id if q.stages else None
+        self.world.commit("quest_state", self.player, target=qid,
+                          payload={"state": "active", "current_stages": [first] if first else []})
+        self._log_journal(f"Принято задание: «{q.title}».")
+        res = self.look()
+        res["text"] = f"📜 Принято задание: «{q.title}». {q.framing}"
+        return res
+
+    def turn_in_quest(self, qid: str) -> dict:
+        q = self.world.quests.get(qid)
+        if not q or q.state != "active":
+            return {"kind": "system", "text": "Это задание не в работе.", "view": self.view()}
+        if "turnin" not in q.current_stages:
+            return {"kind": "system", "text": "Задание ещё не выполнено.", "view": self.view()}
+        if not self._at_board():
+            return {"kind": "system", "text": "Сдать можно только у доски объявлений.", "view": self.view()}
+        self.world.commit("set_flag", self.player, payload={"flag": f"turnin:{qid}"})  # → advance → complete
+        res = self.look()
+        res["text"] = f"✅ Задание «{q.title}» сдано. Награда: {self._reward_text(q.rewards)}."
+        return res
+
     def view(self) -> dict:
         st = self.world.get_stats(self.player)
         place = self.current_place()
@@ -1681,6 +1742,7 @@ class GameSession:
             "progression": prog_v,
             "levelup": self.pending_levelup(),
             "factions": self._factions_view(),
+            "board": self.board_view(),
             "place": place, "place_name": self._place_name(place),
             "seed": self.world.seed,
             "time": self.world.clock.hhmm(),

@@ -127,8 +127,24 @@ main { flex: 1; display: flex; gap: 14px; padding: 14px; overflow: hidden; }
 .map-tabs .tab { cursor: pointer; padding: 3px 10px; border-radius: 7px; border: 1px solid var(--line);
   background: var(--panel2); color: var(--ink); }
 .map-tabs .tab.active { background: var(--accent); color: #14110d; border-color: var(--accent); }
-#map-canvas { display: block; margin: 10px 0 4px; border-radius: 8px; cursor: pointer;
-  width: 100%; height: auto; background: #2a2118; }
+.map-stage { position: relative; margin: 10px 0 4px; }
+.map-stage canvas { position: absolute; top: 0; left: 0; width: 100%; height: auto; border-radius: 8px; }
+#map-canvas { position: relative; background: #2a2118; }   /* база (поток задаёт высоту) */
+#map-fx { cursor: pointer; }                               /* слой токена/маршрута/выбора */
+.map-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; }
+.map-actions.hidden { display: none; }
+.map-actions .sp { flex: 1; }
+.map-actions #map-sel { color: var(--gold); }
+/* всплывашка содержимого дома */
+.hpop { position: fixed; right: 18px; top: 96px; width: 300px; z-index: 12;
+  background: var(--panel); border: 2px solid var(--accent); border-radius: 10px;
+  padding: 12px 14px; box-shadow: 0 6px 26px rgba(0,0,0,.6); font-size: 13px; line-height: 1.45; }
+.hpop.hidden { display: none; }
+.hpop h3 { margin: 0 0 6px; font-size: 15px; color: var(--gold); }
+.hpop .x { float: right; cursor: pointer; border: 1px solid var(--line); border-radius: 5px;
+  background: var(--panel2); color: var(--ink); padding: 0 7px; }
+.hpop .occ { margin: 3px 0; } .hpop .tag { color: var(--gold); opacity: .8; font-style: italic; }
+.hpop .mem { margin-top: 8px; color: #6abf4b; font-size: 11.5px; }
 #initiative { list-style: none; padding: 0; margin: 0 0 12px; }
 #initiative li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; }
 #initiative li.current { background: var(--panel2); border-left: 3px solid var(--accent); }

@@ -195,3 +195,96 @@ class DiscoveryService:
             st = self.world.ecs.get(self.world.player_id, Stats5e)
             return st.level if st else 1
         return 1
+
+    # ----------------------------------------------- интерьер дома ---------
+    # Ленивая материализация наполнения дома + eager-персист (док 06 §2, main §2):
+    # содержимое генерируется ДЕТЕРМИНИРОВАННО по сиду и фиксируется событием
+    # «resolve» — повторный запрос даёт то же и переживает снапшот/реплей.
+    _FIRST = {
+        "human": ["Эдвин", "Марта", "Гарет", "Лина", "Освальд", "Бесс", "Том", "Карина", "Ройс", "Ильза"],
+        "halfling": ["Пиппин", "Роза", "Мило", "Дейзи", "Анна"],
+        "dwarf": ["Торин", "Бруна", "Дарек", "Хельга"],
+        "elf": ["Аэлар", "Силь", "Таэль", "Энна"],
+    }
+    _ROLES = {
+        "inn": ["трактирщик", "подавальщица", "усталый постоялец"],
+        "shop": ["лавочник", "подмастерье", "придирчивый покупатель"],
+        "shrine": ["жрец", "молчаливый послушник"],
+        "townhall": ["писарь", "скучающий стражник"],
+        "manor": ["дворецкий", "горничная", "хозяин поместья"],
+        "farm": ["фермер", "батрак"],
+        "home": ["хозяин дома", "хозяйка", "ребёнок", "старик у очага"],
+    }
+    _TRAITS = ["приветливый", "ворчливый", "настороженный", "болтливый", "усталый",
+               "добродушный", "хитрый", "набожный"]
+    _GOODS = {
+        "inn": ["кружки эля", "котелок похлёбки", "связка ключей от комнат"],
+        "shop": ["рулоны ткани", "мешки с зерном", "моток верёвки", "масляная лампа"],
+        "shrine": ["курильница", "свечи", "священный символ"],
+        "townhall": ["стопка свитков", "печать городка", "запылённый гербовник"],
+        "manor": ["серебряный подсвечник", "гобелен", "запертый сундук"],
+        "farm": ["вилы", "корзина яблок", "бочонок солений"],
+        "home": ["очаг с углями", "лежанка", "сундучок с пожитками", "пучок сушёных трав"],
+    }
+    _AMBIANCE = {
+        "inn": "Гомон, запах эля и дыма; в очаге трещит огонь.",
+        "shop": "Полки до потолка, пахнет пылью и воском.",
+        "shrine": "Полумрак, мерцают свечи, тянет благовониями.",
+        "townhall": "Скрип перьев, ряды полок со свитками.",
+        "manor": "Сумрачные залы, тяжёлые шторы, эхо шагов.",
+        "farm": "Земляной пол, пахнет сеном и скотиной.",
+        "home": "Тесная комнатёнка: очаг, лавка, нехитрый скарб.",
+    }
+
+    def _building_kind(self, place_id: str, hint: str | None) -> str:
+        p = self.world.spatial.places.get(place_id)
+        affs = set(p.affordances) if p else set()
+        if "inn" in affs or "drink" in affs:
+            return "inn"
+        for a in ("shop", "shrine", "townhall", "manor", "farm"):
+            if a in affs:
+                return a
+        if "hideout" in affs:
+            return "manor"
+        return hint if hint in self._ROLES else "home"
+
+    def materialize_interior(self, place_id: str, kind_hint: str | None = None,
+                             model=None) -> dict:
+        """Наполнить дом контентом (жильцы, обстановка, описание) ОДИН раз и сохранить.
+        Повторный вызов возвращает то же из памяти (recorded=True)."""
+        # каждый осмотр поднимает индекс важности места (даже если содержимое уже в памяти)
+        self.world.commit("interest", self.world.player_id or "dm",
+                          payload={"place": place_id, "amount": 1})
+        key = f"interior:{place_id}"
+        rec = self.world.resolutions.get(key)
+        if rec:
+            return {**rec, "recorded": True}
+        kind = self._building_kind(place_id, kind_hint)
+        rng = random.Random(subseed(self.world.seed, "interior", place_id))
+        # жильцы (иногда дом пуст)
+        base = {"inn": 3, "shop": 2, "shrine": 1, "townhall": 2, "manor": 3, "farm": 2, "home": 2}[kind]
+        n = max(0, base - rng.randint(0, 2)) if kind == "home" else max(1, base - rng.randint(0, 1))
+        races = ["human", "human", "human", "halfling", "dwarf", "elf"]
+        roles = list(self._ROLES[kind])
+        occupants = []
+        for i in range(n):
+            race = rng.choice(races)
+            occupants.append({
+                "name": rng.choice(self._FIRST.get(race, self._FIRST["human"])),
+                "race": race, "role": roles[i % len(roles)],
+                "trait": rng.choice(self._TRAITS), "age": rng.randint(8, 70)})
+        # обстановка/предметы (2-4)
+        pool = self._GOODS[kind]
+        items = rng.sample(pool, k=min(len(pool), 2 + rng.randint(0, 2)))
+        desc = self._AMBIANCE[kind]
+        if model is not None and getattr(model, "available", lambda: False)():
+            from ..inference.agents import render_scene
+            out = render_scene(model, f"Интерьер: {kind}. Жильцы: "
+                               + ", ".join(f"{o['name']} ({o['role']})" for o in occupants)
+                               + f". Обстановка: {', '.join(items)}.", None, "interior")
+            if out and out.get("narration"):
+                desc = out["narration"]
+        payload = {"key": key, "place": place_id, "kind": kind, "occupants": occupants,
+                   "items": items, "description": desc, "materialized": True}
+        self.world.commit("resolve", "dm", payload=payload)
+        return {**payload, "recorded": False}

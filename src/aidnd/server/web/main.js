@@ -38,6 +38,7 @@ function render(r) {
     logEntry(head + esc(r.text), cls);
   }
   if (r.rolled_faces) logEntry(`🎲 выпало: [${r.rolled_faces.join(", ")}]`, "mech");
+  if (r.kind === "house" && r.house) renderHouse(r.house);
   if (r.view) updateView(r.view);
   if (r.kind === "look") { renderExits(r.exits); renderNpcs(r.npcs); renderQuick(); }
   if (r.combat) renderCombat(r.combat);
@@ -150,16 +151,118 @@ function renderTrade(shop) {
   });
 }
 
-let mapLevel = null;
+let mapLevel = null, townBuildings = null, townSeed = null, mapHits = [];
+async function ensureTown(seed) {
+  if (townSeed === seed && townBuildings) return;
+  try { const r = await fetch("/town_layout?seed=" + seed); if (r.ok) { townBuildings = (await r.json()).buildings || []; townSeed = seed; } }
+  catch (e) { townBuildings = []; }
+}
+let mapMode = "region", citySel = null, cityState = null, cityCur = 0, cityStep = 0, cityQuiet = 2, cityMarks = [];
 function renderMap(ml) {
   if (!ml || !ml.levels || !ml.levels.length) return;
   if (!mapLevel || !ml.levels.some(l => l.id === mapLevel)) mapLevel = ml.current_level;
   $("map-tabs").innerHTML = ml.levels.map(l =>
     `<span class="tab ${l.id === mapLevel ? "active" : ""}" data-lvl="${l.id}">${esc(l.title)}</span>`).join("");
-  $("map-tabs").querySelectorAll("[data-lvl]").forEach(t => t.onclick = () => { mapLevel = t.dataset.lvl; renderMap(ml); });
-  drawMap(ml.levels.find(l => l.id === mapLevel));
+  $("map-tabs").querySelectorAll("[data-lvl]").forEach(t => t.onclick = () => { mapLevel = t.dataset.lvl; citySel = null; renderMap(ml); });
+  citySel = null;
+  if (mapLevel === "town" && window.drawCity) drawCityLevel();        // красивый процедурный город
+  else if (mapLevel === "region" && window.drawWorld) drawWorldLevel(ml);
+  else drawMapNodes(ml.levels.find(l => l.id === mapLevel));          // нод-граф для интерьера
+  $("map-actions").classList.add("hidden");
+  bindFx();
 }
-function drawMap(level) {
+async function drawCityLevel() {
+  const seed = (lastView && lastView.seed) || 1337;
+  await ensureTown(seed);
+  const cv = $("map-canvas");
+  const keyHouses = (lastView && lastView.key_houses) || [];   // дома, поднявшие важность → ключевые
+  const out = window.drawCity(cv.getContext("2d"), cv.width, cv.height, { seed, buildings: townBuildings || [], keyHouses, chrome: true });
+  mapHits = out.hits; cityState = { ...out, seed }; cityCur = out.streets.start;
+  mapMode = "city"; cityStep = 0; cityQuiet = 2; cityMarks = []; drawFx();
+}
+function drawWorldLevel(ml) {
+  const lvl = ml.levels.find(l => l.id === "region"); if (!lvl) return;
+  const cv = $("map-canvas"), seed = (lastView && lastView.seed) || 1337;
+  mapHits = window.drawWorld(cv.getContext("2d"), cv.width, cv.height, { seed, nodes: lvl.nodes, chrome: true });
+  mapMode = "region"; drawFx();
+}
+
+// --- клик = выбрать+подсветить; идём только по кнопке «Отправиться» -------- #
+function bindFx() {
+  const fx = $("map-fx");
+  fx.onclick = (e) => {
+    const r = fx.getBoundingClientRect(), W = fx.width, H = fx.height;
+    const mx = (e.clientX - r.left) / r.width * W, my = (e.clientY - r.top) / r.height * H;
+    let best = null, bd = 1e9;
+    for (const h of mapHits) { const d = Math.hypot(mx - h.x, my - h.y); if (d < (h.r || 14) + 4 && d < bd) { bd = d; best = h; } }
+    if (best) { setSelection(best); return; }
+    if (mapMode === "city" && cityState) {                 // не дом → ближайший перекрёсток
+      const i = nearestNode(cityState.streets, mx, my), p = cityState.streets.nodes[i];
+      if (Math.hypot(mx - p[0], my - p[1]) < 24) setSelection({ crossroad: true, node: i, x: p[0], y: p[1] });
+    }
+  };
+}
+function setSelection(hit) {
+  citySel = hit;
+  $("map-sel").textContent = hit.crossroad ? "Выбрано: перекрёсток" : "Выбрано: «" + (hit.name || "дом") + "»";
+  $("map-go").textContent = hit.crossroad ? "🚶 Идти сюда"
+    : (mapMode === "city" && !hit.go) ? "🚶 Подойти и осмотреть" : "🚶 Отправиться";
+  $("map-actions").classList.remove("hidden");
+  drawFx();
+}
+function clearSelection() { citySel = null; const a = $("map-actions"); if (a) a.classList.add("hidden"); drawFx(); }
+function drawFx() {
+  const fx = $("map-fx"); if (!fx) return; const c = fx.getContext("2d"); c.clearRect(0, 0, fx.width, fx.height);
+  for (const m of cityMarks) { c.fillStyle = "#c0492c"; c.font = "bold 15px Georgia"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10); }
+  if (mapMode === "city" && cityState) { const p = cityState.streets.nodes[cityCur]; c.beginPath(); c.arc(p[0], p[1], 7, 0, 7); c.fillStyle = "#2f6fb0"; c.fill(); c.lineWidth = 2.5; c.strokeStyle = "#dfe9f6"; c.stroke(); }
+  if (citySel) { c.strokeStyle = "#d8b15a"; c.lineWidth = 3; c.setLineDash([4, 3]); c.beginPath(); c.arc(citySel.x, citySel.y, (citySel.r || 14) + 5, 0, 7); c.stroke(); c.setLineDash([]); }
+}
+function bfs(adj, s, t) { if (s === t) return [s]; const prev = new Array(adj.length).fill(-1); prev[s] = s; const q = [s]; while (q.length) { const u = q.shift(); for (const v of adj[u]) if (prev[v] < 0) { prev[v] = u; if (v === t) { const p = [t]; let x = t; while (x !== s) { x = prev[x]; p.push(x); } return p.reverse(); } q.push(v); } } return null; }
+function nearestNode(s, x, y) { let bi = 0, bd = 1e9; s.nodes.forEach((n, i) => { const d = Math.hypot(n[0] - x, n[1] - y); if (d < bd) { bd = d; bi = i; } }); return bi; }
+async function cityWalk(hit) {
+  const s = cityState.streets, target = nearestNode(s, hit.x, hit.y), path = bfs(s.adj, cityCur, target);
+  if (!path) { cityCur = target; return; }
+  for (let k = 1; k < path.length; k++) {
+    cityCur = path[k]; cityStep++; drawWalk(path, k);
+    try {
+      const r = await fetch(`/city_event?seed=${cityState.seed}&step=${cityStep}&quiet=${cityQuiet}&loc=frontier_town`), d = await r.json();
+      if (d && d.beat) { const ic = { threat: "⚔️", find: "🔎", company: "🧍", ambient: "…" }[d.beat.event] || "•"; logEntry(`${ic} <i>${esc(d.beat.text)}</i>`, "mech"); cityQuiet = 2; cityMarks.push(s.nodes[cityCur].slice()); drawWalk(path, k); }
+      else cityQuiet++;
+    } catch (e) { cityQuiet++; }
+    await new Promise(rs => setTimeout(rs, 430));
+  }
+}
+function drawWalk(path, k) {
+  const fx = $("map-fx"), c = fx.getContext("2d"); c.clearRect(0, 0, fx.width, fx.height);
+  const N = cityState.streets.nodes;
+  c.strokeStyle = "rgba(70,52,22,.45)"; c.setLineDash([5, 4]); c.lineWidth = 2; c.beginPath();
+  for (let i = 0; i < path.length; i++) { const p = N[path[i]]; i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); } c.stroke(); c.setLineDash([]);
+  c.strokeStyle = "#d8b15a"; c.lineWidth = 3; c.beginPath();
+  for (let i = 0; i <= k; i++) { const p = N[path[i]]; i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); } c.stroke();
+  for (const m of cityMarks) { c.fillStyle = "#c0492c"; c.font = "bold 15px Georgia"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10); }
+  const p = N[cityCur]; c.beginPath(); c.arc(p[0], p[1], 7, 0, 7); c.fillStyle = "#2f6fb0"; c.fill(); c.lineWidth = 2.5; c.strokeStyle = "#dfe9f6"; c.stroke();
+}
+async function goSelection() {
+  const hit = citySel; if (!hit) return;
+  $("map-go").disabled = true;
+  if (hit.crossroad) { await cityWalk(hit); $("map-go").disabled = false; clearSelection(); return; }  // просто дойти
+  if (mapMode === "city") {
+    await cityWalk(hit);                                          // дошли по перекрёсткам с событиями
+    if (hit.go) { logEntry(`<span class="you">→ ${esc(hit.go)}</span>`, "you"); send({ cmd: "input", text: hit.go }); closeOverlay("mapview"); }
+    else send({ cmd: "materialize", place: hit.id, kind: hit.kind });   // дом → наполнить
+  } else if (hit.go) {
+    logEntry(`<span class="you">→ ${esc(hit.go)}</span>`, "you"); send({ cmd: "input", text: hit.go }); closeOverlay("mapview");
+  }
+  $("map-go").disabled = false; clearSelection();
+}
+function renderHouse(h) {
+  const occ = (h.occupants || []).map(o => `<div class="occ">• <b>${esc(o.name)}</b> — ${esc(o.role)} <span class="tag">(${esc(o.trait)}, ${o.age})</span></div>`).join("") || '<div class="tag">никого нет</div>';
+  $("house-body").innerHTML = `<h3>Дом <span class="tag">(${esc(h.kind)})</span></h3><div>${esc(h.description || "")}</div>`
+    + `<div style="margin:6px 0"><b>Внутри:</b> ${esc((h.items || []).join(", ") || "—")}</div><b>Кто здесь:</b>${occ}`
+    + (h.recorded ? '<div class="mem">✓ из памяти</div>' : '<div class="mem">✦ наполнен и сохранён</div>');
+  $("house").classList.remove("hidden");
+}
+function drawMapNodes(level) {
   if (!level) return;
   const cv = $("map-canvas"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
   ctx.fillStyle = "#2a2118"; ctx.fillRect(0, 0, W, H);
@@ -171,7 +274,7 @@ function drawMap(level) {
     ctx.strokeStyle = "rgba(200,170,90,.45)"; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke();
   }
-  const hit = [];
+  mapHits = [];
   for (const n of level.nodes) {
     const [x, y] = pos(n);
     const col = n.current ? "#d8b15a" : n.display === "unknown" ? "#6b6450"
@@ -183,15 +286,9 @@ function drawMap(level) {
     ctx.fillText(nm, x, y + 17);
     if (n.dir_ru) { ctx.fillStyle = "#b8a877"; ctx.font = "10px Georgia, serif"; ctx.fillText(n.dir_ru, x, y - 27); }
     if (n.occupants && n.occupants.length) { ctx.fillStyle = "#cd9a6a"; ctx.fillText("• " + n.occupants.length, x + 16, y - 6); }
-    if (n.go) hit.push({ x, y, r: 17, go: n.go });
+    if (n.go) mapHits.push({ x, y, r: 17, go: n.go, name: n.name });
   }
-  cv.onclick = (e) => {
-    const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) / r.width * W, my = (e.clientY - r.top) / r.height * H;
-    for (const o of hit) if (Math.hypot(mx - o.x, my - o.y) <= o.r) {
-      logEntry(`<span class="you">→ ${esc(o.go)}</span>`, "you");
-      send({ cmd: "input", text: o.go }); closeOverlay("mapview"); break;
-    }
-  };
+  mapMode = "interior"; drawFx();
 }
 
 // --------------------------------------------------------------- combat ----
@@ -352,4 +449,7 @@ $("input-form").onsubmit = (e) => {
 };
 
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closeOverlay(b.dataset.close));
+$("map-go").onclick = goSelection;
+$("map-cancel").onclick = clearSelection;
+window.__map = { hits: () => mapHits, mode: () => mapMode, pick: (i) => setSelection(mapHits[i]), go: goSelection };
 connect();

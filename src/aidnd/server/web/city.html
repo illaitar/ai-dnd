@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI-DnD — карта города (эксперимент)</title>
+  <style>
+    :root{--ink:#2c2113;--line:#5a4222}
+    body{margin:0;background:#cdb98a;color:var(--ink);font-family:Georgia,'Iowan Old Style',serif}
+    header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 14px;background:#c2a96f;border-bottom:2px solid var(--line)}
+    header h1{font-size:17px;margin:0;font-style:italic;font-weight:500}.sp{flex:1}
+    .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 14px;background:#dac79a;border-bottom:1px solid var(--line)}
+    .ctl input{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:#f4ecd4;width:90px}
+    .btn{font:inherit;font-size:13px;cursor:pointer;padding:4px 12px;border:1px solid var(--line);border-radius:6px;background:#caa44a;color:#241d08}
+    a.btn{text-decoration:none}
+    .main{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;padding:12px 14px;max-width:1320px}
+    .stage{position:relative;flex:1 1 640px;min-width:320px}
+    .stage canvas{position:absolute;top:0;left:0;width:100%;height:auto;border-radius:8px}
+    #c{position:relative;box-shadow:0 3px 14px rgba(40,28,12,.35)}
+    #cov{cursor:pointer}
+    .side{flex:0 0 230px;background:#efe0bd;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.45}
+    .side h3{margin:0 0 6px;font-size:14px;font-style:italic;font-weight:500}
+    #events{display:flex;flex-direction:column;gap:5px;max-height:560px;overflow:auto}
+    .ev{padding:5px 8px;border-radius:6px;background:#f4ecd4;border:1px solid var(--line)}
+    .ev .k{font-style:italic;color:#8a5a1e;font-size:11px}
+    .hint{font-size:12px;color:#6b4a22;font-style:italic;padding:0 14px 10px}
+    #house{position:fixed;right:18px;top:120px;width:300px;background:#f4ecd4;border:2px solid var(--line);
+      border-radius:10px;padding:12px 14px;box-shadow:0 6px 26px rgba(40,28,12,.45);display:none;font-size:13px;line-height:1.4}
+    #house h3{margin:0 0 6px;font-size:15px} #house .x{float:right;cursor:pointer;border:1px solid var(--line);border-radius:5px;background:#e3cda0;padding:0 7px}
+    #house .occ{margin:3px 0}#house .tag{color:#6b4a22;font-style:italic}#house .mem{margin-top:8px;color:#2e7d32;font-size:11.5px}
+  </style>
+</head>
+<body>
+  <header><h1>🏰 AI-DnD <span style="font-size:12px;opacity:.7">город — прогулка по перекрёсткам</span></h1><span class="sp"></span><a href="/" class="btn">← В игру</a></header>
+  <div class="ctl"><label>seed <input id="seed" type="number" value="1337"></label><button class="btn" id="gen">Сгенерировать</button><span class="hint" id="meta"></span></div>
+  <div class="main">
+    <div class="stage"><canvas id="c" width="980" height="700"></canvas><canvas id="cov" width="980" height="700"></canvas></div>
+    <div class="side"><h3>Прогулка</h3>
+      <div class="hint" style="padding:0 0 6px">Клик по улице/перекрёстку — проложить маршрут и пройти по нему пошагово. Клик по дому — наполнить контентом. По пути режиссёр иногда подбрасывает событие.</div>
+      <div id="events"></div></div>
+  </div>
+  <div id="house"><span class="x" onclick="document.getElementById('house').style.display='none'">✕</span><div id="house-body"></div></div>
+
+<script type="module">
+import {drawCity} from "/static/citygen.js";
+const base=document.getElementById('c'), cov=document.getElementById('cov');
+const ctx=base.getContext('2d'), oc=cov.getContext('2d');
+const W=base.width, H=base.height, dpr=Math.min(2,window.devicePixelRatio||1);
+for(const cv of [base,cov]){ cv.width=W*dpr; cv.height=H*dpr; cv.style.aspectRatio=W+'/'+H; cv.getContext('2d').scale(dpr,dpr); }
+const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let HITS=[], STREETS=null, SEED=1337, cur=0, step=0, quiet=2, walking=false, evMarks=[];
+
+async function generate(){
+  const seed=+document.getElementById('seed').value||0; SEED=seed; step=0; quiet=2; evMarks=[]; document.getElementById('events').innerHTML='';
+  let buildings=[];
+  try{ const r=await fetch('/town_layout?seed='+seed); if(r.ok){ const d=await r.json(); buildings=d.buildings||[]; document.getElementById('meta').textContent=d.settlement+' · '+buildings.length+' зданий'; } }catch(e){}
+  const out=drawCity(ctx, W, H, {seed, buildings, title:'Фэндалин'});
+  HITS=out.hits; STREETS=out.streets; cur=STREETS.start; drawOverlay([cur],0);
+  window.__city={walkTo, n:()=>STREETS.nodes.length, far:()=>{let bi=0,bd=-1;STREETS.nodes.forEach((p,i)=>{const d=Math.hypot(p[0]-STREETS.nodes[cur][0],p[1]-STREETS.nodes[cur][1]);if(d>bd){bd=d;bi=i;}});return bi;}};
+}
+function bfs(adj,s,t){ if(s===t)return[s]; const prev=new Array(adj.length).fill(-1); prev[s]=s; const q=[s];
+  while(q.length){ const u=q.shift(); for(const v of adj[u]) if(prev[v]<0){ prev[v]=u; if(v===t){ const p=[t]; let x=t; while(x!==s){ x=prev[x]; p.push(x);} return p.reverse(); } q.push(v); } } return null; }
+function nodeAt(x,y){ if(!STREETS)return -1; let bi=-1,bd=1e9; STREETS.nodes.forEach((n,i)=>{const d=Math.hypot(n[0]-x,n[1]-y); if(d<bd){bd=d;bi=i;}}); return bd<28?bi:-1; }
+function drawOverlay(path, k){
+  oc.clearRect(0,0,W,H);
+  // граф улиц (тонко) — только при наведении? рисуем перекрёстки слабо
+  if(path&&path.length>1){ const N=STREETS.nodes;
+    oc.strokeStyle='rgba(70,52,22,.4)'; oc.setLineDash([5,4]); oc.lineWidth=2; oc.beginPath();
+    for(let i=0;i<path.length;i++){const p=N[path[i]]; i?oc.lineTo(p[0],p[1]):oc.moveTo(p[0],p[1]);} oc.stroke(); oc.setLineDash([]);
+    oc.strokeStyle='#d8b15a'; oc.lineWidth=3; oc.beginPath();
+    for(let i=0;i<=k;i++){const p=N[path[i]]; i?oc.lineTo(p[0],p[1]):oc.moveTo(p[0],p[1]);} oc.stroke();
+  }
+  // метки событий
+  for(const m of evMarks){ oc.fillStyle='#c0492c'; oc.font='bold 15px Georgia'; oc.textAlign='center'; oc.textBaseline='middle'; oc.fillText('❗', m[0], m[1]-10); }
+  // токен игрока
+  const c=STREETS.nodes[cur];
+  oc.beginPath(); oc.arc(c[0],c[1],7,0,7); oc.fillStyle='#2f6fb0'; oc.fill(); oc.lineWidth=2.5; oc.strokeStyle='#dfe9f6'; oc.stroke();
+}
+function logEvent(beat){
+  const icon={threat:'⚔️',find:'🔎',company:'🧍',ambient:'…'}[beat.event]||'•';
+  const div=document.createElement('div'); div.className='ev';
+  div.innerHTML=`<span class="k">${icon} ${esc(beat.event)} · шаг ${step}</span><br>${esc(beat.text)}`;
+  document.getElementById('events').prepend(div);
+}
+async function walkTo(target){
+  if(walking||!STREETS) return; const path=bfs(STREETS.adj, cur, target); if(!path||path.length<2) return;
+  walking=true;
+  for(let k=1;k<path.length;k++){
+    cur=path[k]; step++; drawOverlay(path,k);
+    try{ const r=await fetch(`/city_event?seed=${SEED}&step=${step}&quiet=${quiet}&loc=frontier_town`); const d=await r.json();
+      if(d&&d.beat){ logEvent(d.beat); quiet=2; evMarks.push(STREETS.nodes[cur].slice()); drawOverlay(path,k); }
+      else quiet++; }catch(e){ quiet++; }
+    await sleep(480);
+  }
+  drawOverlay([cur],0); walking=false;
+}
+async function materialize(hit){
+  try{ const r=await fetch(`/materialize?seed=${SEED}&place=${encodeURIComponent(hit.id)}&kind=${hit.kind}`); const d=await r.json(); if(d.error)return;
+    const occ=(d.occupants||[]).map(o=>`<div class="occ">• <b>${esc(o.name)}</b> — ${esc(o.role)} <span class="tag">(${esc(o.trait)}, ${o.age})</span></div>`).join('')||'<div class="tag">никого нет</div>';
+    document.getElementById('house-body').innerHTML=`<h3>${esc(hit.name||'Дом')} <span class="tag">(${esc(d.kind)})</span></h3><div>${esc(d.description||'')}</div>`+
+      `<div style="margin:6px 0"><b>Внутри:</b> ${esc((d.items||[]).join(', ')||'—')}</div><b>Кто здесь:</b>${occ}`+
+      (d.recorded?'<div class="mem">✓ из памяти</div>':'<div class="mem">✦ наполнен и сохранён</div>');
+    document.getElementById('house').style.display='block';
+  }catch(e){}
+}
+cov.onclick=(e)=>{ const r=cov.getBoundingClientRect(), mx=(e.clientX-r.left)/r.width*W, my=(e.clientY-r.top)/r.height*H;
+  let bh=null,bd=1e9; for(const h of HITS){ const d=Math.hypot(mx-h.x,my-h.y); if(d<h.r+3&&d<bd){bd=d;bh=h;} }
+  if(bh){ materialize(bh); return; }
+  const n=nodeAt(mx,my); if(n>=0) walkTo(n);
+};
+document.getElementById('gen').onclick=generate; generate();
+</script>
+</body>
+</html>

@@ -9,7 +9,10 @@
 <body>
   <header>
     <h1>⚔️ AI-DnD <span class="sub">вертикальный срез LMoP</span></h1>
-    <div id="server-badge" class="badge">…</div>
+    <div class="hdr-right">
+      <button id="menu-btn" class="cbtn">☰ Меню</button>
+      <div id="server-badge" class="badge">…</div>
+    </div>
   </header>
 
   <main>
@@ -116,6 +119,60 @@
   <div id="house" class="hpop hidden">
     <span class="x" data-close="house">✕</span>
     <div id="house-body"></div>
+  </div>
+
+  <!-- главное меню -->
+  <div id="menu" class="overlay hidden">
+    <div class="ui-box menu-box">
+      <h2>☰ Меню <button class="x" data-close="menu">✕</button></h2>
+      <div class="menu-actions">
+        <button class="mbtn" id="m-new">🆕 Новая игра</button>
+        <button class="mbtn" id="m-continue">▶ Продолжить</button>
+        <button class="mbtn" id="m-load">📂 Загрузить</button>
+        <button class="mbtn" id="m-save">💾 Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- новая игра: сценарий + класс + снаряжение -->
+  <div id="newgame" class="overlay hidden">
+    <div class="ui-box ng-box">
+      <h2>🆕 Новая игра <button class="x" data-close="newgame">✕</button></h2>
+      <div class="ng-grid">
+        <div><h3>Сценарий</h3><div id="ng-scenarios" class="ng-cards"></div></div>
+        <div><h3>Класс</h3><div id="ng-classes" class="ng-cards"></div></div>
+        <div><h3>Стартовое снаряжение</h3><div id="ng-kits" class="ng-cards"></div></div>
+      </div>
+      <div class="ng-skills-wrap">
+        <h3>Навыки <span id="ng-skill-hint" class="state"></span></h3>
+        <div id="ng-skills" class="ng-chips"></div>
+      </div>
+      <div class="ng-foot">
+        <label>Имя героя <input id="ng-name" type="text" value="Герой" maxlength="24"></label>
+        <span class="sp"></span>
+        <button class="cbtn" id="ng-start">▶ Начать игру (1 ур.)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- повышение уровня: выборы 5e -->
+  <div id="levelup" class="overlay hidden">
+    <div class="ui-box ng-box">
+      <h2>⬆ Повышение уровня <span id="lvl-title"></span></h2>
+      <div id="lvl-choices" class="ng-grid"></div>
+      <div class="ng-foot">
+        <span id="lvl-msg" class="state"></span><span class="sp"></span>
+        <button class="cbtn" id="lvl-apply">Подтвердить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- загрузка / удаление сейвов -->
+  <div id="loadgame" class="overlay hidden">
+    <div class="ui-box">
+      <h2>📂 Сейвы <button class="x" data-close="loadgame">✕</button></h2>
+      <div id="saves-list" class="saves-list"></div>
+    </div>
   </div>
 
   <script type="module" src="/static/citygen.js"></script>

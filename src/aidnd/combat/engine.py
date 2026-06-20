@@ -300,7 +300,8 @@ class CombatEngine:
             slots = st.spell_slots if st else {}
             if slots.get(str(spell.level), 0) <= 0:
                 return self._no("Нет ячейки заклинания.")
-            slots[str(spell.level)] -= 1
+            self.world.commit("cast_spell", caster,
+                              payload={"spell": spell_key, "level": spell.level})
         cs.turn_budget.action = False
         cast_mod = (st.proficiency if st else 2) + (ability_modifier(st.ability(st.spell_ability)) if st else 0)
         dc = 8 + cast_mod
@@ -460,6 +461,18 @@ class CombatEngine:
         else:
             self.state.log.append(f"{self._name(eid)} повержен.")
             self._spawn_corpse(eid)
+            self._award_xp(eid)
+
+    def _award_xp(self, eid: str) -> None:
+        """Опыт за побеждённого врага — игроку (вся партия делит по упрощению)."""
+        from ..rules.progression import MONSTER_XP
+        from ..world.components import Persona
+        pc = self.world.player_id
+        if not pc:
+            return
+        p = self.world.ecs.get(eid, Persona)
+        xp = MONSTER_XP.get(p.stat_block_ref if p else None, 25)
+        self.world.commit("gain_xp", pc, target=eid, payload={"xp": xp})
 
     def _spawn_corpse(self, eid: str) -> None:
         from ..gen.item_gen import generate_individual_treasure

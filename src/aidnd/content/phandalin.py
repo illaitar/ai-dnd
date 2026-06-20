@@ -271,30 +271,71 @@ def _build_shops(world: World) -> None:
 # --------------------------------------------------------------------------- #
 #  Игрок                                                                       #
 # --------------------------------------------------------------------------- #
-def _create_pc(world: World) -> str:
+def _create_pc(world: World, pc_spec: dict | None = None,
+               start_place: str = "building:stonehill_inn") -> str:
+    """Создать игрока 1 уровня по выбору класса/навыков/снаряжения (новая игра).
+
+    Фичи 1 уровня без выбора применяются сразу; выборы 1 уровня (стиль/домен/
+    компетентность/заклинания) берут разумный дефолт — настоящие выборы идут с апа.
+    """
+    from ..rules.progression import (
+        CANTRIPS_KNOWN,
+        CLASS_SPELLS,
+        SUBCLASSES,
+        available_spells,
+        slots_for,
+        spells_to_learn,
+    )
+    from ..rules.progression import CLASSES as PROG
+    from ..rules.srd import ability_modifier
+    from ..world.components import Progression
+    from .newgame import CLASSES as NG
+    from .newgame import KITS, resolve_pc_spec
+    spec = resolve_pc_spec(pc_spec)
+    ng, cls, kit = NG[spec["klass"]], PROG[spec["klass"]], KITS[spec["kit"]]
+    s = ng["stats"]
+    con_mod = ability_modifier(s[2])
+    hp = max(1, cls["hit_die"] + con_mod)            # максимум HP на 1 уровне
+    caster = cls["caster"]
     pc = "pc:hero"
     world.player_id = pc
     world.ecs.spawn(pc)
-    world.ecs.add(pc, Persona(name="Герой", archetype="fighter", race="human",
-                              voice="игрок", enriched=True))
-    world.ecs.add(pc, Stats5e(str_=16, dex=14, con=14, int_=10, wis=12, cha=10,
-                              proficiency=2, level=3, max_hp=28, hp=28, ac_base=10,
-                              proficient_skills=["athletics", "perception", "intimidation"],
-                              proficient_saves=["str", "con"]))
+    world.ecs.add(pc, Persona(name=spec["name"], archetype=ng["archetype"],
+                              race=spec["race"], voice="игрок", enriched=True))
+    world.ecs.add(pc, Stats5e(str_=s[0], dex=s[1], con=s[2], int_=s[3], wis=s[4], cha=s[5],
+                              proficiency=2, level=1, max_hp=hp, hp=hp, ac_base=10,
+                              proficient_skills=list(spec["skills"]),
+                              proficient_saves=list(cls["saves"]),
+                              spell_slots=slots_for(spec["klass"], 1),
+                              spell_ability=caster or "int"))
     world.ecs.add(pc, LODState(tier=3))
+    # прокачка: авто-фичи 1 уровня + дефолтные выборы 1 уровня
+    prog = Progression(class_id=spec["klass"])
+    feats1 = cls["features"].get(1, [])
+    prog.features = [fid for fid, kind in feats1 if not kind]
+    if any(fid == "fighting_style" for fid, _ in feats1):
+        prog.fighting_style = "defense"
+        prog.features.append("fighting_style")
+    if any(fid == "expertise" for fid, _ in feats1):
+        prog.expertise = list(spec["skills"][:2])
+    if any(fid == "subclass" for fid, _ in feats1):          # клерик: домен на 1 уровне
+        prog.subclass = next(iter(SUBCLASSES.get(spec["klass"], {})), None)
+    if caster:
+        prog.cantrips = list(CLASS_SPELLS[spec["klass"]][0][:CANTRIPS_KNOWN[1]])
+        prog.spells_known = list(available_spells(spec["klass"], 1)[:spells_to_learn(spec["klass"], 1)])
+    world.ecs.add(pc, prog)
     world.commit("set_position", "worldgen", target=pc,
-                 payload={"region": REGION, "place": "building:stonehill_inn"})
-    # инвентарь и экип
+                 payload={"region": REGION, "place": start_place})
+    # инвентарь и экип по выбранному снаряжению
     carry = Container("carry:hero", owner_ref=pc, kind="carry")
     world.containers["carry:hero"] = carry
-    world.wallets[pc] = {"gp": 25, "sp": 30}
-    for tmpl, slot, iid in [("tmpl:longsword", "main_hand", "it:hero_sword"),
-                            ("tmpl:chain_shirt", "armor", "it:hero_armor"),
-                            ("tmpl:shield", "off_hand", "it:hero_shield")]:
+    world.wallets[pc] = dict(kit["wallet"])
+    for tmpl, slot, iid in kit["equip"]:
         spawn_item(world, tmpl, "carry:hero", owner=pc, source="authored", instance_id=iid)
         world.items[iid].equipped_slot = slot
-    spawn_item(world, "tmpl:potion_healing", "carry:hero", qty=2, owner=pc,
-               source="authored", instance_id="it:hero_potions")
+    for tmpl, qty, iid in kit["carry"]:
+        spawn_item(world, tmpl, "carry:hero", qty=qty, owner=pc, source="authored",
+                   instance_id=iid)
     return pc
 
 
@@ -310,8 +351,15 @@ def phandalin_profile() -> SettlementProfile:
         age_mean=35, age_std=14)
 
 
-def build_world(seed: int = 1337, roster_size: int = 12, model=None) -> World:
-    """Строит мир по манифесту предгенерации (док 01 §2)."""
+def build_world(seed: int = 1337, roster_size: int = 12, model=None,
+                scenario: str | None = None, pc_spec: dict | None = None) -> World:
+    """Строит мир по манифесту предгенерации (док 01 §2).
+
+    scenario/pc_spec задают старт новой игры (локация/флаги/спутники и класс/снаряжение).
+    Применяются ДО фиксации baseline — поэтому детерминированно воспроизводятся при загрузке.
+    """
+    from .newgame import SCENARIOS, default_scenario
+    sc = SCENARIOS.get(scenario or default_scenario(), SCENARIOS[default_scenario()])
     world = World(seed=seed)
     register_item_templates(world)
     _build_places(world)              # 1. building graph
@@ -322,7 +370,16 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None) -> World:
     _build_factions(world)            # 5. factions
     _build_fixed_loot(world)          # 4. fixed loot
     _build_shops(world)               # 3. economy
-    _create_pc(world)
+    _create_pc(world, pc_spec, start_place=sc["start"])
+    # сценарий: флаги мира + спутники на старте (часть пре-гена)
+    for flag in sc.get("flags", []):
+        world.commit("set_flag", "worldgen", payload={"flag": flag})
+    for cid in sc.get("companions", []):
+        persona = world.ecs.get(cid, Persona)
+        if persona:
+            persona.companion = True
+        world.commit("set_position", "worldgen", target=cid,
+                     payload={"region": REGION, "place": sc["start"]})
     # 2c. pregen roster поверх зданий (демография)
     if roster_size > 0:
         CharacterGenerator(world, model=model).generate_roster(phandalin_profile(), roster_size)

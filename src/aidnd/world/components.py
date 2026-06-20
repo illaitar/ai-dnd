@@ -88,6 +88,22 @@ class Stats5e:
 
 
 @dataclass
+class Progression:
+    """Прокачка персонажа 5e: класс, опыт, фичи, подкласс, заклинания (rules/progression)."""
+
+    class_id: str = "fighter"
+    xp: int = 0
+    subclass: str | None = None
+    fighting_style: str | None = None
+    features: list[str] = field(default_factory=list)        # выданные фичи (id)
+    expertise: list[str] = field(default_factory=list)       # навыки с компетентностью
+    feats: list[str] = field(default_factory=list)           # взятые черты
+    cantrips: list[str] = field(default_factory=list)        # известные заговоры
+    spells_known: list[str] = field(default_factory=list)    # книга/известные заклинания
+    pending: int = 0                                         # сколько уровней ждут выбора игрока
+
+
+@dataclass
 class Persona:
     """Персона NPC (main §3.1, расширена в доке 02 §3)."""
 

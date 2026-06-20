@@ -1465,16 +1465,88 @@ class GameSession:
             out.append({"id": pid, "importance": c, "kind": rec.get("kind", "home"), "name": name})
         return out
 
+    def _progression_view(self) -> dict | None:
+        from ..combat.spells import SPELLS
+        from ..rules.progression import (
+            CLASSES,
+            FIGHTING_STYLES,
+            SUBCLASSES,
+            feature_label,
+            next_threshold,
+        )
+        from ..world.components import Progression
+        prog = self.world.ecs.get(self.player, Progression)
+        st = self.world.get_stats(self.player)
+        if not prog or not st:
+            return None
+        feats = []
+        for f in prog.features:
+            if f == "fighting_style":
+                feats.append("Боевой стиль: " + FIGHTING_STYLES.get(prog.fighting_style, {}).get("name", ""))
+            else:
+                feats.append(feature_label(f))
+        sub = SUBCLASSES.get(prog.class_id, {}).get(prog.subclass, {}).get("name") if prog.subclass else None
+        spells = [{"key": k, "name": SPELLS[k].name, "level": SPELLS[k].level}
+                  for k in (prog.cantrips + prog.spells_known) if k in SPELLS]
+        return {
+            "class_id": prog.class_id, "class_name": CLASSES[prog.class_id]["name"],
+            "subclass": sub, "xp": prog.xp, "xp_next": next_threshold(st.level),
+            "features": feats, "fighting_style": prog.fighting_style,
+            "expertise": list(prog.expertise), "feats": list(prog.feats),
+            "spells": spells, "slots": dict(st.spell_slots),
+            "caster": bool(CLASSES[prog.class_id]["caster"]),
+        }
+
+    def pending_levelup(self) -> dict | None:
+        """Если накоплен опыт на новый уровень — что предстоит выбрать игроку."""
+        from ..rules.progression import CLASSES
+        from ..world.components import Progression
+        from .leveling import choices_for
+        prog = self.world.ecs.get(self.player, Progression)
+        st = self.world.get_stats(self.player)
+        if not prog or not st or prog.pending <= 0:
+            return None
+        target = st.level + 1
+        return {"from": st.level, "to": target, "remaining": prog.pending,
+                "class_id": prog.class_id, "class_name": CLASSES[prog.class_id]["name"],
+                "choices": choices_for(prog.class_id, target, st, prog)}
+
+    def apply_levelup(self, selections: dict) -> dict:
+        """Применить выбор игрока: собрать и закоммитить событие level_up."""
+        from ..world.components import Progression
+        from .leveling import build_payload, choices_for, validate
+        prog = self.world.ecs.get(self.player, Progression)
+        st = self.world.get_stats(self.player)
+        if not prog or prog.pending <= 0:
+            return {"kind": "error", "text": "Сейчас нет повышения уровня.", "view": self.view()}
+        target = st.level + 1
+        needed = choices_for(prog.class_id, target, st, prog)
+        err = validate(needed, selections or {})
+        if err:
+            return {"kind": "error", "text": err, "view": self.view()}
+        payload = build_payload(prog.class_id, target, st, prog, selections or {})
+        self.world.commit("level_up", self.player, payload=payload)
+        self._log_journal(f"Повышение до {target} уровня.")
+        res = self.look()
+        res["text"] = f"⬆ {self._display(self.player)} достигает {target} уровня!"
+        return res
+
     def view(self) -> dict:
         st = self.world.get_stats(self.player)
         place = self.current_place()
+        prog_v = self._progression_view()
         return {
             "player": {
                 "id": self.player, "name": self._display(self.player),
                 "hp": st.hp if st else 0, "max_hp": st.max_hp if st else 0,
                 "ac": inv.armor_class(self.world, self.player),
                 "level": st.level if st else 1,
+                "xp": prog_v["xp"] if prog_v else 0,
+                "xp_next": prog_v["xp_next"] if prog_v else None,
+                "class_name": prog_v["class_name"] if prog_v else "",
             },
+            "progression": prog_v,
+            "levelup": self.pending_levelup(),
             "place": place, "place_name": self._place_name(place),
             "seed": self.world.seed,
             "time": self.world.clock.hhmm(),

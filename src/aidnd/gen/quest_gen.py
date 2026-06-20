@@ -157,8 +157,9 @@ class QuestSystem:
             if self.world.player_id:
                 transfer_currency(self.world, None, self.world.player_id,
                                   r.currency, actor="quest")
-        for faction, delta in r.faction_rep.items():
-            self.world.flags.add(f"rep:{faction}:+{delta}")
+        for faction, delta in r.faction_rep.items():           # числовое стояние (событийно)
+            self.world.commit("faction_rep", self.world.player_id or "dm",
+                              payload={"faction": faction, "delta": delta})
         if r.xp and self.world.player_id:
             self.world.commit("gain_xp", self.world.player_id,
                               payload={"xp": r.xp, "source": "quest"})

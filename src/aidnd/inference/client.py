@@ -138,6 +138,7 @@ class ModelManager:
         "director": (config.BASE_MODEL, None),
         "quest_writer": (config.BASE_MODEL, "quest"),
         "plausibility": (config.BASE_MODEL, "validator"),
+        "faction_gen": (config.BASE_MODEL, "lore"),
     }
 
     def __init__(self, client: OllamaClient | None = None) -> None:

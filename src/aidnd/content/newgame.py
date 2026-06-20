@@ -93,13 +93,14 @@ SCENARIOS: dict[str, dict] = {
         "desc": "Вы вели припасы и Гундрена к Пещере Эха Волн — но на тракте неспокойно.",
         "intro": "Дикие земли вокруг. Сильдар рядом; свежие следы засады уходят на запад.",
         "start": "place:phandalin_wilds", "flags": ["escort_active"],
-        "companions": ["npc:sildar_hallwinter"],
+        "companions": ["npc:sildar_hallwinter"], "reveals": ["faction:cragmaw"],
     },
     "redbrands": {
         "name": "Логово Красных плащей",
         "desc": "Красные плащи терроризируют город из поместья Тресендар. Пора в их укрытие.",
         "intro": "Поместье Тресендар. За обвалившейся стеной — лаз в подземелье Красных плащей.",
         "start": "building:tresendar_manor", "flags": ["redbrands_alerted"], "companions": [],
+        "reveals": ["faction:redbrands"],
     },
 }
 

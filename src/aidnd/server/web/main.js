@@ -89,8 +89,49 @@ function updateView(v) {
   $("journal").innerHTML = (v.journal || []).slice().reverse().map(e =>
     `<div class="jentry">${esc(e)}</div>`).join("") || "<span class='state'>пусто</span>";
   renderConnectivity(v.connectivity);
+  renderFactionsPanel(v.factions);
   if (!$("trade").classList.contains("hidden")) renderTrade(v.shop);   // живое обновление при открытом окне
   if (!$("mapview").classList.contains("hidden")) renderMap(v.map_levels);
+  if (!$("factionview").classList.contains("hidden")) renderFactionsOverlay(v.factions);
+}
+
+// ----------------------------------------------------------- фракции -------
+function facName(f, id) { const x = (f.list || []).find(y => y.id === id); return x ? x.name : id; }
+function renderFactionsPanel(f) {
+  const box = $("factions");
+  if (!f || !f.list || !f.list.length) { box.innerHTML = "<span class='state'>пока ничего не известно — узнавай в разговорах</span>"; return; }
+  box.innerHTML = f.list.map(x =>
+    `<div class="fac-mini" data-fac="${x.id}"><span class="em">${x.emblem}</span>`
+    + `<span class="nm">${esc(x.name)}${x.member ? ' <span class="you">✓</span>' : ""}</span>`
+    + `<span class="stand" style="color:${x.standing_color}">${esc(x.standing_label)}</span></div>`).join("");
+  box.querySelectorAll("[data-fac]").forEach(el => el.onclick = () => openFactions(el.dataset.fac));
+}
+function openFactions(focusId) {
+  openOverlay("factionview");
+  if (lastView && lastView.factions) renderFactionsOverlay(lastView.factions);
+  if (focusId) send({ cmd: "faction_inspect", faction: focusId });    // ленивое LLM-обогащение
+}
+function renderFactionsOverlay(f) {
+  if (!f) return;
+  $("fac-membership").textContent = f.membership ? "— ты в «" + facName(f, f.membership) + "»" : "— ты вне фракций";
+  if (!f.list.length) { $("fac-list").innerHTML = "<div class='saves-empty'>Ты пока не слышал ни об одной фракции. О них узнают в разговорах с местными и из книг.</div>"; return; }
+  $("fac-list").innerHTML = f.list.map(x => {
+    const goals = x.goals.length ? `<div class="meta"><b>Цели:</b> ${x.goals.map(esc).join("; ")}</div>` : "";
+    const vals = x.values.length ? `<div class="meta"><b>Ценности:</b> ${x.values.map(esc).join(", ")}</div>` : "";
+    const rel = x.relations.length ? `<div class="meta">Отношения: ${x.relations.map(r => `${esc(r.name)} ${r.value > 0 ? "+" : ""}${r.value}`).join(", ")}</div>` : "";
+    let act;
+    if (x.member) act = `<button class="leave" data-leave="1">Покинуть</button><span class="note">ранг: ${esc(x.rank || "—")}</span>`;
+    else if (!x.joinable) act = `<span class="note">вступление невозможно</span>`;
+    else if (x.can_join) act = `<button data-join="${x.id}">Вступить</button>`;
+    else act = `<button disabled>Вступить</button><span class="note">нужна репутация ≥ ${x.join_min_rep}</span>`;
+    return `<div class="fac-card ${x.member ? "member" : ""}"><h3><span>${x.emblem}</span> ${esc(x.name)}<span class="sp"></span>`
+      + `<span class="stand" style="color:${x.standing_color}">${esc(x.standing_label)} ${x.standing > 0 ? "+" : ""}${x.standing}</span></h3>`
+      + `<div class="blurb" data-inspect="${x.id}" title="нажми — описать подробнее">${esc(x.blurb || "…")}</div>`
+      + goals + vals + rel + `<div class="acts">${act}</div></div>`;
+  }).join("");
+  $("fac-list").querySelectorAll("[data-join]").forEach(b => b.onclick = () => send({ cmd: "faction_join", faction: b.dataset.join }));
+  $("fac-list").querySelectorAll("[data-leave]").forEach(b => b.onclick = () => send({ cmd: "faction_leave" }));
+  $("fac-list").querySelectorAll("[data-inspect]").forEach(b => b.onclick = () => send({ cmd: "faction_inspect", faction: b.dataset.inspect }));
 }
 
 // информационное представление связности локаций (вместо тайл-карты)
@@ -580,4 +621,5 @@ $("m-load").onclick = () => { closeOverlay("menu"); openLoad(); };
 $("m-save").onclick = doSave;
 $("ng-start").onclick = startNewGame;
 $("lvl-apply").onclick = applyLevelup;
+$("fac-open").onclick = () => openFactions();
 connect();

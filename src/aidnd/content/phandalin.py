@@ -215,15 +215,18 @@ def _build_encounter(world: World) -> list[str]:
 #  Фракции, фиксированный лут, экономика                                       #
 # --------------------------------------------------------------------------- #
 def _build_factions(world: World) -> None:
-    for fid, name, controls in [
-        ("faction:redbrands", "Красные плащи", ["building:tresendar_manor"]),
-        ("faction:cragmaw", "Гоблины Крэгмо", ["site:cragmaw_hideout"]),
-        ("faction:lords_alliance", "Союз Лордов", []),
-        ("faction:harpers", "Арфисты", []),
-        ("faction:zhentarim", "Жентарим", []),
+    # сюжетные фракции LMoP (во вступление не принимают — это не гражданские гильдии)
+    for fid, name, kind, controls in [
+        ("faction:redbrands", "Красные плащи", "criminal", ["building:tresendar_manor"]),
+        ("faction:cragmaw", "Гоблины Крэгмо", "criminal", ["site:cragmaw_hideout"]),
+        ("faction:lords_alliance", "Союз Лордов", "aristocracy", []),
+        ("faction:harpers", "Арфисты", "watch", []),
+        ("faction:zhentarim", "Жентарим", "criminal", []),
     ]:
         world.ecs.spawn(fid)
-        world.ecs.add(fid, Faction(name=name, controls=list(controls)))
+        fac = Faction(name=name, kind=kind, controls=list(controls), joinable=False)
+        world.ecs.add(fid, fac)
+        world.factions[fid] = fac
         for c in controls:
             world.commit("kg_add", "worldgen", payload={"s": fid, "r": "controls", "o": c})
 
@@ -324,6 +327,15 @@ def _create_pc(world: World, pc_spec: dict | None = None,
         prog.cantrips = list(CLASS_SPELLS[spec["klass"]][0][:CANTRIPS_KNOWN[1]])
         prog.spells_known = list(available_spells(spec["klass"], 1)[:spells_to_learn(spec["klass"], 1)])
     world.ecs.add(pc, prog)
+    # склонность к фракциям по классу (стартовая «обвязка»)
+    from ..world.components import Affiliation
+    class_affinity = {
+        "rogue": {"faction:thieves_guild": 0.3, "faction:watch": -0.1},
+        "cleric": {"faction:temple": 0.3},
+        "fighter": {"faction:watch": 0.25},
+        "wizard": {"faction:arcane": 0.3, "faction:aristocracy": 0.1},
+    }
+    world.ecs.add(pc, Affiliation(affinity=dict(class_affinity.get(spec["klass"], {}))))
     world.commit("set_position", "worldgen", target=pc,
                  payload={"region": REGION, "place": start_place})
     # инвентарь и экип по выбранному снаряжению
@@ -367,13 +379,17 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     attach_battlemaps(world)          # боевые карты на узлы графа локаций
     _build_named_npcs(world)          # 2a. named population
     _build_encounter(world)           # 2b. encounter NPCs
-    _build_factions(world)            # 5. factions
+    _build_factions(world)            # 5a. сюжетные фракции (LMoP)
+    from ..gen.faction_gen import generate_factions
+    generate_factions(world, "phandalin", model=model)   # 5b. гражданские фракции (per-world)
     _build_fixed_loot(world)          # 4. fixed loot
     _build_shops(world)               # 3. economy
     _create_pc(world, pc_spec, start_place=sc["start"])
     # сценарий: флаги мира + спутники на старте (часть пре-гена)
     for flag in sc.get("flags", []):
         world.commit("set_flag", "worldgen", payload={"flag": flag})
+    for fid in sc.get("reveals", []):                   # фракции, названные в завязке — уже известны
+        world.commit("faction_learned", "worldgen", payload={"faction": fid})
     for cid in sc.get("companions", []):
         persona = world.ecs.get(cid, Persona)
         if persona:
@@ -383,4 +399,6 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     # 2c. pregen roster поверх зданий (демография)
     if roster_size > 0:
         CharacterGenerator(world, model=model).generate_roster(phandalin_profile(), roster_size)
+    from ..gen.faction_gen import assign_faction_members
+    assign_faction_members(world)     # 5c. раздать NPC по гражданским фракциям (по профессии)
     return world

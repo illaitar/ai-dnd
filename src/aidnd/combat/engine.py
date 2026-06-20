@@ -462,6 +462,7 @@ class CombatEngine:
             self.state.log.append(f"{self._name(eid)} повержен.")
             self._spawn_corpse(eid)
             self._award_xp(eid)
+            self._faction_fallout(eid)
 
     def _award_xp(self, eid: str) -> None:
         """Опыт за побеждённого врага — игроку (вся партия делит по упрощению)."""
@@ -473,6 +474,20 @@ class CombatEngine:
         p = self.world.ecs.get(eid, Persona)
         xp = MONSTER_XP.get(p.stat_block_ref if p else None, 25)
         self.world.commit("gain_xp", pc, target=eid, payload={"xp": xp})
+
+    def _faction_fallout(self, eid: str) -> None:
+        """Убийство члена фракции роняет репутацию с ней и поднимает у её врагов."""
+        from ..world.components import Faction, Persona
+        pc = self.world.player_id
+        persona = self.world.ecs.get(eid, Persona)
+        fid = persona.faction if persona else None
+        if not pc or not fid:
+            return
+        self.world.commit("faction_rep", pc, payload={"faction": fid, "delta": -0.1})
+        fac = self.world.ecs.get(fid, Faction)
+        for ofid, val in (fac.relations.items() if fac else []):
+            if val < 0:                                   # враги убитой фракции — одобряют
+                self.world.commit("faction_rep", pc, payload={"faction": ofid, "delta": 0.05})
 
     def _spawn_corpse(self, eid: str) -> None:
         from ..gen.item_gen import generate_individual_treasure

@@ -260,6 +260,72 @@ class World:
         p = ev.payload
         self.importance[p["place"]] = self.importance.get(p["place"], 0) + int(p.get("amount", 1))
 
+    def _h_gain_xp(self, ev: Event) -> None:
+        """Начислить опыт; посчитать, сколько уровней ждут выбора игрока (без авто-апа)."""
+        from ..rules.progression import MAX_LEVEL, level_for_xp
+        from .components import Progression, Stats5e
+        prog = self.ecs.get(ev.actor, Progression)
+        st = self.ecs.get(ev.actor, Stats5e)
+        if not prog or not st:
+            return
+        prog.xp = max(0, prog.xp + int(ev.payload.get("xp", 0)))
+        prog.pending = max(0, min(MAX_LEVEL, level_for_xp(prog.xp)) - st.level)
+
+    _ABILITY_ATTR = {"str": "str_", "dex": "dex", "con": "con",
+                     "int": "int_", "wis": "wis", "cha": "cha"}
+
+    def _h_level_up(self, ev: Event) -> None:
+        """Применить готовый (уже разрешённый игроком) уровень — детерминированно, реплей-сейф."""
+        from .components import Progression, Stats5e
+        p = ev.payload
+        prog = self.ecs.get(ev.actor, Progression)
+        st = self.ecs.get(ev.actor, Stats5e)
+        if not prog or not st:
+            return
+        st.level = int(p["new_level"])
+        st.proficiency = int(p.get("proficiency", st.proficiency))
+        gain = int(p.get("hp_gain", 0))
+        st.max_hp += gain
+        st.hp = min(st.max_hp, st.hp + gain)
+        for ability, delta in (p.get("asi") or {}).items():
+            attr = self._ABILITY_ATTR.get(ability)
+            if attr:
+                setattr(st, attr, getattr(st, attr) + int(delta))
+        if p.get("slots") is not None:
+            st.spell_slots = dict(p["slots"])
+        if p.get("spell_ability"):
+            st.spell_ability = p["spell_ability"]
+        for f in p.get("add_features", []):
+            if f not in prog.features:
+                prog.features.append(f)
+        if p.get("fighting_style"):
+            prog.fighting_style = p["fighting_style"]
+        if p.get("subclass"):
+            prog.subclass = p["subclass"]
+        for s in p.get("expertise", []):
+            if s not in prog.expertise:
+                prog.expertise.append(s)
+            if s not in st.proficient_skills:
+                st.proficient_skills.append(s)
+        for ft in p.get("feats", []):
+            if ft not in prog.feats:
+                prog.feats.append(ft)
+        for c in p.get("add_cantrips", []):
+            if c not in prog.cantrips:
+                prog.cantrips.append(c)
+        for s in p.get("add_spells", []):
+            if s not in prog.spells_known:
+                prog.spells_known.append(s)
+        prog.pending = max(0, prog.pending - 1)
+
+    def _h_cast_spell(self, ev: Event) -> None:
+        """Расход ячейки заклинания (событийно — переживает реплей/лоад)."""
+        from .components import Stats5e
+        st = self.ecs.get(ev.actor, Stats5e)
+        lvl = str(ev.payload.get("level", 0))
+        if st and int(lvl) > 0 and st.spell_slots.get(lvl, 0) > 0:
+            st.spell_slots[lvl] -= 1
+
     def _h_map_update(self, ev: Event) -> None:
         """Добавляет/обновляет запись в карте игрока (может быть ложной/неполной)."""
         p = ev.payload

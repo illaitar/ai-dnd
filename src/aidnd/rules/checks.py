@@ -31,6 +31,10 @@ def skill_modifier(world, eid: str, skill: str) -> int:
     st = world.ecs.get(eid, Stats5e)
     if st and skill in st.proficient_skills:
         mod += st.proficiency
+        from ..world.components import Progression
+        prog = world.ecs.get(eid, Progression)
+        if prog and skill in prog.expertise:          # компетentность плута: ×2 мастерство
+            mod += st.proficiency
     return mod
 
 

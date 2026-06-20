@@ -39,8 +39,14 @@ function render(r) {
   }
   if (r.rolled_faces) logEntry(`🎲 выпало: [${r.rolled_faces.join(", ")}]`, "mech");
   if (r.kind === "house" && r.house) renderHouse(r.house);
+  if (r.kind === "saved") { logSystem(`💾 Сохранено: «${r.card ? r.card.name : ""}»`); if (r.saves && !$("loadgame").classList.contains("hidden")) renderSaves(r.saves); }
+  if (r.kind === "saves" && r.saves) renderSaves(r.saves);
   if (r.view) updateView(r.view);
-  if (r.kind === "look") { renderExits(r.exits); renderNpcs(r.npcs); renderQuick(); }
+  if (r.kind === "error" && !$("levelup").classList.contains("hidden")) $("lvl-msg").textContent = r.text;
+  if (r.kind === "look") {
+    renderExits(r.exits); renderNpcs(r.npcs); renderQuick();
+    if (!menuShown) { menuShown = true; openOverlay("menu"); }   // экран меню при первом входе
+  }
   if (r.combat) renderCombat(r.combat);
   else if (r.view && !r.view.in_combat) $("combat").classList.add("hidden");
 
@@ -53,9 +59,25 @@ function updateView(v) {
   lastView = v;
   $("place-name").textContent = v.place_name || "—";
   $("clock").textContent = "🕑 " + (v.time || "—");
-  const p = v.player;
-  $("char").innerHTML =
-    `<b>${esc(p.name)}</b> — уровень ${p.level}<br>AC ${p.ac}`;
+  const p = v.player, pr = v.progression;
+  const xppct = p.xp_next ? Math.min(100, 100 * p.xp / p.xp_next) : 100;
+  const xpline = p.xp_next ? `XP ${p.xp} / ${p.xp_next}` : `XP ${p.xp} (макс.)`;
+  let sheet = `<b>${esc(p.name)}</b><br>${p.class_name ? esc(p.class_name) + " · " : ""}${p.level} ур. · AC ${p.ac}`
+    + `<div class="xpbar"><i style="width:${xppct}%"></i></div>`
+    + `<div style="font-size:11px;color:var(--muted)">${xpline}</div>`;
+  if (pr && pr.features && pr.features.length)
+    sheet += `<div class="sheet-feats"><b>Умения:</b> ${pr.features.map(esc).join(", ")}${pr.subclass ? " · " + esc(pr.subclass) : ""}</div>`;
+  if (pr && pr.spells && pr.spells.length) {
+    const slots = Object.entries(pr.slots || {}).map(([l, n]) => `${l}🔹${n}`).join(" ");
+    sheet += `<div class="sheet-feats"><b>Заклинания:</b> ${pr.spells.map(s => esc(s.name)).join(", ")}`
+      + (slots ? `<br><span style="color:var(--gold)">ячейки ${slots}</span>` : "") + `</div>`;
+  }
+  if (v.levelup) sheet += `<button class="lvl-btn" id="char-levelup">⬆ Повысить уровень${v.levelup.remaining > 1 ? " (" + v.levelup.remaining + ")" : ""}</button>`;
+  $("char").innerHTML = sheet;
+  if (v.levelup) $("char-levelup").onclick = () => openLevelup(v.levelup);
+  if (!$("levelup").classList.contains("hidden")) {        // живое обновление открытого диалога апа
+    if (v.levelup) renderLevelup(v.levelup); else closeOverlay("levelup");
+  }
   const pct = Math.max(0, 100 * p.hp / (p.max_hp || 1));
   $("hpfill").style.width = pct + "%";
   $("hptext").textContent = `HP ${p.hp} / ${p.max_hp}`;
@@ -131,6 +153,105 @@ function openOverlay(id) {
   $(id).classList.remove("hidden");
 }
 function closeOverlay(id) { $(id).classList.add("hidden"); }
+
+// ----------------------------------------------- меню / новая игра / сейвы ----
+let ngOpts = null, ngSel = { scenario: null, klass: null, kit: null, skills: [] }, lvlSel = {}, menuShown = false;
+
+async function ensureNgOptions() {
+  if (!ngOpts) {
+    try { const r = await fetch("/new_game_options"); ngOpts = r.ok ? await r.json() : null; }
+    catch (e) { ngOpts = { classes: [], kits: [], scenarios: [] }; }
+  }
+  renderNgForm();
+}
+function ngCard(grp, id, title, desc, sel) {
+  return `<div class="ng-card ${sel ? "sel" : ""}" data-grp="${grp}" data-id="${id}">`
+    + `<div class="t">${esc(title)}</div><div class="d">${esc(desc)}</div></div>`;
+}
+function renderNgForm() {
+  if (!ngOpts) return;
+  if (!ngSel.scenario && ngOpts.scenarios[0]) ngSel.scenario = ngOpts.scenarios[0].id;
+  if (!ngSel.klass && ngOpts.classes[0]) { ngSel.klass = ngOpts.classes[0].id; ngSel.kit = ngOpts.classes[0].kit; }
+  $("ng-scenarios").innerHTML = ngOpts.scenarios.map(s => ngCard("scenario", s.id, s.name, s.desc, s.id === ngSel.scenario)).join("");
+  $("ng-classes").innerHTML = ngOpts.classes.map(c => ngCard("klass", c.id, c.name, c.desc, c.id === ngSel.klass)).join("");
+  $("ng-kits").innerHTML = ngOpts.kits.map(k => ngCard("kit", k.id, k.name, k.blurb, k.id === ngSel.kit)).join("");
+  const cls = ngOpts.classes.find(c => c.id === ngSel.klass), need = cls ? cls.skill_count : 0;
+  $("ng-skill-hint").textContent = cls ? `выбери ${ngSel.skills.length} / ${need}` : "";
+  $("ng-skills").innerHTML = cls ? cls.skills.map(sk => {
+    const sel = ngSel.skills.includes(sk.id), dim = !sel && ngSel.skills.length >= need;
+    return `<span class="ng-chip ${sel ? "sel" : ""} ${dim ? "dim" : ""}" data-skill="${sk.id}">${esc(sk.name)}</span>`;
+  }).join("") : "";
+  document.querySelectorAll("#newgame .ng-card").forEach(el => el.onclick = () => {
+    const g = el.dataset.grp, id = el.dataset.id;
+    if (g === "scenario") ngSel.scenario = id;
+    else if (g === "klass") { ngSel.klass = id; ngSel.skills = []; const c = ngOpts.classes.find(x => x.id === id); if (c) ngSel.kit = c.kit; }  // класс задаёт снаряжение и сбрасывает навыки
+    else ngSel.kit = id;
+    renderNgForm();
+  });
+  document.querySelectorAll("#ng-skills .ng-chip").forEach(el => el.onclick = () => {
+    const id = el.dataset.skill;
+    if (ngSel.skills.includes(id)) ngSel.skills = ngSel.skills.filter(x => x !== id);
+    else if (ngSel.skills.length < need) ngSel.skills.push(id);
+    renderNgForm();
+  });
+}
+function startNewGame() {
+  send({ cmd: "new_game", scenario: ngSel.scenario, klass: ngSel.klass, kit: ngSel.kit,
+         skills: ngSel.skills, name: $("ng-name").value || "Герой" });
+  closeOverlay("newgame"); closeOverlay("menu"); logSystem("🆕 Новая игра…");
+}
+// ---- повышение уровня (выборы 5e) ----
+function openLevelup(lv) { openOverlay("levelup"); renderLevelup(lv); }
+function renderLevelup(lv) {
+  $("lvl-title").textContent = `${lv.class_name}: ${lv.from} → ${lv.to}` + (lv.remaining > 1 ? ` (ещё ${lv.remaining})` : "");
+  lvlSel = {}; $("lvl-msg").textContent = "";
+  const box = $("lvl-choices");
+  if (!lv.choices.length) { box.innerHTML = '<div class="ng-card"><div class="d">Только улучшения уровня (HP, бонус мастерства). Нажми «Подтвердить».</div></div>'; return; }
+  box.innerHTML = lv.choices.map(ch => {
+    const multi = ch.id === "spells" || ch.id === "expertise" || ch.pick > 1;
+    return `<div><h3>${esc(ch.label)}</h3><div class="ng-cards" data-choice="${ch.id}" data-pick="${ch.pick}" data-multi="${multi ? 1 : 0}">`
+      + ch.options.map(o => `<div class="ng-card" data-opt="${esc(o.id)}"><div class="t">${esc(o.name)}</div>${o.desc ? `<div class="d">${esc(o.desc)}</div>` : ""}</div>`).join("") + `</div></div>`;
+  }).join("");
+  document.querySelectorAll("#lvl-choices .ng-cards").forEach(group => {
+    const cid = group.dataset.choice, pick = +group.dataset.pick, multi = group.dataset.multi === "1";
+    group.querySelectorAll(".ng-card").forEach(card => card.onclick = () => {
+      const opt = card.dataset.opt;
+      if (multi) {
+        const arr = lvlSel[cid] || [];
+        lvlSel[cid] = arr.includes(opt) ? arr.filter(x => x !== opt) : (arr.length < pick ? [...arr, opt] : arr);
+      } else lvlSel[cid] = opt;
+      group.querySelectorAll(".ng-card").forEach(c => {
+        const on = multi ? (lvlSel[cid] || []).includes(c.dataset.opt) : lvlSel[cid] === c.dataset.opt;
+        c.classList.toggle("sel", !!on);
+      });
+    });
+  });
+}
+function applyLevelup() { send({ cmd: "levelup", selections: lvlSel }); }
+async function openLoad() {
+  openOverlay("loadgame");
+  try { const r = await fetch("/saves"); if (r.ok) renderSaves((await r.json()).saves); } catch (e) {}
+}
+function fmtDate(ts) { if (!ts) return ""; try { return new Date(ts * 1000).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }); } catch (e) { return ""; } }
+function renderSaves(list) {
+  const box = $("saves-list");
+  if (!list || !list.length) { box.innerHTML = '<div class="saves-empty">Сохранений пока нет.</div>'; return; }
+  box.innerHTML = list.map(s => {
+    const m = s.meta || {};
+    return `<div class="save-row"><div class="info"><div class="nm">${esc(s.name || s.slug)}</div>`
+      + `<div class="sub2">${esc(m.klass || "")} · ${esc(m.place || "")} · 🕑 ${esc(m.time || "")} · ${esc(fmtDate(s.created))}</div></div>`
+      + `<button data-load="${esc(s.slug)}">Загрузить</button><button class="del" data-del="${esc(s.slug)}">Удалить</button></div>`;
+  }).join("");
+  box.querySelectorAll("[data-load]").forEach(b => b.onclick = () => {
+    send({ cmd: "load", slug: b.dataset.load }); closeOverlay("loadgame"); closeOverlay("menu"); logSystem("📂 Загрузка…");
+  });
+  box.querySelectorAll("[data-del]").forEach(b => b.onclick = () => send({ cmd: "delete_save", slug: b.dataset.del }));
+}
+function doSave() {
+  const def = lastView ? `${(lastView.player && lastView.player.name) || "Герой"} — ${lastView.place_name || ""}` : "Сейв";
+  const name = window.prompt("Название сохранения:", def);
+  if (name) send({ cmd: "save", name });
+}
 
 function renderTrade(shop) {
   if (!shop) { $("trade-goods").innerHTML = "<span class='state'>лавка закрыта</span>"; $("trade-sell").innerHTML = ""; return; }
@@ -452,4 +573,11 @@ document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closeOv
 $("map-go").onclick = goSelection;
 $("map-cancel").onclick = clearSelection;
 window.__map = { hits: () => mapHits, mode: () => mapMode, pick: (i) => setSelection(mapHits[i]), go: goSelection };
+$("menu-btn").onclick = () => openOverlay("menu");
+$("m-new").onclick = () => { closeOverlay("menu"); openOverlay("newgame"); ensureNgOptions(); };
+$("m-continue").onclick = () => closeOverlay("menu");
+$("m-load").onclick = () => { closeOverlay("menu"); openLoad(); };
+$("m-save").onclick = doSave;
+$("ng-start").onclick = startNewGame;
+$("lvl-apply").onclick = applyLevelup;
 connect();

@@ -82,6 +82,19 @@ def world_page() -> HTMLResponse:
         return HTMLResponse(f.read())
 
 
+@app.get("/new_game_options")
+def new_game_options() -> dict:
+    """Списки классов, стартового снаряжения и сценариев для экрана новой игры."""
+    from ..content.newgame import options
+    return options()
+
+
+@app.get("/saves")
+def saves_list() -> dict:
+    from ..runtime.persistence import list_saves
+    return {"saves": list_saves()}
+
+
 @app.get("/town_layout")
 def town_layout(seed: int = config.WORLD_SEED) -> dict:
     """Список достопримечательностей города (здания+направления) для процедурной
@@ -210,6 +223,30 @@ async def ws(sock: WebSocket) -> None:
                 result = {"kind": "house", "house": house, "view": session.view()}
             elif cmd == "roll_manual":
                 result = session.submit_roll(msg.get("faces", []))
+            elif cmd == "new_game":
+                pc_spec = {"klass": msg.get("klass"), "kit": msg.get("kit"),
+                           "name": msg.get("name"), "skills": msg.get("skills")}
+                session = new_session(seed=int(msg.get("seed", config.WORLD_SEED)),
+                                      roster_size=12, use_model=True,
+                                      scenario=msg.get("scenario"), pc_spec=pc_spec)
+                result = session.look()
+                result["server_online"] = bool(session.model and session.model.available())
+            elif cmd == "levelup":
+                result = session.apply_levelup(msg.get("selections") or {})
+            elif cmd == "save":
+                from ..runtime.persistence import list_saves, save_session
+                card = save_session(session, msg.get("name", "Без названия"))
+                result = {"kind": "saved", "card": card, "saves": list_saves(),
+                          "view": session.view()}
+            elif cmd == "load":
+                from ..runtime.persistence import load_session
+                session = load_session(msg.get("slug", ""), use_model=True)
+                result = session.look()
+                result["server_online"] = bool(session.model and session.model.available())
+            elif cmd == "delete_save":
+                from ..runtime.persistence import delete_save, list_saves
+                delete_save(msg.get("slug", ""))
+                result = {"kind": "saves", "saves": list_saves(), "view": session.view()}
             elif cmd == "new":
                 session = new_session(seed=msg.get("seed", config.WORLD_SEED),
                                       roster_size=12, use_model=True)

@@ -388,6 +388,8 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     # сценарий: флаги мира + спутники на старте (часть пре-гена)
     for flag in sc.get("flags", []):
         world.commit("set_flag", "worldgen", payload={"flag": flag})
+    for fid in sc.get("reveals", []):                   # фракции, названные в завязке — уже известны
+        world.commit("faction_learned", "worldgen", payload={"faction": fid})
     for cid in sc.get("companions", []):
         persona = world.ecs.get(cid, Persona)
         if persona:

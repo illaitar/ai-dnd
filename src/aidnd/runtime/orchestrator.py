@@ -351,6 +351,7 @@ class GameSession:
             self.world.commit("talk", self.player, target=npc, payload={"opening": True})
             self._log_journal(f"Заговорил с {self._display(npc)}.")
             line = self._npc_greeting(npc, rel, first_meeting)
+            line += self._reveal_note(self._reveal_from_dialogue(npc, rel, None))
             self._tick()
             return {"kind": "narration", "text": line, "speaker": self._display(npc),
                     "npc": npc, "hint": "Спроси о чём-нибудь, предложи дело или скажи что-то.",
@@ -364,6 +365,7 @@ class GameSession:
                                             f"игрок сказал: {topic[:60]}")
         self.world.commit("talk", self.player, target=npc, payload={"topic": topic[:60]})
         line = self._npc_reply(npc, decision, topic, rel, first_meeting, hooks)
+        line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._log_journal(f"Поговорил с {self._display(npc)}.")
         self._tick()
         return {"kind": "narration", "text": line, "speaker": self._display(npc),
@@ -1552,6 +1554,8 @@ class GameSession:
             fac = self.world.ecs.get(fid, Faction)
             if not fac:
                 continue
+            if fid not in self.world.known_factions and aff.membership != fid:
+                continue                                  # игрок ещё не слышал об этой фракции
             rep = self.world.reputation.get(fid, 0.0)
             label, color = standing_tier(rep)
             is_member = aff.membership == fid
@@ -1587,6 +1591,7 @@ class GameSession:
         fac = self.world.ecs.get(fid, Faction)
         if not fac or not fac.joinable:
             return {"kind": "error", "text": "В эту фракцию нельзя вступить.", "view": self.view()}
+        self._reveal_factions({fid})                        # вступаешь — значит точно знаешь о ней
         aff = self._affiliation()
         if aff.membership == fid:
             return {"kind": "system", "text": f"Ты уже в «{fac.name}».", "view": self.view()}
@@ -1627,6 +1632,37 @@ class GameSession:
         from ..world.components import Faction
         fac = self.world.ecs.get(fid, Faction) if fid else None
         return fac.name if fac else (fid or "—")
+
+    def _reveal_factions(self, fids) -> list[str]:
+        """Открыть игроку фракции (он «узнал» о них). Возвращает имена новооткрытых."""
+        names = []
+        for fid in fids:
+            if not fid or fid not in self.world.factions or fid in self.world.known_factions:
+                continue
+            self.world.commit("faction_learned", self.player, payload={"faction": fid})
+            nm = self._faction_name(fid)
+            names.append(nm)
+            self._log_journal(f"Узнал(а) о фракции «{nm}».")
+        return names
+
+    def _reveal_note(self, names: list[str]) -> str:
+        return ("  📜 Ты узнаёшь о фракции " + ", ".join(f"«{n}»" for n in names) + ".") if names else ""
+
+    def _reveal_from_dialogue(self, npc: str, rel, topic: str | None) -> list[str]:
+        """Что за фракции всплыли в разговоре: своя у NPC + те, чьё знание он раскрыл."""
+        from ..content.knowledge import disclosable, faction_for_topic
+        from ..world.components import Persona
+        persona = self.world.ecs.get(npc, Persona)
+        if not persona:
+            return []
+        fids = set()
+        if persona.faction:
+            fids.add(persona.faction)
+        for item in disclosable(persona, rel.trust, topic):
+            fid = faction_for_topic(item.get("topic"))
+            if fid:
+                fids.add(fid)
+        return self._reveal_factions(fids)
 
     def view(self) -> dict:
         st = self.world.get_stats(self.player)

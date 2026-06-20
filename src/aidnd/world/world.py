@@ -74,6 +74,7 @@ class World:
         self.resolutions: dict[str, dict] = {}           # зафиксированные факты доразрешения сцены
         self.importance: dict[str, int] = {}             # индекс важности места (визиты/осмотры)
         self.reputation: dict[str, float] = {}           # стояние игрока с фракцией [-1..1]
+        self.known_factions: set[str] = set()            # о каких фракциях игроку рассказали
         self.player_maps: dict[str, dict] = {}           # карта в голове игрока (может врать)
         self.name_registry: set[str] = set()
         self.conditions: dict[str, list] = {}            # entity_id -> [Condition]
@@ -426,6 +427,10 @@ class World:
         fac = self._faction(p["a"])
         if fac:
             fac.relations[p["b"]] = float(p.get("value", 0.0))
+
+    def _h_faction_learned(self, ev: Event) -> None:
+        """Игрок узнал о фракции (из диалога/книг) — теперь она видима в листе."""
+        self.known_factions.add(ev.payload["faction"])
 
     def _h_map_update(self, ev: Event) -> None:
         """Добавляет/обновляет запись в карте игрока (может быть ложной/неполной)."""

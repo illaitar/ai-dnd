@@ -99,7 +99,7 @@ function updateView(v) {
 function facName(f, id) { const x = (f.list || []).find(y => y.id === id); return x ? x.name : id; }
 function renderFactionsPanel(f) {
   const box = $("factions");
-  if (!f || !f.list || !f.list.length) { box.innerHTML = "<span class='state'>нет данных</span>"; return; }
+  if (!f || !f.list || !f.list.length) { box.innerHTML = "<span class='state'>пока ничего не известно — узнавай в разговорах</span>"; return; }
   box.innerHTML = f.list.map(x =>
     `<div class="fac-mini" data-fac="${x.id}"><span class="em">${x.emblem}</span>`
     + `<span class="nm">${esc(x.name)}${x.member ? ' <span class="you">✓</span>' : ""}</span>`
@@ -114,6 +114,7 @@ function openFactions(focusId) {
 function renderFactionsOverlay(f) {
   if (!f) return;
   $("fac-membership").textContent = f.membership ? "— ты в «" + facName(f, f.membership) + "»" : "— ты вне фракций";
+  if (!f.list.length) { $("fac-list").innerHTML = "<div class='saves-empty'>Ты пока не слышал ни об одной фракции. О них узнают в разговорах с местными и из книг.</div>"; return; }
   $("fac-list").innerHTML = f.list.map(x => {
     const goals = x.goals.length ? `<div class="meta"><b>Цели:</b> ${x.goals.map(esc).join("; ")}</div>` : "";
     const vals = x.values.length ? `<div class="meta"><b>Ценности:</b> ${x.values.map(esc).join(", ")}</div>` : "";

@@ -85,6 +85,30 @@ def test_inspect_marks_enriched_offline():
     assert s.world.ecs.get("faction:watch", Faction).enriched          # офлайн → дефолты, помечено
 
 
+def test_factions_hidden_until_told_in_dialogue():
+    s = new_session(seed=1337, roster_size=4, use_model=False)   # сценарий «прибытие» — ничего не известно
+    assert s._factions_view()["list"] == []                       # туман войны: фракций не видно
+    r = s.handle("поговорить с Toblen")                            # трактирщик — член торговой гильдии
+    known = {x["id"] for x in s._factions_view()["list"]}
+    assert "faction:merchant_guild" in known                      # узнали о ней из разговора
+    assert "фракци" in r["text"].lower()                          # и нам об этом сказали
+
+
+def test_scenario_reveals_plot_faction():
+    s = new_session(seed=1337, roster_size=2, use_model=False, scenario="redbrands")
+    assert "faction:redbrands" in s.world.known_factions          # названа в завязке → известна
+    assert {x["id"] for x in s._factions_view()["list"]} == {"faction:redbrands"}
+
+
+def test_known_factions_survive_save_load(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "SAVE_DIR", str(tmp_path))
+    s = new_session(seed=1337, roster_size=4, use_model=False)
+    s.handle("поговорить с Toblen")
+    card = persistence.save_session(s, "known")
+    loaded = persistence.load_session(card["slug"], use_model=False)
+    assert "faction:merchant_guild" in loaded.world.known_factions
+
+
 def test_membership_and_rep_survive_save_load(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SAVE_DIR", str(tmp_path))
     s = new_session(seed=1337, roster_size=2, use_model=False)

@@ -87,6 +87,18 @@ FACTION_KNOWLEDGE = {
 }
 
 
+# тема знания → фракция (для «узнавания» фракций из услышанного в диалоге)
+TOPIC_FACTION = {}
+for _fid, _items in FACTION_KNOWLEDGE.items():
+    for _it in _items:
+        TOPIC_FACTION.setdefault(_it["topic"], _fid)
+TOPIC_FACTION.setdefault("cragmaw", "faction:cragmaw")     # упоминается и в профессиях/разведке
+
+
+def faction_for_topic(topic: str | None) -> str | None:
+    return TOPIC_FACTION.get(topic or "")
+
+
 def inherit_knowledge(persona, profession: str | None, faction: str | None) -> None:
     """Добавляет персоне базовые знания профессии и фракции (без дублей)."""
     have = {k.get("fact") for k in persona.knowledge}

@@ -76,6 +76,10 @@ def _build_places(world: World) -> None:
     for direction, bid in compass.items():
         sp.link(sq, direction, bid)
     sp.link("building:sleeping_giant", "south", "building:alderleaf_farm")  # за «Спящим великаном»
+    # доска объявлений — отдельное здание на площади с простыми заданиями (док 05)
+    sp.add_place(Place("building:notice_board", "building", "Доска объявлений",
+                       parent="settlement:phandalin", district="market", affordances=["board"]))
+    sp.link(sq, "к доске", "building:notice_board")     # внекомпасный портал (стоит у площади)
 
     # --- региональный слой странствий ------------------------------------- #
     # Из города «наружу» в дикие земли, оттуда — к сайтам по СТОРОНАМ СВЕТА

@@ -152,6 +152,11 @@ class GameSession:
         if self.combat and self.combat.state.mode == "active":
             return {"kind": "combat", "text": "Идёт бой — используй боевые действия.",
                     "view": self.view()}
+        # вопрос О МИРЕ/СЕБЕ → ответ из стейта (без броска); но вопрос, адресованный
+        # присутствующему NPC (или в идущем диалоге), — это реплика, а не запрос к миру
+        qtype = self._query_type(text)
+        if qtype and not self.dialogue_partner and not self._match_npc(text):
+            return self._post(self._answer_query(qtype), "query")
         action = self._parse_intent(text)
         verb = action.verb
         # действие (не разговор) завершает текущий диалог; покупка сведений/торговля
@@ -1738,6 +1743,69 @@ class GameSession:
             return f"надпись «{m.group(1).strip()}»"
         phrase = re.sub(r'^\s*(я\s+)?(хочу\s+|решил[аи]?\s+|пытаюсь\s+)?', '', text.strip(), flags=re.I)
         return phrase[:90]
+
+    # --- запросы о мире/себе: отвечаем из читаемого стейта, без модели и броска ---
+    _QUERY_HEADS = ("что", "какие", "какой", "какая", "кто", "кого", "где", "куда",
+                    "сколько", "чем", "чего", "есть ли", "видно ли", "можно ли", "видишь",
+                    "вижу ли")
+
+    def _query_type(self, text: str) -> str | None:
+        low = text.strip().lower()
+        is_q = (low.endswith("?") or any(low.startswith(w) for w in self._QUERY_HEADS)
+                or any(p in low for p in ("что вижу", "что видно", "что рядом", "что здесь",
+                                          "что вокруг", "кто здесь", "кто рядом", "куда можно")))
+        if not is_q:
+            return None
+        if any(k in low for k in ("предмет", "вещ", "лежит", "на полу", "на земле", "ценн",
+                                  "добыч", "взять", "подобрать", "лут", "трофе")):
+            return "items"
+        if any(k in low for k in ("кто", "кого", "люд", "персонаж", "нпс")):
+            return "who"
+        if any(k in low for k in ("куда", "выход", "пойти", "идти", "уйти", "дорог", "путь")):
+            return "exits"
+        if any(k in low for k in ("сумк", "инвентар", "при себе", "ношу", "у меня в",
+                                  "что у меня", "золот", "денег", "монет", "снаряж")):
+            return "inventory"
+        if any(k in low for k in ("здоров", "хп", "hp", "ранен", "состояни", "сколько жизн", "цел ли")):
+            return "status"
+        if any(k in low for k in ("карт", "местност", "округ", "где я")):
+            return "map"
+        return "look"
+
+    def _answer_query(self, qtype: str) -> dict:
+        if qtype == "look":
+            return self.look()
+        if qtype == "map":
+            return {"kind": "look", "text": self.map_text(), "view": self.view()}
+        if qtype == "inventory":
+            return {"kind": "inventory", "text": self._inventory_text(), "view": self.view()}
+        if qtype == "who":
+            who = [self._display(n) for n in self.npcs_here()]
+            txt = ("Рядом: " + ", ".join(who) + ".") if who else "Рядом никого нет."
+            return {"kind": "narration", "text": txt, "view": self.view()}
+        if qtype == "exits":
+            ex = [self._place_name(e) for e in self.exits()]
+            txt = ("Отсюда можно пройти: " + ", ".join(ex) + ".") if ex else "Явных выходов отсюда нет."
+            return {"kind": "narration", "text": txt, "view": self.view()}
+        if qtype == "status":
+            pl = self.view().get("player", {})
+            txt = (f"{pl.get('name', 'Ты')}: уровень {pl.get('level', 1)}, "
+                   f"HP {pl.get('hp')}/{pl.get('max_hp')}.")
+            return {"kind": "narration", "text": txt, "view": self.view()}
+        # items: что заметного рядом — контейнеры/лавка/affordances (без выдумки)
+        bits = []
+        for cid in self._containers_here():
+            names = [self._item_name(i) for i in self.world.containers[cid].items]
+            if names:
+                bits.append(", ".join(names))
+        affs = [a["label"] for a in self.affordances_here()]
+        if bits:
+            txt = "На виду: " + "; ".join(bits) + "."
+        elif self._shop_here():
+            txt = "Здесь торгуют — можно посмотреть товар («купить», «что продаёшь»)."
+        else:
+            txt = "Ничего ценного на виду." + ((" Можно: " + ", ".join(affs) + ".") if affs else "")
+        return {"kind": "narration", "text": txt, "view": self.view()}
 
     def _resolve_freeform(self, text: str, target: str | None = None, hostile: bool = False) -> dict:
         low0 = text.lower()

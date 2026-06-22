@@ -39,7 +39,8 @@ def _resolve_rolls(session, result: dict, salt: int) -> dict:
 
 def _print_result(r: dict) -> None:
     if r.get("text"):
-        print("\n" + r["text"])
+        head = (r["speaker"] + " ") if r.get("speaker") else ""
+        print("\n" + head + r["text"])
     if r.get("hint"):
         print(f"  ({r['hint']})")
     cv = r.get("combat")

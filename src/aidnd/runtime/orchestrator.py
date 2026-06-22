@@ -259,9 +259,11 @@ class GameSession:
     def _do_move(self, action: Action, text: str) -> dict:
         dest = self._match_place(text)
         if not dest:
-            low = text.lower()                            # не нашли локацию: описательная/физическая
-            if any(k in low for k in self._FREEFORM_KW) or len(text.split()) >= 5:   # фраза → freeform
-                return self._resolve_freeform(text)
+            low = text.lower()                            # локация не распознана
+            move_verb = any(k in low for k in ("иди", "идти", "иду", "пойд", "двигай", "войти",
+                                               "зайти", "направ", "шага", "топай", "перейти", "go "))
+            if not move_verb or any(k in low for k in self._FREEFORM_KW):
+                return self._resolve_freeform(text)        # роутер ошибся / физическое действие → freeform
             return {"kind": "system", "text": "Куда идти? Доступные выходы: "
                     + ", ".join(self._place_name(e) for e in self.exits()),
                     "view": self.view()}
@@ -410,7 +412,7 @@ class GameSession:
             self.cognition.observe(npc, "ко мне подошёл незнакомец", importance=2)
             self.world.commit("talk", self.player, target=npc, payload={"opening": True})
             self._log_journal(f"Заговорил с {self._display(npc)}.")
-            line = self._npc_greeting(npc, rel, first_meeting)
+            line = self._strip_leading_name(self._npc_greeting(npc, rel, first_meeting), npc)
             line += self._reveal_note(self._reveal_from_dialogue(npc, rel, None))
             self._tick()
             return {"kind": "narration", "text": line, "speaker": self._display(npc),
@@ -424,12 +426,22 @@ class GameSession:
         self.cognition.observe_and_appraise(npc, self.player, "talk", action.tone,
                                             f"игрок сказал: {topic[:60]}")
         self.world.commit("talk", self.player, target=npc, payload={"topic": topic[:60]})
-        line = self._npc_reply(npc, decision, topic, rel, first_meeting, hooks)
+        line = self._strip_leading_name(self._npc_reply(npc, decision, topic, rel, first_meeting, hooks), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._log_journal(f"Поговорил с {self._display(npc)}.")
         self._tick()
         return {"kind": "narration", "text": line, "speaker": self._display(npc),
                 "npc": npc, "decision": decision, "hooks": hooks, "view": self.view()}
+
+    def _strip_leading_name(self, line: str, npc: str) -> str:
+        """Реплику показывает поле speaker, поэтому имя в начале текста — лишнее (иначе
+        фронт даёт «Имя Имя …»). Снимаем ведущее имя NPC."""
+        nm = self._display(npc)
+        s = line.lstrip()
+        if nm and s.startswith(nm):
+            s = s[len(nm):].lstrip(" :,—-")
+            return s[:1].upper() + s[1:] if s else line
+        return line
 
     def _extract_topic(self, text: str, npc: str) -> str:
         """Вычленяет реплику/тему игрока, отбросив каркас «поговорить с X». Пусто —
@@ -1702,7 +1714,8 @@ class GameSession:
 
     _HOSTILE_KW = ["кин", "кид", "брос", "метн", "мета", "швыр", "ударь", "бью", "бей",
                    "толкн", "пихн", "атак", "напад", "руб", "пни", "пина", "режу", "коли",
-                   "стреля", "пыря"]
+                   "стреля", "пыря", "плюн", "плюю", "плева", "врежу", "вмаж", "душу", "пощёчин",
+                   "пощечин"]
 
     def _aggro(self, target: str) -> None:
         """Нападение озлобляет цель, её подельников рядом и (если жертва мирная) стражу;
@@ -1866,6 +1879,9 @@ class GameSession:
 
     def _answer_query(self, qtype: str, text: str = "") -> dict:
         low = text.lower()
+        if any(k in low for k in ("скрыва", "прячет", "прячут", "затаил", "в тени", "соглядат",
+                                  "следит", "следят", "подсматр", "подслуш", "шпион", "слежк")):
+            return self._do_scan(Action(actor=self.player, verb="scan"), text)  # «кто скрывается?» → проверка
         iid = self._item_in_carry(text)                   # назван предмет при себе?
         if not iid and any(p in low for p in ("на нём", "на нем", "на ней", "на это", "на том",
                                               "о нём", "о нем", "что там", "что на")):
@@ -1917,9 +1933,13 @@ class GameSession:
 
     def _resolve_freeform(self, text: str, target: str | None = None, hostile: bool = False) -> dict:
         low0 = text.lower()
-        if (hostile or any(k in low0 for k in self._HOSTILE_KW)) and target \
-                and self.world.ecs.exists(target) and self.world.is_alive(target):
-            return self._improvised_attack(text, target)  # враждебно по NPC → импровиз-атака с последствиями
+        if hostile or any(k in low0 for k in self._HOSTILE_KW):   # враждебное действие по NPC
+            tgt = target or self.dialogue_partner             # «бью ему / плюну в него» → собеседник
+            if not tgt:
+                here = self.npcs_here()
+                tgt = here[0] if len(here) == 1 else None     # единственный рядом — очевидная цель
+            if tgt and self.world.ecs.exists(tgt) and self.world.is_alive(tgt):
+                return self._improvised_attack(text, tgt)     # импровиз-атака с последствиями (урон/агро/бой)
 
         # осмотр предмета из инвентаря → заземлённое описание (с накопленными изменениями)
         if any(k in low0 for k in ("осмотр", "осматр", "разгляд", "рассматр", "посмотр", "погляж",

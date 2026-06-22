@@ -24,8 +24,15 @@ and hidden rooms. The model only adds flavor (names, descriptions) — never the
 
 ![Generated dungeon maps](docs/assets/dungeon_maps.png)
 
-Regenerate with `python scripts/gen_map_collages.py dungeons` (dungeons render in Python;
-town frames come from the in-browser city generator — see the script docstring).
+**A dungeon run** — fog lifts room by room, a locked door blocks the boss until the guard
+room is cleared, a hidden room is found by searching, then the boss falls (rendered from a
+deterministic, model-off playthrough):
+
+![Dungeon playthrough](docs/assets/dungeon_playthrough.gif)
+
+Regenerate with `python scripts/gen_map_collages.py dungeons` and
+`python scripts/gen_dungeon_anim.py` (dungeons/animation render in Python; town frames come
+from the in-browser city generator — see the script docstrings).
 
 ---
 

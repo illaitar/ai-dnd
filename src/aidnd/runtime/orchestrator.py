@@ -27,7 +27,8 @@ from .director import Director
 # Порядок ВАЖЕН: специфичные/враждебные глаголы раньше «talk», иначе «запугать…
 # говори!» ловится на «говор» как разговор. Сначала attack/intimidate/persuade.
 VERB_KEYWORDS = {
-    "move": ["иди", "идти", "иду", "пойд", "go ", "move", "войти", "зайти", "нап혀рав"],
+    "move": ["иди", "идти", "иду", "пойд", "go ", "move", "войти", "зайти", "направ",
+             "подойд", "подойт", "подход", "верну", "вернис", "двигай", "топай"],
     "attack": ["бью", "атак", "напад", "ударь", "attack", "kill", "убить", "руб"],
     "intimidate": ["запуга", "угрож", "intimidate", "припугн"],
     "persuade": ["убеди", "уговор", "persuade", "договор"],
@@ -136,7 +137,18 @@ class GameSession:
     # ===================================================================== #
     #  Главный обработчик ввода                                             #
     # ===================================================================== #
+    def is_game_over(self) -> bool:
+        """Игра окончена, если герой мёртв (0 HP). Дальнейшие действия блокируются."""
+        return not self.world.is_alive(self.player)
+
+    def _game_over_result(self) -> dict:
+        return {"kind": "game_over", "game_over": True,
+                "text": "💀 Игра окончена. Герой пал. Начни новую игру или загрузи сейв.",
+                "view": self.view()}
+
     def handle(self, text: str) -> dict:
+        if self.is_game_over():
+            return self._game_over_result()
         if self.combat and self.combat.state.mode == "active":
             return {"kind": "combat", "text": "Идёт бой — используй боевые действия.",
                     "view": self.view()}
@@ -909,7 +921,8 @@ class GameSession:
         if "cragmaw_cleared" in self.world.flags:
             self.director.pacing_check()
         msg = {"victory": "Победа! Враги повержены.",
-               "tpk": "Партия пала...", "flee": "Враги бежали."}.get(cs.outcome, "Бой окончен.")
+               "tpk": "Партия пала...", "flee": "Враги бежали.",
+               "defeat": "💀 Герой пал. Игра окончена."}.get(cs.outcome, "Бой окончен.")
         self._log_journal(msg)
         return f"\n=== {msg} ==="
 
@@ -1284,13 +1297,34 @@ class GameSession:
         return f"{base}×{inst.quantity}" if inst.quantity > 1 else base
 
     def _match_npc(self, text: str) -> str | None:
+        """Сопоставляет ссылку игрока с присутствующим NPC по имени, эпитету и рус.
+        алиасам. Стем-матч (как у _match_place) терпит падежи: «Гарэле/Гарэлой»,
+        «Кларга/Кларгу». При нескольких NPC рядом выбираем с наибольшим совпадением."""
+        import re
         low = text.lower()
+        toks = [t for t in re.split(r"[^0-9a-zа-яё]+", low) if len(t) >= 3]
+        best, best_score = None, 0
         for npc in self.npcs_here():
             p = self.world.ecs.get(npc, Persona)
-            if p and (p.name.lower() in low or (p.epithet and p.epithet.lower() in low)
-                      or p.name.split()[0].lower() in low):
-                return npc
-        return None
+            if not p:
+                continue
+            forms = [p.name.lower()]
+            if p.epithet:
+                forms.append(p.epithet.lower())
+            forms += [a.lower() for a in getattr(p, "aliases", [])]
+            score = 0
+            for form in forms:
+                if form and form in low:                  # полное вхождение формы
+                    score = max(score, 5)
+                for w in form.split():
+                    if len(w) < 3:
+                        continue
+                    stem = w[:5]
+                    if any(t.startswith(stem) or stem.startswith(t) for t in toks):
+                        score += 1
+            if score > best_score:
+                best, best_score = npc, score
+        return best
 
     def _direction_in(self, low: str) -> str | None:
         from ..world.spatial import DIR_ALIASES
@@ -1835,6 +1869,7 @@ class GameSession:
             "place": place, "place_name": self._place_name(place),
             "seed": self.world.seed,
             "time": self.world.clock.hhmm(),
+            "game_over": self.is_game_over(),
             "in_combat": bool(self.combat and self.combat.state.mode == "active"),
             "pending_roll": self._roll_req_dict(self.pending_roll["request"]) if self.pending_roll else None,
             "connectivity": self.connectivity(),

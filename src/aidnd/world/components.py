@@ -123,6 +123,7 @@ class Persona:
     faction: str | None = None
     faction_rank: str | None = None
     epithet: str | None = None          # "the Black Spider", "Glasstaff"
+    aliases: list[str] = field(default_factory=list)  # рус. формы имени для матчинга ссылок игрока
     knowledge: list[dict] = field(default_factory=list)  # KnowledgeItem-словари
     secrets: list[dict] = field(default_factory=list)
     enriched: bool = False              # прошёл ли first-L3 обогащение моделью

@@ -547,6 +547,12 @@ class CombatEngine:
 
     def check_end(self) -> bool:
         cs = self.state
+        # гибель героя — конец игры, даже если союзники ещё могли добить врагов
+        pc = self.world.player_id
+        if pc and pc in cs.combatants and not self.world.is_alive(pc):
+            cs.mode, cs.outcome = "ended", "defeat"
+            cs.log.append("Герой пал.")
+            return True
         if not self.alive_enemies():
             cs.mode, cs.outcome = "ended", "victory"
             cs.log.append("Победа!")

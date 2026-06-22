@@ -114,13 +114,14 @@ def _add_npc(world: World, npc_id: str, name: str, archetype: str, stat_ref: str
              race: str = "human", faction: str | None = None, traits=None,
              voice=None, profession: str | None = None, works_at: str | None = None,
              lives_in: str | None = None, place: str | None = None,
-             knowledge=None, secrets=None, epithet=None) -> str:
+             knowledge=None, secrets=None, epithet=None, aliases=None) -> str:
     world.ecs.spawn(npc_id)
     sb = get_stat_block(stat_ref)
     persona = Persona(
         name=name, archetype=archetype, race=race, profession=profession,
         traits=list(traits or []), voice=voice, stat_block_ref=stat_ref,
-        faction=faction, epithet=epithet, knowledge=list(knowledge or []),
+        faction=faction, epithet=epithet, aliases=list(aliases or []),
+        knowledge=list(knowledge or []),
         secrets=list(secrets or []), enriched=bool(voice))
     from .knowledge import inherit_knowledge
     inherit_knowledge(persona, profession, faction)
@@ -152,45 +153,51 @@ def _build_named_npcs(world: World) -> None:
              profession="innkeeper", works_at="building:stonehill_inn",
              lives_in="building:stonehill_inn", place="building:stonehill_inn",
              traits=["welcoming", "gossipy"], voice="говорит тепло, любит поболтать",
+             aliases=["толбен", "толбен стоунхилл", "трактирщик"],
              knowledge=[{"fact": "Redbrands shake down merchants", "topic": "redbrands",
                          "disclosure_gate": {"trust": 0.2}}])
     _add_npc(world, "npc:linene_graywind", "Linene Graywind", "merchant", "srd:commoner",
              profession="merchant", works_at="building:lionshield_coster",
              lives_in="building:lionshield_coster", place="building:lionshield_coster",
-             traits=["shrewd", "worried"],
+             traits=["shrewd", "worried"], aliases=["линен", "линен грейвинд"],
              knowledge=[{"fact": "a wagon of Lionshield goods was stolen near the trail",
                          "topic": "lionshield", "disclosure_gate": {"trust": 0.1},
                          "unlocks_quest": "quest:lionshield_goods"}])
     _add_npc(world, "npc:harbin_wester", "Harbin Wester", "townmaster", "srd:commoner",
              profession="guard", works_at="building:townmaster_hall",
              lives_in="building:townmaster_hall", place="building:townmaster_hall",
-             traits=["timid", "bureaucratic"],
+             traits=["timid", "bureaucratic"], aliases=["харбин", "харбин вестер", "градоправитель"],
              knowledge=[{"fact": "orcs raid from Wyvern Tor", "topic": "wyvern_tor",
                          "disclosure_gate": {"trust": 0.1}, "unlocks_quest": "quest:wyvern_tor_orcs"}])
     _add_npc(world, "npc:sister_garaele", "Sister Garaele", "priest", "srd:acolyte",
              race="half-elf", faction="faction:harpers", profession="priest",
              works_at="building:shrine_of_luck", lives_in="building:shrine_of_luck",
-             place="building:shrine_of_luck", traits=["earnest", "secretive"])
+             place="building:shrine_of_luck", traits=["earnest", "secretive"],
+             aliases=["гарэле", "сестра гарэле", "жрица"])
     _add_npc(world, "npc:daran_edermath", "Daran Edermath", "retired_adventurer", "srd:veteran",
              profession="farmhand", works_at="building:edermath_orchard",
              lives_in="building:edermath_orchard", place="building:edermath_orchard",
-             traits=["honest", "vigilant"], faction="faction:lords_alliance")
+             traits=["honest", "vigilant"], faction="faction:lords_alliance",
+             aliases=["даран", "даран эдермат"])
     _add_npc(world, "npc:halia_thornton", "Halia Thornton", "guildmaster", "srd:thug",
              faction="faction:zhentarim", profession="merchant",
              works_at="building:townmaster_hall", lives_in="building:townmaster_hall",
              place="building:townmaster_hall", traits=["ambitious", "manipulative"],
+             aliases=["халия", "халия торнтон"],
              secrets=[{"fact": "I run the Zhentarim cell here",
                        "reveal_conditions": ["trust>0.6"], "consequence_tags": ["faction"]}])
     sildar = _add_npc(world, "npc:sildar_hallwinter", "Sildar Hallwinter", "knight", "srd:veteran",
                       faction="faction:lords_alliance", traits=["noble", "weary"],
-                      place="building:stonehill_inn")
+                      place="building:stonehill_inn", aliases=["сильдар", "сильдар холлвинтер"])
     world.ecs.get(sildar, Persona).companion = True   # эскорт LMoP: следует за партией и бьётся рядом
     _add_npc(world, "npc:gundren_rockseeker", "Gundren Rockseeker", "prospector", "srd:commoner",
-             race="dwarf", traits=["excitable", "secretive"], place="place:cragmaw_klarg_cave")
+             race="dwarf", traits=["excitable", "secretive"], place="place:cragmaw_klarg_cave",
+             aliases=["гундрен", "гундрен рокскикер"])
     # антагонист — социальный босс Redbrand Hideout
     _add_npc(world, "npc:iarno_glasstaff", "Iarno Albrek", "mage", "srd:mage",
              faction="faction:redbrands", epithet="Glasstaff",
              place="building:tresendar_manor", traits=["smug", "cowardly"],
+             aliases=["иарно", "иарно албрек", "глассстаф", "стеклянный посох"],
              secrets=[{"fact": "I lead the Redbrands for the Black Spider",
                        "reveal_conditions": ["defeated"], "consequence_tags": ["main_plot"]}])
 
@@ -199,7 +206,7 @@ def _build_encounter(world: World) -> list[str]:
     """Боевой энкаунтер Cragmaw Hideout: Klarg + 2 гоблина (main §1)."""
     klarg = _add_npc(world, "npc:klarg", "Klarg", "bugbear_boss", "srd:bugbear",
                      faction="faction:cragmaw", place="place:cragmaw_klarg_cave",
-                     traits=["brutal", "proud"])
+                     traits=["brutal", "proud"], aliases=["кларг", "багбир"])
     g1 = _add_npc(world, "npc:goblin_1", "Гоблин-страж", "goblin", "srd:goblin",
                   faction="faction:cragmaw", place="place:cragmaw_klarg_cave")
     g2 = _add_npc(world, "npc:goblin_2", "Гоблин-лучник", "goblin", "srd:goblin",

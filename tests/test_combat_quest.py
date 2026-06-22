@@ -43,7 +43,7 @@ def test_combat_runs_on_grid():
     s = _run_fight(1337)
     cs = s.combat.state
     assert cs.mode == "ended"
-    assert cs.outcome in ("victory", "tpk", "flee")
+    assert cs.outcome in ("victory", "tpk", "flee", "defeat")
     assert cs.grid.cols >= 8 and cs.grid.rows >= 8   # тактическая сетка загружена
 
 
@@ -61,6 +61,20 @@ def test_movement_respects_budget():
         reach = eng.reachable_cells()
         budget = eng.state.turn_budget.movement
         assert all(v <= budget for v in reach.values())
+
+
+def test_player_death_is_game_over():
+    """Гибель героя завершает бой как 'defeat' и переводит сессию в game over."""
+    s = new_session(seed=1337, roster_size=2, use_model=False)
+    s.handle("идти в логово"); s.handle("идти в пещеру")
+    s.handle("атаковать Klarg")
+    s.world.get_stats(s.player).hp = 0          # герой падает
+    assert s.combat.check_end() is True
+    assert s.combat.state.outcome == "defeat"   # не victory, даже если союзник жив
+    assert s.is_game_over() is True
+    r = s.handle("осмотреться")                  # действия блокируются
+    assert r["kind"] == "game_over" and r.get("game_over") is True
+    assert s.view()["game_over"] is True
 
 
 def test_quest_advances_on_klarg_death():

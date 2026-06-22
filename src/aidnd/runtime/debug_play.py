@@ -398,6 +398,84 @@ class DebugDriver:
         lv = s.view()["player"]["level"]
         self.info(f"итог: уровень {lv}, XP {xp2}, золото {gp2}")
 
+    def play_dungeon(self) -> None:
+        s = self.s
+        d = s.world.dungeons.get("sunless_warren")
+        if not self.check(d is not None, "подземелье «Бессолнечная нора» сгенерировано",
+                          "в мире нет пилотного подземелья"):
+            return
+        st = s.world.get_stats(s.player)                  # debug: переживём прогон, чтобы
+        st.max_hp = st.hp = max(st.hp, 80)                # показать все механики данжа целиком
+        self.info(f"[debug] HP героя поднят до {st.hp} для сквозного прогона (тест систем, не баланса)")
+        by_role: dict = {}
+        for rid, r in d.rooms.items():
+            by_role.setdefault(r.role, []).append(rid)
+        entrance, boss = d.entrance, d.boss_room
+        combat = by_role["combat"][0]
+        treasure = by_role["treasure"][0]
+        secret = by_role["secret"][0]
+
+        def name(rid):
+            return s._place_name(rid)
+
+        self.step("Входим в подземелье (из города через дикие земли)")
+        self.goto(f"иди в {name(entrance)}", entrance, name(entrance))
+        print("\n" + s.dungeon_map_text())
+
+        self.step("Запертая дверь: пробуем сразу к боссу — должно быть преграждено")
+        out = self.cmd(f"иди в {name(boss)}")
+        blocked = (s.current_place() != boss) and ("заперт" in (out.get("text") or "").lower())
+        self.check(blocked, "проход к боссу заперт, пока жив страж-ключник (lock-and-key работает)",
+                   f"замок не сработал: kind={out.get('kind')}, место={s.current_place()}")
+
+        self.step("Идём в логово стражи и вступаем в бой")
+        self.goto(f"иди в {name(combat)}", combat, name(combat))
+        foes = [s._display(n) for n in s.npcs_here() if s._is_hostile(n)]
+        self.info("враги здесь: " + (", ".join(foes) or "никого"))
+        out = self.cmd("атаковать стража")
+        if s.combat and s.combat.state.mode == "active":
+            self.fight()
+        if not s.world.is_alive(s.player):
+            self.issue("герой пал в подземелье — game over (исход геймплея)")
+            return
+        keeper = next(iter(s.world.dungeon_locks.values()), None)
+        self.check(keeper and not s.world.is_alive(keeper),
+                   "страж-ключник повержен → замок открыт",
+                   "страж-ключник жив — путь к боссу всё ещё заперт")
+
+        self.step("Ищем секретную комнату (обыск кладовой)")
+        self.goto(f"иди в {name(treasure)}", treasure, name(treasure))
+        before = s.world.spatial.path_between(treasure, secret) is not None
+        self.cmd("обыскать комнату")
+        # на провал броска — повторяем, пока не найдём (демонстрация механики)
+        for _ in range(6):
+            if any(fl.startswith("secret_found:") for fl in s.world.flags):
+                break
+            self.cmd("обыскать комнату")
+        found = any(fl.startswith("secret_found:") for fl in s.world.flags)
+        self.check(found and not before
+                   and s.world.spatial.path_between(treasure, secret) is not None,
+                   "секретный ход найден — скрытая комната стала достижимой",
+                   "секретную комнату найти не удалось")
+        if found:
+            self.goto(f"иди в {name(secret)}", secret, name(secret))
+        print("\n" + s.dungeon_map_text())
+
+        self.step("Идём к боссу (дверь теперь открыта) и добиваем")
+        self.goto(f"иди в {name(boss)}", boss, name(boss))
+        if s.current_place() == boss:
+            self.cmd("атаковать вожака")
+            if s.combat and s.combat.state.mode == "active":
+                self.fight()
+        if not s.world.is_alive(s.player):
+            self.issue("герой пал в логове вожака — game over (исход геймплея)")
+            return
+        self.step("Проверяем зачистку")
+        boss_npcs = [c.get("npc") for r in d.rooms.values()
+                     for c in r.contents if c["kind"] == "boss"]
+        boss_dead = all(not s.world.is_alive(n) for n in boss_npcs if n)
+        self.check(boss_dead, "вожак повержен — подземелье зачищено", "вожак ещё жив")
+
     def report(self) -> int:
         self.step("ИТОГ")
         if not self.issues:
@@ -415,7 +493,8 @@ def run(offline: bool = False, scenario: str = "talk") -> int:
     scenario: "talk" — простой квест (поговорить с NPC); "bounty" — сложный (дорога+бой+сдача).
     """
     title = {"talk": "простой квест: разговор",
-             "bounty": "сложный квест: баунти (дорога + бой)"}.get(scenario, scenario)
+             "bounty": "сложный квест: баунти (дорога + бой)",
+             "dungeon": "подземелье: исследование, секрет, lock-and-key, босс"}.get(scenario, scenario)
     print("=" * 70)
     print(f" AI-DnD — КОНСОЛЬНЫЙ РЕЖИМ ОТЛАДКИ ({title})")
     print("=" * 70)
@@ -424,7 +503,8 @@ def run(offline: bool = False, scenario: str = "talk") -> int:
     drv = DebugDriver(session, require_model=require_model)
     if not drv.preflight():
         return drv.report()
-    play = {"talk": drv.play_quest, "bounty": drv.play_bounty}.get(scenario)
+    play = {"talk": drv.play_quest, "bounty": drv.play_bounty,
+            "dungeon": drv.play_dungeon}.get(scenario)
     if play is None:
         drv.issue(f"неизвестный сценарий: {scenario} (есть: talk, bounty)")
         return drv.report()

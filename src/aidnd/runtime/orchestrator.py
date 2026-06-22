@@ -238,6 +238,12 @@ class GameSession:
         if not path:
             return {"kind": "system", "text": f"Ты не знаешь, как добраться до "
                     f"«{self._place_name(dest)}».", "view": self.view()}
+        for a, b in zip(path, path[1:]):                  # запертая дверь на пути?
+            keeper = self.world.dungeon_locks.get(frozenset((a, b)))
+            if keeper and self.world.is_alive(keeper):
+                return {"kind": "system", "view": self.view(),
+                        "text": f"Дальше путь к «{self._place_name(dest)}» преграждает "
+                                "запертая дверь — её не открыть, пока жив тот, кто стережёт ключ."}
         ticks, region_travel = self._travel_cost(path)
         self.world.commit("set_position", self.player, target=self.player,
                           payload={"region": "region:phandalin", "place": dest})
@@ -248,6 +254,9 @@ class GameSession:
         self._log_journal(f"Перешёл в «{self._place_name(dest)}»"
                           + (f" (путь ~{hours} ч)" if region_travel and hours else "") + ".")
         self._record_explored(dest)
+        for pid in path:                                  # туман подземелья: открыть пройденные комнаты
+            if self._dungeon_of(pid):
+                self.world.commit("set_flag", self.player, payload={"flag": f"dseen:{pid}"})
         self.world.commit("interest", self.player, payload={"place": dest, "amount": 1})  # частые визиты ↑ важность
         debunked = self._verify_map_here(dest)        # сверка купленных наводок с реальностью
         self._tick(ticks)
@@ -456,6 +465,24 @@ class GameSession:
     def _do_search(self, action: Action, text: str) -> dict:
         place = self.current_place()
         dc = 15
+        # секретная дверь в подземелье — ищется тем же чеком, что и тайники
+        secret = self.world.dungeon_secrets.get(place)
+        if secret and f"secret_found:{place}" not in self.world.flags:
+            if self.rules.try_passive(self.player, "perception", dc):
+                return self._reveal_secret(place, secret, "Сквозняк из щели выдаёт скрытый ход.")
+            req = self.rules.build_check_request(self.player, "investigation", dc, kind="skill")
+
+            def resume_secret(result: RollResult) -> dict:
+                outcome = self.rules.adjudicate(action, req, result)
+                self.world.commit("search", self.player, payload={"success": outcome.success},
+                                  roll=result.to_record(req.dice))
+                self._tick()
+                if outcome.success:
+                    return self._reveal_secret(place, secret, outcome.summary)
+                return {"kind": "narration", "text": outcome.summary
+                        + " Стены кажутся глухими — ничего не найдено.", "view": self.view()}
+
+            return self._suspend(req, resume_secret, f"Поиск тайного хода: Investigation против DC {dc}.")
         # пассивная Perception (док 07 §5) — авто без броска
         if self.rules.try_passive(self.player, "perception", dc):
             return self._reveal_container(place, "Твоё чутьё сразу находит тайник.")
@@ -993,6 +1020,85 @@ class GameSession:
             return {"kind": "narration", "text": msg + " Содержимое: " + ", ".join(items),
                     "container": cid, "view": self.view()}
         return {"kind": "narration", "text": msg, "view": self.view()}
+
+    # ===================================================================== #
+    #  Подземелья: туман, секретные ходы, тайловая карта                    #
+    # ===================================================================== #
+    def _dungeon_of(self, place: str):
+        for d in self.world.dungeons.values():
+            if place in d.rooms:
+                return d
+        return None
+
+    def _reveal_secret(self, place: str, secret_room: str, msg: str) -> dict:
+        """Открыть секретный проход place→secret_room (реплей через reveal_passage)."""
+        self.world.commit("reveal_passage", self.player, payload={"a": place, "b": secret_room})
+        self.world.commit("set_flag", self.player, payload={"flag": f"dseen:{secret_room}"})
+        self._log_journal(f"Найден тайный ход в «{self._place_name(secret_room)}».")
+        self._tick()
+        return {"kind": "narration", "view": self.view(),
+                "text": msg + f" Открывается скрытый проход в «{self._place_name(secret_room)}»."}
+
+    def dungeon_map(self) -> dict | None:
+        """Тайловая карта текущего подземелья с туманом (по dseen-флагам). Для UI."""
+        d = self._dungeon_of(self.current_place())
+        if not d:
+            return None
+        from ..gen import dungeon as dg
+        cur = self.current_place()
+        floors = []
+        for f in d.floors:
+            rows = []
+            for y in range(f.h):
+                line = []
+                for x in range(f.w):
+                    line.append(f.grid[y][x])
+                rows.append(line)
+            for rid in f.rooms:                           # туман: не пройденные комнаты — глухие
+                r = d.rooms[rid]
+                if f"dseen:{rid}" not in self.world.flags:
+                    for (x, y) in r.cells:
+                        rows[y][x] = dg.WALL
+                    if r.secret:                          # секретку прячем и саму дверь
+                        rows[r.center[1]][r.center[0]] = dg.WALL
+            # секретная дверь: глухая стена, пока её не нашли (в MVP секретка одна)
+            found_secret = any(fl.startswith("secret_found:") for fl in self.world.flags)
+            for y in range(f.h):
+                for x in range(f.w):
+                    if rows[y][x] == dg.SECRET:
+                        rows[y][x] = dg.DOOR if found_secret else dg.WALL
+            floors.append({"index": f.index, "w": f.w, "h": f.h,
+                           "rows": ["".join(r) for r in rows]})
+        return {"site": d.site_key, "current": cur,
+                "current_floor": d.rooms[cur].floor if cur in d.rooms else 0, "floors": floors}
+
+    def dungeon_map_text(self) -> str:
+        """ASCII текущего подземелья с туманом и меткой игрока (для консоли/отладки)."""
+        from ..gen import dungeon as dg
+        dm = self.dungeon_map()
+        if not dm:
+            return "Ты не в подземелье."
+        d = self.world.dungeons[dm["site"]]
+        cur = dm["current"]
+        out = []
+        for fl in dm["floors"]:
+            rows = [list(r) for r in fl["rows"]]
+            for rid in d.floors[fl["index"]].rooms:       # маркеры наполнения видимых комнат
+                r = d.rooms[rid]
+                if f"dseen:{rid}" not in self.world.flags:
+                    continue
+                cx, cy = r.center
+                mk = None
+                if rid == cur:
+                    mk = "@"
+                elif any(self._is_hostile(n) for n in self.world.spatial.occupants(rid)):
+                    mk = "B" if r.role == "boss" else "g"
+                if mk and rows[cy][cx] in (dg.FLOOR, dg.ENTRANCE, dg.STAIRS_DN, dg.STAIRS_UP):
+                    rows[cy][cx] = mk
+            mark = " ◄ ты здесь" if fl["index"] == dm["current_floor"] else ""
+            out.append(f"— этаж {fl['index'] + 1}{mark} —")
+            out.extend("".join(r) for r in rows)
+        return "\n".join(out)
 
     def _tick(self, n: int = 1) -> None:
         self.world.clock.advance(n)

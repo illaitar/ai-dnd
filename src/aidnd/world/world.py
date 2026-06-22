@@ -81,6 +81,11 @@ class World:
         self.player_id: str | None = None
         self._item_seq = 0                               # per-world счётчик id предметов
 
+        # подземелья (док 05/07): сгенерированные данжи + рантайм-замки/секреты
+        self.dungeons: dict[str, object] = {}            # site_key -> Dungeon (пре-ген)
+        self.dungeon_locks: dict[frozenset, str] = {}    # {room_a,room_b} -> npc-ключник (мёртв → открыто)
+        self.dungeon_secrets: dict[str, str] = {}        # комната с секреткой -> скрытая комната
+
         self._subscribers: list = []                     # коллбэки on_event (квесты)
 
     def next_item_id(self, template_id: str) -> str:
@@ -466,6 +471,12 @@ class World:
             q.state = ev.payload["state"]               # type: ignore[attr-defined]
             if "current_stages" in ev.payload:
                 q.current_stages = ev.payload["current_stages"]  # type: ignore[attr-defined]
+
+    def _h_reveal_passage(self, ev: Event) -> None:
+        """Раскрытие секретного прохода: добавляет ребро в граф (реплей-безопасно)."""
+        a, b = ev.payload["a"], ev.payload["b"]
+        self.spatial.link_portal(a, b)
+        self.flags.add(f"secret_found:{a}")
 
     # ----------------------------------------------------- запросы чтения ---
     def get_stats(self, eid: str) -> Stats5e | None:

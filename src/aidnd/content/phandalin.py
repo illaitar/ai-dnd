@@ -391,6 +391,8 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     attach_battlemaps(world)          # боевые карты на узлы графа локаций
     _build_named_npcs(world)          # 2a. named population
     _build_encounter(world)           # 2b. encounter NPCs
+    from .dungeons import build_dungeon, default_warren_brief
+    build_dungeon(world, default_warren_brief(), seed)   # 2d. процедурное подземелье (пилот)
     _build_factions(world)            # 5a. сюжетные фракции (LMoP)
     from ..gen.faction_gen import generate_factions
     generate_factions(world, "phandalin", model=model)   # 5b. гражданские фракции (per-world)

@@ -3,6 +3,8 @@
 Запуск:  python -m aidnd            (играть)
          python -m aidnd serve      (веб-сервер, L9)
          python -m aidnd doctor      (проверка окружения и сервера модели)
+         python -m aidnd debug       (консольный авто-прогон квеста; требует онлайн-модель)
+         python -m aidnd debug --offline  (то же на детерминированных фоллбэках)
 """
 
 from __future__ import annotations
@@ -153,6 +155,10 @@ def main() -> None:
         run()
     elif cmd == "doctor":
         doctor()
+    elif cmd == "debug":
+        from .runtime.debug_play import run as run_debug
+        offline = "--offline" in sys.argv[2:]
+        sys.exit(run_debug(offline=offline))
     else:
         play()
 

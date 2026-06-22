@@ -9,6 +9,26 @@ Backend in Python, presentation in JS.
 
 ---
 
+## Procedural maps
+
+The world is procedurally generated and **deterministic** — the same seed reproduces the
+same map. Towns are laid out Watabou-style (Voronoi wards, walls, a river, key buildings);
+dungeons are multi-level **tile maps** with varied room shapes, lock-and-key progression
+and hidden rooms. The model only adds flavor (names, descriptions) — never the layout.
+
+**Towns** — four seeds:
+
+![Generated town maps](docs/assets/city_maps.png)
+
+**Dungeons** — four themes (floor 1 shown, secret rooms revealed):
+
+![Generated dungeon maps](docs/assets/dungeon_maps.png)
+
+Regenerate with `python scripts/gen_map_collages.py dungeons` (dungeons render in Python;
+town frames come from the in-browser city generator — see the script docstring).
+
+---
+
 ## Why it runs without a model
 
 **Determinism is separated from language.** Dice, rules, and world state are

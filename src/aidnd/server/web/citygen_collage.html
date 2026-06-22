@@ -1,0 +1,31 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>City collage</title>
+<style>body{margin:0;background:#141210;font-family:system-ui,sans-serif}
+.grid{display:grid;grid-template-columns:repeat(2,520px);gap:10px;padding:10px}
+.cell{position:relative}.cap{color:#e6decd;font-size:14px;padding:4px 2px}
+canvas{display:block;border-radius:6px}</style></head>
+<body>
+<div class="grid">
+  <div class="cell"><div class="cap" id="t0"></div><canvas id="c0" width="520" height="380"></canvas></div>
+  <div class="cell"><div class="cap" id="t1"></div><canvas id="c1" width="520" height="380"></canvas></div>
+  <div class="cell"><div class="cap" id="t2"></div><canvas id="c2" width="520" height="380"></canvas></div>
+  <div class="cell"><div class="cap" id="t3"></div><canvas id="c3" width="520" height="380"></canvas></div>
+</div>
+<script type="module">
+import {drawCity} from "/static/citygen.js";
+const seeds = [7, 42, 1337, 2024], W = 520, H = 380;
+window.__done = false;
+(async () => {
+  for (let i = 0; i < seeds.length; i++) {
+    const ctx = document.getElementById('c' + i).getContext('2d');
+    let buildings = [];
+    try {
+      const r = await fetch('/town_layout?seed=' + seeds[i]);
+      if (r.ok) buildings = (await r.json()).buildings || [];
+    } catch (e) {}
+    drawCity(ctx, W, H, {seed: seeds[i], buildings});
+    document.getElementById('t' + i).textContent = 'seed ' + seeds[i];
+  }
+  window.__done = true;
+})();
+</script>
+</body></html>

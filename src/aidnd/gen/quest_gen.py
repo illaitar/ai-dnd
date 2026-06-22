@@ -41,6 +41,19 @@ class Predicate:
     def _p_TalkedTo(self, world) -> bool:
         return f"talked:{self.args[0]}" in world.flags
 
+    def _p_HasItemQty(self, world) -> bool:
+        owner, template, need = self.args[0], self.args[1], int(self.args[2])
+        carry = world.containers.get(f"carry:{owner.split(':', 1)[1]}")
+        if not carry:
+            return False
+        total = sum(world.items[i].quantity for i in carry.items
+                    if world.items.get(i) and (world.items[i].template_id == template or i == template))
+        return total >= need
+
+    def _p_NpcAtPlace(self, world) -> bool:
+        pos = world.position(self.args[0])
+        return bool(pos and pos.place_id == self.args[1])
+
     def _p_HasItem(self, world) -> bool:
         owner, template = self.args[0], self.args[1]
         carry = world.containers.get(f"carry:{owner.split(':',1)[1]}")

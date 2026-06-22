@@ -239,11 +239,11 @@ class GameSession:
             return {"kind": "system", "text": f"Ты не знаешь, как добраться до "
                     f"«{self._place_name(dest)}».", "view": self.view()}
         for a, b in zip(path, path[1:]):                  # запертая дверь на пути?
-            keeper = self.world.dungeon_locks.get(frozenset((a, b)))
-            if keeper and self.world.is_alive(keeper):
+            guard = self.world.dungeon_locks.get(frozenset((a, b)))
+            if guard and f"cleared:{guard}" not in self.world.flags:
                 return {"kind": "system", "view": self.view(),
-                        "text": f"Дальше путь к «{self._place_name(dest)}» преграждает "
-                                "запертая дверь — её не открыть, пока жив тот, кто стережёт ключ."}
+                        "text": f"Дальше путь к «{self._place_name(dest)}» преграждает запертая "
+                                f"дверь — её откроет лишь зачистка «{self._place_name(guard)}»."}
         ticks, region_travel = self._travel_cost(path)
         self.world.commit("set_position", self.player, target=self.player,
                           payload={"region": "region:phandalin", "place": dest})
@@ -942,6 +942,9 @@ class GameSession:
 
     def _on_combat_end(self) -> str:
         cs = self.combat.state
+        if cs.outcome == "victory":                       # зачистка локации (для LairCleared/замков)
+            self.world.commit("set_flag", self.player,
+                              payload={"flag": f"cleared:{self.current_place()}"})
         for q in list(self.world.quests.values()):
             if q.state == "active":
                 self.quests.advance(q)

@@ -438,10 +438,9 @@ class DebugDriver:
         if not s.world.is_alive(s.player):
             self.issue("герой пал в подземелье — game over (исход геймплея)")
             return
-        keeper = next(iter(s.world.dungeon_locks.values()), None)
-        self.check(keeper and not s.world.is_alive(keeper),
-                   "страж-ключник повержен → замок открыт",
-                   "страж-ключник жив — путь к боссу всё ещё заперт")
+        lock_open = all(f"cleared:{r}" in s.world.flags for r in s.world.dungeon_locks.values())
+        self.check(lock_open, "логово стражи зачищено → замок открыт",
+                   "логово стражи не зачищено — путь к боссу всё ещё заперт")
 
         self.step("Ищем секретную комнату (обыск кладовой)")
         self.goto(f"иди в {name(treasure)}", treasure, name(treasure))

@@ -64,12 +64,12 @@ def build_dungeon(world, brief: DungeonBrief, seed: int,
             sp.link_portal(a, b)
     sp.link_portal(link_from, d.entrance)                 # вход из диких земель
 
-    keeper = None                                          # страж-ключник (его смерть откроет замок)
+    guard_room = None                                      # комната-страж: её зачистка откроет замок
     for rid, r in d.rooms.items():                         # наполнение комнат
         for c in r.contents:
             if c["kind"] == "encounter":
-                keeper = f"npc:{sk}_keeper"
-                _spawn_mob(world, keeper, "Страж-ключник норы", "srd:bugbear", rid)
+                guard_room = rid
+                _spawn_mob(world, f"npc:{sk}_keeper", "Страж-ключник норы", "srd:bugbear", rid)
                 for i in range(max(0, int(c.get("n", 1)))):
                     _spawn_mob(world, f"npc:{sk}_goblin_{i}", f"Гоблин норы {i + 1}", "srd:goblin", rid)
             elif c["kind"] == "boss":
@@ -77,9 +77,9 @@ def build_dungeon(world, brief: DungeonBrief, seed: int,
                 _spawn_mob(world, npc, "Вожак норы", "srd:bugbear", rid,
                            weapon="tmpl:morningstar")
 
-    for a, b, kind in d.edges:                             # замки → привязать к ключнику
-        if kind == "locked" and keeper:
-            world.dungeon_locks[frozenset((a, b))] = keeper
+    for a, b, kind in d.edges:                             # замок открывается зачисткой комнаты-стража
+        if kind == "locked" and guard_room:
+            world.dungeon_locks[frozenset((a, b))] = guard_room
 
     world.dungeons[sk] = d
     return d

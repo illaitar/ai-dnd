@@ -157,8 +157,14 @@ def main() -> None:
         doctor()
     elif cmd == "debug":
         from .runtime.debug_play import run as run_debug
-        offline = "--offline" in sys.argv[2:]
-        sys.exit(run_debug(offline=offline))
+        args = sys.argv[2:]
+        offline = "--offline" in args
+        scenario = "talk"
+        if "--quest" in args:
+            i = args.index("--quest")
+            if i + 1 < len(args):
+                scenario = args[i + 1]
+        sys.exit(run_debug(offline=offline, scenario=scenario))
     else:
         play()
 

@@ -25,6 +25,9 @@ from ..rules.dice import roll_expr
 BOARD_PLACE = "building:notice_board"
 SHRINE_PLACE = "building:shrine_of_luck"
 DEMO_QUEST = "quest:board_garaele"      # «поговорить с сестрой Гарэле» — самый показательный цикл
+BOUNTY_QUEST = "quest:board_klarg"      # «награда за Кларга» — сложный цикл: дорога + бой + сдача
+KLARG = "npc:klarg"
+KLARG_CAVE = "place:cragmaw_klarg_cave"
 
 
 def _short(text: str | None, limit: int = 600) -> str:
@@ -242,6 +245,159 @@ class DebugDriver:
         self.check(gp2 - gp1 == want_gp, f"золото начислено верно (+{want_gp})",
                    f"золото начислено неверно: дельта {gp2 - gp1}, ожидали +{want_gp}")
 
+    # --------------------------------------------------- бой (для баунти) ---
+    def _print_combat(self, cv: dict | None) -> None:
+        if not cv:
+            return
+        print(f"       ⚔️  раунд {cv.get('round')}, ход: "
+              f"{'игрок' if cv.get('is_pc_turn') else 'противник'}")
+        for c in cv.get("combatants", []):
+            mark = "→" if c.get("current") else " "
+            tail = " ✝" if c["hp"] <= 0 else (" 🏃" if c.get("fled") else "")
+            print(f"        {mark} {c['name']:<24} HP {c['hp']:>3}/{c['max_hp']:<3} AC {c['ac']}{tail}")
+
+    @staticmethod
+    def _cheby(a, b) -> int:
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+    @staticmethod
+    def _pos_of(cv: dict, eid: str):
+        return next((c["pos"] for c in cv["combatants"] if c["id"] == eid), None)
+
+    def _say(self, out: dict, limit: int = 320) -> None:
+        tail = _short(out.get("text"), limit).replace("\n", "\n       ")
+        if tail:
+            print("       " + tail)
+
+    def _hp(self, eid: str) -> int:
+        st = self.s.world.get_stats(eid)
+        return st.hp if st else 0
+
+    def fight(self, max_rounds: int = 24) -> str:
+        """Авто-бой как сыграл бы игрок: добиваем ближайших слабых (фокус-огонь),
+        при отсутствии цели в досягаемости — сближаемся, затем пасуем (враги ходят
+        через тактик-агента). Возвращает исход (victory|tpk|flee|…)."""
+        s = self.s
+        self._print_combat(s.combat_view())
+        rounds = 0
+        while s.combat and s.combat.state.mode == "active" and rounds < max_rounds:
+            rounds += 1
+            if s.combat.is_pc_turn():
+                cv = s.combat_view()
+                in_range = cv.get("targets", [])
+                if in_range:                              # бьём слабейшего в зоне
+                    tgt = min(in_range, key=self._hp)
+                    self.info(f"⚔ атакую {s._display(tgt)} (HP {self._hp(tgt)}, в досягаемости)")
+                    self._say(self._resolve_rolls(s.combat_attack(tgt)), 240)
+                else:                                     # сближаемся с ближайшим врагом
+                    me = self._pos_of(cv, cv["player"])
+                    foes = cv.get("enemies", [])
+                    reach = cv.get("reachable", [])
+                    tgt = min(foes, key=lambda e: self._cheby(me, self._pos_of(cv, e))) if foes and me else None
+                    if tgt and reach and me:
+                        tpos = self._pos_of(cv, tgt)
+                        cell = min(reach, key=lambda c: self._cheby(c, tpos))
+                        self.info(f"сближаюсь к {s._display(tgt)}: move {cell}")
+                        self._say(self._resolve_rolls(s.combat_move(tuple(cell))), 200)
+                        nin = s.combat_view().get("targets", []) if s.combat else []
+                        if nin:                           # дошёл — бьём
+                            t2 = min(nin, key=self._hp)
+                            self.info(f"⚔ после сближения атакую {s._display(t2)}")
+                            self._say(self._resolve_rolls(s.combat_attack(t2)), 240)
+                    else:
+                        self.info("не могу выбрать цель/клетку — пропускаю ход")
+                if not (s.combat and s.combat.state.mode == "active"):
+                    break
+                self._say(self._resolve_rolls(s.combat_end_turn()))   # пас → ходят враги
+            else:
+                self._say(self._resolve_rolls(s.combat_end_turn()))   # враг в инициативе раньше
+        self._print_combat(s.combat_view())
+        outcome = s.combat.state.outcome if s.combat else "?"
+        if rounds >= max_rounds and (s.combat and s.combat.state.mode == "active"):
+            self.issue(f"бой не завершился за {max_rounds} раундов (зацикливание/баланс?)")
+        return outcome
+
+    def play_bounty(self) -> None:
+        s = self.s
+
+        self.step("Старт: осмотреться")
+        look = s.look()
+        self.info(f"место: {look.get('place_name')} ({look.get('place')})")
+        xp0, gp0 = self.player_xp(), self.player_gp()
+        self.info(f"персонаж: XP={xp0}, золото={gp0}, "
+                  f"HP={s.view()['player']['hp']}/{s.view()['player']['max_hp']}")
+        comps = [s._display(c) for c in s._companions()]
+        self.info("спутники: " + (", ".join(comps) or "нет"))
+
+        self.step("Идём к доске и берём награду за Кларга")
+        self.goto("подойти к доске объявлений", BOARD_PLACE, "Доска объявлений")
+        q = self.quest(BOUNTY_QUEST)
+        if not self.check(q is not None, f"квест найден: «{q.title if q else '?'}»",
+                          f"нет квеста {BOUNTY_QUEST}"):
+            return
+        res = s.accept_quest(BOUNTY_QUEST)
+        self.info("→ " + _short(res.get("text")))
+        q = self.quest(BOUNTY_QUEST)
+        self.check(q.state == "active" and q.current_stages == ["do"],
+                   f"квест принят: {self.qsig(BOUNTY_QUEST)}",
+                   f"квест не активировался корректно: {self.qsig(BOUNTY_QUEST)}")
+
+        self.step("Идём в логово Крэгмо к пещере Кларга (дикие земли)")
+        self.goto("иди в пещеру Кларга", KLARG_CAVE, "Пещера Кларга")
+        foes = [s._display(n) for n in s.npcs_here() if s._is_hostile(n)]
+        self.info("враги здесь: " + (", ".join(foes) or "никого"))
+        klarg_here = KLARG in s.npcs_here()
+        if not self.check(klarg_here, "Кларг на месте — есть кого бить",
+                          "Кларга нет в пещере — баунти не выполнить"):
+            return
+
+        self.step("Бой: вступаем в схватку, цель — Кларг")
+        out = self.cmd("атаковать Кларга")
+        if not self.check(out.get("kind") == "combat_start" or (s.combat and s.combat.state.mode == "active"),
+                          "бой начался (combat_start)",
+                          f"бой не начался: kind={out.get('kind')}"):
+            return
+        outcome = self.fight()
+        self.info(f"исход боя: {outcome}")
+
+        self.step("Проверяем результат боя и продвижение квеста")
+        klarg_dead = not s.world.is_alive(KLARG)
+        self.check(klarg_dead, "Кларг повержен (NpcDead выполнится)",
+                   "Кларг жив — цель баунти не достигнута")
+        pc_alive = s.world.is_alive(s.player)
+        if not pc_alive:
+            if outcome == "victory":
+                self.issue("бой засчитан как «victory», но герой при 0 HP помечен мёртвым: "
+                           "нет состояния «при смерти»/спасбросков 5e, союзник добил врагов — "
+                           "движок не обрабатывает гибель/недееспособность игрока, продолжить нельзя")
+            else:
+                self.info(f"исход «{outcome}»: герой пал — закономерный геймплей, квест не сдать")
+            return
+        q = self.quest(BOUNTY_QUEST)
+        self.check(q.current_stages == ["turnin"],
+                   "цель зачтена, квест ждёт сдачи (стадия «turnin»)",
+                   f"квест не продвинулся после убийства Кларга: {q.current_stages}")
+
+        self.step("Возвращаемся к доске и сдаём награду")
+        self.goto("вернуться к доске объявлений", BOARD_PLACE, "Доска объявлений")
+        xp1, gp1 = self.player_xp(), self.player_gp()
+        res = s.turn_in_quest(BOUNTY_QUEST)
+        self.info("→ " + _short(res.get("text")))
+        q = self.quest(BOUNTY_QUEST)
+        self.check(q.state == "completed", f"квест завершён: {self.qsig(BOUNTY_QUEST)}",
+                   f"квест не завершился: {self.qsig(BOUNTY_QUEST)}")
+
+        self.step("Сверяем награду")
+        xp2, gp2 = self.player_xp(), self.player_gp()
+        want_xp, want_gp = q.rewards.xp, int(q.rewards.currency.get("gp", 0))
+        self.info(f"XP: {xp1} → {xp2} (ожидали +{want_xp}); золото: {gp1} → {gp2} (ожидали +{want_gp})")
+        self.check(xp2 - xp1 == want_xp, f"XP начислены верно (+{want_xp})",
+                   f"XP неверно: дельта {xp2 - xp1}, ожидали +{want_xp}")
+        self.check(gp2 - gp1 == want_gp, f"золото начислено верно (+{want_gp})",
+                   f"золото неверно: дельта {gp2 - gp1}, ожидали +{want_gp}")
+        lv = s.view()["player"]["level"]
+        self.info(f"итог: уровень {lv}, XP {xp2}, золото {gp2}")
+
     def report(self) -> int:
         self.step("ИТОГ")
         if not self.issues:
@@ -253,18 +409,27 @@ class DebugDriver:
         return 1
 
 
-def run(offline: bool = False) -> int:
-    """Точка входа консольного debug-режима. Возвращает код выхода (0 — без проблем)."""
+def run(offline: bool = False, scenario: str = "talk") -> int:
+    """Точка входа консольного debug-режима. Возвращает код выхода (0 — без проблем).
+
+    scenario: "talk" — простой квест (поговорить с NPC); "bounty" — сложный (дорога+бой+сдача).
+    """
+    title = {"talk": "простой квест: разговор",
+             "bounty": "сложный квест: баунти (дорога + бой)"}.get(scenario, scenario)
     print("=" * 70)
-    print(" AI-DnD — КОНСОЛЬНЫЙ РЕЖИМ ОТЛАДКИ (авто-прогон квеста)")
+    print(f" AI-DnD — КОНСОЛЬНЫЙ РЕЖИМ ОТЛАДКИ ({title})")
     print("=" * 70)
     require_model = not offline
     session = new_session(seed=config.WORLD_SEED, roster_size=12, use_model=not offline)
     drv = DebugDriver(session, require_model=require_model)
     if not drv.preflight():
         return drv.report()
+    play = {"talk": drv.play_quest, "bounty": drv.play_bounty}.get(scenario)
+    if play is None:
+        drv.issue(f"неизвестный сценарий: {scenario} (есть: talk, bounty)")
+        return drv.report()
     try:
-        drv.play_quest()
+        play()
     except Exception as e:  # noqa: BLE001
         import traceback
         drv.issue(f"необработанное исключение в сценарии: {e!r}")

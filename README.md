@@ -23,68 +23,33 @@ the same `state_hash()`.
 
 ---
 
-## Agent roles
+## The pipeline
 
-Eleven roles, each a system prompt + JSON schema (constrained decoding), each with a
-deterministic fallback. All are wired into the live loop.
+The general flow after the player types text. This is the **control logic** — where LLM
+agents plug in is marked 🟣, but *what each agent does* is documented per-agent in
+[LLM agents](#llm-agents) below, not here.
 
-| Role | Purpose | Deterministic fallback |
-|---|---|---|
-| `intent` | parse free-text into a structured action | keyword parser (verbs, directions, aliases) |
-| `plausibility` | **can the player's action happen here?** (feasibility gate) | rule list of impossible feats |
-| `narrator` | render dialogue **and** mechanical outcomes (no number changes) | grounded templates |
-| `cognition` | NPC action policy under relationship gates | trust/fear gate table |
-| `reflection` | synthesize NPC memories into higher-level beliefs | one aggregating reflection |
-| `character_gen` | fill the **NPC pool** under context (enrich + spawn) | skeleton persona |
-| `item_smith` | name/describe a spawned **item instance** (flavor, not mechanics) | template name |
-| `tactician` | choose a monster's combat action | deterministic target/heuristic AI |
-| `director` | pacing: surface hooks, raise random-event odds in a lull | heuristics + seeded ambient beats |
-| `quest_writer` | framing + giver lines for assembled side quests | template framing |
-| `lore_keeper` | validate generated content against world invariants | invariant checks |
-
----
-
-## The turn pipeline
-
-What happens after the player types text. Node colour marks the kind of step:
-🟣 **LLM-backed** (each has a deterministic fallback) · 🟡 **decision** · 🟢 **in / out**.
+Node colour: 🟣 **may call an LLM agent** (always with a deterministic fallback) ·
+🟡 **decision** · 🟢 **in / out** · ⬜ **deterministic engine**.
 
 ```mermaid
 flowchart TD
   IN([Player types text]):::io --> H["GameSession.handle"]:::core
   H --> CB{In combat?}:::dec
-  CB -- yes --> CMB["Combat commands only"]:::core --> OUT
-  CB -- no --> KW["Keyword parser<br/>observer? · buyinfo? · direction?<br/>attack · intimidate · persuade before talk"]:::core
+  CB -- yes --> CMB["Combat loop<br/>attack · move · cast · end turn<br/>(monsters act via an agent)"]:::llm --> OUT
+  CB -- no --> PARSE["Parse intent<br/>keyword parser; unclear → LLM agent"]:::llm
+  PARSE --> ACT["Action<br/>verb · target · tone"]:::core
 
-  KW -- clear command --> ACT["Action<br/>verb · target · tone"]:::core
-  KW -- unclear --> LLM["intent model — small Qwen<br/>map free text → closest command"]:::llm
-  LLM -- confident --> ACT
-  LLM -- unsure / other --> DEF["named NPC → talk<br/>else → freeform"]:::core
-  DEF --> ACT
-
-  ACT --> DISP{Dispatch verb}:::dec
-  DISP --> MOVE["move<br/>path-find · travel time & risk"]:::core
-  DISP --> TALK["talk<br/>cognition policy · narrator · reflection"]:::llm
-  DISP --> SOC["persuade / intimidate<br/>fear-gate or skill check"]:::core
-  DISP --> ATK["attack → combat<br/>tactician drives monsters"]:::llm
-  DISP --> SRCH["search / loot / scan<br/>seeded discovery · item_smith"]:::llm
-  DISP --> BUY["buy / buyinfo<br/>map beliefs: true · false · partial"]:::core
-  DISP --> FREE["freeform<br/>feasibility gate (plausibility) · narrator"]:::llm
-
-  SOC --> ROLL{Roll needed?}:::dec
-  ATK --> ROLL
-  SRCH --> ROLL
-  ROLL -- yes --> SUS["suspend → RollRequest<br/>→ roll → adjudicate"]:::core --> COMMIT
+  ACT --> DISP{Dispatch by verb}:::dec
+  DISP --> RES["Resolve verb<br/>rules + seeded RNG<br/>some verbs invoke an agent"]:::llm
+  RES --> ROLL{Roll needed?}:::dec
+  ROLL -- yes --> SUS["Suspend → RollRequest<br/>→ roll → adjudicate"]:::core --> COMMIT
   ROLL -- no --> COMMIT
-  MOVE --> COMMIT
-  TALK --> COMMIT
-  BUY --> COMMIT
-  FREE --> COMMIT
 
-  COMMIT["world.commit → Event → apply<br/>event-sourced · lore_keeper validates content"]:::core
-  COMMIT --> COG["cognition observe / appraise<br/>relationship sliders"]:::core
-  COG --> NARR["narrator renders outcome<br/>numbers never change"]:::llm
-  NARR --> POST["pacing — quiet streak<br/>director ambient_beat"]:::llm
+  COMMIT["world.commit → Event → apply<br/>event-sourced · CQRS read-models<br/>content validated by an agent"]:::core
+  COMMIT --> REACT["World reacts<br/>cognition · LOD tiers · quests · factions"]:::core
+  REACT --> NARR["Narrate the outcome<br/>(agent; numbers never change)"]:::llm
+  NARR --> POST["Pacing<br/>(agent surfaces an ambient beat in a lull)"]:::llm
   POST --> OUT([Response to player]):::io
 
   classDef io fill:#1f6f4a,stroke:#5fd39a,color:#eafff4,font-weight:bold;
@@ -93,7 +58,126 @@ flowchart TD
   classDef core fill:#2b2f37,stroke:#6b7480,color:#eef1f5;
 ```
 
+Stage by stage:
+
+1. **Handle / combat gate** — if a fight is active, only combat commands are accepted.
+2. **Parse intent** — a fast keyword parser; if the text isn't a clear command it falls
+   back to the `intent` agent, which maps free text onto the closest engine verb.
+3. **Dispatch** — the `Action` (verb · target · tone) is routed to a handler
+   (`move`, `talk`, `persuade`/`intimidate`, `attack`, `search`/`loot`, `buy`/`buyinfo`,
+   `freeform`, inventory, board, …).
+4. **Resolve** — deterministic rules + seeded dice decide the outcome; a roll, if needed,
+   suspends the turn as a `RollRequest` and resumes on the rolled faces.
+5. **Commit** — the only way state changes: `world.commit(verb, …)` appends an `Event` and
+   applies it to the read-models (event sourcing / CQRS).
+6. **World reacts** — cognition (NPC memory/relationships), LOD promotion, quest predicates,
+   and faction standing all update off the committed events.
+7. **Narrate & pace** — the outcome is rendered to prose and the director may inject an
+   ambient beat during a lull.
+
 Full write-up: [`docs/architecture.md`](docs/architecture.md).
+
+---
+
+## LLM agents
+
+Each agent is a **system prompt + JSON schema** (constrained / structured decoding at
+temperature 0) with a **deterministic fallback**. Routing lives in
+`ModelManager.ROLE_MODELS`: `intent` uses a small fast model (`INTENT_MODEL`), every other
+role uses the base model (`BASE_MODEL`). Code: `src/aidnd/inference/agents.py`.
+
+Twelve roles, grouped by where they fire in the pipeline.
+
+### Input → output
+
+#### `intent` — understand the player
+- **Fires at:** *Parse intent*, only when the keyword parser is unsure.
+- **In:** player text + scene context (place, present NPCs, exits, affordances).
+- **Out:** `{ verb, target, tone, needs_clarification }` (`emit_intent`; `verb` is an enum of
+  engine commands).
+- **Logic:** few-shot, snaps to the nearest engine verb; unsure/"other" → a named NPC means
+  `talk`, otherwise `freeform`.
+- **Fallback:** keyword parser (verbs, directions, aliases).
+
+#### `plausibility` — feasibility gate
+- **Fires at:** *Resolve* for freeform/ambiguous actions, before anything is narrated.
+- **In:** the proposed action + world context.
+- **Out:** `{ plausibility 0..1, drivers, verdict_note }` (`estimate_plausibility`).
+- **Logic:** conservative — implausible-but-possible scores low, true contradictions and
+  impossible feats score near zero.
+- **Fallback:** a rule list of impossible feats.
+
+#### `narrator` — render the result
+- **Fires at:** *Narrate*, for dialogue replies **and** mechanical outcomes.
+- **In:** the structured outcome (verb, damage + damage type, dialogue decision, scene).
+- **Out:** prose narration — **never changes numbers**.
+- **Logic:** weapon/damage-type fidelity, no anachronisms, no invented NPC lines.
+- **Fallback:** grounded templates.
+
+#### `cognition` — how an NPC reacts
+- **Fires at:** *World reacts*, during `talk`/social.
+- **In:** retrieved NPC memory + the relationship edge (trust/fear/affinity) + player
+  verb/tone.
+- **Out:** an action policy `{ action, info_disclosed, rationale_tags }` (`propose_action`).
+- **Logic:** disclosure is gated by trust/fear; faction standing shifts the gate.
+- **Fallback:** a trust/fear gate table.
+
+#### `reflection` — NPC belief synthesis
+- **Fires at:** *World reacts*, when an NPC's memory tree summarizes.
+- **In:** leaf observations.
+- **Out:** higher-level reflections, each citing the observation ids it derives from
+  (`emit_reflections`).
+- **Fallback:** one aggregating reflection.
+
+#### `character_gen` — fill the NPC pool
+- **Fires at:** lazily, at an NPC's first promotion to L3 (and when spawning passersby).
+- **In:** a skeleton persona (name, archetype, race, traits).
+- **Out:** `{ voice, traits }` enrichment (`emit_persona`); spawns satisfy world invariants
+  (workplace, residence).
+- **Fallback:** the deterministic skeleton persona.
+
+#### `item_smith` — flavor an item instance
+- **Fires at:** *Resolve* for `search`/`loot`, when an item is spawned.
+- **In:** the item template + world context.
+- **Out:** `{ name, description, properties }` (`forge_item`) — **cosmetic only**; rarity,
+  bonuses and numbers stay fixed by the template.
+- **Fallback:** the template name.
+
+#### `tactician` — monster turns
+- **Fires at:** the *Combat loop*, on each monster's turn.
+- **In:** a battle-state digest + the monster's stat block.
+- **Out:** `{ intent, target, move_to, ability }` (`choose_tactic`); the rules engine
+  resolves dice and movement, the agent only *chooses*.
+- **Fallback:** deterministic target selection / heuristic AI.
+
+#### `director` — pacing
+- **Fires at:** *Pacing*, after a turn and during lulls.
+- **In:** a world digest, active quests, recent events, the quiet streak.
+- **Out:** a directive `{ directive, ref, reason }` (`emit_directive`) or an ambient beat.
+- **Logic:** raises random-event odds the longer nothing interesting happens, when the scene
+  allows it.
+- **Fallback:** heuristics + seeded ambient beats.
+
+#### `quest_writer` — side-quest text
+- **Fires at:** when a CSP side quest is assembled.
+- **In:** the template, filled slots (giver, target, location, reward), world facts.
+- **Out:** `{ title, framing, giver_lines, objective_text, completion_text }` (`write_quest`);
+  mechanics stay deterministic, the agent only writes flavor.
+- **Fallback:** template framing.
+
+#### `lore_keeper` — invariant guard
+- **Fires at:** *Commit*, validating proposed/generated content.
+- **In:** the proposed content + the world knowledge graph.
+- **Out:** a verdict with concrete fixes (every professional NPC has a workplace and
+  residence; every shop one owner; every named item an owner and a location).
+- **Fallback:** direct invariant checks.
+
+#### `faction_gen` — flesh out a faction
+- **Fires at:** lazily, the first time the player inspects a per-world faction.
+- **In:** the faction archetype kind + seed name/goals + the town.
+- **Out:** `{ name, blurb, goals, values }` (`forge_faction`); persisted via a
+  `faction_enrich` event so it survives save/load and replay.
+- **Fallback:** the archetype defaults (`rules/factions.py`).
 
 ---
 
@@ -126,12 +210,12 @@ src/aidnd/
   lod/          # L2 LOD tiers, salience, smart objects
   cognition/    # L3 memory, relationships, reflection
   inference/    # L4 model client, agent prompts+schemas, structured output
-  rules/        # L5 deterministic 5e rules + dice
+  rules/        # L5 deterministic 5e rules, dice, progression, factions
   combat/       # tactical combat (grid, surfaces, spells, tactician)
-  gen/          # L7 generation: NPCs, items, quests, discovery, map info
-  runtime/      # L6/L8 orchestrator (game loop), director (pacing), snapshots
-  content/      # authored Phandalin/Cragmaw content, knowledge, regions, maps
-  server/       # L9 FastAPI + WebSocket + web UI (game, /map, /eval)
+  gen/          # L7 generation: NPCs, items, quests, factions, discovery, map info
+  runtime/      # L6/L8 orchestrator (game loop), leveling, director, persistence
+  content/      # authored Phandalin/Cragmaw content, classes, factions, board, quests
+  server/       # L9 FastAPI + WebSocket + web UI (game, /map, /city, /world, /eval)
   eval/         # LLM-as-judge scene/conversation harness
 tests/          # pytest suite (deterministic, model-off)
 docs/           # documentation site (Zensical)

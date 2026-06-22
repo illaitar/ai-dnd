@@ -467,10 +467,13 @@ def estimate_plausibility(manager, entity_descriptor: str, ctx_digest: str):
                  ["plausibility", "drivers"])
 
 
-def route_action(manager, text: str, context_digest: str, npcs: list[str] | None = None):
+def route_action(manager, text: str, context_digest: str, npcs: list[str] | None = None,
+                 history: str = ""):
     """Полноценный LLM-роутер: kind(query|dialogue|command|freeform) + query_type/verb/target/tone.
+    history — последние ходы диалога (для местоимений/продолжений «а на нём…»).
     None — нет сервера (тогда оркестратор берёт детерминированный фоллбэк)."""
-    user = (f"Scene: {context_digest}\nPresent NPCs: {npcs or []}\n"
+    hist = f"Recent turns (context for pronouns/follow-ups):\n{history}\n" if history else ""
+    user = (f"{hist}Scene: {context_digest}\nPresent NPCs: {npcs or []}\n"
             f"Player input: «{text}»\n"
             'Return the JSON object {"kind":…, "query_type":…, "verb":…, "target":…, "tone":…}.')
     return _call(manager, "router", "route_action", user, ["kind"])

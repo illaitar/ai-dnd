@@ -63,6 +63,8 @@ class GameSession:
         self.pending_roll: dict | None = None     # приостановленный ход на бросок
         self.player = world.player_id or "pc:hero"
         self.dialogue_partner: str | None = None  # с кем сейчас идёт разговор
+        self._last_item: str | None = None        # последний осмотренный предмет (для «на нём…»)
+        self._history: list[dict] = []            # последние ходы (ввод/ответ) — контекст для роутера
         self.journal: list[str] = []              # журнал событий игрока (read-model)
         self._quest_log_seen = 0                  # сколько строк журнала квестов уже втянуто
         self.quiet_ticks = 0                      # длина затишья для нарративного темпа
@@ -152,19 +154,48 @@ class GameSession:
         if self.combat and self.combat.state.mode == "active":
             return {"kind": "combat", "text": "Идёт бой — используй боевые действия.",
                     "view": self.view()}
+        if self._is_item_followup(text):                  # «а на нём что написано?» → про последний предмет
+            return self._post(self._answer_query("look", text), "query")
         route = self._route(text)                         # LLM-роутер (онлайн) / детерминированный фоллбэк
         if route["kind"] == "query":                      # вопрос о мире/себе → ответ из стейта, без броска
-            return self._post(self._answer_query(route.get("query") or "look"), "query")
-        verb = route.get("verb") or "freeform"
-        action = Action(actor=self.player, verb=verb, target=route.get("target"),
-                        tone=route.get("tone", "neutral"))
-        # действие (не разговор) завершает текущий диалог; покупка сведений/торговля
-        # идут у текущего собеседника, поэтому диалог не сбрасывают
-        if verb not in ("talk", "persuade", "intimidate", "inspect", "buyinfo", "buy", "sell"):
-            self.dialogue_partner = None
-        handler = getattr(self, f"_do_{verb}", None)
-        result = handler(action, text) if handler else self._resolve_freeform(text, action.target)
-        return self._post(result, verb)
+            out, verb = self._answer_query(route.get("query") or "look", text), "query"
+        else:
+            verb = route.get("verb") or "freeform"
+            action = Action(actor=self.player, verb=verb, target=route.get("target"),
+                            tone=route.get("tone", "neutral"))
+            # действие (не разговор) завершает текущий диалог; покупка сведений/торговля
+            # идут у текущего собеседника, поэтому диалог не сбрасывают
+            if verb not in ("talk", "persuade", "intimidate", "inspect", "buyinfo", "buy", "sell"):
+                self.dialogue_partner = None
+            handler = getattr(self, f"_do_{verb}", None)
+            out = handler(action, text) if handler else self._resolve_freeform(text, action.target)
+        result = self._post(out, verb)
+        self._remember(text, result)                      # короткая память диалога (контекст роутера)
+        return result
+
+    def _is_item_followup(self, text: str) -> bool:
+        """Продолжение про последний осмотренный предмет: местоимение «на нём…» + вопрос
+        об осмотре/надписи. Решается детерминированно (не отдаём догадке роутера)."""
+        if not (self._last_item and self._last_item in self._carry_items()):
+            return False
+        low = text.lower()
+        pron = any(p in low for p in ("на нём", "на нем", "на ней", "о нём", "о нем",
+                                      "что там", "на этом", "на нём", "этот предмет"))
+        about = any(k in low for k in ("написа", "гравир", "надпис", "выцарап", "начертан",
+                                       "метк", "рун", "что-то", "что то", "осмотр", "разгляд"))
+        return pron and about
+
+    def _remember(self, text: str, result: dict) -> None:
+        self._history.append({"in": text.strip()[:160], "out": (result.get("text") or "")[:160]})
+        self._history = self._history[-5:]                # последние 5 ходов
+
+    def _recent_context(self, n: int = 4) -> str:
+        lines = []
+        for h in self._history[-n:]:
+            lines.append(f"Игрок: {h['in']}")
+            if h["out"]:
+                lines.append(f"Мастер: {h['out'][:120]}")
+        return "\n".join(lines)
 
     # ===================================================================== #
     #  Нарративный темп: при затишье и подходящей обстановке — случайный бит #
@@ -1176,7 +1207,8 @@ class GameSession:
         if self.model is not None and self.model.available():
             from ..inference.agents import route_action
             out = route_action(self.model, text, self._intent_context(),
-                               [self._display(n) for n in self.npcs_here()])
+                               [self._display(n) for n in self.npcs_here()],
+                               history=self._recent_context())
             r = self._route_from_llm(out, text)
             if r:
                 return r
@@ -1755,6 +1787,7 @@ class GameSession:
         inst = self.world.items.get(iid)
         if not inst:
             return "Такого предмета у тебя нет."
+        self._last_item = iid                             # запомнить для местоимений «на нём…»
         tmpl = self.world.templates.get(inst.template_id)
         desc = inst.description or getattr(tmpl, "description", None) or ""
         parts = [self._item_name(iid).capitalize() + "."]
@@ -1831,7 +1864,23 @@ class GameSession:
             return "map"
         return "look"
 
-    def _answer_query(self, qtype: str) -> dict:
+    def _answer_query(self, qtype: str, text: str = "") -> dict:
+        low = text.lower()
+        iid = self._item_in_carry(text)                   # назван предмет при себе?
+        if not iid and any(p in low for p in ("на нём", "на нем", "на ней", "на это", "на том",
+                                              "о нём", "о нем", "что там", "что на")):
+            if self._last_item and self._last_item in self._carry_items():
+                iid = self._last_item                     # местоимение → последний осмотренный
+        if iid and qtype not in ("who", "exits", "status", "map"):
+            inst = self.world.items.get(iid)
+            if any(k in low for k in ("написа", "гравир", "надпис", "выцарап", "начертан",
+                                      "метк", "рун", "что-то на", "что то на")):
+                alts = (inst.mods or {}).get("alterations") or [] if inst else []
+                nm = self._item_name(iid)
+                txt = (f"На «{nm}»: " + "; ".join(alts) + ".") if alts \
+                    else f"На «{nm}» ничего не написано — он чист."
+                return {"kind": "narration", "text": txt, "view": self.view()}
+            return {"kind": "narration", "text": self._describe_item(iid), "view": self.view()}
         if qtype == "look":
             return self.look()
         if qtype == "map":

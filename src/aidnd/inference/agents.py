@@ -89,6 +89,15 @@ PROMPTS = {
         "not zero. Reserve zero/near-zero for true contradictions and physically impossible "
         "feats. Output ONLY the plausibility JSON."
     ),
+    "arbiter": (
+        "You are a D&D 5e referee deciding HOW to resolve ONE freeform player action that is "
+        "not a fixed game command. Decide: 'auto_success' for trivial, unopposed, mundane acts; "
+        "'auto_fail' for things that contradict the world or are impossible here; 'roll' when "
+        "there is real risk, opposition or uncertainty. For a roll, choose the single best 5e "
+        "ability (str/dex/con/int/wis/cha) and skill, and a DC: 5 very easy, 10 easy, 15 medium, "
+        "20 hard, 25 very hard — the more plausible the action, the lower the DC. Output ONLY JSON "
+        "via decide_resolution."
+    ),
     "item_smith": (
         "You name and flavour a single D&D 5e item instance from its template and the world "
         "context. You MAY set an evocative in-world name, a one-sentence description, and "
@@ -194,6 +203,17 @@ SCHEMAS = {
             "verdict_note": {"type": "string"}},
             "required": ["plausibility", "drivers"]},
     },
+    "decide_resolution": {
+        "name": "decide_resolution",
+        "parameters": {"type": "object", "properties": {
+            "resolution": {"type": "string", "enum": ["auto_success", "auto_fail", "roll"]},
+            "ability": {"type": ["string", "null"],
+                        "enum": ["str", "dex", "con", "int", "wis", "cha", None]},
+            "skill": {"type": ["string", "null"]},
+            "dc": {"type": ["integer", "null"], "minimum": 1, "maximum": 30},
+            "reason": {"type": "string"}},
+            "required": ["resolution"]},
+    },
     "forge_item": {
         "name": "forge_item",
         "parameters": {"type": "object", "properties": {
@@ -283,9 +303,12 @@ def parse_intent(manager, text: str, actor: str, options: list[str] | None = Non
             f"{_INTENT_SHOTS}"
             f"Scene: {context or 'n/a'}\nVisible NPCs: {options or []}\n"
             f"Player input: «{text}»\n"
-            f"Choose the closest command and a target if one is named. Almost always pick a "
-            f"real command; use 'other' or needs_clarification ONLY for impossible/nonsensical "
-            f"input. Call emit_intent.")
+            f"Pick a real command ONLY when the input clearly IS that command (go to a place, "
+            f"attack a foe, talk, search, buy, inventory…). For improvised / creative / compound "
+            f"physical actions that are NOT a plain command — climbing, throwing or picking up "
+            f"objects, shoving, breaking things, hiding, stunts — return verb 'other' so the engine "
+            f"resolves them freeform. needs_clarification only for truly ambiguous input. "
+            f"Call emit_intent.")
     # только verb обязателен: малые модели часто опускают actor/needs_clarification
     return _call(manager, "intent", "emit_intent", user, ["verb"])
 
@@ -410,6 +433,16 @@ def estimate_plausibility(manager, entity_descriptor: str, ctx_digest: str):
             f"Call estimate_plausibility.")
     return _call(manager, "plausibility", "estimate_plausibility", user,
                  ["plausibility", "drivers"])
+
+
+def decide_resolution(manager, action_text: str, context_digest: str, plausibility: float):
+    """Как разрешить freeform-действие: auto_success | auto_fail | roll(ability,skill,dc).
+    None — нет сервера (тогда оркестратор берёт детерминированный фоллбэк)."""
+    user = (f"PLAYER action: «{action_text}»\nScene: {context_digest}\n"
+            f"Estimated plausibility 0..1: {plausibility:.2f}\n"
+            f"Decide how to resolve it. If a check is warranted, give ability, skill and dc "
+            f"(lower dc the more plausible). Call decide_resolution.")
+    return _call(manager, "arbiter", "decide_resolution", user, ["resolution"])
 
 
 def assess_feasibility(manager, action_text: str, context_digest: str):

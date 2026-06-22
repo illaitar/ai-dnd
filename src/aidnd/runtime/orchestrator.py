@@ -224,6 +224,9 @@ class GameSession:
     def _do_move(self, action: Action, text: str) -> dict:
         dest = self._match_place(text)
         if not dest:
+            low = text.lower()                            # не нашли локацию: описательная/физическая
+            if any(k in low for k in self._FREEFORM_KW) or len(text.split()) >= 5:   # фраза → freeform
+                return self._resolve_freeform(text)
             return {"kind": "system", "text": "Куда идти? Доступные выходы: "
                     + ", ".join(self._place_name(e) for e in self.exits()),
                     "view": self.view()}
@@ -839,8 +842,8 @@ class GameSession:
         enemies = [n for n in self.npcs_here() if self._is_hostile(n)]
         if target and target not in enemies and self._is_hostile(target):
             enemies = [target] + [e for e in enemies if e != target]
-        if not enemies:
-            return {"kind": "system", "text": "Здесь нет врагов для атаки.", "view": self.view()}
+        if not enemies:                                   # «атака» без явного врага — враждебный freeform
+            return self._resolve_freeform(text, action.target, hostile=True)
         return self.start_combat(enemies)
 
     # ===================================================================== #
@@ -1115,6 +1118,11 @@ class GameSession:
 
     _MAP_KW = ["карт", " map", "карту", "карты", "карте", "куда идти", "куда можно",
                "куда пойти", "где я", "местност", "локаци", "окрестност"]
+    # физические/импровизированные действия → freeform (а не «реплика»), даже если рядом NPC
+    _FREEFORM_KW = ["подбир", "подобрат", "подними", "поднять", "кин", "брос", "метн", "швыр",
+                    "толкн", "схват", "оттолк", "перепрыг", "перелез", "взбер", "взбир", "влез",
+                    "залаз", "лезу", "карабк", "вылом", "выбить", "поджеч", "подожг", "протисн",
+                    "прокрад", "спрята", "перевяз"]
     _OBSERVER_KW = ["наблюда", "следит", "следят", "соглядат", "за мной", "за нами",
                     "кто-то рядом", "кто-нибудь рядом", "не видит ли", "не смотрит ли",
                     "кто-то смотрит", "watching", "следил"]
@@ -1159,6 +1167,8 @@ class GameSession:
         # 3) обращение к присутствующему NPC (по имени или вопрос при ком-то рядом) —
         #    это реплика; идёт диалог — продолжаем его; иначе свободное действие.
         named = self._match_npc(text)
+        if any(k in text.lower() for k in self._FREEFORM_KW):   # физическое/импровиз — это freeform
+            return Action(actor=self.player, verb="freeform", target=named)
         if self.dialogue_partner or named or ("?" in text and self.npcs_here()):
             return Action(actor=self.player, verb="talk",
                           target=named or self.dialogue_partner)
@@ -1508,24 +1518,211 @@ class GameSession:
         return mapping.get(place)
 
     def _is_hostile(self, npc: str) -> bool:
+        if f"hostile:{npc}" in self.world.flags:          # озлоблен рантайм-событием (напр., напали)
+            return True
         p = self.world.ecs.get(npc, Persona)
         return bool(p and p.faction in ("faction:cragmaw", "faction:redbrands"))
 
     def _do_freeform(self, action: Action, text: str) -> dict:
-        return self._narrate_freeform(text)
+        return self._resolve_freeform(text, action.target)
 
-    def _narrate_freeform(self, text: str) -> dict:
-        """Свободное действие: сперва ГЕЙТ ВЫПОЛНИМОСТИ (можно ли это здесь и сейчас —
-        роль plausibility), затем нарратор описывает попытку (роль narrator/render_scene).
-        Офлайн — детерминированные фоллбэки."""
+    # --- общий резолвер любого свободного действия (боевого и не боевого) ---
+    #   intent → plausibility → нужен ли бросок и с какой вероятностью → результат.
+    _SKILL_KW = [                                          # (ключи, навык) для офлайн-арбитра
+        (("перепрыг", "прыг", "влез", "взбер", "перелез", "карабк", "залез", "подтян",
+          "вылом", "выбить", "толкн", "сдвин", "оттолк", "поднять", "подними", "удерж",
+          "кин", "брос", "метн", "швырн", "разорв", "сорв"), "athletics"),
+        (("прокрад", "крад", "подкрад", "спрятат", "притаит", "тихо", "бесшум", "укрыт"), "stealth"),
+        (("увернут", "проскольз", "протисн", "балансир", "кувыр", "акробат", "пролез"), "acrobatics"),
+        (("взлом", "отмыч", "карман", "стащ", "стянут", "ловк", "фокус", "обезвред"), "sleight_of_hand"),
+        (("заметить", "высмотр", "приглядет", "прислуш", "услыш", "разглядет", "осмотрет"), "perception"),
+        (("изуч", "разобрат", "понять", "вычисл", "осмотреть", "обыщ", "исслед", "следы"), "investigation"),
+        (("вспомн", "что знаю", "припомн", "магия", "заклинан", "руны"), "arcana"),
+        (("перевяз", "лечит", "рану", "оказать помощь", "медициy"), "medicine"),
+        (("убедить", "уговор", "упрос", "разжалоб", "договор"), "persuasion"),
+        (("обман", "соврат", "притвор", "выдать себя", "блеф"), "deception"),
+        (("запуг", "угроз", "припугн", "застращ"), "intimidation"),
+    ]
+
+    def _guess_skill(self, low: str) -> str:
+        for keys, skill in self._SKILL_KW:
+            if any(k in low for k in keys):
+                return skill
+        return "athletics"                                # дефолт: физическое усилие
+
+    def _norm_skill(self, raw: str | None, text: str) -> str:
+        """Приводит навык из любого формата арбитра («DEX + Stealth», «thrown») к валидному
+        ключу 5e; иначе — эвристика по тексту действия."""
+        from ..rules.srd import SKILL_ABILITY
+        s = (raw or "").lower()
+        for sk in SKILL_ABILITY:
+            if sk in s or sk.replace("_", " ") in s:
+                return sk
+        alias = {"thrown": "athletics", "throw": "athletics", "climb": "athletics",
+                 "jump": "athletics", "lift": "athletics", "sneak": "stealth", "hide": "stealth",
+                 "lockpick": "sleight_of_hand", "thiev": "sleight_of_hand", "balance": "acrobatics",
+                 "tumble": "acrobatics", "spot": "perception", "listen": "perception",
+                 "persuade": "persuasion", "convince": "persuasion", "lie": "deception",
+                 "threaten": "intimidation"}
+        for k, sk in alias.items():
+            if k in s:
+                return sk
+        for a, sk in {"dex": "acrobatics", "str": "athletics", "cha": "persuasion",
+                      "int": "investigation", "wis": "perception", "con": "athletics"}.items():
+            if a in s:
+                return sk
+        return self._guess_skill(text.lower())
+
+    _TRIVIAL_KW = ["сажус", "сесть", "присяд", "встаю", "встать", "передохн", "перевож дух",
+                   "перевести дух", "отдыха", "отдохн", "дышу", "жду", "подожд", "киваю",
+                   "оглядыва", "озира"]
+
+    def _arbiter_fallback(self, text: str, p: float) -> dict:
+        """Детерминированный арбитр (офлайн): по правдоподобию и ключевым словам.
+        Онлайн эту роль точнее играет агент-арбитр (decide_resolution)."""
+        low = text.lower()
+        if any(k in low for k in self._TRIVIAL_KW):       # будничное, без риска → без броска
+            return {"resolution": "auto_success"}
+        opposed = any(k in low for k in ("страж", "враг", "противник", "замок", "против",
+                                         "часов", "охран")) or p < 0.6
+        if p >= 0.85 and not opposed:
+            return {"resolution": "auto_success"}
+        skill = self._guess_skill(low)
+        dc = max(5, min(25, round(20 - p * 16)))          # p 0.8→7, 0.5→12, 0.3→15
+        return {"resolution": "roll", "skill": skill, "dc": dc}
+
+    @staticmethod
+    def _success_pct(req) -> int:
+        need = (req.dc or 10) - req.modifier              # нужно выкинуть ≥ need на d20
+        base = max(0, min(20, 21 - need)) / 20
+        if req.advantage > 0:
+            base = 1 - (1 - base) ** 2
+        elif req.advantage < 0:
+            base = base ** 2
+        return round(base * 100)
+
+    _HOSTILE_KW = ["кин", "кид", "брос", "метн", "мета", "швыр", "ударь", "бью", "бей",
+                   "толкн", "пихн", "атак", "напад", "руб", "пни", "пина", "режу", "коли",
+                   "стреля", "пыря"]
+
+    def _aggro(self, target: str) -> None:
+        """Нападение озлобляет цель, её подельников рядом и (если жертва мирная) стражу;
+        репутация с задетыми фракциями падает. Всё событийно → реплей-safe."""
+        def hostile(n):
+            self.world.commit("set_flag", self.player, payload={"flag": f"hostile:{n}"})
+        hostile(target)
+        p = self.world.ecs.get(target, Persona)
+        fac = p.faction if p else None
+        for n in self.npcs_here():                        # подельники той же фракции
+            np = self.world.ecs.get(n, Persona)
+            if n != target and np and np.faction and np.faction == fac:
+                hostile(n)
+        civilian = (fac is None) or (p and p.archetype in ("guard", "commoner", "townmaster"))
+        if civilian:                                      # нападение на мирного — преступление
+            for n in self.npcs_here():
+                np = self.world.ecs.get(n, Persona)
+                if n != target and np and (np.faction == "faction:watch" or np.archetype == "guard"):
+                    hostile(n)
+            self.world.commit("faction_rep", self.player, payload={"faction": "faction:watch", "delta": -0.2})
+        if fac:
+            self.world.commit("faction_rep", self.player, payload={"faction": fac, "delta": -0.15})
+
+    def _improvised_attack(self, text: str, target: str) -> dict:
+        """Враждебное freeform-действие по NPC: бросок vs AC → урон при попадании →
+        агро (цель/подельники/стража) → начало боя."""
+        if not (self.world.ecs.exists(target) and self.world.is_alive(target)):
+            return self._resolve_freeform(text, None)
+        from ..rules.checks import ability_mod
+        st = self.world.get_stats(target)
+        ac = st.ac_base if st else 12
+        strmod = ability_mod(self.world, self.player, "str")
+        req = self.dice.request_player(kind="attack", dice="1d20", modifier=strmod, dc=ac,
+                                       roller=self.player,
+                                       context={"skill": "импровиз. атака", "target": target})
+        pct = self._success_pct(req)
+        tname = self._display(target)
+        action = Action(actor=self.player, verb="attack", target=target)
+
+        def resume(result: RollResult) -> dict:
+            outcome = self.rules.adjudicate(action, req, result)
+            dealt = 0
+            if outcome.success:
+                dmg = self.dice.roll_seeded("damage", "1d4", modifier=strmod, roller=self.player)
+                dealt = max(1, dmg.total)
+                self.world.commit("damage", self.player, target=target,
+                                  payload={"amount": dealt}, roll=dmg.to_record("1d4"))
+            self._aggro(target)
+            self._tick()
+            head = (f"Попадание по {tname} — {dealt} урона!" if outcome.success
+                    else f"Мимо {tname}.")
+            enemies = [n for n in self.npcs_here() if self._is_hostile(n) and self.world.is_alive(n)]
+            if enemies:
+                cs = self.start_combat(enemies)
+                cs["text"] = head + " На тебя бросаются — начинается бой!"
+                return cs
+            return {"kind": "narration", "text": head + " Твоя выходка не осталась без последствий.",
+                    "view": self.view()}
+
+        return self._suspend(req, resume,
+                             f"Импровизированная атака по {tname}: бросок против AC {ac} "
+                             f"(~{pct}% попадания).")
+
+    def _resolve_freeform(self, text: str, target: str | None = None, hostile: bool = False) -> dict:
+        low0 = text.lower()
+        if (hostile or any(k in low0 for k in self._HOSTILE_KW)) and target \
+                and self.world.ecs.exists(target) and self.world.is_alive(target):
+            return self._improvised_attack(text, target)  # враждебно по NPC → импровиз-атака с последствиями
         fz = self.feasibility(text)
-        if not fz["feasible"]:
-            return {"kind": "narration", "feasibility": fz,
+        if not fz["feasible"]:                            # неосуществимо здесь и сейчас
+            self._tick()
+            return {"kind": "narration", "feasibility": fz, "needs_roll": False,
                     "text": f"Мастер качает головой: {fz['reason']}", "view": self.view()}
-        narr = self._narrate_outcome(f"Игрок пытается: {text.strip()}", topic="freeform")
-        return {"kind": "narration", "feasibility": fz,
-                "text": narr or "Мастер обдумывает твои слова... (свободное действие)",
-                "view": self.view()}
+        p = float(fz.get("p", 0.5))
+        adj = None
+        if self.model is not None and self.model.available():
+            from ..inference.agents import decide_resolution
+            sc = self.scene_context()
+            adj = decide_resolution(self.model, text, f"{sc.descriptor} Локация: {sc.place_name}.", p)
+        if not adj:
+            adj = self._arbiter_fallback(text, p)
+        res = adj.get("resolution", "roll")
+
+        why = adj.get("reason") or adj.get("reasoning") or fz["reason"]
+        if res == "auto_fail":
+            self._tick()
+            return {"kind": "narration", "feasibility": fz, "needs_roll": False,
+                    "text": f"Так не выйдет: {why}", "view": self.view()}
+        if res == "auto_success":
+            self._tick()
+            narr = self._narrate_outcome(f"Игрок: {text.strip()} — удаётся без труда.", topic="freeform")
+            return {"kind": "narration", "feasibility": fz, "needs_roll": False,
+                    "text": narr or f"Без труда удаётся: {text.strip()}.", "view": self.view()}
+
+        # нужен бросок: навык + DC (DC кодирует вероятность), считаем шанс успеха
+        skill = self._norm_skill(adj.get("skill") or adj.get("ability_skill") or adj.get("ability"), text)
+        dc = int(adj.get("dc") or max(5, min(25, round(20 - p * 16))))
+        req = self.rules.build_check_request(self.player, skill, dc, kind="skill", target=target)
+        pct = self._success_pct(req)
+        action = Action(actor=self.player, verb="freeform", target=target)
+
+        def resume(result: RollResult) -> dict:
+            outcome = self.rules.adjudicate(action, req, result)
+            self.world.commit("check", self.player,
+                              payload={"skill": skill, "dc": dc, "success": outcome.success},
+                              roll=result.to_record(req.dice))
+            self._tick()
+            tag = "успех" if outcome.success else "провал"
+            narr = self._narrate_outcome(
+                f"Игрок: {text.strip()} — {tag} ({skill} {result.total} против DC {dc}).",
+                topic="freeform")
+            return {"kind": "narration", "feasibility": fz, "needs_roll": True,
+                    "outcome_success": outcome.success,
+                    "text": narr or (("Получилось! " if outcome.success else "Не вышло. ")
+                                     + f"({skill} {result.total} против DC {dc})"),
+                    "view": self.view()}
+
+        return self._suspend(req, resume,
+                             f"Нужен бросок: {skill} против DC {dc} (~{pct}% успеха).")
 
     def feasibility(self, text: str) -> dict:
         """Оценка выполнимости действия игрока в контексте сцены (роль plausibility).

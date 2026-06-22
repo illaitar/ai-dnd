@@ -33,7 +33,7 @@ VERB_KEYWORDS = {
     "intimidate": ["запуга", "угрож", "intimidate", "припугн"],
     "persuade": ["убеди", "уговор", "persuade", "договор"],
     "talk": ["поговор", "говор", "спрос", "talk", "ask", "обрат", "привет"],
-    "inspect": ["осмотр", "смотр", "look", "examine", "оглядет", "разгляд"],
+    "inspect": ["осмотр", "осматр", "смотр", "look", "examine", "оглядет", "разгляд", "рассматр"],
     "search": ["обыск", "ищу", "иска", "search", "найти", "пошарь"],
     "loot": ["лут", "обобрать", "loot", "забрать", "открыть сундук", "обыскать труп"],
     "buy": ["купить", "куплю", "buy", "приобрес"],
@@ -159,7 +159,7 @@ class GameSession:
         if verb not in ("talk", "persuade", "intimidate", "inspect", "buyinfo", "buy", "sell"):
             self.dialogue_partner = None
         handler = getattr(self, f"_do_{verb}", None)
-        result = handler(action, text) if handler else self._narrate_freeform(text)
+        result = handler(action, text) if handler else self._resolve_freeform(text, action.target)
         return self._post(result, verb)
 
     # ===================================================================== #
@@ -534,13 +534,26 @@ class GameSession:
         npc = self._match_npc(text)
         if npc:
             return {"kind": "narration", "text": self._describe_npc(npc), "view": self.view()}
-        return self.look()
+        iid = self._item_in_carry(text)                   # «осмотреть кинжал» — конкретный предмет
+        if iid:
+            return {"kind": "narration", "text": self._describe_item(iid), "view": self.view()}
+        if self._is_bare_look(text):                      # «осмотреться вокруг» — обычный обзор
+            return self.look()
+        return self._resolve_freeform(text)               # «осмотреть руку» и пр. — freeform-действие
+
+    _BARE_LOOK_KW = ["осмотреться", "осмотрюсь", "осмотрись", "осматрива", "оглядет", "оглядыва",
+                     "оглянут", "озира", "вокруг", "где я", "что здесь", "что вокруг",
+                     "комнат", "помещ", "зал", "местност", "локац", "округ", "look"]
+
+    def _is_bare_look(self, text: str) -> bool:
+        low = text.lower()
+        return any(k in low for k in self._BARE_LOOK_KW) or len(low.split()) <= 1
 
     def _do_loot(self, action: Action, text: str) -> dict:
         self.current_place()
         containers = self._containers_here()
-        if not containers:
-            return {"kind": "system", "text": "Здесь нечего обыскивать.", "view": self.view()}
+        if not containers:                                # нечего лутать → это freeform-действие
+            return self._resolve_freeform(text, action.target)
         cid = containers[0]
         c = self.world.containers[cid]
         try:
@@ -1667,11 +1680,79 @@ class GameSession:
                              f"Импровизированная атака по {tname}: бросок против AC {ac} "
                              f"(~{pct}% попадания).")
 
+    # --- стойкие изменения предметов (любое freeform-изменение сохраняется) ---
+    def _carry_items(self) -> list[str]:
+        c = self.world.containers.get(f"carry:{ids.name_of(self.player)}")
+        return list(c.items) if c else []
+
+    def _item_in_carry(self, text: str) -> str | None:
+        """Находит экземпляр в инвентаре, упомянутый в тексте (стем-матч по имени;
+        порог 3 буквы — чтобы ловить короткие «меч», «лук», «нож»)."""
+        import re
+        toks = [t for t in re.split(r"[^0-9a-zа-яё]+", text.lower()) if len(t) >= 3]
+        for iid in self._carry_items():
+            for w in re.split(r"[^0-9a-zа-яё]+", self._item_name(iid).lower()):
+                if len(w) >= 3 and any(t.startswith(w[:5]) or w.startswith(t[:5]) for t in toks):
+                    return iid
+        return None
+
+    def _describe_item(self, iid: str) -> str:
+        """Заземлённое описание экземпляра: имя + флавор + накопленные изменения."""
+        inst = self.world.items.get(iid)
+        if not inst:
+            return "Такого предмета у тебя нет."
+        tmpl = self.world.templates.get(inst.template_id)
+        desc = inst.description or getattr(tmpl, "description", None) or ""
+        parts = [self._item_name(iid).capitalize() + "."]
+        if desc:
+            parts.append(desc)
+        alts = (inst.mods or {}).get("alterations") or []
+        if alts:
+            parts.append("Следы изменений: " + "; ".join(alts) + ".")
+        if inst.equipped_slot:
+            parts.append("(в руке)")
+        return " ".join(parts).strip()
+
+    def _apply_alteration(self, iid: str, effect: str) -> None:
+        """Сохраняет изменение на экземпляре событийно (modify_item → переживает сейв/лоад)."""
+        from ..inventory.container import modify_item
+        cur = list((self.world.items[iid].mods or {}).get("alterations") or [])
+        if effect and effect not in cur:
+            modify_item(self.world, iid, alterations=cur + [effect])
+            self._log_journal(f"Изменение сохранено на «{self._item_name(iid)}»: {effect}")
+
+    _MOD_VERBS = ("гравир", "выцарап", "нацарап", "вырез", "привяз", "повяз", "обмот", "помет",
+                  "покрас", "краш", "наточ", "затуп", "погн", "слома", "надлом", "нанёс", "нанес",
+                  "написа", "назв", "приклеи", "прицеп", "закрепи", "оберну", "обвяз", "вбил",
+                  "пометк", "метк", "царап", "выбил надпись")
+
+    def _lasting_effect_fallback(self, text: str) -> str | None:
+        """Офлайн: извлечь стойкое изменение из фразы (если это вообще модификация)."""
+        import re
+        low = text.lower()
+        if not any(v in low for v in self._MOD_VERBS):
+            return None
+        m = re.search(r'[«"“„\'](.+?)[»"”“\']', text)
+        if m and ("гравир" in low or "надпис" in low or "царап" in low or "вырез" in low
+                  or "написа" in low or "метк" in low):
+            return f"надпись «{m.group(1).strip()}»"
+        phrase = re.sub(r'^\s*(я\s+)?(хочу\s+|решил[аи]?\s+|пытаюсь\s+)?', '', text.strip(), flags=re.I)
+        return phrase[:90]
+
     def _resolve_freeform(self, text: str, target: str | None = None, hostile: bool = False) -> dict:
         low0 = text.lower()
         if (hostile or any(k in low0 for k in self._HOSTILE_KW)) and target \
                 and self.world.ecs.exists(target) and self.world.is_alive(target):
             return self._improvised_attack(text, target)  # враждебно по NPC → импровиз-атака с последствиями
+
+        # осмотр предмета из инвентаря → заземлённое описание (с накопленными изменениями)
+        if any(k in low0 for k in ("осмотр", "осматр", "разгляд", "рассматр", "посмотр", "погляж",
+                                   "гляж", "изуч", "достаю", "достать", "достан", "вынима", "вытаск")):
+            iid = self._item_in_carry(text)
+            if iid:
+                self._tick()
+                return {"kind": "narration", "text": self._describe_item(iid), "view": self.view()}
+
         fz = self.feasibility(text)
         if not fz["feasible"]:                            # неосуществимо здесь и сейчас
             self._tick()
@@ -1687,6 +1768,18 @@ class GameSession:
             adj = self._arbiter_fallback(text, p)
         res = adj.get("resolution", "roll")
 
+        # стойкое изменение: любое успешное freeform-действие, меняющее предмет, сохраняется
+        tgt_hint = adj.get("target") if isinstance(adj.get("target"), str) else ""
+        mod_iid = self._item_in_carry(f"{tgt_hint} {text}")
+        eff = adj.get("lasting_effect")
+        effect = (eff if isinstance(eff, str) and eff.strip() else None) or self._lasting_effect_fallback(text)
+
+        def alter_note(success: bool) -> str:
+            if success and effect and mod_iid:
+                self._apply_alteration(mod_iid, effect)
+                return f" На «{self._item_name(mod_iid)}» остаётся след: {effect}."
+            return ""
+
         why = adj.get("reason") or adj.get("reasoning") or fz["reason"]
         if res == "auto_fail":
             self._tick()
@@ -1696,7 +1789,8 @@ class GameSession:
             self._tick()
             narr = self._narrate_outcome(f"Игрок: {text.strip()} — удаётся без труда.", topic="freeform")
             return {"kind": "narration", "feasibility": fz, "needs_roll": False,
-                    "text": narr or f"Без труда удаётся: {text.strip()}.", "view": self.view()}
+                    "text": (narr or f"Без труда удаётся: {text.strip()}.") + alter_note(True),
+                    "view": self.view()}
 
         # нужен бросок: навык + DC (DC кодирует вероятность), считаем шанс успеха
         skill = self._norm_skill(adj.get("skill") or adj.get("ability_skill") or adj.get("ability"), text)
@@ -1717,8 +1811,8 @@ class GameSession:
                 topic="freeform")
             return {"kind": "narration", "feasibility": fz, "needs_roll": True,
                     "outcome_success": outcome.success,
-                    "text": narr or (("Получилось! " if outcome.success else "Не вышло. ")
-                                     + f"({skill} {result.total} против DC {dc})"),
+                    "text": (narr or (("Получилось! " if outcome.success else "Не вышло. ")
+                                      + f"({skill} {result.total} против DC {dc})")) + alter_note(outcome.success),
                     "view": self.view()}
 
         return self._suspend(req, resume,

@@ -95,8 +95,11 @@ PROMPTS = {
         "'auto_fail' for things that contradict the world or are impossible here; 'roll' when "
         "there is real risk, opposition or uncertainty. For a roll, choose the single best 5e "
         "ability (str/dex/con/int/wis/cha) and skill, and a DC: 5 very easy, 10 easy, 15 medium, "
-        "20 hard, 25 very hard — the more plausible the action, the lower the DC. Output ONLY JSON "
-        "via decide_resolution."
+        "20 hard, 25 very hard — the more plausible the action, the lower the DC. If the action "
+        "permanently ALTERS a specific object the player carries or sees, set target (its name) and "
+        "lasting_effect — a short Russian description of the lasting change that should be remembered "
+        "(e.g. «надпись „тест“ на клинке», «красная лента на рукояти», «зазубрина на лезвии»); else "
+        "leave them null. Output ONLY JSON via decide_resolution."
     ),
     "item_smith": (
         "You name and flavour a single D&D 5e item instance from its template and the world "
@@ -211,6 +214,8 @@ SCHEMAS = {
                         "enum": ["str", "dex", "con", "int", "wis", "cha", None]},
             "skill": {"type": ["string", "null"]},
             "dc": {"type": ["integer", "null"], "minimum": 1, "maximum": 30},
+            "target": {"type": ["string", "null"]},
+            "lasting_effect": {"type": ["string", "null"]},
             "reason": {"type": "string"}},
             "required": ["resolution"]},
     },

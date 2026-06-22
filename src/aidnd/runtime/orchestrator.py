@@ -152,13 +152,12 @@ class GameSession:
         if self.combat and self.combat.state.mode == "active":
             return {"kind": "combat", "text": "Идёт бой — используй боевые действия.",
                     "view": self.view()}
-        # вопрос О МИРЕ/СЕБЕ → ответ из стейта (без броска); но вопрос, адресованный
-        # присутствующему NPC (или в идущем диалоге), — это реплика, а не запрос к миру
-        qtype = self._query_type(text)
-        if qtype and not self.dialogue_partner and not self._match_npc(text):
-            return self._post(self._answer_query(qtype), "query")
-        action = self._parse_intent(text)
-        verb = action.verb
+        route = self._route(text)                         # LLM-роутер (онлайн) / детерминированный фоллбэк
+        if route["kind"] == "query":                      # вопрос о мире/себе → ответ из стейта, без броска
+            return self._post(self._answer_query(route.get("query") or "look"), "query")
+        verb = route.get("verb") or "freeform"
+        action = Action(actor=self.player, verb=verb, target=route.get("target"),
+                        tone=route.get("tone", "neutral"))
         # действие (не разговор) завершает текущий диалог; покупка сведений/торговля
         # идут у текущего собеседника, поэтому диалог не сбрасывают
         if verb not in ("talk", "persuade", "intimidate", "inspect", "buyinfo", "buy", "sell"):
@@ -1169,6 +1168,46 @@ class GameSession:
                               target=self._match_npc(text))
         return None
 
+    _QUERY_TYPES = {"look", "items", "who", "exits", "inventory", "status", "map"}
+
+    def _route(self, text: str) -> dict:
+        """Полноценная маршрутизация: онлайн — LLM-роутер; иначе детерминированный фоллбэк.
+        Возвращает {kind:'query'|'command', query?, verb?, target?, tone?}."""
+        if self.model is not None and self.model.available():
+            from ..inference.agents import route_action
+            out = route_action(self.model, text, self._intent_context(),
+                               [self._display(n) for n in self.npcs_here()])
+            r = self._route_from_llm(out, text)
+            if r:
+                return r
+            if config.LLM_REQUIRED:                       # без фоллбэков не падаем в подстроки
+                return {"kind": "command", "verb": "freeform", "target": self._match_npc(text)}
+        return self._route_offline(text)
+
+    def _route_from_llm(self, out: dict | None, text: str) -> dict | None:
+        if not out or out.get("kind") not in ("query", "dialogue", "command", "freeform"):
+            return None
+        kind = out["kind"]
+        if kind == "query":
+            q = out.get("query_type")
+            return {"kind": "query", "query": q if q in self._QUERY_TYPES else "look"}
+        tgt = self._match_npc(out.get("target") if isinstance(out.get("target"), str) else "") \
+            or self._match_npc(text)
+        tone = out.get("tone", "neutral")
+        if kind == "dialogue":
+            return {"kind": "command", "verb": "talk", "target": tgt or self.dialogue_partner, "tone": tone}
+        verb = out.get("verb")
+        if kind == "command" and verb in self._VERBS:
+            return {"kind": "command", "verb": verb, "target": tgt, "tone": tone}
+        return {"kind": "command", "verb": "freeform", "target": tgt, "tone": tone}
+
+    def _route_offline(self, text: str) -> dict:
+        q = self._query_type(text)                        # запрос к миру/себе (вопрос/императив осмотра)
+        if q and not self.dialogue_partner and not self._match_npc(text):
+            return {"kind": "query", "query": q}
+        act = self._parse_intent(text)                    # keyword + named/freeform
+        return {"kind": "command", "verb": act.verb, "target": act.target, "tone": act.tone}
+
     def _parse_intent(self, text: str) -> Action:
         # 1) ЛЁГКАЯ модель-классификатор интента — первой, когда сервер доступен.
         #    Её единственная задача: понять смысл и выбрать БЛИЖАЙШУЮ команду движка
@@ -1178,10 +1217,12 @@ class GameSession:
             act = self._model_intent(text)
             if act is not None:
                 return act
-        # 2) офлайн / модель не уверена → детерминированный keyword-парсер (фоллбэк)
-        kw = self._keyword_intent(text)
-        if kw:
-            return kw
+        # 2) офлайн / модель не уверена → детерминированный keyword-парсер (фоллбэк).
+        #    В режиме без фоллбэков (LLM_REQUIRED) keyword-эвристику не используем.
+        if not config.LLM_REQUIRED:
+            kw = self._keyword_intent(text)
+            if kw:
+                return kw
         # 3) обращение к присутствующему NPC (по имени или вопрос при ком-то рядом) —
         #    это реплика; идёт диалог — продолжаем его; иначе свободное действие.
         named = self._match_npc(text)
@@ -1595,19 +1636,27 @@ class GameSession:
                    "перевести дух", "отдыха", "отдохн", "дышу", "жду", "подожд", "киваю",
                    "оглядыва", "озира"]
 
+    def _skill_kw(self, low: str) -> str | None:
+        """Навык по ключевым словам, или None если действие не похоже на проверку навыка."""
+        for keys, skill in self._SKILL_KW:
+            if any(k in low for k in keys):
+                return skill
+        return None
+
     def _arbiter_fallback(self, text: str, p: float) -> dict:
         """Детерминированный арбитр (офлайн): по правдоподобию и ключевым словам.
+        Без явного навыка и без риска бросок НЕ нужен (а не дефолт-athletics).
         Онлайн эту роль точнее играет агент-арбитр (decide_resolution)."""
         low = text.lower()
-        if any(k in low for k in self._TRIVIAL_KW):       # будничное, без риска → без броска
+        if any(k in low for k in self._TRIVIAL_KW):       # будничное → без броска
             return {"resolution": "auto_success"}
-        opposed = any(k in low for k in ("страж", "враг", "противник", "замок", "против",
-                                         "часов", "охран")) or p < 0.6
-        if p >= 0.85 and not opposed:
+        skill = self._skill_kw(low)
+        risky = p < 0.5 or any(k in low for k in ("страж", "враг", "противник", "замок", "против",
+                                                  "часов", "охран", "опасн", "сложн", "трудн"))
+        if skill is None and not risky:                   # нет навыка и риска → просто получается
             return {"resolution": "auto_success"}
-        skill = self._guess_skill(low)
         dc = max(5, min(25, round(20 - p * 16)))          # p 0.8→7, 0.5→12, 0.3→15
-        return {"resolution": "roll", "skill": skill, "dc": dc}
+        return {"resolution": "roll", "skill": skill or "athletics", "dc": dc}
 
     @staticmethod
     def _success_pct(req) -> int:
@@ -1751,6 +1800,16 @@ class GameSession:
 
     def _query_type(self, text: str) -> str | None:
         low = text.strip().lower()
+        has_item = self._item_in_carry(low) is not None  # «осмотреть кинжал» — это про предмет, не запрос
+        if not has_item:                                  # императивный обзор вокруг (без вопроса)
+            if any(p in low for p in ("по сторон", "оглядыва", "озира", "окидыва", "оглянул",
+                                      "оглянут", "осматрива", "осмотрюсь", "осмотреться",
+                                      "смотрю вокруг", "смотрю по", "гляжу вокруг")):
+                return "look"
+            if any(p in low for p in ("сумк", "рюкзак", "мои вещи", "свои вещи", "что несу",
+                                      "что у меня", "инвентар", "пожитк", "пересчита", "кошел",
+                                      "при себе", "в карман")):
+                return "inventory"
         is_q = (low.endswith("?") or any(low.startswith(w) for w in self._QUERY_HEADS)
                 or any(p in low for p in ("что вижу", "что видно", "что рядом", "что здесь",
                                           "что вокруг", "кто здесь", "кто рядом", "куда можно")))
@@ -1833,6 +1892,11 @@ class GameSession:
             sc = self.scene_context()
             adj = decide_resolution(self.model, text, f"{sc.descriptor} Локация: {sc.place_name}.", p)
         if not adj:
+            if config.LLM_REQUIRED:                       # без фоллбэков: не подменяем эвристикой
+                self._tick()
+                return {"kind": "error", "feasibility": fz, "view": self.view(),
+                        "text": "Модель не разобрала действие (режим без фоллбэков). "
+                                "Переформулируй или подними сервер моделей."}
             adj = self._arbiter_fallback(text, p)
         res = adj.get("resolution", "roll")
 

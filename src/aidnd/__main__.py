@@ -135,6 +135,7 @@ def doctor() -> None:
     print("  OLLAMA_HOST :", config.OLLAMA_HOST)
     print("  BASE_MODEL  :", config.BASE_MODEL, "(нарратив, когниция, бой…)")
     print("  INTENT_MODEL:", config.INTENT_MODEL, "(лёгкий классификатор интента)")
+    print("  LLM_REQUIRED:", config.LLM_REQUIRED, "(без фоллбэков — модель обязательна)")
     m = ModelManager()
     ok = m.available()
     print("  сервер доступен:", ok)
@@ -149,6 +150,9 @@ def doctor() -> None:
 
 
 def main() -> None:
+    if "--require-llm" in sys.argv or "--no-fallback" in sys.argv:
+        config.LLM_REQUIRED = True                        # требовать модель, отключить фоллбэки
+        print("⚙  режим без фоллбэков: модель обязательна (LLM_REQUIRED)")
     cmd = sys.argv[1] if len(sys.argv) > 1 else "play"
     if cmd == "serve":
         from .server.app import run

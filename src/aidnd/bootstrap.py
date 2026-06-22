@@ -20,7 +20,12 @@ def new_session(seed: int = config.WORLD_SEED, roster_size: int = 12,
     """
     from .content.newgame import default_scenario, resolve_pc_spec
     manager = ModelManager() if use_model else None
-    model = manager if (manager and manager.available()) else None
+    available = bool(manager and manager.available())
+    if config.LLM_REQUIRED and not available:             # режим без фоллбэков — модель обязательна
+        raise RuntimeError(
+            f"LLM_REQUIRED: сервер моделей недоступен ({config.OLLAMA_HOST}). "
+            "Подними Ollama (bash scripts/setup_local.sh) или сними флаг --require-llm.")
+    model = manager if available else None
     world = build_world(seed=seed, roster_size=roster_size, model=model,
                         scenario=scenario, pc_spec=pc_spec)
     quests = QuestSystem(world)

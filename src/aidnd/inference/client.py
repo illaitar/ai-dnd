@@ -128,7 +128,8 @@ class ModelManager:
 
     # роль -> (модель, опциональный LoRA-адаптер) — main §12
     ROLE_MODELS = {
-        "intent": (config.BASE_MODEL, None),    # роутер команд — на базовой модели (2b давала бред)
+        "intent": (config.BASE_MODEL, None),    # legacy verb-классификатор (офлайн-путь)
+        "router": (config.BASE_MODEL, None),    # полноценный LLM-роутер намерений (онлайн)
         "narrator": (config.BASE_MODEL, "narrator-persona"),
         "cognition": (config.BASE_MODEL, "lore"),
         "lore_keeper": (config.BASE_MODEL, "lore"),

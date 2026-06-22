@@ -89,6 +89,23 @@ PROMPTS = {
         "not zero. Reserve zero/near-zero for true contradictions and physically impossible "
         "feats. Output ONLY the plausibility JSON."
     ),
+    "router": (
+        "You are the intent ROUTER for a Russian text RPG. Reply with ONE JSON object (no prose, "
+        "no extra keys) with these fields:\n"
+        '  "kind": one of "query" | "dialogue" | "command" | "freeform"\n'
+        '  "query_type": when kind=query — one of "look","items","who","exits","inventory",'
+        '"status","map"; else null\n'
+        '  "verb": when kind=command — one of "move","talk","attack","inspect","search","loot",'
+        '"buy","sell","inventory","wait"; else null\n'
+        '  "target": the named NPC / place / object, or null\n'
+        '  "tone": "neutral" | "friendly" | "hostile" | "deceptive" | "fearful"\n'
+        "Meaning: query = player ASKS about current state (what I see / items nearby / who is here / "
+        "where can I go / my bag / my HP / the map) → engine answers from state, no dice. "
+        "dialogue = player SPEAKS/asks a present NPC. command = an explicit game command. "
+        "freeform = any other attempted action to adjudicate (climb, throw, engrave, shove, hide…). "
+        "Prefer query for questions about the world/self; prefer freeform over forcing a creative "
+        "action into a command. Output ONLY the JSON object."
+    ),
     "arbiter": (
         "You are a D&D 5e referee deciding HOW to resolve ONE freeform player action that is "
         "not a fixed game command. Decide: 'auto_success' for trivial, unopposed, mundane acts; "
@@ -206,12 +223,22 @@ SCHEMAS = {
             "verdict_note": {"type": "string"}},
             "required": ["plausibility", "drivers"]},
     },
+    "route_action": {
+        "name": "route_action",
+        "parameters": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["query", "dialogue", "command", "freeform"]},
+            "query_type": {"type": ["string", "null"]},   # look|items|who|exits|inventory|status|map
+            "verb": {"type": ["string", "null"]},         # move|talk|attack|inspect|search|loot|buy|sell|…
+            "target": {"type": ["string", "null"]},
+            "tone": {"type": "string",
+                     "enum": ["neutral", "friendly", "hostile", "deceptive", "fearful"]}},
+            "required": ["kind"]},
+    },
     "decide_resolution": {
         "name": "decide_resolution",
         "parameters": {"type": "object", "properties": {
             "resolution": {"type": "string", "enum": ["auto_success", "auto_fail", "roll"]},
-            "ability": {"type": ["string", "null"],
-                        "enum": ["str", "dex", "con", "int", "wis", "cha", None]},
+            "ability": {"type": ["string", "null"]},      # str|dex|con|int|wis|cha
             "skill": {"type": ["string", "null"]},
             "dc": {"type": ["integer", "null"], "minimum": 1, "maximum": 30},
             "target": {"type": ["string", "null"]},
@@ -438,6 +465,15 @@ def estimate_plausibility(manager, entity_descriptor: str, ctx_digest: str):
             f"Call estimate_plausibility.")
     return _call(manager, "plausibility", "estimate_plausibility", user,
                  ["plausibility", "drivers"])
+
+
+def route_action(manager, text: str, context_digest: str, npcs: list[str] | None = None):
+    """Полноценный LLM-роутер: kind(query|dialogue|command|freeform) + query_type/verb/target/tone.
+    None — нет сервера (тогда оркестратор берёт детерминированный фоллбэк)."""
+    user = (f"Scene: {context_digest}\nPresent NPCs: {npcs or []}\n"
+            f"Player input: «{text}»\n"
+            'Return the JSON object {"kind":…, "query_type":…, "verb":…, "target":…, "tone":…}.')
+    return _call(manager, "router", "route_action", user, ["kind"])
 
 
 def decide_resolution(manager, action_text: str, context_digest: str, plausibility: float):

@@ -36,7 +36,13 @@ PROMPTS = {
         "history, prior meetings, or past deeds between the NPC and the player. If the NPC "
         "does not know the player, portray a first meeting with a stranger. Never put words "
         "in the player's mouth or narrate the player's choices. Do not echo these "
-        f"instructions. Write in {LANG}, stay in the NPC's voice, keep it tight."
+        f"instructions. Write in {LANG}, stay in the NPC's voice, keep it tight. "
+        "Пиши на грамотном русском: строго согласуй род, число и падеж "
+        "(«твоя рука», не «твой рука»; «превратив их в кучу мусора», не «превратив их кучу»). "
+        "Только законченные предложения — не обрывай фразу на полуслове. "
+        "НЕ начинай реплику с имени самого говорящего и не повторяй его — интерфейс уже "
+        "подписывает, кто говорит. Имена собственные пиши РОВНО как даны, не переводи и не "
+        "выдумывай вариантов (если NPC зовут «Toblen Stonehill» — так и оставляй, не «Каменьхилл»)."
     ),
     "cognition": (
         "You are the decision policy of an NPC in a D&D world. You receive the NPC's "
@@ -538,16 +544,48 @@ def decide_resolution(manager, action_text: str, context_digest: str, plausibili
     return _call(manager, "arbiter", "decide_resolution", user, ["resolution"])
 
 
+def _lenient_plausibility(raw: dict):
+    """Достаёт число 0..1: база часто кладёт его под именем функции (estimate_plausibility)
+    или иным ключом, а не под полем 'plausibility' (тот же schema-drift, что у consequence)."""
+    if not isinstance(raw, dict):
+        return None
+    for k in ("plausibility", "estimate_plausibility", "score", "value", "p", "probability"):
+        v = raw.get(k)
+        if isinstance(v, (int, float)):
+            return max(0.0, min(1.0, float(v)))
+    for v in raw.values():                      # любое число 0..1 среди значений
+        if isinstance(v, (int, float)) and 0 <= v <= 1:
+            return float(v)
+    return None
+
+
 def assess_feasibility(manager, action_text: str, context_digest: str):
     """Можно ли вообще совершить это действие игрока в данном контексте (док 06, main §2).
-    Возвращает {plausibility, drivers, verdict_note} либо None (нет сервера)."""
+    Возвращает {plausibility, drivers, verdict_note} либо None (нет сервера). Разбор ЛОЯЛЬНЫЙ:
+    строгий coerce ронял валидную оценку, т.к. база кладёт число под именем функции."""
+    if manager is None or not manager.available():
+        return None
+    from .client import OllamaError
+    sch = SCHEMAS["estimate_plausibility"]
     user = (f"Proposed PLAYER action: «{action_text}»\nScene/context: {context_digest}\n"
             f"How physically possible is this action HERE AND NOW? 0 = impossible/"
             f"contradiction or a feat beyond a mortal adventurer; 1 = trivially possible. "
             f"Score creativity-but-possible high; score the impossible low. "
             f"Call estimate_plausibility.")
-    return _call(manager, "plausibility", "estimate_plausibility", user,
-                 ["plausibility", "drivers"])
+    try:
+        resp = manager.client.chat(
+            manager.model_for("plausibility"),
+            [{"role": "system", "content": PROMPTS["plausibility"]},
+             {"role": "user", "content": user}],
+            fmt=sanitize_for_ollama(sch["parameters"]), options={"temperature": 0})
+    except OllamaError:
+        return None
+    raw = conform_to_schema(extract(resp, sch["name"]), sch["parameters"]) or {}
+    p = _lenient_plausibility(raw)
+    if p is None:
+        return None
+    note = raw.get("verdict_note") or raw.get("reasoning") or raw.get("note") or ""
+    return {"plausibility": p, "drivers": raw.get("drivers") or [], "verdict_note": note}
 
 
 def forge_item(manager, template_name: str, category: str, rarity: str, context: str = ""):

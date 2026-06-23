@@ -33,6 +33,9 @@ ROUTER_MODEL: str = os.environ.get("AIDND_ROUTER_MODEL", "aidnd-router")
 # Дообученный арбитр freeform-действий (decide_resolution → aidnd-arbiter в Ollama;
 # held-out resolution 10%→83%, dc±2 100%, см. training/). Откат на BASE_MODEL, если нет.
 ARBITER_MODEL: str = os.environ.get("AIDND_ARBITER_MODEL", "aidnd-arbiter")
+# Дообученный агент последствий (world_effects → aidnd-consequence в Ollama;
+# held-out valid-схема 47%→100%, full 43%→83%, см. training/). Откат на BASE_MODEL.
+CONSEQUENCE_MODEL: str = os.environ.get("AIDND_CONSEQUENCE_MODEL", "aidnd-consequence")
 
 KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
 HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))

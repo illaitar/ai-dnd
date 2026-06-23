@@ -131,6 +131,7 @@ class ModelManager:
         "intent": (config.BASE_MODEL, None),    # legacy verb-классификатор (офлайн-путь)
         "router": (config.ROUTER_MODEL, "router"),  # дообученный роутер намерений (см. training/)
         "arbiter": (config.ARBITER_MODEL, "arbiter"),  # дообученный арбитр freeform (decide_resolution)
+        "consequence": (config.CONSEQUENCE_MODEL, "consequence"),  # дообученный агент последствий
         "narrator": (config.BASE_MODEL, "narrator-persona"),
         "cognition": (config.BASE_MODEL, "lore"),
         "lore_keeper": (config.BASE_MODEL, "lore"),

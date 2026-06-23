@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-import random
+import hashlib
 import re
 from dataclasses import asdict, dataclass, field
 
@@ -77,8 +77,15 @@ class RollResult:
         )
 
 
-def _roll_die(faces: int, rng: random.Random) -> int:
-    return rng.randint(1, faces)
+def _roll_die(faces: int, seed: int, idx: int) -> int:
+    """Грань напрямую из хеша (seed, idx) — равномерно и детерминированно.
+
+    НЕ через random.Random(seed).randint: фабрика нового MT на каждый бросок и взятие
+    ПЕРВОГО вывода даёт кластеризацию для хеш-сидов (разные seed → одна и та же грань).
+    blake2b(seed|idx) mod faces равномерен и replay-безопасен.
+    """
+    h = hashlib.blake2b(f"{seed}:{idx}".encode(), digest_size=8).digest()
+    return int.from_bytes(h, "big") % faces + 1
 
 
 def roll_expr(
@@ -86,16 +93,15 @@ def roll_expr(
     modifier: int = 0, advantage: int = 0, source: str = "server_seeded",
 ) -> RollResult:
     """Сидированный бросок выражения с adv/dis для d20 (док 07 §9)."""
-    rng = random.Random(seed)
     n, faces, inline_mod = parse_expr(expr)
     mod = modifier + inline_mod
 
     if n == 1 and faces == 20 and advantage != 0:
-        a, b = _roll_die(20, rng), _roll_die(20, rng)
+        a, b = _roll_die(20, seed, 0), _roll_die(20, seed, 1)
         nat = max(a, b) if advantage > 0 else min(a, b)
         return RollResult(request_id, [a, b], nat + mod, nat, source, seed)
 
-    rolls = [_roll_die(faces, rng) for _ in range(n)] if n else []
+    rolls = [_roll_die(faces, seed, i) for i in range(n)] if n else []
     nat = rolls[0] if (n == 1 and faces == 20) else 0
     total = sum(rolls) + mod
     return RollResult(request_id, rolls, total, nat, source, seed)

@@ -645,6 +645,12 @@ class GameSession:
     def _do_buy(self, action: Action, text: str) -> dict:
         shop = self._shop_here()
         if not shop:
+            # лавки нет, но рядом NPC (трактирщик и т.п.) — это вопрос/просьба к нему,
+            # а не дед-энд: «сколько стоит снять комнату?», «налей эля». Уводим в диалог.
+            here = self.npcs_here()
+            npc = self.dialogue_partner if self.dialogue_partner in here else (here[0] if here else None)
+            if npc:
+                return self._do_talk(Action(actor=self.player, verb="talk", target=npc), text)
             return {"kind": "system", "text": "Поблизости нет лавки.", "view": self.view()}
         c = self.world.containers[shop]
         if not c.items:

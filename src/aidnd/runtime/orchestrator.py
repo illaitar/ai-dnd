@@ -1671,7 +1671,8 @@ class GameSession:
             return best
         # 3) разговорные синонимы (без двусмысленного «пещер» — он теперь решается по графу)
         aliases = {"город": "place:phandalin_square", "площад": "place:phandalin_square",
-                   "фэндалин": "place:phandalin_square",
+                   "фэндалин": "place:phandalin_square", "рынок": "place:phandalin_square",
+                   "рынк": "place:phandalin_square", "базар": "place:phandalin_square",
                    "дикие": "place:phandalin_wilds", "пустош": "place:phandalin_wilds",
                    "таверн": "building:stonehill_inn", "трактир": "building:stonehill_inn",
                    "постоял": "building:stonehill_inn",

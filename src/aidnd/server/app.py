@@ -175,9 +175,20 @@ def _auto_roll(rr: dict, salt: int) -> list[int]:
     return roll_expr(rr["request_id"], rr["dice"], seed, source="server_ui").raw
 
 
+_active = {"n": 0}
+_MAX_SESSIONS = int(os.environ.get("AIDND_MAX_SESSIONS", "2"))  # демо на одной GPU: ограничить наплыв
+
+
 @app.websocket("/ws")
 async def ws(sock: WebSocket) -> None:
     await sock.accept()
+    if _active["n"] >= _MAX_SESSIONS:                  # занято — мягкий отказ, без сборки мира
+        await sock.send_text(json.dumps(
+            {"kind": "system", "text": "Сервер сейчас занят (демо на одной видеокарте). "
+             "Зайди чуть позже."}, ensure_ascii=False))
+        await sock.close()
+        return
+    _active["n"] += 1
     session = new_session(seed=config.WORLD_SEED, roster_size=12, use_model=True)
     salt = {"n": 1}
 
@@ -273,7 +284,9 @@ async def ws(sock: WebSocket) -> None:
                           "view": session.view()}
             await send(result)
     except WebSocketDisconnect:
-        return
+        pass
+    finally:
+        _active["n"] -= 1
 
 
 def run(host: str = "127.0.0.1", port: int | None = None) -> None:

@@ -70,6 +70,7 @@ class Place:
     exits: dict = field(default_factory=dict)             # направление -> place_id (компас и пр.)
     battlemap: str | None = None    # файл боевой карты (визуальная подложка боя)
     ambiance: str | None = None     # короткая физическая атмосфера (для нарратора)
+    alterations: list[str] = field(default_factory=list)  # стойкие следы действий (агент последствий)
 
 
 class SpatialIndex:

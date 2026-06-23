@@ -12,8 +12,9 @@ from dataclasses import dataclass
 @dataclass
 class Condition:
     name: str
-    duration_kind: str = "rounds"   # rounds | save_ends | concentration | until_stable
+    duration_kind: str = "rounds"   # rounds | save_ends | concentration | until_stable | time
     rounds_left: int = 1
+    until_tick: int | None = None   # для duration_kind="time": тик мира, на котором эффект спадёт
     save_ability: str | None = None
     save_dc: int | None = None
     source: str | None = None
@@ -26,6 +27,7 @@ CONDITION_HOOKS = {
     "frightened": {"own_attacks": "disadvantage", "own_checks": "disadvantage"},
     "restrained": {"attacks_against": "advantage", "own_attacks": "disadvantage", "speed": 0},
     "poisoned": {"own_attacks": "disadvantage", "own_checks": "disadvantage"},
+    "опьянение": {"own_attacks": "disadvantage", "own_checks": "disadvantage"},  # хмель: руки/глаз не те
     "stunned": {"incapacitated": True, "attacks_against": "advantage",
                 "auto_fail": ["str", "dex"]},
     "unconscious": {"incapacitated": True, "attacks_against": "advantage",

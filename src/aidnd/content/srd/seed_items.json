@@ -1,0 +1,17 @@
+[
+  {"id": "tmpl:candle", "name": "свеча", "category": "gear", "value": 1, "weight": 0.0, "tags": ["light"]},
+  {"id": "tmpl:parchment", "name": "пергамент", "category": "gear", "value": 10, "weight": 0.0, "stackable": true, "max_stack": 20},
+  {"id": "tmpl:sealing_wax", "name": "сургуч", "category": "gear", "value": 50, "weight": 0.0},
+  {"id": "tmpl:ink", "name": "пузырёк чернил", "category": "gear", "value": 1000, "weight": 0.0},
+  {"id": "tmpl:quill", "name": "перо", "category": "gear", "value": 2, "weight": 0.0},
+  {"id": "tmpl:oil_flask", "name": "фляга масла", "category": "consumable", "value": 10, "weight": 1.0, "base_stats": {"fire": "5"}, "tags": ["oil"]},
+  {"id": "tmpl:rope_hempen", "name": "пеньковая верёвка", "category": "gear", "value": 100, "weight": 10.0},
+  {"id": "tmpl:holy_water", "name": "святая вода", "category": "consumable", "value": 2500, "weight": 1.0, "base_stats": {"radiant": "2d6"}, "tags": ["holy"]},
+  {"id": "tmpl:antitoxin", "name": "антитоксин", "category": "consumable", "value": 5000, "weight": 0.0, "base_stats": {"cure": true}},
+  {"id": "tmpl:healers_kit", "name": "набор лекаря", "category": "tool", "value": 500, "weight": 3.0},
+  {"id": "tmpl:thieves_tools", "name": "воровские инструменты", "category": "tool", "value": 2500, "weight": 1.0},
+  {"id": "tmpl:crowbar", "name": "лом", "category": "tool", "value": 200, "weight": 5.0},
+  {"id": "tmpl:tinderbox", "name": "трутница", "category": "gear", "value": 50, "weight": 1.0, "tags": ["light"]},
+  {"id": "tmpl:potion_greater_healing", "name": "зелье большого лечения", "category": "consumable", "value": 15000, "weight": 0.5, "rarity": "uncommon", "base_stats": {"heal": "4d4+4"}},
+  {"id": "tmpl:potion_climbing", "name": "зелье лазания", "category": "consumable", "value": 18000, "weight": 0.5, "rarity": "common", "base_stats": {}}
+]

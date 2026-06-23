@@ -137,7 +137,7 @@ class ModelManager:
         "tactician": (config.BASE_MODEL, "combat"),
         "reflection": (config.BASE_MODEL, "reflect"),
         "director": (config.BASE_MODEL, None),
-        "quest_writer": (config.BASE_MODEL, "quest"),
+        "quest_writer": (config.QUEST_MODEL, "quest"),   # дообученная модель (см. training/)
         "plausibility": (config.BASE_MODEL, "validator"),
         "faction_gen": (config.BASE_MODEL, "lore"),
     }
@@ -161,4 +161,10 @@ class ModelManager:
         return self._available
 
     def model_for(self, role: str) -> str:
-        return self.ROLE_MODELS.get(role, (config.BASE_MODEL, None))[0]
+        model = self.ROLE_MODELS.get(role, (config.BASE_MODEL, None))[0]
+        # Дообученные модели (напр. aidnd-quest) могут отсутствовать на сервере —
+        # тогда откатываемся на базовую, а не падаем. (self._models заполняется
+        # в available(); если ещё не проверяли — отдаём как есть.)
+        if self._models and model not in self._models:
+            return config.BASE_MODEL
+        return model

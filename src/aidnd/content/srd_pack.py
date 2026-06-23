@@ -1,0 +1,80 @@
+"""Каталог SRD 5.1 (CC-BY-4.0): монстры → STAT_BLOCKS, предметы → шаблоны мира.
+
+Аддитивно и НЕдеструктивно: курируемые LMoP-id не перезаписываются, а item_gen/
+character_gen по-прежнему выдумывают новые предметы/персон. Полный каталог тянется
+`scripts/fetch_srd.py` из open5e в content/srd/{monsters,items}.json; в репозитории
+лежит стартовый набор, так что движок работает и без запуска скрипта.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+
+from ..inventory.items import ItemTemplate
+from ..rules.progression import MONSTER_XP
+from ..rules.srd import STAT_BLOCKS, StatBlock
+
+SRD_DIR = os.path.join(os.path.dirname(__file__), "srd")
+
+# опыт за победу по CR (DMG) и бонус мастерства по CR
+_XP_BY_CR = {0: 10, 0.125: 25, 0.25: 50, 0.5: 100, 1: 200, 2: 450, 3: 700, 4: 1100,
+             5: 1800, 6: 2300, 7: 2900, 8: 3900, 9: 5000, 10: 5900, 11: 7200, 12: 8400,
+             13: 10000, 14: 11500, 15: 13000, 16: 15000, 17: 18000, 20: 25000, 24: 62000}
+
+
+def _prof_by_cr(cr: float) -> int:
+    return 2 + max(0, (int(cr) - 1)) // 4 if cr >= 1 else 2
+
+
+def _xp_by_cr(cr: float) -> int:
+    keys = sorted(_XP_BY_CR)
+    best = min(keys, key=lambda k: abs(k - cr))
+    return _XP_BY_CR[best]
+
+
+def _slug(name: str, prefix: str) -> str:
+    return f"{prefix}:" + (re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "x")
+
+
+def _load(fn: str) -> list:
+    path = os.path.join(SRD_DIR, fn)
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_srd(world) -> tuple[int, int]:
+    """Регистрирует монстров и предметы SRD: курируемый seed + полный дамп от fetch_srd.
+    Возвращает (добавлено монстров, предметов). Дубликаты по id игнорируются."""
+    nm = ni = 0
+    monsters = _load("seed_monsters.json") + _load("monsters.json")
+    items = _load("seed_items.json") + _load("items.json")
+    for m in monsters:
+        ref = m.get("id") or _slug(m["name"], "srd")
+        if ref in STAT_BLOCKS:                            # курируемые не трогаем
+            continue
+        cr = float(m.get("cr", 0))
+        STAT_BLOCKS[ref] = StatBlock(
+            ref=ref, name=m["name"], str_=m.get("str", 10), dex=m.get("dex", 10),
+            con=m.get("con", 10), int_=m.get("int", 10), wis=m.get("wis", 10),
+            cha=m.get("cha", 10), ac=m.get("ac", 10), hp=m.get("hp", 4),
+            speed=m.get("speed", 30), proficiency=_prof_by_cr(cr), cr=cr,
+            intelligence_score=m.get("int", 10), weapon=m.get("weapon", "unarmed"),
+            traits=tuple(m.get("traits", [])))
+        MONSTER_XP.setdefault(ref, _xp_by_cr(cr))
+        nm += 1
+    for it in items:
+        tid = it.get("id") or _slug(it["name"], "tmpl")
+        if tid in world.templates:                        # курируемые шаблоны приоритетны
+            continue
+        world.templates[tid] = ItemTemplate(
+            template_id=tid, name=it["name"], category=it.get("category", "gear"),
+            base_stats=it.get("base_stats", {}), weight=it.get("weight", 0.0),
+            base_value=it.get("value", 0), rarity=it.get("rarity", "mundane"),
+            stackable=it.get("stackable", False), max_stack=it.get("max_stack", 1),
+            tags=tuple(it.get("tags", [])))
+        ni += 1
+    return nm, ni

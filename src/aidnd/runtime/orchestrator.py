@@ -40,6 +40,8 @@ VERB_KEYWORDS = {
     "sell": ["продать", "продаю", "sell"],
     "inventory": ["инвентар", "инв", "inventory", "сумк", "рюкзак"],
     "wait": ["ждать", "жду", "wait", "отдых", "rest", "ждём"],
+    "drink": ["выпить", "выпью", "выпивк", "эля", "эль", "пива", "пиво", "налей", "пинт",
+              "кружк", "браг", "вина", "вискар", "хмель"],
 }
 
 
@@ -125,6 +127,8 @@ class GameSession:
         actions = self.affordances_here()
         text = f"{sc.descriptor}\nТы в локации «{name}». " + (
             f"Здесь: {', '.join(npcs)}." if npcs else "Здесь пусто.")
+        if p and p.alterations:                           # стойкие следы действий в локации
+            text += " Следы: " + "; ".join(p.alterations) + "."
         if actions:
             text += " Можно: " + ", ".join(a["label"] for a in actions) + "."
         return {
@@ -157,6 +161,14 @@ class GameSession:
         if self._is_item_followup(text):                  # «а на нём что написано?» → про последний предмет
             return self._post(self._answer_query("look", text), "query")
         route = self._route(text)                         # LLM-роутер (онлайн) / детерминированный фоллбэк
+        # продолжение разговора: при активном собеседнике рядом «расскажи о…/что слышно»
+        # (freeform или общий look) — это реплика ему, а не бросок/мировой-запрос
+        convertible = ((route["kind"] == "command" and (route.get("verb") or "freeform") == "freeform")
+                       or (route["kind"] == "query" and (route.get("query") or "look") == "look"))
+        if (convertible and self.dialogue_partner and self.dialogue_partner in self.npcs_here()
+                and not self._item_in_carry(text)
+                and not any(k in text.lower() for k in (*self._HOSTILE_KW, *self._FREEFORM_KW))):
+            route = {"kind": "command", "verb": "talk", "target": self.dialogue_partner}
         if route["kind"] == "query":                      # вопрос о мире/себе → ответ из стейта, без броска
             out, verb = self._answer_query(route.get("query") or "look", text), "query"
         else:
@@ -1169,10 +1181,58 @@ class GameSession:
     def _tick(self, n: int = 1) -> None:
         self.world.clock.advance(n)
         self.lod.tick(self.player)
+        self._expire_conditions()                         # временные эффекты (опьянение и пр.) спадают со временем
+
+    def _expire_conditions(self) -> None:
+        """Снимает состояния с длительностью по игровому времени, чей срок истёк."""
+        now = self.world.clock.tick
+        for eid, conds in list(self.world.conditions.items()):
+            kept = [c for c in conds if not (getattr(c, "duration_kind", None) == "time"
+                    and c.until_tick is not None and c.until_tick <= now)]
+            if len(kept) != len(conds):
+                dropped = {c.name for c in conds} - {c.name for c in kept}
+                self.world.conditions[eid] = kept
+                if eid == self.player and "опьянение" in dropped:
+                    self._log_journal("Хмель отступил — голова проясняется.")
+
+    def _apply_intoxication(self, ticks: int = 6) -> int:
+        """Вешает/продлевает «опьянение» (помеха на атаки и проверки) на ticks игровых тиков."""
+        from ..rules.conditions import Condition
+        conds = self.world.conditions.setdefault(self.player, [])
+        cur = next((c for c in conds if c.name == "опьянение"), None)
+        if cur:
+            cur.until_tick = (cur.until_tick or self.world.clock.tick) + ticks  # ещё кружка → дольше
+            return cur.until_tick
+        until = self.world.clock.tick + ticks
+        conds.append(Condition(name="опьянение", duration_kind="time", until_tick=until, source="drink"))
+        return until
+
+    def _do_drink(self, action: Action, text: str) -> dict:
+        from ..inventory.container import transfer_currency
+        from ..inventory.items import COIN, wallet_value_cp
+        iid = self._item_in_carry(text)                   # «выпить зелье …» — расходник при себе
+        if iid:
+            t = self.world.templates.get(self.world.items[iid].template_id)
+            if t and t.category == "consumable":
+                return self.use_item(iid)                 # зелье пьём где угодно (эффект из шаблона)
+        affs = {a["affordance"] for a in self.affordances_here()}
+        if not ({"drink", "inn"} & affs):                 # иначе — выпивка только в заведении
+            return {"kind": "system", "text": "Здесь нечего пить — нужна таверна, трактир "
+                    "или зелье при себе.", "view": self.view()}
+        if wallet_value_cp(self.world.wallets.get(self.player, {})) < 2 * COIN["sp"]:
+            return {"kind": "system", "text": "Не хватает монет даже на кружку эля.", "view": self.view()}
+        transfer_currency(self.world, self.player, None, {"sp": 2}, actor="drink")  # платим заведению
+        self._apply_intoxication()
+        self._log_journal("Выпил кружку эля (−2 sp).")
+        self._tick()
+        drunk = any(c.name == "опьянение" for c in self.world.conditions.get(self.player, []))
+        txt = ("Ты осушаешь кружку доброго эля (−2 sp). Тепло растекается по телу, мир чуть "
+               "покачивается — рука и глаз уже не так верны.") if drunk else "Ты выпиваешь кружку эля (−2 sp)."
+        return {"kind": "narration", "text": txt, "view": self.view()}
 
     # допустимые глаголы движка (валидация выхода LLM-парсера)
     _VERBS = {"move", "talk", "attack", "inspect", "search", "persuade", "intimidate",
-              "loot", "buy", "sell", "inventory", "wait", "scan", "buyinfo", "map"}
+              "loot", "buy", "sell", "inventory", "wait", "scan", "buyinfo", "map", "drink"}
     _MAPINFO_KW = ["сведен", "наводк", "карт", "о дороге", "о пути", "путь к", "дорог к",
                    "что знаешь о", "слух о", "разузнать"]
 
@@ -1401,7 +1461,8 @@ class GameSession:
         epithet = f" ({p.epithet})" if p.epithet else ""
         traits = ", ".join(p.traits) if p.traits else "обычный"
         prof = f", {p.profession}" if p.profession else ""
-        return f"{p.name}{epithet} — {p.race}{prof}. {traits.capitalize()}."
+        marks = f" Следы: {'; '.join(p.marks)}." if p.marks else ""   # синяки/метки от действий
+        return f"{p.name}{epithet} — {p.race}{prof}. {traits.capitalize()}.{marks}"
 
     def _inventory_text(self) -> str:
         carry = self.world.containers.get(f"carry:{ids.name_of(self.player)}")
@@ -1479,23 +1540,35 @@ class GameSession:
         return res
 
     def use_item(self, iid: str) -> dict:
+        """Применить расходник: эффекты берутся из шаблона (base_stats) — работает для любого
+        зелья/эликсира, а не только лечения."""
         from ..gen.seeds import subseed
         from ..rules.dice import roll_expr
         inst = self.world.items.get(iid)
         tmpl = self.world.templates.get(inst.template_id) if inst else None
         if not inst or not tmpl or tmpl.category != "consumable":
             return {"kind": "system", "text": "Это нельзя использовать.", "view": self.view()}
-        text = f"Ты используешь {self._item_name(iid)}."
-        if "potion_healing" in inst.template_id:
+        nm = self._item_name(iid)
+        bs = tmpl.base_stats or {}
+        verb = "осушаешь" if ("зель" in nm.lower() or "элик" in nm.lower()
+                              or "potion" in inst.template_id) else "используешь"
+        parts = [f"Ты {verb} {nm}."]
+        if bs.get("heal"):                                # лечение по формуле шаблона
             seed = subseed(self.world.seed, "use", iid, self.world.clock.tick) & 0x7FFFFFFF
-            heal = roll_expr("use_potion", "2d4+2", seed, source="server_seeded").total
+            heal = roll_expr("use_potion", str(bs["heal"]), seed, source="server_seeded").total
             self.world.commit("heal", self.player, target=self.player, payload={"amount": heal})
-            text += f" Восстановлено {heal} HP."
+            parts.append(f"Восстановлено {heal} HP.")
+        if bs.get("cure"):                                # антидот: снять отраву/дурман
+            conds = self.world.conditions.get(self.player, [])
+            cured = [c for c in conds if c.name in ("poisoned", "отравление", "опьянение")]
+            if cured:
+                self.world.conditions[self.player] = [c for c in conds if c not in cured]
+                parts.append("Отрава и дурман отступают.")
         self.world.commit("item_consume", self.player,
                           payload={"container": f"carry:{ids.name_of(self.player)}",
                                    "instance": iid, "amount": 1})
         res = self.look()
-        res["text"] = text
+        res["text"] = " ".join(parts)
         return res
 
     def _display(self, eid: str) -> str:
@@ -1813,32 +1886,6 @@ class GameSession:
             parts.append("(в руке)")
         return " ".join(parts).strip()
 
-    def _apply_alteration(self, iid: str, effect: str) -> None:
-        """Сохраняет изменение на экземпляре событийно (modify_item → переживает сейв/лоад)."""
-        from ..inventory.container import modify_item
-        cur = list((self.world.items[iid].mods or {}).get("alterations") or [])
-        if effect and effect not in cur:
-            modify_item(self.world, iid, alterations=cur + [effect])
-            self._log_journal(f"Изменение сохранено на «{self._item_name(iid)}»: {effect}")
-
-    _MOD_VERBS = ("гравир", "выцарап", "нацарап", "вырез", "привяз", "повяз", "обмот", "помет",
-                  "покрас", "краш", "наточ", "затуп", "погн", "слома", "надлом", "нанёс", "нанес",
-                  "написа", "назв", "приклеи", "прицеп", "закрепи", "оберну", "обвяз", "вбил",
-                  "пометк", "метк", "царап", "выбил надпись")
-
-    def _lasting_effect_fallback(self, text: str) -> str | None:
-        """Офлайн: извлечь стойкое изменение из фразы (если это вообще модификация)."""
-        import re
-        low = text.lower()
-        if not any(v in low for v in self._MOD_VERBS):
-            return None
-        m = re.search(r'[«"“„\'](.+?)[»"”“\']', text)
-        if m and ("гравир" in low or "надпис" in low or "царап" in low or "вырез" in low
-                  or "написа" in low or "метк" in low):
-            return f"надпись «{m.group(1).strip()}»"
-        phrase = re.sub(r'^\s*(я\s+)?(хочу\s+|решил[аи]?\s+|пытаюсь\s+)?', '', text.strip(), flags=re.I)
-        return phrase[:90]
-
     # --- запросы о мире/себе: отвечаем из читаемого стейта, без модели и броска ---
     _QUERY_HEADS = ("что", "какие", "какой", "какая", "кто", "кого", "где", "куда",
                     "сколько", "чем", "чего", "есть ли", "видно ли", "можно ли", "видишь",
@@ -1968,19 +2015,6 @@ class GameSession:
                                 "Переформулируй или подними сервер моделей."}
             adj = self._arbiter_fallback(text, p)
         res = adj.get("resolution", "roll")
-
-        # стойкое изменение: любое успешное freeform-действие, меняющее предмет, сохраняется
-        tgt_hint = adj.get("target") if isinstance(adj.get("target"), str) else ""
-        mod_iid = self._item_in_carry(f"{tgt_hint} {text}")
-        eff = adj.get("lasting_effect")
-        effect = (eff if isinstance(eff, str) and eff.strip() else None) or self._lasting_effect_fallback(text)
-
-        def alter_note(success: bool) -> str:
-            if success and effect and mod_iid:
-                self._apply_alteration(mod_iid, effect)
-                return f" На «{self._item_name(mod_iid)}» остаётся след: {effect}."
-            return ""
-
         why = adj.get("reason") or adj.get("reasoning") or fz["reason"]
         if res == "auto_fail":
             self._tick()
@@ -1990,8 +2024,8 @@ class GameSession:
             self._tick()
             narr = self._narrate_outcome(f"Игрок: {text.strip()} — удаётся без труда.", topic="freeform")
             return {"kind": "narration", "feasibility": fz, "needs_roll": False,
-                    "text": (narr or f"Без труда удаётся: {text.strip()}.") + alter_note(True),
-                    "view": self.view()}
+                    "text": (narr or f"Без труда удаётся: {text.strip()}.")
+                    + self._apply_consequences(text, "success"), "view": self.view()}
 
         # нужен бросок: навык + DC (DC кодирует вероятность), считаем шанс успеха
         skill = self._norm_skill(adj.get("skill") or adj.get("ability_skill") or adj.get("ability"), text)
@@ -2010,14 +2044,97 @@ class GameSession:
             narr = self._narrate_outcome(
                 f"Игрок: {text.strip()} — {tag} ({skill} {result.total} против DC {dc}).",
                 topic="freeform")
+            trail = ""                                    # последствия пишутся на успех и крит-провал
+            if outcome.success:
+                trail = self._apply_consequences(text, "critical_success" if outcome.crit else "success")
+            elif outcome.fumble:
+                trail = self._apply_consequences(text, "critical_failure")
             return {"kind": "narration", "feasibility": fz, "needs_roll": True,
                     "outcome_success": outcome.success,
                     "text": (narr or (("Получилось! " if outcome.success else "Не вышло. ")
-                                      + f"({skill} {result.total} против DC {dc})")) + alter_note(outcome.success),
+                                      + f"({skill} {result.total} против DC {dc})")) + trail,
                     "view": self.view()}
 
         return self._suspend(req, resume,
                              f"Нужен бросок: {skill} против DC {dc} (~{pct}% успеха).")
+
+    def _apply_consequences(self, text: str, outcome: str) -> str:
+        """Агент последствий: переписывает стойкий контекст мира (локация/NPC/предмет),
+        отношения, состояния, флаги. Только онлайн; всё событийно (переживает сейв/лоад)."""
+        if self.model is None or not self.model.available():
+            return ""
+        from ..inference.agents import world_effects
+        place = self.current_place()
+        pl = self.world.spatial.places.get(place)
+        loc = f"«{pl.name if pl else place}»: {self.scene_context().descriptor}"
+        npcs = [self._display(n) for n in self.npcs_here()]
+        items = [self._item_name(i) for i in self._carry_items()]
+        out = world_effects(self.model, text, outcome, loc, npcs, items, self._recent_context())
+        notes = []
+        for raw in (out.get("effects") if out else []) or []:
+            e = self._norm_effect(raw)
+            tid = self._resolve_effect_target(e, text)
+            if not tid:
+                continue
+            payload = {"kind": e["kind"], "target": tid, "note": e.get("note"),
+                       "condition": e.get("condition"), "minutes": e.get("minutes"),
+                       "flag": e.get("flag")}
+            for k in ("trust", "fear", "affinity"):       # дельты отношений ограничены
+                v = e.get(k)
+                payload[k] = max(-0.25, min(0.25, float(v))) if isinstance(v, (int, float)) else None
+            if not any(payload.get(k) for k in ("note", "trust", "fear", "affinity", "condition", "flag")):
+                continue
+            self.world.commit("world_effect", self.player, target=tid, payload=payload)
+            if payload["note"]:
+                notes.append(payload["note"])
+            if len(notes) >= 3:
+                break
+        return (" След: " + "; ".join(notes) + ".") if notes else ""
+
+    @staticmethod
+    def _norm_effect(e: dict) -> dict:
+        """Нормализует эффект из любого формата модели (kind|entity|target_kind, note|value…)."""
+        if not isinstance(e, dict):
+            return {"kind": ""}
+        k = str(e.get("kind") or e.get("entity") or e.get("target_kind")
+                or e.get("target_type") or "").lower()
+        kind = ("place" if k.startswith(("loc", "place", "мест"))
+                else "npc" if k in ("npc", "character", "person", "персонаж")
+                else "item" if k in ("item", "object", "предмет")
+                else "self" if k in ("self", "player", "игрок") else k)
+        name = e.get("name") or e.get("target_name") or e.get("target") or e.get("id")
+        etype = str(e.get("type") or e.get("change_kind") or e.get("change") or "note").lower()
+        val = next((e[f] for f in ("note", "value", "description", "desc")
+                    if isinstance(e.get(f), str) and e[f].strip()), None)
+        out = {"kind": kind, "name": name if isinstance(name, str) else ""}
+        for d in ("trust", "fear", "affinity"):           # дельты могут лежать прямо в полях
+            if isinstance(e.get(d), (int, float)):
+                out[d] = e[d]
+        if etype.startswith(("cond", "status", "effect")) and val:
+            out["condition"] = val
+            out["minutes"] = e.get("minutes")
+        elif etype == "flag" and val:
+            out["flag"] = val
+        elif not etype.startswith("relat") and val:
+            out["note"] = val
+        return out
+
+    def _resolve_effect_target(self, e: dict, text: str) -> str | None:
+        kind = e.get("kind")
+        name = e.get("name") if isinstance(e.get("name"), str) else ""
+        if kind == "place":
+            return self.current_place()
+        if kind == "self":
+            return self.player
+        if kind == "npc":
+            tid = self._match_npc(name) or self._match_npc(text)
+            here = self.npcs_here()
+            if tid in here:
+                return tid
+            return here[0] if len(here) == 1 else None
+        if kind == "item":
+            return self._item_in_carry(name) or self._item_in_carry(text)
+        return None
 
     def feasibility(self, text: str) -> dict:
         """Оценка выполнимости действия игрока в контексте сцены (роль plausibility).

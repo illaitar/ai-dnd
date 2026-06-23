@@ -126,6 +126,7 @@ class Persona:
     aliases: list[str] = field(default_factory=list)  # рус. формы имени для матчинга ссылок игрока
     knowledge: list[dict] = field(default_factory=list)  # KnowledgeItem-словари
     secrets: list[dict] = field(default_factory=list)
+    marks: list[str] = field(default_factory=list)  # стойкие следы на персонаже (синяк, метка) — агент последствий
     enriched: bool = False              # прошёл ли first-L3 обогащение моделью
     companion: bool = False             # спутник партии: следует за игроком и бьётся на его стороне
 

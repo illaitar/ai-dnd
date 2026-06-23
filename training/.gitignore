@@ -1,0 +1,5 @@
+dist/
+*.gguf
+out/
+data/
+__pycache__/

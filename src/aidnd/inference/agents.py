@@ -40,10 +40,13 @@ PROMPTS = {
     ),
     "cognition": (
         "You are the decision policy of an NPC in a D&D world. You receive the NPC's "
-        "persona, goals, retrieved memories, and relationship vector toward the player. "
-        "Propose the NPC's next in-world action. Respect relationship gates: do not "
-        "reveal secrets to a distrusted actor, flee or yield when fear is high. Output "
-        "ONLY the action JSON. You do not narrate and you do not compute mechanics."
+        "persona (profession, traits, voice), memories, and relationship vector toward the "
+        "player. Propose the NPC's next in-world action. Ordinary courtesy is the default: "
+        "a service-trade or welcoming/gossipy NPC (innkeeper, merchant, bartender, host) "
+        "chats warmly and shares common rumors even with a stranger — that's their job. "
+        "Only SECRETS and sensitive info are trust-gated; flee/yield when fear is high; be "
+        "curt only if the persona is secretive/hostile or the player is rude. Output ONLY "
+        "the action JSON. You do not narrate and you do not compute mechanics."
     ),
     "lore_keeper": (
         "You validate proposed world content against the world knowledge graph and a "
@@ -89,6 +92,19 @@ PROMPTS = {
         "not zero. Reserve zero/near-zero for true contradictions and physically impossible "
         "feats. Output ONLY the plausibility JSON."
     ),
+    "consequence": (
+        "You are the WORLD-STATE consequence writer. After a player's freeform action RESOLVES, "
+        "you record DURABLE changes the world should remember. You get the action, its outcome "
+        "(success / critical_failure), the current location, present NPCs and the player's carried "
+        "items. Emit a list of effects, EACH grounded to ONE present entity — kind 'place' (current "
+        "location), 'npc' (a present NPC, give name), 'item' (a carried item, give name) or 'self'. "
+        "NEVER invent entities. Effect types per item: a durable 'note' (a lasting physical/state "
+        "trace in Russian: пролитый воск, вмятина, синяк, опрокинутый стол, выцарапанная метка); a "
+        "small relationship delta toward the player ('trust'/'fear'/'affinity', −0.25..0.25, for npc); "
+        "a 'condition' on the target (e.g. bleeding/prone/frightened/опьянение) with optional "
+        "'minutes'; a quest 'flag'. Do NOT touch HP, money or item counts — the engine owns those. "
+        "Trivial actions leave NO effects (empty list); typical actions leave 1-2. Output ONLY JSON."
+    ),
     "router": (
         "You are the intent ROUTER for a Russian text RPG. Reply with ONE JSON object (no prose, "
         "no extra keys) with these fields:\n"
@@ -96,7 +112,7 @@ PROMPTS = {
         '  "query_type": when kind=query — one of "look","items","who","exits","inventory",'
         '"status","map"; else null\n'
         '  "verb": when kind=command — one of "move","talk","attack","inspect","search","loot",'
-        '"buy","sell","inventory","wait"; else null\n'
+        '"buy","sell","inventory","wait","drink"; else null\n'
         '  "target": the named NPC / place / object, or null\n'
         '  "tone": "neutral" | "friendly" | "hostile" | "deceptive" | "fearful"\n'
         "Meaning: query = player ASKS about current state (what I see / items nearby / who is here / "
@@ -222,6 +238,22 @@ SCHEMAS = {
             "drivers": {"type": "array", "items": {"type": "object"}},
             "verdict_note": {"type": "string"}},
             "required": ["plausibility", "drivers"]},
+    },
+    "world_effects": {
+        "name": "world_effects",
+        "parameters": {"type": "object", "properties": {
+            "effects": {"type": "array", "items": {"type": "object", "properties": {
+                "kind": {"type": "string", "enum": ["place", "npc", "item", "self"]},
+                "name": {"type": ["string", "null"]},
+                "note": {"type": ["string", "null"]},
+                "trust": {"type": ["number", "null"]},
+                "fear": {"type": ["number", "null"]},
+                "affinity": {"type": ["number", "null"]},
+                "condition": {"type": ["string", "null"]},
+                "minutes": {"type": ["integer", "null"]},
+                "flag": {"type": ["string", "null"]}},
+                "required": ["kind"]}}},
+            "required": ["effects"]},
     },
     "route_action": {
         "name": "route_action",
@@ -412,7 +444,13 @@ def render_dialogue(manager, persona, rel_summary: str, situation: str,
 def propose_action(manager, npc_id: str, player_verb: str, tone: str, ctx, world):
     mem = "; ".join(getattr(n, "text", "") for n in getattr(ctx, "memories", [])[:5])
     rel = ctx.rel
-    user = (f"NPC: {npc_id}\nRelationship to player: trust={rel.trust:.2f} "
+    from ..world.components import Persona
+    p = world.ecs.get(npc_id, Persona)
+    persona = ""
+    if p:
+        persona = (f"Persona: {p.name}, {p.profession or p.archetype}; "
+                   f"traits: {', '.join(p.traits) or '—'}; voice: {p.voice or '—'}.\n")
+    user = (f"{persona}Relationship to player: trust={rel.trust:.2f} "
             f"affinity={rel.affinity:.2f} fear={rel.fear:.2f}\n"
             f"Memories: {mem}\nPlayer just did: {player_verb} (tone {tone}).\n"
             f"Call propose_action.")
@@ -465,6 +503,17 @@ def estimate_plausibility(manager, entity_descriptor: str, ctx_digest: str):
             f"Call estimate_plausibility.")
     return _call(manager, "plausibility", "estimate_plausibility", user,
                  ["plausibility", "drivers"])
+
+
+def world_effects(manager, action_text: str, outcome: str, location: str,
+                  npcs: list[str] | None = None, items: list[str] | None = None, history: str = ""):
+    """Стойкие последствия успешного/крит-провального freeform: следы на локации/NPC/предмете,
+    дельты отношений, состояния, флаги. None — нет сервера (тогда последствий нет)."""
+    hist = f"Recent turns:\n{history}\n" if history else ""
+    user = (f"{hist}Location: {location}\nPresent NPCs: {npcs or []}\nCarried items: {items or []}\n"
+            f"Player action: «{action_text}»\nOutcome: {outcome}.\n"
+            'List durable world effects (empty if none). Return {"effects":[...]}.')
+    return _call(manager, "consequence", "world_effects", user, ["effects"])
 
 
 def route_action(manager, text: str, context_digest: str, npcs: list[str] | None = None,

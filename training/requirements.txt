@@ -1,0 +1,15 @@
+# Ставить ТОЛЬКО на сервере с CUDA (RTX 4070 Ti Super). На Mac не нужно —
+# prepare.py / eval_compare.py работают без этих пакетов (нужен лишь httpx).
+#
+# Арх qwen35 (Qwen3.5) — свежайшая, поэтому ставим АКТУАЛЬНЫЕ версии (pip -U), без жёстких пинов:
+#   pip install -U unsloth unsloth_zoo transformers trl peft accelerate bitsandbytes datasets httpx
+unsloth
+unsloth_zoo
+transformers
+trl
+peft
+accelerate
+bitsandbytes
+datasets
+httpx
+# torch ставится как зависимость unsloth (нужна CUDA-сборка).

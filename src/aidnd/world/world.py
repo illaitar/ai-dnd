@@ -478,6 +478,52 @@ class World:
         self.spatial.link_portal(a, b)
         self.flags.add(f"secret_found:{a}")
 
+    def _h_world_effect(self, ev: Event) -> None:
+        """Стойкое последствие действия (агент последствий): след на локации/персонаже/
+        предмете, дельта отношений, состояние, флаг. target — УЖЕ разрешённый id."""
+        from .. import config
+        from .components import Persona
+        p = ev.payload
+        kind, tid, note = p.get("kind"), p.get("target"), p.get("note")
+        if note and tid:
+            if kind == "place":
+                pl = self.spatial.places.get(tid)
+                if pl and note not in pl.alterations:
+                    pl.alterations.append(note)
+            elif kind in ("npc", "self"):
+                per = self.ecs.get(tid, Persona)
+                if per and note not in per.marks:
+                    per.marks.append(note)
+            elif kind == "item":
+                inst = self.items.get(tid)
+                if inst is not None:
+                    alts = inst.mods.setdefault("alterations", [])
+                    if note not in alts:
+                        alts.append(note)
+        if kind == "npc" and tid and any(p.get(k) for k in ("trust", "fear", "affinity")):
+            from .components import Relationships, RelEdge
+            rels = self.ecs.get(tid, Relationships)
+            if rels is None:
+                rels = Relationships()
+                self.ecs.add(tid, rels)
+            e = rels.edges.setdefault(self.player_id or "pc:hero", RelEdge())
+            e.trust = max(-1.0, min(1.0, e.trust + (p.get("trust") or 0)))
+            e.fear = max(-1.0, min(1.0, e.fear + (p.get("fear") or 0)))
+            e.affinity = max(-1.0, min(1.0, e.affinity + (p.get("affinity") or 0)))
+        if p.get("condition") and tid:
+            from ..rules.conditions import Condition
+            conds = self.conditions.setdefault(tid, [])
+            mins = p.get("minutes")
+            if mins:
+                ticks = max(1, int(mins) // max(1, config.SIM_MINUTES_PER_TICK))
+                conds.append(Condition(name=p["condition"], duration_kind="time",
+                                       until_tick=self.clock.tick + ticks, source="consequence"))
+            else:
+                conds.append(Condition(name=p["condition"], duration_kind="rounds",
+                                       rounds_left=int(p.get("rounds", 3)), source="consequence"))
+        if p.get("flag"):
+            self.flags.add(p["flag"])
+
     # ----------------------------------------------------- запросы чтения ---
     def get_stats(self, eid: str) -> Stats5e | None:
         return self.ecs.get(eid, Stats5e)

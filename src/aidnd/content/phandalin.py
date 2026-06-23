@@ -386,6 +386,8 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     sc = SCENARIOS.get(scenario or default_scenario(), SCENARIOS[default_scenario()])
     world = World(seed=seed)
     register_item_templates(world)
+    from .srd_pack import load_srd
+    load_srd(world)                   # каталог SRD (монстры/предметы) поверх курируемого набора
     _build_places(world)              # 1. building graph
     from .maps import attach_battlemaps
     attach_battlemaps(world)          # боевые карты на узлы графа локаций

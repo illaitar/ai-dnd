@@ -23,6 +23,10 @@ OLLAMA_HOST: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 BASE_MODEL: str = os.environ.get("AIDND_MODEL", "qwen3.5:9b")
 # Крошечная модель интент-парсера держится отдельно ради мгновенности (док 08 §3).
 INTENT_MODEL: str = os.environ.get("AIDND_INTENT_MODEL", "qwen3.5:2b")
+# Дообученный квест-генератор (LoRA на BASE_MODEL, смерджен и экспортирован в Ollama
+# как aidnd-quest; 0%→85% валидных квестов на отложенной выборке, см. training/).
+# Если модели нет на сервере — model_for() откатывается на BASE_MODEL.
+QUEST_MODEL: str = os.environ.get("AIDND_QUEST_MODEL", "aidnd-quest")
 
 KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
 HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))

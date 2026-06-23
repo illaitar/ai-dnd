@@ -74,6 +74,27 @@ class Cognition:
                 return out
         return self._fallback_policy(npc_id, player_verb, tone, ctx, player_id)
 
+    _SOCIABLE_TRAITS = {"welcoming", "gossipy", "friendly", "talkative", "chatty", "jovial",
+                        "gregarious", "warm"}
+    _RESERVED_TRAITS = {"secretive", "manipulative", "suspicious", "cold", "gruff", "taciturn",
+                        "ambitious", "cowardly"}
+    _SOCIABLE_JOBS = {"innkeeper", "merchant", "bartender", "host", "trader",
+                      "shopkeeper", "barkeep"}
+
+    def _sociable(self, npc_id: str) -> bool:
+        """Радушен по натуре: сфера услуг или общительные черты → болтает с чужаками.
+        Скрытные/манипулятивные/интриганы — нет, даже если профессия торговая (напр., Халия)."""
+        from ..world.components import Persona
+        p = self.world.ecs.get(npc_id, Persona)
+        if not p:
+            return False
+        traits = {t.lower() for t in (p.traits or [])}
+        if traits & self._RESERVED_TRAITS:
+            return False
+        if traits & self._SOCIABLE_TRAITS:
+            return True
+        return (p.profession or "") in self._SOCIABLE_JOBS or (p.archetype or "") in self._SOCIABLE_JOBS
+
     def _fallback_policy(self, npc_id, player_verb, tone, ctx, player_id) -> dict:
         rel = ctx.rel
         # враждебные намерения
@@ -92,6 +113,9 @@ class Cognition:
             if gate_open(self.world, npc_id, player_id, "share_info"):
                 return {"action": "share_info", "info_disclosed": ["rumor"],
                         "rationale_tags": ["mild_trust"]}
+            if self._sociable(npc_id) and tone != "hostile":   # сфера услуг/болтлив — радушен к чужаку
+                return {"action": "share_info", "info_disclosed": ["rumor"],
+                        "rationale_tags": ["sociable"]}
             return {"action": "withhold", "rationale_tags": ["distrust"]}
         if player_verb == "trade":
             return {"action": "trade", "rationale_tags": ["merchant"]}

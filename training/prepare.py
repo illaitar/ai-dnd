@@ -14,11 +14,23 @@ import json
 import os
 
 
-def _tier(rec: dict) -> str:
-    """Стратификационный ключ: tier из user-спеки (для квестов); иначе 'na'."""
-    try:
-        spec = json.loads(rec["messages"][1]["content"])
-        return str(spec.get("tier", "na"))
+def _stratum(rec: dict) -> str:
+    """Ключ стратификации: для freeform — класс gold-ответа (kind/resolution/effects),
+    для квеста — tier из user-спеки; иначе 'na'. Чтобы eval покрывал все классы."""
+    msgs = rec.get("messages", [])
+    try:                                      # gold-ответ ассистента
+        out = json.loads(msgs[2]["content"])
+        if isinstance(out, dict):
+            if out.get("kind"):               # router
+                return "k:" + out["kind"]
+            if out.get("resolution"):         # arbiter
+                return "r:" + out["resolution"]
+            if "effects" in out:              # consequence
+                return "eff" if out["effects"] else "noeff"
+    except (KeyError, IndexError, json.JSONDecodeError, TypeError):
+        pass
+    try:                                      # квест: tier из user-спеки
+        return "t:" + str(json.loads(msgs[1]["content"]).get("tier", "na"))
     except (KeyError, IndexError, json.JSONDecodeError, TypeError):
         return "na"
 
@@ -27,7 +39,7 @@ def split(rows: list[dict], holdout: int, seed: int) -> tuple[list[dict], list[d
     """Берём holdout строк в eval, разложив их по стратам пропорционально, детерминированно."""
     buckets: dict[str, list[int]] = {}
     for i, r in enumerate(rows):
-        buckets.setdefault(_tier(r), []).append(i)
+        buckets.setdefault(_stratum(r), []).append(i)
     for k in buckets:                       # детерминированный порядок внутри страты
         buckets[k].sort(key=lambda i: (json.dumps(rows[i], ensure_ascii=False), i))
     order = sorted(buckets)                 # обход страт по возрастанию ключа
@@ -72,7 +84,7 @@ def main() -> None:
 
     from collections import Counter
     print(f"[{a.adapter}] src={len(rows)}  train={len(train)}  eval={len(ev)} → {os.path.relpath(out_dir)}")
-    print("  eval по стратам (tier):", dict(sorted(Counter(_tier(r) for r in ev).items())))
+    print("  eval по стратам:", dict(sorted(Counter(_stratum(r) for r in ev).items())))
 
 
 if __name__ == "__main__":

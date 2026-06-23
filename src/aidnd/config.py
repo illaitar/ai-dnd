@@ -27,6 +27,12 @@ INTENT_MODEL: str = os.environ.get("AIDND_INTENT_MODEL", "qwen3.5:2b")
 # как aidnd-quest; 0%→85% валидных квестов на отложенной выборке, см. training/).
 # Если модели нет на сервере — model_for() откатывается на BASE_MODEL.
 QUEST_MODEL: str = os.environ.get("AIDND_QUEST_MODEL", "aidnd-quest")
+# Дообученный роутер намерений (LoRA на BASE_MODEL → aidnd-router в Ollama;
+# held-out kind 75%→92%, full 50%→71%, см. training/). Откат на BASE_MODEL, если нет.
+ROUTER_MODEL: str = os.environ.get("AIDND_ROUTER_MODEL", "aidnd-router")
+# Дообученный арбитр freeform-действий (decide_resolution → aidnd-arbiter в Ollama;
+# held-out resolution 10%→83%, dc±2 100%, см. training/). Откат на BASE_MODEL, если нет.
+ARBITER_MODEL: str = os.environ.get("AIDND_ARBITER_MODEL", "aidnd-arbiter")
 
 KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
 HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))

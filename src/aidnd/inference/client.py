@@ -129,7 +129,8 @@ class ModelManager:
     # роль -> (модель, опциональный LoRA-адаптер) — main §12
     ROLE_MODELS = {
         "intent": (config.BASE_MODEL, None),    # legacy verb-классификатор (офлайн-путь)
-        "router": (config.BASE_MODEL, None),    # полноценный LLM-роутер намерений (онлайн)
+        "router": (config.ROUTER_MODEL, "router"),  # дообученный роутер намерений (см. training/)
+        "arbiter": (config.ARBITER_MODEL, "arbiter"),  # дообученный арбитр freeform (decide_resolution)
         "narrator": (config.BASE_MODEL, "narrator-persona"),
         "cognition": (config.BASE_MODEL, "lore"),
         "lore_keeper": (config.BASE_MODEL, "lore"),
@@ -162,9 +163,11 @@ class ModelManager:
 
     def model_for(self, role: str) -> str:
         model = self.ROLE_MODELS.get(role, (config.BASE_MODEL, None))[0]
-        # Дообученные модели (напр. aidnd-quest) могут отсутствовать на сервере —
-        # тогда откатываемся на базовую, а не падаем. (self._models заполняется
-        # в available(); если ещё не проверяли — отдаём как есть.)
-        if self._models and model not in self._models:
-            return config.BASE_MODEL
-        return model
+        # self._models заполняется в available(); если ещё не проверяли — отдаём как есть.
+        if not self._models or model in self._models:
+            return model
+        # Ollama хранит имена с тегом (aidnd-router:latest) — матчим терпимо.
+        if f"{model}:latest" in self._models:
+            return f"{model}:latest"
+        # Дообученной модели нет на сервере — откат на базовую, а не падение.
+        return config.BASE_MODEL

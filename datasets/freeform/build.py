@@ -124,21 +124,30 @@ def main() -> None:
     from examples import ARBITER, CONSEQUENCE, ROUTER
     groups = {"router": ROUTER, "arbiter": ARBITER, "consequence": CONSEQUENCE}
     here = os.path.dirname(os.path.abspath(__file__))
-    out_path = os.path.join(here, "freeform.jsonl")
     written, bad = 0, 0
+    all_lines: list[str] = []
+    for task, rows in groups.items():
+        role, user_fn, validate = ROLES[task]
+        lines: list[str] = []
+        for s in rows:
+            out = s["out"]
+            err = _no_bad_keys(out) or validate(out, s)
+            if err:
+                bad += 1
+                print(f"  ✗ [{task}] «{s.get('input') or s.get('action')}»: {err}")
+                continue
+            lines.append(json.dumps(sample(role, user_fn(s), out), ensure_ascii=False) + "\n")
+        # пер-таск файл (для обучения отдельного адаптера, напр. router.jsonl)
+        with open(os.path.join(here, f"{task}.jsonl"), "w", encoding="utf-8") as tf:
+            tf.writelines(lines)
+        all_lines.extend(lines)
+        written += len(lines)
+    # объединённый корпус (мульти-таск)
+    out_path = os.path.join(here, "freeform.jsonl")
     with open(out_path, "w", encoding="utf-8") as f:
-        for task, rows in groups.items():
-            role, user_fn, validate = ROLES[task]
-            for s in rows:
-                out = s["out"]
-                err = _no_bad_keys(out) or validate(out, s)
-                if err:
-                    bad += 1
-                    print(f"  ✗ [{task}] «{s.get('input') or s.get('action')}»: {err}")
-                    continue
-                f.write(json.dumps(sample(role, user_fn(s), out), ensure_ascii=False) + "\n")
-                written += 1
-    print(f"\nwrote {written} samples → {os.path.relpath(out_path)}" + (f"  ({bad} invalid)" if bad else ""))
+        f.writelines(all_lines)
+    print(f"\nwrote {written} samples → {os.path.relpath(out_path)}"
+          f" (+ router.jsonl/arbiter.jsonl/consequence.jsonl)" + (f"  ({bad} invalid)" if bad else ""))
     print("per task:", {t: len(g) for t, g in groups.items()})
     cons = [e for s in CONSEQUENCE for e in s["out"]["effects"]]
     print("consequence effect kinds:", dict(Counter(e["kind"] for e in cons)),

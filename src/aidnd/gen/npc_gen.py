@@ -133,6 +133,11 @@ class CharacterGenerator:
             self.world.ecs.add(npc_id, Profession(job=job))
             self.world.commit("kg_set", "worldgen", payload={"s": npc_id, "r": "profession", "o": job})
         self.world.name_registry.add(name)
+        try:                                # знания мира/города/роли + рёбра knows (граф знаний)
+            from ..content.facts import seed_known_facts
+            seed_known_facts(self.world, npc_id)
+        except Exception:
+            pass
         return npc_id
 
     # ------------------------------------------ CSP assign places ----------

@@ -145,6 +145,8 @@ def _add_npc(world: World, npc_id: str, name: str, archetype: str, stat_ref: str
     pos_place = place or lives_in or "building:stonehill_inn"
     world.commit("set_position", "worldgen", target=npc_id,
                  payload={"region": REGION, "place": pos_place})
+    from .facts import seed_known_facts
+    seed_known_facts(world, npc_id)   # знания мира/города/фракции + личные факт-ноды и рёбра knows
     return npc_id
 
 
@@ -391,6 +393,8 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     _build_places(world)              # 1. building graph
     from .maps import attach_battlemaps
     attach_battlemaps(world)          # боевые карты на узлы графа локаций
+    from .facts import build_fact_base
+    build_fact_base(world, model=model)   # большой пул знаний мира/города (старт игры, до населения)
     _build_named_npcs(world)          # 2a. named population
     _build_encounter(world)           # 2b. encounter NPCs
     from .dungeons import build_dungeon, default_warren_brief

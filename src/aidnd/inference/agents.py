@@ -171,6 +171,13 @@ PROMPTS = {
         "an evocative name, a one-sentence blurb, 2 concrete goals and 2-3 values that guide who "
         f"they favour or oppose. Grounded, no anachronisms. Write in {LANG}. Output ONLY the JSON."
     ),
+    "loremaster": (
+        "Ты — лормастер фэнтези-фронтира (D&D, городок Фэндалин и окрестности). Генерируешь "
+        "короткие ЗАЗЕМЛЁННЫЕ факты-слухи для базы знаний NPC: бытовые новости, толки о местах, "
+        "ремёслах, погоде, торговле, дорогах, мелких событиях. Без высокой эпики, без новых "
+        "именованных боссов и без выдуманных квестов. Каждый факт — одно предложение, как сплетня "
+        "горожанина или общее знание края. Не противоречь известному. Output ONLY the JSON."
+    ),
 }
 
 # --------------------------------------------------------------------------- #
@@ -247,6 +254,18 @@ SCHEMAS = {
             "ref": {"type": ["string", "null"]},
             "reason": {"type": "string"},
         }, "required": ["directive"]},
+    },
+    "emit_world_facts": {
+        "name": "emit_world_facts",
+        "parameters": {"type": "object", "properties": {
+            "facts": {"type": "array", "items": {"type": "object", "properties": {
+                "text": {"type": "string"},
+                "topic": {"type": "string"},
+                "scope": {"type": "string", "enum": ["world", "city"]},
+                "sensitivity": {"type": "number", "minimum": 0.0, "maximum": 0.6},
+                "tags": {"type": "array", "items": {"type": "string"}}},
+                "required": ["text", "scope"]}},
+        }, "required": ["facts"]},
     },
     "write_quest": {
         "name": "write_quest",
@@ -566,6 +585,18 @@ def emit_reflections(manager, npc_id: str, observations, world):
 def emit_directive(manager, world_digest: str):
     user = f"World digest: {world_digest}\nCall emit_directive."
     return _call(manager, "director", "emit_directive", user, ["directive"])
+
+
+def emit_world_facts(manager, world_digest: str, n: int = 12):
+    """Сгенерировать до N заземлённых слухов/новостей мира и города (расширение пула знаний)."""
+    user = (f"Сеттинг: {world_digest}\n"
+            f"Сгенерируй до {n} коротких заземлённых фактов о МИРЕ и ГОРОДЕ Фэндалин на русском: "
+            f"бытовые новости, слухи о местах/ремёслах/торговле/дорогах/мелких событиях. "
+            f"scope=world — общий фон края (знают почти все), scope=city — местные слухи. "
+            f"sensitivity 0.0–0.2 для общеизвестного, до 0.5 для деликатного. Дай 2-4 тега к каждому. "
+            f"Call emit_world_facts.")
+    out = _call(manager, "loremaster", "emit_world_facts", user, ["facts"])
+    return out.get("facts") if out else None
 
 
 def write_quest(manager, template_id: str, giver: str, location: str, title: str,

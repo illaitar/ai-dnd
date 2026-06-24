@@ -101,3 +101,7 @@ MEM_RECENCY_LAMBDA: float = 0.01   # спад recency
 MEM_ALPHA, MEM_BETA, MEM_GAMMA = 1.0, 1.0, 1.0  # recency/importance/relevance
 MEM_FORGET_TAU: float = 200.0
 MEM_TOPK: int = 12
+
+# Диффузия знаний: каждые DIFFUSE_EVERY тиков слух переходит к новым NPC (граф знаний)
+DIFFUSE_EVERY: int = 6
+DIFFUSE_MAX_PER_STEP: int = 3

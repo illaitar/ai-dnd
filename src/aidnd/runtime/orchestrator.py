@@ -32,6 +32,7 @@ VERB_KEYWORDS = {
     "attack": ["бью", "атак", "напад", "ударь", "attack", "kill", "убить", "руб"],
     "intimidate": ["запуга", "угрож", "intimidate", "припугн"],
     "persuade": ["убеди", "уговор", "persuade", "договор"],
+    "deceive": ["обман", "соврат", "притвор", "блеф", "выдать себя", "deceive", "приврат"],
     "talk": ["поговор", "говор", "спрос", "talk", "ask", "обрат", "привет"],
     "inspect": ["осмотр", "осматр", "смотр", "look", "examine", "оглядет", "разгляд", "рассматр"],
     "search": ["обыск", "ищу", "иска", "search", "найти", "пошарь"],
@@ -181,7 +182,8 @@ class GameSession:
                             tone=route.get("tone", "neutral"))
             # действие (не разговор) завершает текущий диалог; покупка сведений/торговля
             # идут у текущего собеседника, поэтому диалог не сбрасывают
-            if verb not in ("talk", "persuade", "intimidate", "inspect", "buyinfo", "buy", "sell"):
+            if verb not in ("talk", "persuade", "intimidate", "deceive", "inspect",
+                            "buyinfo", "buy", "sell"):
                 self.dialogue_partner = None
             handler = getattr(self, f"_do_{verb}", None)
             out = handler(action, text) if handler else self._resolve_freeform(text, action.target)
@@ -217,7 +219,7 @@ class GameSession:
     #  Нарративный темп: при затишье и подходящей обстановке — случайный бит #
     # ===================================================================== #
     _EVENTFUL_VERBS = {"attack", "loot", "buy", "sell", "buyinfo", "persuade",
-                       "intimidate", "search", "move"}
+                       "intimidate", "deceive", "search", "move"}
 
     def _is_eventful(self, result: dict, verb: str) -> bool:
         """Произошло ли что-то «интересное» (сбрасывает затишье)."""
@@ -490,6 +492,9 @@ class GameSession:
     def _do_intimidate(self, action: Action, text: str) -> dict:
         return self._social_check(action, text, "intimidation")
 
+    def _do_deceive(self, action: Action, text: str) -> dict:
+        return self._social_check(action, text, "deception")
+
     def _social_check(self, action: Action, text: str, skill: str) -> dict:
         npc = action.target or self._match_npc(text) or (self.npcs_here()[0] if self.npcs_here() else None)
         if not npc:
@@ -514,15 +519,23 @@ class GameSession:
 
         def resume(result: RollResult) -> dict:
             outcome = self.rules.adjudicate(action, req, result)
-            tone = "friendly" if skill == "persuasion" else "fearful"
+            tone = {"persuasion": "friendly", "intimidation": "fearful",
+                    "deception": "deceptive"}.get(skill, "friendly")
             self.cognition.observe_and_appraise(npc, self.player, skill, tone, outcome.summary)
             self.world.commit(skill, self.player, target=npc,
                               payload={"success": outcome.success},
                               roll=result.to_record(req.dice))
             ctx = self.cognition.retrieve(npc, "", self.player)
             rel, first = ctx.rel, (not ctx.memories)
+            # успех проверки = временный «эффективный гейт»: NPC выдаёт более чувствительное и
+            # релевантное знание, чем при пассивном доверии (док 02 §4+: убеждение/обман/страх).
+            gate_level = min(1.0, rel.trust + 0.35) if outcome.success else None
+            if skill == "deception" and outcome.success:   # ложь сработала — метка для последствий
+                self.world.commit("rel_update", self.player,
+                                  payload={"npc": npc, "target": self.player, "tags": ["deceived"]})
             reply = self._npc_reply(npc, {"action": "share_info" if outcome.success else "withhold"},
-                                    text, rel, first, self.director.surface_hooks_near(npc))
+                                    text, rel, first, self.director.surface_hooks_near(npc),
+                                    gate_level=gate_level)
             self._log_journal(f"{'Убедил' if skill == 'persuasion' and outcome.success else 'Говорил с'} "
                               f"{self._display(npc)} ({'успех' if outcome.success else 'неудача'}).")
             self._tick()
@@ -1197,6 +1210,9 @@ class GameSession:
         self.world.clock.advance(n)
         self.lod.tick(self.player)
         self._expire_conditions()                         # временные эффекты (опьянение и пр.) спадают со временем
+        if self.world.clock.tick % config.DIFFUSE_EVERY == 0:   # оборот слухов: знания расходятся по NPC
+            from ..content.facts import diffuse_rumors
+            diffuse_rumors(self.world)
 
     def _expire_conditions(self) -> None:
         """Снимает состояния с длительностью по игровому времени, чей срок истёк."""
@@ -1332,7 +1348,8 @@ class GameSession:
 
     # допустимые глаголы движка (валидация выхода LLM-парсера)
     _VERBS = {"move", "talk", "attack", "inspect", "search", "persuade", "intimidate",
-              "loot", "buy", "sell", "inventory", "wait", "scan", "buyinfo", "map", "drink"}
+              "deceive", "loot", "buy", "sell", "inventory", "wait", "scan", "buyinfo",
+              "map", "drink"}
     _MAPINFO_KW = ["сведен", "наводк", "карт", "о дороге", "о пути", "путь к", "дорог к",
                    "что знаешь о", "слух о", "разузнать"]
 
@@ -1487,7 +1504,8 @@ class GameSession:
                 return line
         return self._greeting_fallback(persona, first_meeting)
 
-    def _npc_reply(self, npc: str, decision: dict, topic: str, rel, first_meeting, hooks) -> str:
+    def _npc_reply(self, npc: str, decision: dict, topic: str, rel, first_meeting, hooks,
+                   gate_level: float | None = None) -> str:
         persona = self.world.ecs.get(npc, Persona)
         action = decision.get("action", "respond")
         action = action if isinstance(action, str) else "respond"
@@ -1497,7 +1515,8 @@ class GameSession:
                 self.model, persona, self._rel_summary(rel, first_meeting),
                 situation=f"The player says/asks: «{topic}». Your stance: {action}.",
                 player_line=topic, intent=action, scene=self._narrator_context(),
-                facts=self._disclosable_facts(npc, rel), mode="dialogue")
+                facts=self._disclosable_facts(npc, rel, topic, gate_level=gate_level),
+                mode="dialogue")
             if line:
                 return self._maybe_hook(line, hooks)
         name = self._display(npc)
@@ -1521,17 +1540,10 @@ class GameSession:
         return self._maybe_hook(templates.get(action, templates["respond"]), hooks)
 
     def _relevant_fact(self, npc: str, rel, topic: str | None) -> str | None:
-        """Самый релевантный РАЗБЛОКИРОВАННЫЙ факт NPC: по совпадению слов темы, иначе
-        первый доступный при текущем доверии. Только из реально известного — без выдумки."""
-        facts = self._disclosable_facts(npc, rel)
-        if not facts:
-            return None
-        low = (topic or "").lower()
-        toks = [w for w in low.replace(",", " ").replace("?", " ").split() if len(w) > 3]
-        for f in facts:
-            if any(t[:5] in f.lower() for t in toks):
-                return f
-        return facts[0]
+        """Самый релевантный РАЗБЛОКИРОВАННЫЙ факт NPC под запрос игрока (recall).
+        Только из реально известного — без выдумки."""
+        items = self.cognition.recall(npc, topic or "", rel, k=1)
+        return items[0]["fact"] if items else None
 
     def _maybe_hook(self, line: str, hooks: list[str]) -> str:
         if hooks:
@@ -2367,12 +2379,13 @@ class GameSession:
         from ..world import environment
         return environment.effects(self.scene_context()).note
 
-    def _disclosable_facts(self, npc: str, rel, topic: str | None = None, limit: int = 5):
-        persona = self.world.ecs.get(npc, Persona)
-        if not persona:
-            return []
-        from ..content.knowledge import disclosable
-        return [k["fact"] for k in disclosable(persona, rel.trust, topic)][:limit]
+    def _disclosable_facts(self, npc: str, rel, topic: str | None = None, limit: int = 5,
+                           gate_level: float | None = None):
+        """Факты под раскрытие, отранжированные по релевантности запросу игрока (recall).
+        topic здесь — реплика/запрос игрока (для ранжирования), gate_level — эффективное
+        доверие после пройденной проверки убеждения/обмана."""
+        items = self.cognition.recall(npc, topic or "", rel, gate_level=gate_level, k=limit)
+        return [it["fact"] for it in items]
 
     # ===================================================================== #
     #  Журнал игрока и контекст (read-model поверх event log, док 08 §4)     #

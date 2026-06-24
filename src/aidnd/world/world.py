@@ -15,7 +15,7 @@ import json
 from typing import TYPE_CHECKING
 
 from .. import config
-from .components import LODState, Position, Relationships, RelEdge, Stats5e
+from .components import LODState, Persona, Position, Relationships, RelEdge, Stats5e
 from .ecs import ECS
 from .events import Event, EventLog, RollRecord
 from .kg import KnowledgeGraph
@@ -70,6 +70,7 @@ class World:
         # прочее состояние мира
         self.quests: dict[str, object] = {}
         self.factions: dict[str, object] = {}
+        self.facts: dict[str, object] = {}               # реестр канонических фактов-нод (content/facts.py)
         self.flags: set[str] = set()
         self.resolutions: dict[str, dict] = {}           # зафиксированные факты доразрешения сцены
         self.importance: dict[str, int] = {}             # индекс важности места (визиты/осмотры)
@@ -130,6 +131,28 @@ class World:
         p = ev.payload
         self.kg.remove_where(p["s"], p["r"])
         self.kg.add(p["s"], p["r"], p["o"])
+
+    def _h_learn_fact(self, ev: Event) -> None:
+        """NPC узнал факт: ребро knows в графе + синк в Persona.knowledge (для recall).
+        Event-sourced (диффузия слухов в рантайме воспроизводится при загрузке)."""
+        p = ev.payload
+        npc, fid = p.get("npc"), p.get("fact")
+        if not npc or not fid:
+            return
+        self.kg.add(npc, "knows", fid)
+        fact = self.facts.get(fid)                      # duck-typed Fact (content/facts.py)
+        persona = self.ecs.get(npc, Persona)
+        if fact is None or persona is None:
+            return
+        if any(k.get("fact_id") == fid for k in persona.knowledge):
+            return
+        persona.knowledge.append({
+            "fact": getattr(fact, "text", ""),
+            "topic": getattr(fact, "topic", "rumors"),
+            "disclosure_gate": {"trust": getattr(fact, "sensitivity", 0.1)},
+            "fact_id": fid, "scope": getattr(fact, "scope", "city"),
+            "tags": list(getattr(fact, "tags", []) or []),
+        })
 
     def _h_set_hp(self, ev: Event) -> None:
         st = self.ecs.get(ev.target, Stats5e)

@@ -11,9 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..world.components import Persona, RelEdge
-from .memory import CognitionStore
+from .memory import CognitionStore, _similarity, _tokens
 from .relationships import appraise as _appraise
 from .relationships import edge, gate_open
+
+
+def _stems(toks: set[str]) -> set[str]:
+    """5-символьные префиксы значимых слов — грубый стеммер против рус. словоизменения."""
+    return {w[:5] for w in toks if len(w) >= 4}
 
 
 @dataclass
@@ -37,6 +42,39 @@ class Cognition:
         rel = edge(self.world, npc_id, player_id) if player_id else RelEdge()
         persona = self.world.ecs.get(npc_id, Persona)
         return RetrievedContext(persona=persona, rel=rel, memories=nodes, topic=query)
+
+    # --- recall: релевантные запросу факты под гейтом (граф знаний) -------- #
+    def recall(self, npc_id: str, query: str, rel: RelEdge | None = None, *,
+               gate_level: float | None = None, topic: str | None = None,
+               k: int = 5) -> list[dict]:
+        """Наиболее релевантные запросу факты, которые NPC ЗНАЕТ и готов раскрыть.
+
+        Гейт: эффективное доверие (gate_level от пройденной проверки убеждения/обмана,
+        иначе rel.trust) против sensitivity факта. Ранжирование: токен-оверлап запроса с
+        текстом/тегами/темой факта + бонус за совпадение темы + лёгкий приоритет
+        общеизвестного. Топ-k (самый релевантный первым) — это контекст для нарратора."""
+        persona = self.world.ecs.get(npc_id, Persona)
+        if persona is None:
+            return []
+        from ..content.knowledge import disclosable
+        trust = gate_level if gate_level is not None else (rel.trust if rel else 0.0)
+        items = disclosable(persona, trust, topic)
+        # стем-токены (5-symbol prefix) гасят рус. словоизменение: «красных»≈«красные»
+        qstem = _stems(_tokens(query or ""))
+
+        def score(it: dict) -> float:
+            ftoks = _tokens(it.get("fact", ""))
+            for t in (it.get("tags") or []):
+                ftoks |= _tokens(str(t))
+            if it.get("topic"):
+                ftoks |= _tokens(str(it["topic"]))
+            rels = _similarity(qstem, _stems(ftoks)) if qstem else 0.0
+            gate = (it.get("disclosure_gate") or {}).get("trust", 0.0)
+            prior = 0.08 * (1.0 - gate)                 # общеизвестное чуть выше при прочих равных
+            tb = 0.25 if (topic and it.get("topic") == topic) else 0.0
+            return rels + tb + prior
+
+        return sorted(items, key=score, reverse=True)[:k]
 
     # --- observe / appraise (main §5.4) ----------------------------------- #
     def observe(self, npc_id: str, text: str, importance: int = 5) -> None:

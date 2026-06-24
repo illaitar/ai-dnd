@@ -63,7 +63,8 @@ def main() -> None:
     rows = [json.loads(ln) for ln in open(path, encoding="utf-8") if ln.strip()]
     agg = {a.before: [], a.after: []}
 
-    for i, r in enumerate(rows):
+    prepped = []
+    for r in rows:
         m = r["messages"]
         sys_p, user_p, gold = m[0]["content"], m[1]["content"], m[2]["content"]
         mode = user_p.split("Mode: ", 1)[1].split(" —", 1)[0].strip()
@@ -72,13 +73,22 @@ def main() -> None:
             if ln.startswith("NPC: "):
                 name = ln[5:].split(" —", 1)[0].strip()
                 break
-        msgs = [{"role": "system", "content": sys_p}, {"role": "user", "content": user_p}]
-        b, af = chat(a.host, a.before, msgs), chat(a.host, a.after, msgs)
+        prepped.append((mode, name, sys_p, user_p, gold))
+
+    def _msgs(sp, up):
+        return [{"role": "system", "content": sp}, {"role": "user", "content": up}]
+
+    # ДВА ПРОХОДА: вся база, затем весь адаптер — 1 своп модели в VRAM вместо 2N
+    befores = [chat(a.host, a.before, _msgs(sp, up)) for _, _, sp, up, _ in prepped]
+    afters = [chat(a.host, a.after, _msgs(sp, up)) for _, _, sp, up, _ in prepped]
+
+    for i, (mode, name, sp, user_p, gold) in enumerate(prepped):
+        b, af = befores[i], afters[i]
         agg[a.before].append(style_flags(mode, name, b))
         agg[a.after].append(style_flags(mode, name, af))
         if i < a.n:
-            ask = user_p.splitlines()
-            ctx = next((x for x in ask if x.startswith(("Situation:", "Resolved Outcome", "The player"))), "")
+            ctx = next((x for x in user_p.splitlines()
+                        if x.startswith(("Situation:", "Resolved Outcome", "The player"))), "")
             print(f"\n{'='*78}\n[{i+1}] mode={mode}  {('NPC: '+name) if name else ''}\n  {ctx[:110]}")
             print(f"  BASE  : {b[:200]}")
             print(f"  ADAPT : {af[:200]}")

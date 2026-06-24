@@ -21,7 +21,8 @@ echo "→ создаю/обновляю репо $HF_REPO"
 hf repo create "$HF_REPO" --repo-type model -y 2>/dev/null || true
 
 echo "→ заливаю карточку и Modelfile"
-hf upload "$HF_REPO" hf/README.md README.md --repo-type model
+CARD="hf/README_${ADAPTER}.md"; [ -f "$CARD" ] || CARD="hf/README.md"   # карточка под адаптер
+hf upload "$HF_REPO" "$CARD" README.md --repo-type model
 # Modelfile с ссылкой на gguf-файл репозитория (для `ollama create` после скачивания)
 printf 'FROM ./%s\n' "aidnd-${ADAPTER}-q4_k_m.gguf" > "${OUT}/Modelfile.hf"
 ollama show --modelfile "$BASE_OLLAMA" 2>/dev/null | grep -E '^(TEMPLATE|RENDERER|PARSER)' >> "${OUT}/Modelfile.hf" || true

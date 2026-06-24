@@ -71,7 +71,7 @@ export function drawCity(ctx, W, H, opts={}){
       ctx.strokeStyle='rgba(0,0,0,.22)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(cc[0]-dir[0]*L,cc[1]-dir[1]*L);ctx.lineTo(cc[0]+dir[0]*L,cc[1]+dir[1]*L);ctx.stroke();
       ctx.strokeStyle = key?'#3a2c14':'rgba(40,28,12,.5)';ctx.lineWidth=key?1.3:0.8;pathP(inset);ctx.stroke();
       const r=Math.max(7,Math.sqrt(area(inset))*0.55);
-      if(key){ flag(ctx,cc,key.roof); marks.push({c:cc,name:key.name,roof:key.roof});
+      if(key){ marks.push({c:cc,name:key.name,roof:key.roof,id:key.id,kind:key.kind,go:key.go});
         hits.push({x:cc[0],y:cc[1],r:Math.max(r,12),id:key.id,name:key.name,kind:key.kind,go:key.go,landmark:!!key.go,key:true}); }
       else hits.push({x:cc[0],y:cc[1],r,id,kind:'home',house:true});
     }
@@ -98,19 +98,24 @@ export function drawCity(ctx, W, H, opts={}){
   ctx.strokeStyle='rgba(70,120,160,.85)';ctx.lineWidth=Math.max(6,W*0.011);const y0=H*(0.2+rng()*0.1);
   ctx.beginPath();ctx.moveTo(-10,y0);ctx.bezierCurveTo(W*0.3,y0+40,W*0.45,CY+60,W*0.62,CY+20);ctx.bezierCurveTo(W*0.8,CY-20,W*0.9,H*0.7,W+10,H*0.62);ctx.stroke();
   ctx.strokeStyle='rgba(150,200,225,.6)';ctx.lineWidth=2.5;ctx.stroke();
-  // подписи ключевых зданий (поверх домов): помечен один дом-локация на квартал/промоушн
+  // НОМЕРНЫЕ бейджи ключевых зданий (компактно, НЕ перекрывают дома) + сбор легенды.
+  // Нумеруем сверху-вниз / слева-направо — порядок совпадает с легендой справа от карты.
+  marks.sort((a,b)=>a.c[1]-b.c[1]||a.c[0]-b.c[0]);
+  const legend=[];
   ctx.textAlign='center';ctx.textBaseline='middle';
-  for(const m of marks){ ctx.font='bold 12px Georgia';
-    const nm=m.name.length>24?m.name.slice(0,23)+'…':m.name, w=ctx.measureText(nm).width;
-    ctx.save();ctx.shadowColor='rgba(0,0,0,.35)';ctx.shadowBlur=3;ctx.shadowOffsetY=1;
-    ctx.fillStyle='rgba(245,236,212,.96)';ctx.strokeStyle=m.roof;ctx.lineWidth=2;rr(ctx,m.c[0]-w/2-7,m.c[1]-27,w+14,17,5);ctx.fill();ctx.stroke();ctx.restore();
-    ctx.fillStyle='#2c2113';ctx.fillText(nm,m.c[0],m.c[1]-18.5);
-  }
+  marks.forEach((m,i)=>{
+    const n=i+1, x=m.c[0], y=m.c[1];
+    legend.push({n,name:m.name,kind:m.kind,go:m.go,id:m.id,x,y});
+    ctx.save();ctx.shadowColor='rgba(0,0,0,.4)';ctx.shadowBlur=3;ctx.shadowOffsetY=1;
+    ctx.beginPath();ctx.arc(x,y,9.5,0,7);ctx.fillStyle='rgba(245,236,212,.97)';ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle=m.roof;ctx.stroke();ctx.restore();
+    ctx.fillStyle='#2c2113';ctx.font='bold 12px Georgia';ctx.fillText(String(n),x,y+0.5);
+  });
   // обрамление
   const vg=ctx.createRadialGradient(CX,CY*0.95,H*0.34,CX,CY,H*0.85);vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(40,28,12,.34)');ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
   ctx.strokeStyle='#4a3415';ctx.lineWidth=5;ctx.strokeRect(5,5,W-10,H-10);
   if(chrome){ compass(ctx,W); cartouche(ctx,W,opts.title||'Фэндалин'); }
-  return {hits, streets};
+  return {hits, streets, legend};
 }
 function rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
 function flag(ctx,c,col){ctx.strokeStyle='#3a2c14';ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(c[0],c[1]-1);ctx.lineTo(c[0],c[1]-13);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(c[0],c[1]-13);ctx.lineTo(c[0]+8,c[1]-10.5);ctx.lineTo(c[0],c[1]-8);ctx.fill();}

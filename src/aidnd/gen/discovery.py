@@ -294,7 +294,7 @@ class DiscoveryService:
             from ..inference.agents import render_scene
             out = render_scene(model, f"Интерьер: {kind}. Жильцы: "
                                + ", ".join(f"{o['name']} ({o['role']})" for o in occupants)
-                               + f". Обстановка: {', '.join(items)}.", None, "interior")
+                               + f". Обстановка: {', '.join(items)}.", None, "interior", mode="ambient")
             if out and out.get("narration"):
                 desc = out["narration"]
         payload = {"key": key, "place": place_id, "kind": kind, "occupants": occupants,

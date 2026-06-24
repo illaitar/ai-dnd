@@ -129,10 +129,22 @@ main { flex: 1; display: flex; gap: 14px; padding: 14px; overflow: hidden; }
 .map-tabs .tab { cursor: pointer; padding: 3px 10px; border-radius: 7px; border: 1px solid var(--line);
   background: var(--panel2); color: var(--ink); }
 .map-tabs .tab.active { background: var(--accent); color: #14110d; border-color: var(--accent); }
-.map-stage { position: relative; margin: 10px 0 4px; }
+#mapview .ui-box { width: 820px; }                         /* шире: карта + легенда справа */
+.map-layout { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; margin: 10px 0 4px; }
+.map-stage { position: relative; flex: 1 1 420px; min-width: 0; }
 .map-stage canvas { position: absolute; top: 0; left: 0; width: 100%; height: auto; border-radius: 8px; }
 #map-canvas { position: relative; background: #2a2118; }   /* база (поток задаёт высоту) */
 #map-fx { cursor: pointer; }                               /* слой токена/маршрута/выбора */
+.map-legend { flex: 0 0 190px; max-height: 400px; overflow-y: auto;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.map-legend:empty { display: none; }                       /* регион/интерьер → нет легенды */
+.map-legend h4 { margin: 0 0 8px; color: var(--gold); font-size: 13px; }
+.map-legend ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.map-legend li { display: flex; gap: 8px; align-items: center; padding: 4px 5px; border-radius: 6px; cursor: pointer; }
+.map-legend li:hover { background: rgba(216,177,90,.16); }
+.map-legend .ln { flex: 0 0 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 50%;
+  background: var(--accent); color: #14110d; font-weight: bold; font-size: 12px; }
+.map-legend .lname { flex: 1; color: var(--ink); font-size: 13px; line-height: 1.25; }
 .map-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; }
 .map-actions.hidden { display: none; }
 .map-actions .sp { flex: 1; }

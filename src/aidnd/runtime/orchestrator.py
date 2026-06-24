@@ -102,6 +102,7 @@ class GameSession:
     AFFORD_LABEL = {
         "inn": "отдохнуть и перекусить", "drink": "выпить", "eat": "поесть",
         "serve": "снять комнату", "shop": "посмотреть товар", "work": "оглядеть работу",
+        "sleep": "лечь спать до утра",
         "shrine": "помолиться", "townhall": "справиться о делах города",
         "manor": "осмотреть поместье", "hideout": "искать тайный ход",
         "farm": "оглядеть хозяйство", "combat": "осмотреть поле боя",
@@ -160,6 +161,9 @@ class GameSession:
                     "view": self.view()}
         if self._is_item_followup(text):                  # «а на нём что написано?» → про последний предмет
             return self._post(self._answer_query("look", text), "query")
+        svc = self._inn_service(text)                     # услуги двора (комната/еда/меню) — до роутера
+        if svc is not None:
+            return self._post(svc, "serve")
         route = self._route(text)                         # LLM-роутер (онлайн) / детерминированный фоллбэк
         # продолжение разговора: при активном собеседнике рядом «расскажи о…/что слышно»
         # (freeform или общий look) — это реплика ему, а не бросок/мировой-запрос
@@ -346,6 +350,8 @@ class GameSession:
             key = reachable_place_to_site(path[-1])
             danger = REGION_SITES.get(key, {}).get("danger") if key else None
             ticks = int(ticks * self._DANGER_FACTOR.get(danger, 1.0))
+            from ..world import environment
+            ticks = int(ticks * environment.effects(self.scene_context()).travel_mult)  # погода
         return max(1, ticks), region
 
     def _travel_incident(self, dest: str) -> str:
@@ -503,7 +509,8 @@ class GameSession:
                                     self.director.surface_hooks_near(npc))
             return {"kind": "narration", "text": reply, "npc": npc, "view": self.view()}
         dc = 13
-        req = self.rules.build_check_request(self.player, skill, dc, target=npc, kind="skill")
+        req = self.rules.build_check_request(self.player, skill, dc, target=npc, kind="skill",
+                                             env_adv=self._env_check_adv(skill))
 
         def resume(result: RollResult) -> dict:
             outcome = self.rules.adjudicate(action, req, result)
@@ -532,7 +539,8 @@ class GameSession:
         if secret and f"secret_found:{place}" not in self.world.flags:
             if self.rules.try_passive(self.player, "perception", dc):
                 return self._reveal_secret(place, secret, "Сквозняк из щели выдаёт скрытый ход.")
-            req = self.rules.build_check_request(self.player, "investigation", dc, kind="skill")
+            req = self.rules.build_check_request(self.player, "investigation", dc, kind="skill",
+                                                 env_adv=self._env_check_adv("investigation"))
 
             def resume_secret(result: RollResult) -> dict:
                 outcome = self.rules.adjudicate(action, req, result)
@@ -548,7 +556,8 @@ class GameSession:
         # пассивная Perception (док 07 §5) — авто без броска
         if self.rules.try_passive(self.player, "perception", dc):
             return self._reveal_container(place, "Твоё чутьё сразу находит тайник.")
-        req = self.rules.build_check_request(self.player, "investigation", dc, kind="skill")
+        req = self.rules.build_check_request(self.player, "investigation", dc, kind="skill",
+                                             env_adv=self._env_check_adv("investigation"))
 
         def resume(result: RollResult) -> dict:
             outcome = self.rules.adjudicate(action, req, result)
@@ -1236,6 +1245,91 @@ class GameSession:
                "покачивается — рука и глаз уже не так верны.") if drunk else "Ты выпиваешь кружку эля (−2 sp)."
         return {"kind": "narration", "text": txt, "view": self.view()}
 
+    # --- услуги двора: комната/еда (реальные транзакции, не флавор) --------- #
+    _ROOM_KW = ("снять комнат", "комнату на ночь", "снять номер", "снять угол", "переночев",
+                "ночлег", "заночев", "снять жиль", "снять койк", "на ночлег", "снять эту комнат")
+    _MEAL_KW = ("поесть", "перекус", "поужина", "пообеда", "покуша", "похлёбк", "похлебк",
+                "горячего поес", "поедим", "перехвати", "поснедать", "трапез", "заказать ед")
+    _INN_MENU_KW = ("отдохнуть и перекусить", "что предлага", "какие услуги", "что у вас есть",
+                    "меню", "что есть из", "услуги двора", "почём ноч", "сколько за комнат")
+    _SLEEP_KW = ("спать", "лечь", "ложусь", "до утра", "отоспат", "отосплюсь", "на боковую",
+                 "вздремн", "соснуть", "выспат", "ко сну", "отдохнуть до утра")
+
+    def _inn_service(self, text: str) -> dict | None:
+        """Перехват услуг ДО роутера (детерминированно, по affordance места): аренда комнаты
+        (открывает под-локацию), еда, меню — реальные транзакции; сон — в снятой комнате."""
+        affs = {a["affordance"] for a in self.affordances_here()}
+        low = text.lower()
+        if "sleep" in affs and any(k in low for k in self._SLEEP_KW):  # в своей комнате — отдых
+            return self._sleep_until_morning()
+        if not (affs & {"inn", "serve", "eat"}):
+            return None
+        if any(k in low for k in self._ROOM_KW):
+            return self._rent_room()
+        if any(k in low for k in self._INN_MENU_KW):
+            return self._inn_menu()
+        if any(k in low for k in self._MEAL_KW):
+            return self._eat_meal()
+        return None
+
+    def _inn_menu(self) -> dict:
+        return {"kind": "narration",
+                "text": "За стойкой предлагают: комната на ночь — 5 sp (своя комната наверху, спать "
+                        "там можно в любой момент); горячая похлёбка — 3 sp (подлечиться); "
+                        "кружка эля — 2 sp. Скажи, что берёшь: «снять комнату», «поесть» или «выпить».",
+                "view": self.view()}
+
+    def _rent_room(self) -> dict:
+        from ..inventory.container import transfer_currency
+        from ..inventory.items import COIN, wallet_value_cp
+        inn = self.current_place()
+        rid = f"room:{inn.split(':')[-1]}_rented"
+        if f"rented:{inn}" in self.world.flags and rid in self.world.spatial.places:
+            return {"kind": "system", "text": "Комната уже за тобой — поднимись к себе "
+                    "(выход «Снятая комната») и ложись спать, когда устанешь.", "view": self.view()}
+        if wallet_value_cp(self.world.wallets.get(self.player, {})) < 5 * COIN["sp"]:
+            return {"kind": "system", "text": "На комнату не хватает (нужно 5 sp).", "view": self.view()}
+        transfer_currency(self.world, self.player, None, {"sp": 5}, actor="inn")
+        self.world.commit("rent_room", self.player, payload={
+            "inn": inn, "room": rid, "name": "Снятая комната",
+            "ambiance": "Тесная сухая комнатка наверху: лежанка, табурет, ставни глушат дождь."})
+        self._log_journal("Снял комнату на дворе (−5 sp).")
+        return {"kind": "narration",
+                "text": "Ты платишь 5 sp — комната твоя. Наверху открылась «Снятая комната»: "
+                        "поднимись туда (выход наверх) и ложись спать, когда устанешь.",
+                "view": self.view()}
+
+    def _sleep_until_morning(self) -> dict:
+        h, m = (int(x) for x in self.world.clock.hhmm().split(":"))
+        to_morning = (8 * 60 - (h * 60 + m)) % (24 * 60) or 24 * 60   # до ближайших 08:00
+        self._tick(max(1, to_morning // config.SIM_MINUTES_PER_TICK))
+        st = self.world.get_stats(self.player)
+        if st and st.hp < st.max_hp:                      # сон = полное восстановление HP
+            self.world.commit("heal", self.player, target=self.player,
+                              payload={"amount": st.max_hp - st.hp})
+        self._log_journal("Выспался до утра.")
+        return {"kind": "narration",
+                "text": f"Ты заваливаешься на лежанку и спишь до утра ({self.world.clock.hhmm()}). "
+                        f"Силы полностью восстановлены.", "view": self.view()}
+
+    def _eat_meal(self) -> dict:
+        from ..inventory.container import transfer_currency
+        from ..inventory.items import COIN, wallet_value_cp
+        if wallet_value_cp(self.world.wallets.get(self.player, {})) < 3 * COIN["sp"]:
+            return {"kind": "system", "text": "На еду не хватает (нужно 3 sp).", "view": self.view()}
+        transfer_currency(self.world, self.player, None, {"sp": 3}, actor="inn")
+        st = self.world.get_stats(self.player)
+        healed = 0
+        if st and st.hp < st.max_hp:                      # горячая еда — небольшое лечение
+            healed = min(5, st.max_hp - st.hp)
+            self.world.commit("heal", self.player, target=self.player, payload={"amount": healed})
+        self._tick(2)
+        self._log_journal("Поел горячего (−3 sp).")
+        extra = f" Восстановлено {healed} HP." if healed else ""
+        return {"kind": "narration",
+                "text": f"Ты съедаешь миску горячей похлёбки с хлебом (−3 sp).{extra}",
+                "view": self.view()}
+
     # допустимые глаголы движка (валидация выхода LLM-парсера)
     _VERBS = {"move", "talk", "attack", "inspect", "search", "persuade", "intimidate",
               "loot", "buy", "sell", "inventory", "wait", "scan", "buyinfo", "map", "drink"}
@@ -1388,7 +1482,7 @@ class GameSession:
                 situation=("A stranger walks up and greets you for the first time"
                            if first_meeting else "Someone you know greets you"),
                 player_line="", intent="greet and ask what they want",
-                scene=self.scene_descriptor())
+                scene=self._narrator_context(), mode="greeting")
             if line:
                 return line
         return self._greeting_fallback(persona, first_meeting)
@@ -1402,8 +1496,8 @@ class GameSession:
             line = render_dialogue(
                 self.model, persona, self._rel_summary(rel, first_meeting),
                 situation=f"The player says/asks: «{topic}». Your stance: {action}.",
-                player_line=topic, intent=action, scene=self.scene_descriptor(),
-                facts=self._disclosable_facts(npc, rel))
+                player_line=topic, intent=action, scene=self._narrator_context(),
+                facts=self._disclosable_facts(npc, rel), mode="dialogue")
             if line:
                 return self._maybe_hook(line, hooks)
         name = self._display(npc)
@@ -2013,7 +2107,9 @@ class GameSession:
         if self.model is not None and self.model.available():
             from ..inference.agents import decide_resolution
             sc = self.scene_context()
-            adj = decide_resolution(self.model, text, f"{sc.descriptor} Локация: {sc.place_name}.", p)
+            adj = decide_resolution(self.model, text,
+                                    f"{sc.descriptor} Локация: {sc.place_name}. "
+                                    f"{self._env_note()}".strip(), p)
         if not adj:
             if config.LLM_REQUIRED:                       # без фоллбэков: не подменяем эвристикой
                 self._tick()
@@ -2037,7 +2133,8 @@ class GameSession:
         # нужен бросок: навык + DC (DC кодирует вероятность), считаем шанс успеха
         skill = self._norm_skill(adj.get("skill") or adj.get("ability_skill") or adj.get("ability"), text)
         dc = int(adj.get("dc") or max(5, min(25, round(20 - p * 16))))
-        req = self.rules.build_check_request(self.player, skill, dc, kind="skill", target=target)
+        req = self.rules.build_check_request(self.player, skill, dc, kind="skill", target=target,
+                                             env_adv=self._env_check_adv(skill))
         pct = self._success_pct(req)
         action = Action(actor=self.player, verb="freeform", target=target)
 
@@ -2147,7 +2244,7 @@ class GameSession:
         """Оценка выполнимости действия игрока в контексте сцены (роль plausibility).
         {feasible, p, reason}. Модель при наличии, иначе правило-фоллбэк."""
         scene = self.scene_context()
-        ctx = f"{scene.descriptor} Локация: {scene.place_name}."
+        ctx = f"{scene.descriptor} Локация: {scene.place_name}. {self._env_note()}".strip()
         if self.model is not None:
             from ..inference.agents import assess_feasibility
             out = assess_feasibility(self.model, text, ctx)
@@ -2175,8 +2272,21 @@ class GameSession:
             return None
         from ..inference.agents import render_scene
         out = render_scene(self.model, summary,
-                           persona or self.world.ecs.get(self.player, Persona), topic)
+                           persona or self.world.ecs.get(self.player, Persona), topic,
+                           scene=self._narrator_context(),
+                           mode="combat" if topic == "combat" else "outcome")
         return out.get("narration") if out else None
+
+    def _narrator_context(self) -> str:
+        """Богатый контекст сцены для нарратора: время/сезон/погода/место (descriptor),
+        кто рядом, последние ходы — чтобы он не выдумывал антураж и держал преемственность."""
+        sc = self.scene_context()
+        npcs = ", ".join(self._display(n) for n in self.npcs_here()) or "никого нет"
+        ctx = f"{sc.descriptor} Место: «{sc.place_name}». Рядом: {npcs}."
+        recent = self._recent_context(3)
+        if recent:
+            ctx += f"\nЧто было только что:\n{recent}"
+        return ctx
 
     # ===================================================================== #
     #  Информационное представление связности локаций (вместо карты)        #
@@ -2246,6 +2356,16 @@ class GameSession:
 
     def scene_descriptor(self) -> str:
         return self.scene_context().descriptor
+
+    def _env_check_adv(self, skill: str, ranged: bool = False) -> int:
+        """Поправка advantage от погоды/света для проверки навыка (док 07 §6)."""
+        from ..world import environment
+        return environment.check_advantage(self.scene_context(), skill=skill, ranged=ranged)
+
+    def _env_note(self) -> str:
+        """Краткая сводка погодных эффектов — в контекст арбитра/feasibility."""
+        from ..world import environment
+        return environment.effects(self.scene_context()).note
 
     def _disclosable_facts(self, npc: str, rel, topic: str | None = None, limit: int = 5):
         persona = self.world.ecs.get(npc, Persona)

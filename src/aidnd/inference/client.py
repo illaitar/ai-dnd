@@ -132,7 +132,7 @@ class ModelManager:
         "router": (config.ROUTER_MODEL, "router"),  # дообученный роутер намерений (см. training/)
         "arbiter": (config.ARBITER_MODEL, "arbiter"),  # дообученный арбитр freeform (decide_resolution)
         "consequence": (config.CONSEQUENCE_MODEL, "consequence"),  # дообученный агент последствий
-        "narrator": (config.BASE_MODEL, "narrator-persona"),
+        "narrator": (config.NARRATOR_MODEL, "narrator-persona"),  # дообученный нарратор (см. training/)
         "cognition": (config.BASE_MODEL, "lore"),
         "lore_keeper": (config.BASE_MODEL, "lore"),
         "character_gen": (config.BASE_MODEL, "lore"),

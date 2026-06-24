@@ -105,9 +105,12 @@
     <div class="ui-box">
       <h2>🗺 Карта <span id="map-tabs" class="map-tabs"></span>
         <button class="x" data-close="mapview">✕</button></h2>
-      <div class="map-stage">
-        <canvas id="map-canvas" width="560" height="400"></canvas>
-        <canvas id="map-fx" width="560" height="400"></canvas>
+      <div class="map-layout">
+        <div class="map-stage">
+          <canvas id="map-canvas" width="560" height="400"></canvas>
+          <canvas id="map-fx" width="560" height="400"></canvas>
+        </div>
+        <div id="map-legend" class="map-legend"></div>
       </div>
       <div id="map-actions" class="map-actions hidden">
         <span id="map-sel" class="state"></span>

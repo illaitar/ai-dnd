@@ -29,6 +29,12 @@ def _stratum(rec: dict) -> str:
                 return "eff" if out["effects"] else "noeff"
     except (KeyError, IndexError, json.JSONDecodeError, TypeError):
         pass
+    try:                                      # narrator: страта по виду реплики (mode)
+        u = msgs[1]["content"]
+        if isinstance(u, str) and u.startswith("Mode: "):
+            return "m:" + u[6:].split(" —", 1)[0].strip()
+    except (KeyError, IndexError, TypeError):
+        pass
     try:                                      # квест: tier из user-спеки
         return "t:" + str(json.loads(msgs[1]["content"]).get("tier", "na"))
     except (KeyError, IndexError, json.JSONDecodeError, TypeError):

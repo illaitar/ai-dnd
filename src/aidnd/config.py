@@ -36,6 +36,10 @@ ARBITER_MODEL: str = os.environ.get("AIDND_ARBITER_MODEL", "aidnd-arbiter")
 # Дообученный агент последствий (world_effects → aidnd-consequence в Ollama;
 # held-out valid-схема 47%→100%, full 43%→83%, см. training/). Откат на BASE_MODEL.
 CONSEQUENCE_MODEL: str = os.environ.get("AIDND_CONSEQUENCE_MODEL", "aidnd-consequence")
+# Дообученный нарратор (LoRA на BASE_MODEL → aidnd-narrator в Ollama; 522 примера
+# проза по mode, before/after: канон-имена не коверкает, сухой живой стиль вместо
+# наигранного, см. training/). Откат на BASE_MODEL, если модели нет.
+NARRATOR_MODEL: str = os.environ.get("AIDND_NARRATOR_MODEL", "aidnd-narrator")
 
 KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
 HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))

@@ -71,7 +71,7 @@ def test_outcome_narrator_offline_returns_none_online_renders(monkeypatch):
     assert s._narrate_outcome("Удар мечом: 7 рубящего урона.") is None     # офлайн → механика
     s.model = _Off()
     monkeypatch.setattr(agents, "render_scene",
-                        lambda m, summ, persona, topic="": {"narration": "Клинок поёт, рассекая тьму."})
+                        lambda *a, **kw: {"narration": "Клинок поёт, рассекая тьму."})
     assert s._narrate_outcome("Удар мечом: 7 рубящего урона.", topic="combat") == "Клинок поёт, рассекая тьму."
 
 

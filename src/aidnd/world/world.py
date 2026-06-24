@@ -270,6 +270,20 @@ class World:
     def _h_set_flag(self, ev: Event) -> None:
         self.flags.add(ev.payload["flag"])
 
+    def _h_rent_room(self, ev: Event) -> None:
+        """Аренда комнаты: добавляет под-локацию (с аффордансом сна) и связывает её с
+        двором. Событийно → переживает сейв/лоад (комната и доступ к ней восстановятся)."""
+        from .spatial import Place
+        inn, rid = ev.payload["inn"], ev.payload["room"]
+        if rid not in self.spatial.places:
+            self.spatial.add_place(Place(
+                place_id=rid, kind="room", name=ev.payload.get("name", "Снятая комната"),
+                parent=inn if inn in self.spatial.places else None,
+                affordances=["sleep"], ambiance=ev.payload.get("ambiance", "")))
+            if inn in self.spatial.places:
+                self.spatial.link(inn, "up", rid)
+        self.flags.add(f"rented:{inn}")
+
     def _h_resolve(self, ev: Event) -> None:
         """Фиксирует факт доразрешения сцены (eager persistence): повторный запрос
         по тому же ключу вернёт тот же ответ навсегда (main §2, док 06 §6)."""

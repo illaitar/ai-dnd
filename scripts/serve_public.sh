@@ -46,4 +46,6 @@ trap 'kill $WEB_PID 2>/dev/null' EXIT
 for _ in $(seq 1 20); do curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null 2>&1 && break; sleep 0.5; done
 
 echo "→ публичная ссылка (держи это окно открытым):"
-exec "$CF" tunnel --url "http://localhost:${PORT}"
+# --protocol http2: многие домашние сети режут QUIC/UDP, из-за чего туннель не встаёт
+# (530 на публичном URL). HTTP/2 идёт по TCP/443 и проходит.
+exec "$CF" tunnel --protocol http2 --url "http://localhost:${PORT}"

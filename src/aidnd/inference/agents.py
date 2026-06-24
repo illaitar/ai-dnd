@@ -42,7 +42,26 @@ PROMPTS = {
         "Только законченные предложения — не обрывай фразу на полуслове. "
         "НЕ начинай реплику с имени самого говорящего и не повторяй его — интерфейс уже "
         "подписывает, кто говорит. Имена собственные пиши РОВНО как даны, не переводи и не "
-        "выдумывай вариантов (если NPC зовут «Toblen Stonehill» — так и оставляй, не «Каменьхилл»)."
+        "выдумывай вариантов (если NPC зовут «Toblen Stonehill» — так и оставляй, не «Каменьхилл»). "
+        "Если дана СЦЕНА — держись её строго: время суток, погода, сезон и место должны "
+        "совпадать (ночь → темно, без солнца и «первых лучей»; дождь → сыро; таверна → не «замок»). "
+        "СТИЛЬ — живой, ПРОСТОЙ, разговорный, как современная проза от 2-го лица, а НЕ "
+        "фэнтезийный сказ. Короткие фразы, обычные слова, прямые глаголы (выпалил, хмыкнул, "
+        "сплюнул, махнул рукой). Допустима лёгкая ирония и сухая бытовая деталь. Длина по "
+        "делу: короткая реплика или исход — 1–3 предложения; описание места, прибытия или "
+        "сложного действия — можно 2–4 описательных предложения. ЧЕРЕДУЙ короткие и длинные "
+        "фразы, не дроби всё в рубленые куски и не растягивай ради красоты. ЗАПРЕЩЕНО: пафос "
+        "и сказовость («о, путник», «молвил», «дивный», "
+        "«ступай с миром»); вычурные метафоры и олицетворения («клинок поёт», «поместье "
+        "дышит запустением», «тьма обнимает», «туман шепчет»); украшательские эпитеты. НЕ "
+        "«сердце полно тепла», НЕ «словно сам фатум», НЕ «добро пожаловать, странник!». Пиши "
+        "так, будто рассказываешь приятелю за столом: конкретно, по делу, без прикрас; "
+        "реплики NPC — как говорят живые люди, а не герои былин. "
+        "НИКОГДА не описывай мысли, чувства, выводы или решения игрока («ты понимаешь, "
+        "что…», «тебе кажется», «ты решаешь», «думаешь, что…») и НЕ давай ему советов или "
+        "рекомендаций («лучше иди…», «держись…», «придётся…», «не суйся»). Описывай только "
+        "наблюдаемое — действия, обстановку, реакции мира и NPC; что думать и как поступать, "
+        "решает сам игрок."
     ),
     "cognition": (
         "You are the decision policy of an NPC in a D&D world. You receive the NPC's "
@@ -383,21 +402,89 @@ def parse_intent(manager, text: str, actor: str, options: list[str] | None = Non
     return _call(manager, "intent", "emit_intent", user, ["verb"])
 
 
-def render_scene(manager, outcome_summary: str, persona, dialogue_topic: str = ""):
+# «Вид реплики» нарратора — задаёт ФОРМУ вывода (модель ориентируется на mode).
+MODE_HINTS = {
+    "dialogue": "РЕПЛИКА NPC — краткая реакция и ОДНА живая фраза в кавычках, в его голосе.",
+    "greeting": "ПРИВЕТСТВИЕ — NPC коротко здоровается (с незнакомцем — как с незнакомцем) и "
+                "спрашивает, что нужно.",
+    "outcome": "ИСХОД ДЕЙСТВИЯ — результат во 2-м лице, 1–2 предложения; речей NPC нет, кроме "
+               "тех, что прямо в Outcome.",
+    "combat": "БОЙ — короткая динамичная зарисовка удара/промаха строго по Outcome, без новых чисел.",
+    "ambient": "ОБСТАНОВКА — короткое атмосферное описание места во 2-м лице, без событий.",
+}
+
+# финальная инструкция по ФОРМЕ вывода под каждый mode
+_MODE_WRITE = {
+    "dialogue": "Реакция NPC и ОДНА реплика в кавычках — 1–2 коротких предложения, в его голосе. "
+                "Без чисел.",
+    "greeting": "Коротко поздоровайся в голосе NPC и спроси, что нужно — 1 предложение. Без чисел.",
+    "outcome": "Опиши исход во 2-м лице, 1–3 предложения, привязанных к сцене; для сложного "
+               "действия можно подробнее. Без чисел и механики, без советов и мыслей игрока.",
+    "combat": "Опиши удар/промах строго по Outcome — 1–2 динамичных предложения. Без новых чисел.",
+    "ambient": "Атмосферное описание места во 2-м лице — 2–4 предложения, конкретные детали. "
+               "Только наблюдаемое: без советов игроку и без его мыслей.",
+}
+
+
+def narrator_user(mode: str, *, name: str = "", kind: str = "", race: str = "", voice: str = "",
+                  traits: str = "", epithet: str = "", rel: str = "", scene: str = "",
+                  situation: str = "", player_line: str = "", intent: str = "", tone: str = "",
+                  outcome: str = "", facts=None, topic: str = "") -> str:
+    """ЕДИНЫЙ user-промпт нарратора — общий для рантайма и датасета (train == inference).
+    Печатает только заданные поля; `mode` (вид реплики) задаёт форму вывода."""
+    L = [f"Mode: {mode} — {MODE_HINTS.get(mode, MODE_HINTS['outcome'])}"]
+    if name:
+        meta = ", ".join(x for x in (kind, race, f"voice: {voice}" if voice else "",
+                                     f"черты: {traits}" if traits else "",
+                                     f"эпитет: {epithet}" if epithet else "") if x)
+        L.append(f"NPC: {name}" + (f" — {meta}" if meta else ""))
+    if rel:
+        L.append(f"Relationship to the player: {rel}")
+    if scene:
+        L.append(f"Scene (ground in this; do NOT contradict time/weather/season/place): {scene}")
+    if situation:
+        L.append(f"Situation: {situation}")
+    if mode in ("dialogue", "greeting"):
+        L.append(f"The player says: «{player_line}»." if player_line
+                 else "The player approached without saying anything specific.")
+    if tone:
+        L.append(f"Player's tone: {tone}")
+    if intent:
+        L.append(f"NPC intent: {intent}")
+    if outcome:
+        L.append(f"Resolved Outcome (DO NOT change or print any numbers, dice or stats): {outcome}")
+    if facts:
+        L.append("Facts the NPC may share NOW (use ONLY these for world info; invent nothing else):\n"
+                 + "\n".join(f"- {f}" for f in facts))
+    if topic:
+        L.append(f"Topic: {topic}")
+    L.append(_MODE_WRITE.get(mode, _MODE_WRITE["outcome"]))
+    return "\n".join(L)
+
+
+def _persona_fields(persona) -> dict:
+    """Извлечь из Persona параметры для нарратора (вид NPC и т.д.)."""
+    return {
+        "name": getattr(persona, "name", "") or "",
+        "kind": getattr(persona, "profession", None) or getattr(persona, "archetype", "") or "",
+        "race": getattr(persona, "race", "") or "",
+        "voice": getattr(persona, "voice", None) or "",
+        "traits": ", ".join(getattr(persona, "traits", []) or []),
+        "epithet": getattr(persona, "epithet", "") or "",
+    }
+
+
+def render_scene(manager, outcome_summary: str, persona, dialogue_topic: str = "", scene: str = "",
+                 mode: str = "outcome"):
     """Нарратор отрисовывает прозой. Это свободный текст, а не структура —
     constrained JSON ломает качество и грамматику Ollama (вложенный массив), поэтому
     берём контент как narration напрямую (формат гарантируется prompt'ом, main §12.3)."""
     if manager is None or not manager.available():
         return None
     from .client import OllamaError
-    voice = getattr(persona, "voice", None) or "neutral"
-    name = getattr(persona, "name", "Narrator")
-    user = (f"Speaking NPC: {name} (voice: {voice}).\n"
-            f"Resolved mechanical Outcome (DO NOT change or print any numbers, dice, "
-            f"or mechanical annotations): {outcome_summary}\n"
-            f"Topic: {dialogue_topic}\n"
-            f"Write 2-4 sentences of vivid second-person narration and in-character "
-            f"dialogue. Prose only, no JSON, no stats.")
+    # для исхода/обстановки говорящего NPC нет (повествование от 2-го лица)
+    pf = _persona_fields(persona) if mode in ("dialogue", "greeting", "combat") else {}
+    user = narrator_user(mode, scene=scene, outcome=outcome_summary, topic=dialogue_topic, **pf)
     try:
         resp = manager.client.chat(manager.model_for("narrator"),
                                    [{"role": "system", "content": PROMPTS["narrator"]},
@@ -409,35 +496,20 @@ def render_scene(manager, outcome_summary: str, persona, dialogue_topic: str = "
 
 
 def render_dialogue(manager, persona, rel_summary: str, situation: str,
-                    player_line: str, intent: str, scene: str = "", facts=None):
-    """Заземлённый диалоговый нарратор: прозой, без выдуманной истории/реплик игрока.
+                    player_line: str, intent: str, scene: str = "", facts=None,
+                    mode: str = "dialogue", tone: str = ""):
+    """Заземлённый диалоговый нарратор: проза, без выдуманной истории/реплик игрока.
 
-    scene — физический контекст (сезон/время/погода/место). facts — список фактов,
-    которые NPC реально знает и МОЖЕТ раскрыть при текущем доверии; делиться
-    мировой информацией можно ТОЛЬКО из них, иначе ничего не выдумывать.
+    mode — вид реплики (dialogue/greeting). scene — физический контекст (сезон/время/
+    погода/место). tone — тон игрока. facts — что NPC реально знает и МОЖЕТ раскрыть при
+    текущем доверии; мировую информацию давать ТОЛЬКО из них, иначе не выдумывать.
     """
     if manager is None or not manager.available():
         return None
     from .client import OllamaError
-    name = getattr(persona, "name", "NPC")
-    voice = getattr(persona, "voice", None) or "neutral"
-    arch = getattr(persona, "archetype", "") or getattr(persona, "profession", "") or "person"
-    said = (f"The player says: «{player_line}».\n" if player_line
-            else "The player has not said anything specific — they just approached.\n")
-    facts_block = ""
-    if facts:
-        facts_block = ("Facts you actually know and MAY share now (use ONLY these for any "
-                       "world information; do not invent other facts):\n"
-                       + "\n".join(f"- {f}" for f in facts) + "\n")
-    scene_block = f"Physical scene: {scene}\n" if scene else ""
-    user = (f"NPC: {name}, a {arch} (voice: {voice}).\n"
-            f"Relationship to the player: {rel_summary}.\n"
-            f"{scene_block}Situation: {situation}\n{said}{facts_block}"
-            f"NPC intent: {intent}.\n"
-            f"Write 1-3 sentences in {LANG}: the NPC's reaction and ONE spoken line, in "
-            f"character. You may reference the physical scene briefly. Ground strictly in the "
-            f"given facts; invent no shared past and no world facts beyond those listed. If "
-            f"greeting a stranger, keep it brief and ask what they want. Prose only, no numbers.")
+    user = narrator_user(mode, rel=rel_summary, scene=scene, situation=situation,
+                         player_line=player_line, intent=intent, tone=tone, facts=facts,
+                         **_persona_fields(persona))
     try:
         resp = manager.client.chat(manager.model_for("narrator"),
                                    [{"role": "system", "content": PROMPTS["narrator"]},

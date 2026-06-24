@@ -401,6 +401,7 @@ function renderMap(ml) {
     `<span class="tab ${l.id === mapLevel ? "active" : ""}" data-lvl="${l.id}">${esc(l.title)}</span>`).join("");
   $("map-tabs").querySelectorAll("[data-lvl]").forEach(t => t.onclick = () => { mapLevel = t.dataset.lvl; citySel = null; renderMap(ml); });
   citySel = null;
+  renderLegend(null);                                                // легенда только для town
   if (mapLevel === "town" && window.drawCity) drawCityLevel();        // красивый процедурный город
   else if (mapLevel === "region" && window.drawWorld) drawWorldLevel(ml);
   else drawMapNodes(ml.levels.find(l => l.id === mapLevel));          // нод-граф для интерьера
@@ -414,7 +415,18 @@ async function drawCityLevel() {
   const keyHouses = (lastView && lastView.key_houses) || [];   // дома, поднявшие важность → ключевые
   const out = window.drawCity(cv.getContext("2d"), cv.width, cv.height, { seed, buildings: townBuildings || [], keyHouses, chrome: true });
   mapHits = out.hits; cityState = { ...out, seed }; cityCur = out.streets.start;
+  renderLegend(out.legend);                                    // нумерованная легенда справа
   mapMode = "city"; cityStep = 0; cityQuiet = 2; cityMarks = []; drawFx();
+}
+// легенда ключевых мест справа от карты: номер → название; клик = выбрать дом на карте
+function renderLegend(legend) {
+  const el = $("map-legend"); if (!el) return;
+  if (!legend || !legend.length) { el.innerHTML = ""; return; }
+  el.innerHTML = "<h4>Ключевые места</h4><ol>" + legend.map(L =>
+    `<li data-key="${esc(L.id)}"><span class="ln">${L.n}</span><span class="lname">${esc(L.name)}</span></li>`).join("") + "</ol>";
+  el.querySelectorAll("[data-key]").forEach(li => li.onclick = () => {
+    const h = mapHits.find(x => x.id === li.dataset.key); if (h) setSelection(h);
+  });
 }
 function drawWorldLevel(ml) {
   const lvl = ml.levels.find(l => l.id === "region"); if (!lvl) return;

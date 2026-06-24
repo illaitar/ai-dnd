@@ -63,7 +63,7 @@ class RulesEngine:
     # ----------------------------------------------- проверки/спасброски ---
     def build_check_request(
         self, actor: str, skill: str, dc: int, *, target: str | None = None,
-        kind: str = "skill",
+        kind: str = "skill", env_adv: int = 0,
     ) -> RollRequest:
         is_save = kind == "save"
         mod, adv = assemble_modifier(
@@ -72,6 +72,7 @@ class RulesEngine:
             ability=skill if is_save else None,
             target=target, kind=kind,
         )
+        adv = max(-1, min(1, adv + env_adv))          # погода/свет (док 07 §6)
         return self.dice.request_player(
             kind=kind, dice="1d20", modifier=mod, advantage=adv, dc=dc,
             roller=actor, context={"skill": skill, "target": target},

@@ -178,6 +178,21 @@ PROMPTS = {
         "именованных боссов и без выдуманных квестов. Каждый факт — одно предложение, как сплетня "
         "горожанина или общее знание края. Не противоречь известному. Output ONLY the JSON."
     ),
+    "event_director": (
+        "Ты — режиссёр живого города (D&D-фронтир, Фэндалин). По СОСТОЯНИЮ МИРА — фракции "
+        "(цели, отношения, территории, сила), опасные места вокруг, флаги и недавние действия "
+        "игрока — предлагаешь правдоподобные ИНЦИДЕНТЫ ближайшего времени: ходы фракций "
+        "(облава/вербовка/экспансия/разборка с врагом), вылазки монстров из логовищ, решения "
+        "ратуши (политика), редкие катаклизмы. На каждый инцидент: kind; source (id фракции / "
+        "ключ места / 'town' / 'world'); origin (place_id территории-источника / 'gate:<ключ "
+        "места>' для вылазок монстров / 'center'); короткий label и одно предложение desc; через "
+        "сколько тиков случится (when 0..72); сила intensity 0..1; эффекты: rumor (слух-молва, "
+        "одно предложение) и/или alteration (стойкий след на месте-источнике). РЕДКО, когда событие "
+        "меняет сам город — добавь change: {action:'close' (закрыть лавку, target=place_id), 'ruin' "
+        "(разрушить локацию в руины, target=place_id), 'open' (открыть НОВУЮ: name + dir), 'reopen'}. "
+        "Заземляйся СТРОГО в данных — не выдумывай новых фракций/мест (кроме change.open). Враждующие "
+        "фракции (relations<0) — повод для стычки. Дай 5-9 инцидентов. Output ONLY JSON via propose_incidents."
+    ),
 }
 
 # --------------------------------------------------------------------------- #
@@ -338,6 +353,27 @@ SCHEMAS = {
             "goals": {"type": "array", "items": {"type": "string"}},
             "values": {"type": "array", "items": {"type": "string"}}},
             "required": ["name"]},
+    },
+    "propose_incidents": {
+        "name": "propose_incidents",
+        "parameters": {"type": "object", "properties": {
+            "incidents": {"type": "array", "items": {"type": "object", "properties": {
+                "kind": {"type": "string", "enum": ["faction", "monster", "politics", "cataclysm"]},
+                "source": {"type": "string"},
+                "origin": {"type": "string"},
+                "label": {"type": "string"},
+                "desc": {"type": "string"},
+                "when": {"type": "integer", "minimum": 0, "maximum": 72},
+                "intensity": {"type": "number", "minimum": 0, "maximum": 1},
+                "rumor": {"type": ["string", "null"]},
+                "alteration": {"type": ["string", "null"]},
+                "change": {"type": ["object", "null"], "properties": {
+                    "action": {"type": "string", "enum": ["close", "ruin", "open", "reopen"]},
+                    "target": {"type": ["string", "null"]},
+                    "name": {"type": ["string", "null"]},
+                    "dir": {"type": ["string", "null"]}}}},
+                "required": ["kind", "source", "origin", "label", "when", "intensity"]}}},
+            "required": ["incidents"]},
     },
 }
 
@@ -597,6 +633,16 @@ def emit_world_facts(manager, world_digest: str, n: int = 12):
             f"Call emit_world_facts.")
     out = _call(manager, "loremaster", "emit_world_facts", user, ["facts"])
     return out.get("facts") if out else None
+
+
+def propose_incidents(manager, digest: str):
+    """LLM-режиссёр событий: предлагает инциденты города из состояния мира (этап 2).
+    Возвращает list[dict] или None (нет сервера). Геометрию/волны считает код, не модель."""
+    user = (f"Состояние города и края:\n{digest}\n\n"
+            f"Предложи 5-9 правдоподобных инцидентов на ближайшие ~72 тика, заземлённых строго "
+            f"в этих данных. Call propose_incidents.")
+    out = _call(manager, "event_director", "propose_incidents", user, ["incidents"])
+    return out.get("incidents") if out else None
 
 
 def write_quest(manager, template_id: str, giver: str, location: str, title: str,

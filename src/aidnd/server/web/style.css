@@ -203,6 +203,15 @@ main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }
 .map-svg { position: absolute; top: 0; left: 0; width: 100%; height: auto; border-radius: var(--r); overflow: hidden; }
 .map-svg svg { display: block; width: 100%; height: auto; pointer-events: auto; }
 #map-fx { cursor: pointer; }
+.map-debug { display: flex; align-items: center; gap: 10px; margin: 8px 0 4px; flex-wrap: wrap; font-size: 13px; color: var(--ink2, #b9c2d0); }
+.map-debug .inc-toggle { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+.map-debug input[type=range] { flex: 1 1 180px; min-width: 140px; accent-color: #7F77DD; }
+.inc-list { display: flex; flex-direction: column; gap: 3px; margin: 2px 0 6px; font-size: 12px; max-height: 132px; overflow-y: auto; }
+.inc-row { display: flex; align-items: baseline; gap: 6px; color: var(--ink2, #b9c2d0); }
+.inc-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; transform: translateY(1px); }
+.inc-desc { color: var(--ink3, #8b94a3); }
+.inc-rumor { color: #b08a3e; }
+.inc-react { color: #c66; }
 .map-legend { flex: 0 0 200px; max-height: 420px; overflow-y: auto;
   background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
 .map-legend:empty { display: none; }

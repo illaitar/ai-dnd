@@ -154,6 +154,50 @@ class World:
             "tags": list(getattr(fact, "tags", []) or []),
         })
 
+    def _h_incident_rumor(self, ev: Event) -> None:
+        """Слух от инцидента → регистрируется как раскрываемый факт (городской слух).
+        Сами рёбра knows для свидетелей кладёт отдельный learn_fact (тот же путь, что у диффузии)."""
+        from ..content.facts import Fact
+        p = ev.payload
+        fid, text = p.get("fid"), p.get("text")
+        if fid and text and fid not in self.facts:
+            self.facts[fid] = Fact(fid, text, p.get("topic", "rumors"), "city",
+                                   float(p.get("sensitivity", 0.15)), list(p.get("tags") or ["событие"]))
+
+    _SHOP_AFF = {"serve", "buy", "sell", "shop", "drink", "eat", "inn", "trade"}
+
+    def _h_place_change(self, ev: Event) -> None:
+        """Событие меняет КАРТУ: закрыть лавку (убрать торговые аффордансы), разрушить
+        ключевую локацию (руины), открыть новую (узел в граф + связь с площадью). Event-sourced
+        — реплей воспроизводит изменившийся город."""
+        from .spatial import Place
+        p = ev.payload
+        action, tid = p.get("action"), p.get("target")
+        pl = self.spatial.places.get(tid) if tid else None
+        if action == "close" and pl:
+            pl.status = "closed"
+            pl.affordances = [a for a in pl.affordances if a not in self._SHOP_AFF]
+            if "закрыто" not in pl.alterations:
+                pl.alterations.append("закрыто")
+        elif action == "reopen" and pl:
+            pl.status = "open"
+            if "закрыто" in pl.alterations:
+                pl.alterations.remove("закрыто")
+        elif action in ("ruin", "destroy") and pl:
+            pl.status = "ruined"
+            pl.affordances = []
+            if "руины" not in pl.alterations:
+                pl.alterations.append("руины")
+        elif action == "open":                          # новая локация появляется в городе
+            nid = p.get("id") or f"building:new:{p.get('key', len(self.spatial.places))}"
+            if nid not in self.spatial.places:
+                self.spatial.add_place(Place(nid, "building", p.get("name", "Новое заведение"),
+                                             parent="settlement:phandalin",
+                                             affordances=list(p.get("affordances") or []), status="new"))
+                hub = "place:phandalin_square"
+                if hub in self.spatial.places:
+                    self.spatial.link(hub, p.get("dir", "out"), nid)
+
     def _h_set_hp(self, ev: Event) -> None:
         st = self.ecs.get(ev.target, Stats5e)
         if st:

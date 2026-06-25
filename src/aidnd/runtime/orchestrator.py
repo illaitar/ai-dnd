@@ -165,6 +165,11 @@ class GameSession:
         svc = self._inn_service(text)                     # услуги двора (комната/еда/меню) — до роутера
         if svc is not None:
             return self._post(svc, "serve")
+        mv = self._movement_intent(text)                  # явное «идти/подойти к <место>» — детерминированно, до роутера
+        if mv is not None:                                # навигация не должна зависеть от настроения LLM-роутера
+            self.dialogue_partner = None
+            action = Action(actor=self.player, verb="move", target=None, tone="neutral")
+            return self._post(self._do_move(action, text), "move")
         route = self._route(text)                         # LLM-роутер (онлайн) / детерминированный фоллбэк
         # продолжение разговора: при активном собеседнике рядом «расскажи о…/что слышно»
         # (freeform или общий look) — это реплика ему, а не бросок/мировой-запрос
@@ -242,6 +247,7 @@ class GameSession:
             return result
         if isinstance(result, dict) and result.get("kind") == "roll_request":
             return result
+        result = self._surface_incidents(result)          # живые события, сработавшие за этот ход
         if self._is_eventful(result, verb):
             self.quiet_ticks = 0
             return result
@@ -253,6 +259,25 @@ class GameSession:
             result["text"] = ((result.get("text") or "").rstrip() + "\n\n— " + beat["text"]).strip()
             result["ambient_event"] = beat
             self._log_journal("· " + beat["text"])
+        return result
+
+    def _surface_incidents(self, result: dict) -> dict:
+        """Сработавшие за ход инциденты — в нарратив, журнал и (если меняли карту) флаг map_dirty."""
+        pending = self.__dict__.get("_inc_pending")
+        if not pending or not isinstance(result, dict):
+            return result
+        self._inc_pending = []
+        lines, map_dirty = [], False
+        for sp in pending:
+            lines.append(f"⚡ В городе: {sp.label}" + (f" — {sp.desc}" if sp.desc else ""))
+            self._log_journal("⚡ " + sp.label)
+            if (sp.effects or {}).get("change"):
+                map_dirty = True
+        result = dict(result)
+        result["text"] = ((result.get("text") or "").rstrip() + "\n\n" + "\n".join(lines)).strip()
+        result["incidents_fired"] = [sp.label for sp in pending]
+        if map_dirty:
+            result["map_dirty"] = True                     # фронту — перечитать карту (статусы изменились)
         return result
 
     def _ambient_beat(self) -> dict | None:
@@ -285,13 +310,38 @@ class GameSession:
             return {"kind": "system", "text": "Куда идти? Доступные выходы: "
                     + ", ".join(self._place_name(e) for e in self.exits()),
                     "view": self.view()}
+        # НЕОДНОЗНАЧНОСТЬ: модель локаций дала 2+ известных места с высокой долей вероятности —
+        # не угадываем, а просим уточнить (напр. две таверны). Фронт покажет варианты кнопками.
+        opts = self._movement_options(text)
+        if opts:
+            return {"kind": "system", "view": self.view(), "clarify_places": opts,
+                    "text": "Уточни, куда именно: " + " или ".join(f"«{o['name']}»" for o in opts) + "?"}
         cur = self.current_place()
         if dest == cur:
             look = self.look()
             look["text"] = "Ты уже здесь. " + look["text"]
             return look
-        # маршрутизация: до известной локации идём по графу проходимости (не только
-        # к прямому соседу) — без авто-прокладки пришлось бы хопать вручную
+        name = self._place_name(dest)
+        # ГЕЙТ ЗНАНИЯ: нельзя направиться туда, о чём не знаешь (не примыкает, не разведано,
+        # не услышано). Разведка — ногами через соседние локации или со слов/карты.
+        if not self._knows_place(dest):
+            return {"kind": "narration", "view": self.view(),
+                    "text": f"Ты не знаешь, где находится «{name}». Сначала разведай это — "
+                            f"расспроси местных или дойди туда, изучая город шаг за шагом."}
+        # ГЕЙТ РАССТОЯНИЯ: текстовой командой — только к примыкающей локации (1 переход);
+        # дальше игрок идёт через карту (там прокладывается путь и случаются события).
+        hops = self.world.spatial.hops_between(cur, dest)
+        if hops and hops > 1:
+            return {"kind": "system", "view": self.view(), "travel_far": dest,
+                    "text": f"«{name}» отсюда не дойти одним шагом — это {hops} кварталов пути. "
+                            f"Открой карту и проложи маршрут — в дороге может что-то случиться."}
+        return self._commit_move(dest)
+
+    def _commit_move(self, dest: str, lead: str | None = None) -> dict:
+        """Фактический переход в локацию dest (многоходовый путь допустим — для карты).
+        Гейты знания/расстояния делает вызывающий; здесь — стоимость пути, спутники,
+        журнал, разведка, туман подземелья, сверка наводок, тик времени и нарратив."""
+        cur = self.current_place()
         path = self.world.spatial.path_between(cur, dest)
         if not path:
             return {"kind": "system", "text": f"Ты не знаешь, как добраться до "
@@ -319,14 +369,15 @@ class GameSession:
         debunked = self._verify_map_here(dest)        # сверка купленных наводок с реальностью
         self._tick(ticks)
         look = self.look()
-        if region_travel:
-            lead = (f"Путь к «{self._place_name(dest)}» ведёт дикими землями и "
-                    f"занимает несколько часов.")
-            incident = self._travel_incident(dest)
-            if incident:
-                lead += " " + incident
-        else:
-            lead = f"Ты направляешься в «{self._place_name(dest)}»."
+        if lead is None:
+            if region_travel:
+                lead = (f"Путь к «{self._place_name(dest)}» ведёт дикими землями и "
+                        f"занимает несколько часов.")
+                incident = self._travel_incident(dest)
+                if incident:
+                    lead += " " + incident
+            else:
+                lead = f"Ты направляешься в «{self._place_name(dest)}»."
         look["text"] = lead + " " + look["text"]
         if debunked:
             look["text"] += "\n⚠ Сведения об этом месте оказались ложными!"
@@ -446,6 +497,7 @@ class GameSession:
         self.cognition.observe_and_appraise(npc, self.player, "talk", action.tone,
                                             f"игрок сказал: {topic[:60]}")
         self.world.commit("talk", self.player, target=npc, payload={"topic": topic[:60]})
+        self._player_shares_with(npc, topic)          # реплика игрока может научить NPC (игрок — источник молвы)
         line = self._strip_leading_name(self._npc_reply(npc, decision, topic, rel, first_meeting, hooks), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._log_journal(f"Поговорил с {self._display(npc)}.")
@@ -1207,12 +1259,70 @@ class GameSession:
         return "\n".join(out)
 
     def _tick(self, n: int = 1) -> None:
+        before = self.world.clock.tick
         self.world.clock.advance(n)
         self.lod.tick(self.player)
         self._expire_conditions()                         # временные эффекты (опьянение и пр.) спадают со временем
-        if self.world.clock.tick % config.DIFFUSE_EVERY == 0:   # оборот слухов: знания расходятся по NPC
+        # оборот слухов: знания расходятся по NPC. Длинный сон/ожидание = несколько оборотов,
+        # чтобы «жизнь города» проходила пропорционально времени (а не один раз на любой прыжок).
+        cycles = self.world.clock.tick // config.DIFFUSE_EVERY - before // config.DIFFUSE_EVERY
+        if cycles:
             from ..content.facts import diffuse_rumors
-            diffuse_rumors(self.world)
+            for _ in range(min(cycles, 24)):
+                diffuse_rumors(self.world)
+        self._fire_due_incidents(before, self.world.clock.tick)  # живой слой событий (этап 3)
+
+    # ===================================================================== #
+    #  Живой слой инцидентов: события срабатывают по ходу времени           #
+    # ===================================================================== #
+    def _incident_digest(self, factions: list, sites: list) -> str:
+        def pn(pid):
+            p = self.world.spatial.places.get(pid)
+            return p.name if p else pid
+        lines = ["Фракции (id, бойцов, территория place_id, враги):"]
+        for f in factions:
+            terr = "; ".join(f"{c} ({pn(c)})" for c in (f.get("controls") or [])[:2]) or "—"
+            rivals = ", ".join(f"{o}({v:+.1f})" for o, v in (f.get("relations") or {}).items() if v < -0.1) or "нет"
+            lines.append(f"  - {f['id']} «{f['name']}»: {len(f.get('members') or [])}; терр: {terr}; враги: {rivals}")
+        lines.append("Опасные места (origin gate:<ключ>):")
+        for s in sites[:8]:
+            lines.append(f"  - {s['key']} «{s['label']}» — {s['danger']}")
+        return "\n".join(lines)
+
+    def _incident_schedule(self):
+        """Расписание инцидентов на окно вперёд (LLM-режиссёр / правила). Перегенерится,
+        когда время подходит к концу окна — так события идут потоком всю партию."""
+        cur = self.world.clock.tick
+        if getattr(self, "_inc_sched", None) is None or cur >= getattr(self, "_inc_horizon", -1):
+            from .incidents import build_schedule
+            from ..content.region import REGION_SITES
+            w = self.world
+            factions = [{"id": fid, "name": getattr(f, "name", fid),
+                         "controls": list(getattr(f, "controls", []) or []),
+                         "members": list(getattr(f, "members", []) or []),
+                         "relations": dict(getattr(f, "relations", {}) or {})}
+                        for fid, f in w.factions.items()]
+            sites = [{"key": k, "place": v.get("place"), "danger": v.get("danger"),
+                      "label": v.get("label", k)} for k, v in REGION_SITES.items()]
+            self._inc_sched = build_schedule(factions, sites, w.seed, cur, cur + 72,
+                                             model=self.model, digest=self._incident_digest(factions, sites))
+            self._inc_horizon = cur + 72
+            self._inc_fired = set()
+        return self._inc_sched
+
+    def _fire_due_incidents(self, before: int, after: int) -> None:
+        """Срабатывают инциденты, чьё время наступило (effects в мир: слухи, Δ отношений,
+        мутации карты). Один раз каждый (учёт по id). Виден игроку через _post."""
+        if after <= before:
+            return
+        from .incidents import apply_incident_effects
+        sched = self._incident_schedule()                # может пересоздать _inc_fired (новое окно)
+        fired = self.__dict__.setdefault("_inc_fired", set())
+        for sp in sched:
+            if before < sp.spawn_tick <= after and sp.id not in fired:
+                fired.add(sp.id)
+                apply_incident_effects(self.world, sp)
+                self.__dict__.setdefault("_inc_pending", []).append(sp)
 
     def _expire_conditions(self) -> None:
         """Снимает состояния с длительностью по игровому времени, чей срок истёк."""
@@ -1509,24 +1619,31 @@ class GameSession:
         persona = self.world.ecs.get(npc, Persona)
         action = decision.get("action", "respond")
         action = action if isinstance(action, str) else "respond"
+        name = self._display(npc)
+        sharing = action in ("share_info", "respond")
+        items, news, exhausted = ([], False, False)
+        if sharing:
+            items, news, exhausted = self._facts_for_reply(npc, rel, topic, gate_level)
+        if exhausted:                                   # просил новости, а всё уже рассказано → честно, без выдумки
+            return (f"{name} разводит руками: «Да ничего нового, чего бы ты от меня "
+                    f"уже не слышал. Пока тихо».")
+        feed = items[:2]                                # 1–2 факта: что отдали нарратору ≈ что игрок узнаёт
         if self.model is not None:
             from ..inference.agents import render_dialogue
             line = render_dialogue(
                 self.model, persona, self._rel_summary(rel, first_meeting),
                 situation=f"The player says/asks: «{topic}». Your stance: {action}.",
                 player_line=topic, intent=action, scene=self._narrator_context(),
-                facts=self._disclosable_facts(npc, rel, topic, gate_level=gate_level),
-                mode="dialogue")
-            if line:
+                facts=[it["fact"] for it in feed], mode="dialogue")
+            if line and not self._degenerate(line):     # отсеять мусорный вывод модели («??????»)
+                if sharing:
+                    self._record_player_learned(npc, feed)
                 return self._maybe_hook(line, hooks)
-        name = self._display(npc)
-        # заземление офлайн: делясь, NPC называет РЕАЛЬНЫЙ доступный факт (по теме,
-        # иначе первый разблокированный), а не пустую отписку «расскажу, что знаю»
+        # заземление офлайн / при сбое модели: называем РЕАЛЬНЫЙ факт, без выдумки
         share_line = f"{name}: «Раз уж спрашиваешь — слушай.»"
-        if action == "share_info":
-            fact = self._relevant_fact(npc, rel, topic)
-            if fact:
-                share_line = f"{name} понижает голос: «Раз уж спрашиваешь — {fact}.»"
+        if action == "share_info" and feed:
+            self._record_player_learned(npc, feed[:1])
+            share_line = f"{name} понижает голос: «Раз уж спрашиваешь — {feed[0]['fact']}.»"
         templates = {
             "share_info": share_line,
             "withhold": f"{name} уклончиво пожимает плечами: «Не моё это дело — болтать с незнакомцами».",
@@ -1539,11 +1656,64 @@ class GameSession:
         }
         return self._maybe_hook(templates.get(action, templates["respond"]), hooks)
 
-    def _relevant_fact(self, npc: str, rel, topic: str | None) -> str | None:
-        """Самый релевантный РАЗБЛОКИРОВАННЫЙ факт NPC под запрос игрока (recall).
-        Только из реально известного — без выдумки."""
-        items = self.cognition.recall(npc, topic or "", rel, k=1)
-        return items[0]["fact"] if items else None
+    # --- слухи как память: что игрок знает / узнаёт / приносит сам ---------- #
+    _NEWS_KW = ("нов", "слух", "вест", "молв", "сплетн", "что слышно", "что происходит",
+                "что творит", "что в город", "чем живёт", "чем живет", "свеж")
+
+    def _is_news_query(self, topic: str | None) -> bool:
+        low = (topic or "").lower()
+        return any(k in low for k in self._NEWS_KW)
+
+    def _player_knows(self) -> set:
+        """fact_id, которые игрок уже знает (рёбра (player, knows, …) в графе знаний)."""
+        return set(self.world.kg.objects_of(self.player, "knows"))
+
+    def _facts_for_reply(self, npc: str, rel, topic: str | None, gate_level):
+        """Факты для реплики. На запрос НОВОСТЕЙ — только неизвестные игроку (unknown-first):
+        пусто → exhausted («ничего нового»). На предметный вопрос — самые релевантные
+        (повтор допустим). Возвращает (items, news, exhausted)."""
+        news = self._is_news_query(topic)
+        exclude = self._player_knows() if news else None
+        items = self.cognition.recall(npc, topic or "", rel, gate_level=gate_level, k=8, exclude=exclude)
+        if news:                                          # свежесть: происшествия-инциденты — вперёд старого лора
+            items = sorted(items, key=lambda it: 0 if "событие" in (it.get("tags") or []) else 1)
+        return items, news, (news and not items)
+
+    def _record_player_learned(self, npc: str, items: list) -> None:
+        """Игрок узнал раскрытые факты → ребро (player, knows, fid) тем же событием learn_fact,
+        что и диффузия между NPC. «Ничего нового» теперь вытекает из памяти, без костыля."""
+        for it in items:
+            fid = it.get("fact_id")
+            if fid and not self.world.kg.has(self.player, "knows", fid):
+                self.world.commit("learn_fact", npc, payload={"npc": self.player, "fact": fid})
+
+    def _player_shares_with(self, npc: str, topic: str) -> None:
+        """Реплика игрока по теме: если игрок знает релевантный факт, которого NPC не знает,
+        NPC перенимает его (игрок — источник молвы) тем же событием learn_fact."""
+        import re
+        qtoks = {t for t in re.split(r"[^0-9a-zа-яё]+", (topic or "").lower()) if len(t) >= 4}
+        if not qtoks:
+            return
+        npc_knows = set(self.world.kg.objects_of(npc, "knows"))
+        for fid in self._player_knows():
+            if fid in npc_knows:
+                continue
+            fact = self.world.facts.get(fid)
+            if fact is None:
+                continue
+            ftoks = set(re.split(r"[^0-9a-zа-яё]+", getattr(fact, "text", "").lower()))
+            if qtoks & ftoks:                           # реплика пересекается с фактом игрока
+                self.world.commit("learn_fact", self.player, payload={"npc": npc, "fact": fid})
+                break
+
+    @staticmethod
+    def _degenerate(line: str) -> bool:
+        """Вырожденный вывод модели (повтор «?????», почти нет букв) → не показывать, уйти в факт."""
+        s = (line or "").strip()
+        letters = sum(ch.isalpha() for ch in s)
+        if letters < 2:
+            return True
+        return len(s) >= 8 and letters < len(s) * 0.4
 
     def _maybe_hook(self, line: str, hooks: list[str]) -> str:
         if hooks:
@@ -1741,54 +1911,127 @@ class GameSession:
                 return canon
         return None
 
-    def _match_place(self, text: str) -> str | None:
+    # разговорные синонимы локаций (стем → place_id); участвуют в подборе как кандидаты,
+    # поэтому коллизия с реальным именем (две «таверны») всплывает как неоднозначность
+    _PLACE_ALIASES = {"город": "place:phandalin_square", "площад": "place:phandalin_square",
+                      "фэндалин": "place:phandalin_square", "рынок": "place:phandalin_square",
+                      "рынк": "place:phandalin_square", "базар": "place:phandalin_square",
+                      "дикие": "place:phandalin_wilds", "пустош": "place:phandalin_wilds",
+                      "таверн": "building:stonehill_inn", "трактир": "building:stonehill_inn",
+                      "постоял": "building:stonehill_inn",
+                      "лавк": "building:barthens_provisions", "бартен": "building:barthens_provisions",
+                      "львинощ": "building:lionshield_coster", "lionshield": "building:lionshield_coster",
+                      "ратуш": "building:townmaster_hall", "святил": "building:shrine_of_luck"}
+
+    def _place_candidates(self, text: str) -> list[tuple]:
+        """Достижимые локации, подходящие под текст, со счётом (имя + синоним). Стем-матч
+        под рус. падежи. Сортировка: счёт ↓, затем известные раньше, затем ближе по графу.
+        Возвращает [(pid, score, hops)]."""
         import re
         low = text.lower()
         sp = self.world.spatial
         cur = self.current_place()
-        # 1) сторона света → сосед по направленному ребру текущего узла
-        d = self._direction_in(low)
+        toks = [t for t in re.split(r"[^0-9a-zа-яё]+", low) if len(t) >= 3]
+        scores: dict[str, int] = {}
+        for pid, place in sp.places.items():
+            if pid == cur or sp.hops_between(cur, pid) is None:
+                continue
+            name = place.name.lower()
+            sc = 5 if name in low else 0
+            for w in name.split():
+                if len(w) >= 4 and any(t.startswith(w[:5]) or w[:5].startswith(t) for t in toks):
+                    sc += 1
+            if sc:
+                scores[pid] = sc
+        for k, pid in self._PLACE_ALIASES.items():        # синоним = кандидат (тай с именем → уточнение)
+            if k in low and pid != cur and pid in sp.places and sp.hops_between(cur, pid) is not None:
+                scores[pid] = max(scores.get(pid, 0), 1)
+        return sorted(((pid, sc, sp.hops_between(cur, pid)) for pid, sc in scores.items()),
+                      key=lambda x: (-x[1], not self._knows_place(x[0]), x[2]))
+
+    def _match_place(self, text: str) -> str | None:
+        sp = self.world.spatial
+        cur = self.current_place()
+        d = self._direction_in(text.lower())             # 1) сторона света — однозначный сосед
         if d:
             exits = sp.exits_of(cur)
             if d in exits:
                 return exits[d]
-        # 2) лучшее совпадение по ИМЕНИ среди достижимых локаций: стем-матч (морфология
-        #    рус. падежей), при равенстве — ближайшая по графу. Так «пещеру» у входа в
-        #    логово даёт пещеру Кларга, а не Эха Волн (устранение коллизии keymap).
-        toks = [t for t in re.split(r"[^0-9a-zа-яё]+", low) if len(t) >= 3]
-        best, best_score, best_hops = None, 0, 10 ** 9
-        for pid, place in sp.places.items():
-            if pid == cur:
-                continue
-            hops = sp.hops_between(cur, pid)
-            if hops is None:                              # недостижимо → не предлагаем
-                continue
-            name = place.name.lower()
-            score = 5 if name in low else 0
-            for w in name.split():
-                if len(w) < 4:
-                    continue
-                stem = w[:5]
-                if any(t.startswith(stem) or stem.startswith(t) for t in toks):
-                    score += 1
-            if score and (score > best_score or (score == best_score and hops < best_hops)):
-                best, best_score, best_hops = pid, score, hops
-        if best:
-            return best
-        # 3) разговорные синонимы (без двусмысленного «пещер» — он теперь решается по графу)
-        aliases = {"город": "place:phandalin_square", "площад": "place:phandalin_square",
-                   "фэндалин": "place:phandalin_square", "рынок": "place:phandalin_square",
-                   "рынк": "place:phandalin_square", "базар": "place:phandalin_square",
-                   "дикие": "place:phandalin_wilds", "пустош": "place:phandalin_wilds",
-                   "таверн": "building:stonehill_inn", "трактир": "building:stonehill_inn",
-                   "постоял": "building:stonehill_inn",
-                   "лавк": "building:barthens_provisions", "бартен": "building:barthens_provisions",
-                   "львинощ": "building:lionshield_coster", "lionshield": "building:lionshield_coster",
-                   "ратуш": "building:townmaster_hall", "святил": "building:shrine_of_luck"}
-        for k, pid in aliases.items():
-            if k in low and pid in sp.places and sp.hops_between(cur, pid) is not None:
-                return pid
-        return None
+        cands = self._place_candidates(text)             # 2) лучшее по имени/синониму (известные — раньше)
+        return cands[0][0] if cands else None
+
+    _AMBIG_SHARE = 0.30                                    # доля вероятности, при которой вариант стоит предложить
+
+    def _rank_places(self, text: str) -> list[dict]:
+        """Модель локаций: вместо одной локации — список ИЗВЕСТНЫХ кандидатов под фразу
+        с долями вероятности p (сумма = 1) из нормированного счёта совпадения (имя+синоним).
+        Нельзя предложить место, которого игрок не знает, — поэтому только известные."""
+        known = [(pid, sc) for pid, sc, _h in self._place_candidates(text)
+                 if self._knows_place(pid)]
+        total = sum(sc for _p, sc in known)
+        if not total:
+            return []
+        return [{"id": pid, "name": self._place_name(pid), "p": round(sc / total, 3)}
+                for pid, sc in known]
+
+    def _movement_options(self, text: str) -> list[dict]:
+        """Если две и более известных локации имеют высокую долю вероятности — вернуть их
+        как варианты для явного выбора игроком; иначе [] (решаем сами). Сторона света — нет."""
+        if self._direction_in(text.lower()):
+            return []
+        high = [r for r in self._rank_places(text) if r["p"] >= self._AMBIG_SHARE]
+        return high if len(high) >= 2 else []
+
+    # --- знание мест и распознавание перемещения ------------------------- #
+    _MOVE_CUES = ("иди", "идти", "иду", "пойд", "пойт", "пошёл", "пошел", "подойд",
+                  "подойти", "подойм", "подним", "подня", "наверх", "вверх", "вниз",
+                  "спуст", "двигай", "двин", "направ", "войти", "войду", "зайти", "зайду",
+                  "перейти", "перехож", "топай", "шагай", "доберись", "добрать", "дойт",
+                  "дойд", "отправ", "сходи", "сходить", "go ", "вернуть", "вернусь", "вернёт")
+    _EXAMINE_CUES = ("осмотр", "оглядыв", "разгляд", "прочит", "почита", "читать", "изуч",
+                     "глян", "посмотр", "что на ", "что там", "обыщ", "обыска", "что написа")
+
+    def _movement_intent(self, text: str) -> str | None:
+        """Детерминированно распознаёт явную команду «идти/подойти к <место>» к узнаваемой
+        локации (а НЕ осмотр/чтение). Возвращает place_id или None (тогда решает роутер).
+        Так навигация к видимому месту не зависит от настроения LLM-роутера."""
+        low = text.lower()
+        if any(k in low for k in self._EXAMINE_CUES):     # «осмотреть доску» ≠ «подойти к доске»
+            return None
+        if not (any(k in low for k in self._MOVE_CUES) or self._direction_in(low)):
+            return None
+        return self._match_place(text)
+
+    def _known_places(self) -> set[str]:
+        """Места, куда игрок в принципе может направиться: примыкающие выходы (видны со
+        сцены) + текущее + всё, о чём есть запись на карте игрока (разведано / со слов)."""
+        cur = self.current_place()
+        known = {cur} | set(self.world.spatial.connections(cur))
+        for b in self.world.player_maps.get(self.player, {}).values():
+            if b.get("place"):
+                known.add(b["place"])
+        return known
+
+    def _knows_place(self, place_id: str) -> bool:
+        return place_id in self._known_places()
+
+    def travel_to(self, place_id: str) -> dict:
+        """Санкционированное перемещение «через карту»: многоходовый путь допустим,
+        гейт только по знанию (карта — обзор города/региона). Текстовый гейт расстояния
+        здесь НЕ применяется — карта и есть способ дойти до далёкого известного места."""
+        sp = self.world.spatial
+        if place_id not in sp.places:
+            return {"kind": "system", "text": "Такого места нет.", "view": self.view()}
+        cur = self.current_place()
+        if place_id == cur:
+            look = self.look()
+            look["text"] = "Ты уже здесь. " + look["text"]
+            return self._post(look, "look")
+        if not self._knows_place(place_id):
+            return {"kind": "narration", "view": self.view(),
+                    "text": f"Ты ещё не разведал «{self._place_name(place_id)}» — "
+                            f"сначала узнай, где это (на месте или со слов)."}
+        return self._post(self._commit_move(place_id), "move")
 
     def _containers_here(self) -> list[str]:
         place = self.current_place()

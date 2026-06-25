@@ -96,11 +96,8 @@ def saves_list() -> dict:
     return {"saves": list_saves()}
 
 
-@app.get("/town_layout")
-def town_layout(seed: int = config.WORLD_SEED) -> dict:
-    """Список достопримечательностей города (здания+направления) для процедурной
-    карты: реальные узлы графа якорят сгенерированный город (улицы/дома)."""
-    session = new_session(seed=seed, roster_size=12, use_model=False)
+def _town_buildings(session) -> list:
+    """Здания города из сессии (с актуальным status — отражает мутации событиями)."""
     ml = session.map_levels()
     town = next((lvl for lvl in ml["levels"] if lvl["id"] == "town"), {"nodes": []})
     sp = session.world.spatial
@@ -110,8 +107,16 @@ def town_layout(seed: int = config.WORLD_SEED) -> dict:
         buildings.append({"id": n["id"], "name": n["name"], "kind": n["kind"],
                           "dir": n.get("dir_ru", ""), "dx": n["dx"], "dy": n["dy"],
                           "affordances": list(p.affordances) if p else [],
-                          "go": n.get("go")})
-    return {"seed": int(seed), "settlement": "Фэндалин", "buildings": buildings}
+                          "go": n.get("go"), "status": getattr(p, "status", "open") if p else "open"})
+    return buildings
+
+
+@app.get("/town_layout")
+def town_layout(seed: int = config.WORLD_SEED) -> dict:
+    """Список достопримечательностей города (здания+направления) для процедурной
+    карты: реальные узлы графа якорят сгенерированный город (улицы/дома)."""
+    session = new_session(seed=seed, roster_size=12, use_model=False)
+    return {"seed": int(seed), "settlement": "Фэндалин", "buildings": _town_buildings(session)}
 
 
 # --------------------------------------------------------------------------- #
@@ -157,11 +162,35 @@ def city_svg(seed: int = config.WORLD_SEED, w: int = 980, h: int = 700, page: in
 _CITY_FULL_CACHE: dict = {}
 
 
+def _city_blds(buildings: list) -> list:
+    """Здания → формат citygen.build_city (с status, чтобы карта показывала закрытые/руины/новые)."""
+    return [{"kind": "building", "dx": b["dx"], "dy": b["dy"], "name": b["name"],
+             "affordances": b.get("affordances", []), "go": b.get("go"), "id": b["id"],
+             "status": b.get("status", "open")} for b in buildings]
+
+
+def _session_with_incidents(seed: int, tick: int):
+    """Свежая сессия, в которой СРАБОТАЛИ мутации карты от событий с spawn_tick ≤ tick
+    (закрытия/руины/новые локации). Детерминированно по расписанию → город «как на тике»."""
+    from ..runtime import incidents as inc
+    session = new_session(seed=int(seed), roster_size=12, use_model=False)
+    sched = _INCIDENT_SCHED_CACHE.get(int(seed))
+    if sched is None:
+        _s, factions, sites, digest = _incident_world(seed)
+        sched = inc.build_schedule(factions, sites, int(seed), 0, 200, model=_incident_model(), digest=digest)
+        _INCIDENT_SCHED_CACHE[int(seed)] = sched
+    for sp in sched:
+        chg = (sp.effects or {}).get("change")
+        if chg and chg.get("action") and sp.spawn_tick <= tick:
+            session.world.commit("place_change", "incident", payload=chg)
+    return session
+
+
 @app.get("/city_full")
-def city_full(seed: int = config.WORLD_SEED, w: int = 980, h: int = 700, keys: str = ""):
-    """JSON для встраивания в игровую карту: интерактивный SVG + hits/legend/streets
-    (та же геометрия) — фронт инлайнит SVG как базу, а FX-оверлей/навигацию берёт из данных."""
-    ckey = (int(seed), int(w), int(h), keys)
+def city_full(seed: int = config.WORLD_SEED, w: int = 980, h: int = 700, keys: str = "", tick: int = -1):
+    """JSON для встраивания в игровую карту: интерактивный SVG + hits/legend/streets.
+    tick≥0 → город отражает мутации от событий (закрытые лавки, руины, новые локации) на этом тике."""
+    ckey = (int(seed), int(w), int(h), keys, int(tick))
     cached = _CITY_FULL_CACHE.get(ckey)
     if cached is not None:
         return cached
@@ -172,12 +201,12 @@ def city_full(seed: int = config.WORLD_SEED, w: int = 980, h: int = 700, keys: s
         except Exception:
             key_houses = []
     cg = _citygen()
-    layout = town_layout(seed)
-    blds = [{"kind": "building", "dx": b["dx"], "dy": b["dy"], "name": b["name"],
-             "affordances": b.get("affordances", []), "go": b.get("go"), "id": b["id"]}
-            for b in layout["buildings"]]
-    m = cg.build_city(int(seed), int(w), int(h), buildings=blds,
-                      key_houses=key_houses, title=layout["settlement"])
+    if tick >= 0:
+        buildings = _town_buildings(_session_with_incidents(seed, tick))
+    else:
+        buildings = town_layout(seed)["buildings"]
+    m = cg.build_city(int(seed), int(w), int(h), buildings=_city_blds(buildings),
+                      key_houses=key_houses, title="Фэндалин")
     if not m:
         return {"svg": "<svg/>", "hits": [], "legend": [],
                 "streets": {"nodes": [], "adj": [], "start": 0}}
@@ -185,6 +214,93 @@ def city_full(seed: int = config.WORLD_SEED, w: int = 980, h: int = 700, keys: s
            "legend": m["legend"], "streets": m["streets"]}
     _CITY_FULL_CACHE[ckey] = out
     return out
+
+
+_INCIDENT_GEOM_CACHE: dict = {}
+
+
+def _incident_geometry(seed: int, w: int, h: int) -> dict:
+    """Геометрия города для слоя инцидентов: place_id→xy (лендмарки), ворота, центр.
+    Кэшируется, чтобы скраббер тиков не пересобирал город на каждый кадр."""
+    key = (int(seed), int(w), int(h))
+    geom = _INCIDENT_GEOM_CACHE.get(key)
+    if geom is None:
+        cg = _citygen()
+        layout = town_layout(seed)
+        blds = [{"kind": "building", "dx": b["dx"], "dy": b["dy"], "name": b["name"],
+                 "affordances": b.get("affordances", []), "go": b.get("go"), "id": b["id"]}
+                for b in layout["buildings"]]
+        m = cg.build_city(int(seed), int(w), int(h), buildings=blds, title=layout["settlement"])
+        if not m:
+            geom = {"place_xy": {}, "gates": [], "center": [w / 2, h / 2]}
+        else:
+            geom = {"place_xy": {L["id"]: [L["x"], L["y"]] for L in m["legend"]},
+                    "gates": [r[0] for r in m.get("roads_out", [])],
+                    "center": [m["CX"], m["CY"]]}
+        _INCIDENT_GEOM_CACHE[key] = geom
+    return geom
+
+
+_INCIDENT_SCHED_CACHE: dict = {}
+_INCIDENT_MODEL = {"mm": None}
+
+
+def _incident_model():
+    """ModelManager для LLM-режиссёра (сессии слоя инцидентов идут use_model=False ради
+    скорости — состояние от модели не зависит, а расписание берёт модель отдельно)."""
+    if _INCIDENT_MODEL["mm"] is None:
+        from ..inference import ModelManager
+        _INCIDENT_MODEL["mm"] = ModelManager()
+    return _INCIDENT_MODEL["mm"]
+
+
+def _incident_world(seed: int):
+    """Состояние мира для слоя инцидентов: фракции, сайты, дайджест для LLM-режиссёра."""
+    from ..content.region import REGION_SITES
+    session = _city_session(seed)
+    w = session.world
+    factions = [{"id": fid, "name": getattr(f, "name", fid),
+                 "goals": list(getattr(f, "goals", []) or []),
+                 "controls": list(getattr(f, "controls", []) or []),
+                 "members": list(getattr(f, "members", []) or []),
+                 "relations": dict(getattr(f, "relations", {}) or {})}
+                for fid, f in w.factions.items()]
+    sites = [{"key": k, "place": v.get("place"), "danger": v.get("danger"),
+              "label": v.get("label", k)} for k, v in REGION_SITES.items()]
+
+    def pn(pid):
+        p = w.spatial.places.get(pid)
+        return p.name if p else pid
+    lines = ["Фракции (id, имя, бойцов, территория place_id, враги):"]
+    for f in factions:
+        terr = "; ".join(f"{c} ({pn(c)})" for c in f["controls"][:3]) or "—"
+        rivals = ", ".join(f"{o}({v:+.1f})" for o, v in f["relations"].items() if v < -0.1) or "нет"
+        lines.append(f"  - {f['id']} «{f['name']}»: {len(f['members'])} чел.; терр: {terr}; враги: {rivals}")
+    lines.append("Опасные места (ключ для origin 'gate:<ключ>', опасность):")
+    for s in sites[:8]:
+        lines.append(f"  - {s['key']} «{s['label']}» — {s['danger']}")
+    flags = list(getattr(w, "flags", []) or [])[:10]
+    if flags:
+        lines.append("Флаги мира: " + ", ".join(flags))
+    return session, factions, sites, "\n".join(lines)
+
+
+@app.get("/city_incidents")
+def city_incidents(seed: int = config.WORLD_SEED, tick: int = 0, w: int = 980, h: int = 700):
+    """Слой инцидентов на тике: активные события (фракции/монстры/политика/катаклизмы) с
+    координатами/радиусом/интенсивностью + пересечения. Расписание строит LLM-режиссёр из
+    состояния мира (этап 2; фоллбэк — детерминированные правила) и КЭШИРУЕТСЯ по seed, поэтому
+    скраббер тиков детерминирован и не дёргает модель на каждый кадр."""
+    from ..runtime import incidents as inc
+    geom = _incident_geometry(seed, w, h)
+    session, factions, sites, digest = _incident_world(seed)
+    sched = _INCIDENT_SCHED_CACHE.get(int(seed))
+    if sched is None:
+        sched = inc.build_schedule(factions, sites, int(seed), 0, 200,
+                                   model=_incident_model(), digest=digest)
+        _INCIDENT_SCHED_CACHE[int(seed)] = sched
+    return inc.simulate(sched, geom["place_xy"], geom["gates"], geom["center"],
+                        factions, int(seed), int(tick))
 
 
 # кэш сессий по сиду: чтобы материализация дома сохранялась в памяти между запросами
@@ -306,6 +422,8 @@ async def ws(sock: WebSocket) -> None:
                 house = session.discovery.materialize_interior(msg.get("place", ""),
                                                                kind_hint=msg.get("kind"))
                 result = {"kind": "house", "house": house, "view": session.view()}
+            elif cmd == "travel":                          # переход «через карту»: многоходовый путь, гейт по знанию
+                result = session.travel_to(msg.get("place", ""))
             elif cmd == "roll_manual":
                 result = session.submit_roll(msg.get("faces", []))
             elif cmd == "new_game":

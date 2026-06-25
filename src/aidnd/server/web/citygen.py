@@ -612,7 +612,8 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Ф�
             promo = key_map.get(hid) if not is_lm else None
             if is_lm:
                 key = {'name': lm['name'], 'kind': kind_from_aff(lm.get('affordances')),
-                       'roof': c['roof'], 'id': lm['id'], 'go': lm.get('go')}
+                       'roof': c['roof'], 'id': lm['id'], 'go': lm.get('go'),
+                       'status': lm.get('status', 'open')}
             elif promo:
                 key = {'name': promo['name'], 'kind': promo.get('kind', 'home'),
                        'roof': LM_ROOF.get(promo.get('kind'), '#9a7b30'), 'id': hid, 'go': None}
@@ -627,7 +628,8 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Ф�
                            'key': key, 'id': (key['id'] if key else hid)})
             r = max(7, math.sqrt(area(inset)) * 0.55)
             if key:
-                marks.append({'c': cc, 'name': key['name'], 'roof': key['roof'], 'id': key['id'], 'kind': key['kind'], 'go': key['go']})
+                marks.append({'c': cc, 'name': key['name'], 'roof': key['roof'], 'id': key['id'],
+                              'kind': key['kind'], 'go': key['go'], 'status': key.get('status', 'open')})
                 hits.append({'x': cc[0], 'y': cc[1], 'r': max(r, 12), 'id': key['id'], 'name': key['name'],
                              'kind': key['kind'], 'go': key['go'], 'landmark': bool(key['go']), 'key': True})
             else:
@@ -671,7 +673,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Ф�
     legend = []
     for i, m in enumerate(marks):
         legend.append({'n': i + 1, 'name': m['name'], 'kind': m['kind'], 'go': m['go'],
-                       'id': m['id'], 'x': m['c'][0], 'y': m['c'][1]})
+                       'id': m['id'], 'x': m['c'][0], 'y': m['c'][1], 'status': m.get('status', 'open')})
 
     Rcity = min(W, H) * 0.40
     return {'W': W, 'H': H, 'CX': CX, 'CY': CY, 'seed': seed, 'title': title,
@@ -739,9 +741,11 @@ def render_svg(m, chrome=True, interactive=False):
                 e.append(f'<path d="{_poly_d(h["poly"])}" fill="#9fae6e" stroke="rgba(60,80,40,.4)" stroke-width="0.7"/>')
                 continue
             d = _poly_d(h['poly'])
-            # крыша (в интерактиве — кликабельный полигон дома с id)
+            # крыша (в интерактиве — кликабельный полигон дома с id); статус меняет цвет
             ha = f' class="h" data-id="{h.get("id","")}"' if interactive else ''
-            e.append(f'<path d="{d}" fill="{h["roof"]}"{ha}/>')
+            st = (h.get('key') or {}).get('status', 'open')
+            rf = '#8d8d8d' if st == 'closed' else ('#4a4036' if st == 'ruined' else h['roof'])
+            e.append(f'<path d="{d}" fill="{rf}"{ha}/>')
             # конёк
             rg = h['ridge']
             e.append(f'<line x1="{rg[0][0]:.1f}" y1="{rg[0][1]:.1f}" x2="{rg[1][0]:.1f}" y2="{rg[1][1]:.1f}" stroke="rgba(0,0,0,.22)" stroke-width="1"/>')
@@ -853,10 +857,19 @@ def render_svg(m, chrome=True, interactive=False):
                  f'<textPath href="#{pid}" startOffset="50%" text-anchor="middle">{nm}</textPath></text>')
     # номерные бейджи
     e.append('<g text-anchor="middle" dominant-baseline="central">')
+    _ST_FILL = {'closed': 'rgba(200,200,200,.96)', 'ruined': 'rgba(170,135,120,.96)', 'new': 'rgba(190,232,170,.97)'}
+    _ST_STROKE = {'closed': '#6f6f6f', 'ruined': '#7a3a2a', 'new': '#3b6d11'}
+    _ST_GLYPH = {'closed': '×', 'ruined': '!', 'new': '+'}
     for i, mk in enumerate(m['marks']):
         n, x, y = i + 1, mk['c'][0], mk['c'][1]
-        e.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="9.5" fill="rgba(245,236,212,.97)" stroke="{mk["roof"]}" stroke-width="2"/>')
+        st = mk.get('status', 'open')
+        bf = _ST_FILL.get(st, 'rgba(245,236,212,.97)')
+        bs = _ST_STROKE.get(st, mk["roof"])
+        e.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="9.5" fill="{bf}" stroke="{bs}" stroke-width="2"/>')
         e.append(f'<text x="{x:.1f}" y="{y+0.5:.1f}" fill="#2c2113" font-weight="bold" font-size="12">{n}</text>')
+        if st in _ST_GLYPH:                                 # статус-маркер (закрыто/руины/новое)
+            e.append(f'<circle cx="{x+8:.1f}" cy="{y-8:.1f}" r="5.5" fill="{bs}"/>'
+                     f'<text x="{x+8:.1f}" y="{y-7.3:.1f}" fill="#fff" font-weight="bold" font-size="9">{_ST_GLYPH[st]}</text>')
     e.append('</g>')
     # обрамление
     e.append(f'<rect width="{W}" height="{H}" fill="url(#vg)"/>')

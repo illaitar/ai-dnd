@@ -71,6 +71,7 @@ class Place:
     battlemap: str | None = None    # файл боевой карты (визуальная подложка боя)
     ambiance: str | None = None     # короткая физическая атмосфера (для нарратора)
     alterations: list[str] = field(default_factory=list)  # стойкие следы действий (агент последствий)
+    status: str = "open"            # open | closed | ruined | new — меняется событиями (слой инцидентов)
 
 
 class SpatialIndex:

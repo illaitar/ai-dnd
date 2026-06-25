@@ -37,11 +37,22 @@ function render(r) {
     const head = r.speaker ? `<span class="speaker">${esc(r.speaker)}</span> ` : "";
     logEntry(head + esc(r.text), cls);
   }
+  if (r.clarify_places && r.clarify_places.length) {     // уточнение «куда именно» → кнопки выбора
+    const div = document.createElement("div");
+    div.className = "entry system"; div.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+    r.clarify_places.forEach(o => {
+      const b = document.createElement("button"); b.className = "cbtn"; b.textContent = o.name;
+      b.onclick = () => { logEntry(`<span class="you">→ ${esc(o.name)}</span>`, "you"); send({ cmd: "travel", place: o.id }); };
+      div.appendChild(b);
+    });
+    $("log").appendChild(div); $("log").scrollTop = $("log").scrollHeight;
+  }
   if (r.rolled_faces) logEntry(`🎲 выпало: [${r.rolled_faces.join(", ")}]`, "mech");
   if (r.kind === "house" && r.house) renderHouse(r.house);
   if (r.kind === "saved") { logSystem(`💾 Сохранено: «${r.card ? r.card.name : ""}»`); if (r.saves && !$("loadgame").classList.contains("hidden")) renderSaves(r.saves); }
   if (r.kind === "saves" && r.saves) renderSaves(r.saves);
   if (r.view) updateView(r.view);
+  if (r.travel_far) openOverlay("mapview");           // «далеко — открой карту»: сразу показываем карту для маршрута
   if (r.kind === "error" && !$("levelup").classList.contains("hidden")) $("lvl-msg").textContent = r.text;
   if (r.kind === "look") {
     renderExits(r.exits); renderNpcs(r.npcs); renderQuick();
@@ -422,16 +433,17 @@ function renderMap(ml) {
   bindFx();
 }
 let cityFullCache = {};
-async function drawCityLevel() {
+async function drawCityLevel(tick = -1) {
   const seed = (lastView && lastView.seed) || 1337;
   const cv = $("map-canvas"), host = $("map-svg");
   const CW = 980, CH = 700;                                    // фикс-размер генерации (аспект 1.4 == карта)
   const keyHouses = (lastView && lastView.key_houses) || [];   // дома, поднявшие важность → ключевые
-  const ck = seed + "|" + JSON.stringify(keyHouses);
+  const tq = tick >= 0 ? "&tick=" + tick : "";                 // tick → город отражает мутации от событий
+  const ck = seed + "|" + JSON.stringify(keyHouses) + "|" + tick;
   let data = cityFullCache[ck];
   if (!data) {
     try {
-      const r = await fetch(`/city_full?seed=${seed}&w=${CW}&h=${CH}&keys=${encodeURIComponent(JSON.stringify(keyHouses))}`);
+      const r = await fetch(`/city_full?seed=${seed}&w=${CW}&h=${CH}&keys=${encodeURIComponent(JSON.stringify(keyHouses))}${tq}`);
       if (!r.ok) throw new Error("city_full " + r.status);
       data = await r.json(); cityFullCache[ck] = data;
     } catch (e) {                                              // фолбэк: старый canvas-генератор
@@ -453,6 +465,8 @@ async function drawCityLevel() {
   cityCur = cityState.streets.start;
   renderLegend(data.legend);                                   // нумерованная легенда справа
   mapMode = "city"; cityStep = 0; cityQuiet = 2; cityMarks = []; drawFx();
+  ensureIncidentControls();                                    // дебаг-слой событий (тумблер + скраббер)
+  if (incidentMode) fetchIncidents();
 }
 // подсветить выбранный дом прямо в SVG (яркая заливка); возвращает true, если дом найден
 function highlightSvgHouse(id) {
@@ -516,6 +530,66 @@ function drawFx() {
   // кольцо-выбор показываем только для НЕ-домов (перекрёсток/ратуша/замок); дом подсвечивается заливкой в SVG
   const hl = $("map-svg") && $("map-svg").querySelector(".h.sel");
   if (citySel && !hl) { c.strokeStyle = "#e0a64d"; c.lineWidth = 3 * s; c.setLineDash([5 * s, 4 * s]); c.beginPath(); c.arc(citySel.x, citySel.y, (citySel.r || 14) + 6 * s, 0, 7); c.stroke(); c.setLineDash([]); }
+  if (incidentMode && incidentData && mapMode === "city") drawIncidents(c, s);   // дебаг-слой событий
+}
+// ===== Дебаг-слой инцидентов: точки-источники, волны-кольца, пересечения ===== #
+let incidentMode = false, incidentTick = 0, incidentData = null;
+function drawIncidents(c, s) {
+  const k = $("map-canvas").width / 980;                  // модель 980×700 → бэкстор FX
+  for (const inc of incidentData.incidents) {
+    const x = inc.x * k, y = inc.y * k, R = Math.max(2, inc.radius * k);
+    for (const [rf, af] of [[1, 0.75], [0.66, 0.55], [0.33, 0.4]]) {   // 3 кольца — ощущение волны
+      c.globalAlpha = Math.min(0.9, inc.intensity * 1.3) * af; c.strokeStyle = inc.color; c.lineWidth = 2.4 * s;
+      c.beginPath(); c.arc(x, y, R * rf, 0, 7); c.stroke();
+    }
+    c.globalAlpha = 1; c.fillStyle = inc.color; c.strokeStyle = "#15161a"; c.lineWidth = 1.5 * s;
+    c.beginPath(); c.arc(x, y, 5 * s, 0, 7); c.fill(); c.stroke();
+  }
+  for (const ix of incidentData.intersections) {          // пересечение → ромб
+    const x = ix.x * k, y = ix.y * k; c.globalAlpha = 1;
+    c.save(); c.translate(x, y); c.rotate(Math.PI / 4);
+    c.fillStyle = "#A32D2D"; c.strokeStyle = "#15161a"; c.lineWidth = 1.5 * s;
+    c.fillRect(-5 * s, -5 * s, 10 * s, 10 * s); c.strokeRect(-5 * s, -5 * s, 10 * s, 10 * s); c.restore();
+  }
+  c.globalAlpha = 1;
+}
+async function fetchIncidents() {
+  const seed = (lastView && lastView.seed) || 1337;
+  try {
+    const r = await fetch(`/city_incidents?seed=${seed}&tick=${incidentTick}&w=980&h=700`);
+    incidentData = await r.json();
+  } catch (e) { incidentData = { incidents: [], intersections: [] }; }
+  const lbl = $("inc-readout");
+  if (lbl) lbl.textContent = `тик ${incidentTick} · событий ${incidentData.incidents.length} · пересечений ${incidentData.intersections.length}`;
+  const list = $("inc-list");
+  if (list) list.innerHTML = incidentData.incidents.map(i =>
+    `<div class="inc-row"><span class="inc-dot" style="background:${i.color}"></span>`
+    + `<span><b>${esc(i.label)}</b>${i.desc ? ` <span class="inc-desc">— ${esc(i.desc)}</span>` : ""}`
+    + `${(i.effects && i.effects.rumor) ? ` <span class="inc-rumor">🗣 ${esc(i.effects.rumor)}</span>` : ""}</span></div>`).join("")
+    + (incidentData.intersections.length ? `<div class="inc-row inc-react">◇ ${incidentData.intersections.map(x => esc(x.reaction)).join(", ")}</div>` : "");
+  drawFx();
+}
+function ensureIncidentControls() {
+  if ($("map-debug") || !$("map-actions")) return;
+  const bar = document.createElement("div");
+  bar.id = "map-debug"; bar.className = "map-debug";
+  bar.innerHTML = `<label class="inc-toggle"><input type="checkbox" id="inc-on"> 🌐 слой событий (дебаг)</label>`
+    + `<input type="range" id="inc-tick" min="0" max="200" value="0" step="1" disabled>`
+    + `<span id="inc-readout" class="state">тик 0</span>`;
+  $("map-actions").parentNode.insertBefore(bar, $("map-actions"));
+  const list = document.createElement("div"); list.id = "inc-list"; list.className = "inc-list";
+  $("map-actions").parentNode.insertBefore(list, $("map-actions"));
+  $("inc-on").onchange = (e) => {
+    incidentMode = e.target.checked; $("inc-tick").disabled = !incidentMode;
+    if (incidentMode) fetchIncidents(); else { incidentData = null; drawFx(); $("inc-readout").textContent = "выкл"; $("inc-list").innerHTML = ""; }
+  };
+  let incTimer = null;                                  // дебаунс: перерисовка карты под тик + оверлей событий
+  $("inc-tick").oninput = (e) => {
+    incidentTick = +e.target.value;
+    if (!incidentMode) return;
+    clearTimeout(incTimer);
+    incTimer = setTimeout(() => drawCityLevel(incidentTick), 120);   // перерисовка карты под тик (overlay внутри)
+  };
 }
 function bfs(adj, s, t) { if (s === t) return [s]; const prev = new Array(adj.length).fill(-1); prev[s] = s; const q = [s]; while (q.length) { const u = q.shift(); for (const v of adj[u]) if (prev[v] < 0) { prev[v] = u; if (v === t) { const p = [t]; let x = t; while (x !== s) { x = prev[x]; p.push(x); } return p.reverse(); } q.push(v); } } return null; }
 function nearestNode(s, x, y) { let bi = 0, bd = 1e9; s.nodes.forEach((n, i) => { const d = Math.hypot(n[0] - x, n[1] - y); if (d < bd) { bd = d; bi = i; } }); return bi; }
@@ -548,10 +622,11 @@ async function goSelection() {
   if (hit.crossroad) { await cityWalk(hit); $("map-go").disabled = false; clearSelection(); return; }  // просто дойти
   if (mapMode === "city") {
     await cityWalk(hit);                                          // дошли по перекрёсткам с событиями
-    if (hit.go) { logEntry(`<span class="you">→ ${esc(hit.go)}</span>`, "you"); send({ cmd: "input", text: hit.go }); closeOverlay("mapview"); }
-    else send({ cmd: "materialize", place: hit.id, kind: hit.kind });   // дом → наполнить
+    if (hit.go) {                                                 // лендмарк → санкционированный переход «через карту» (минует гейт расстояния)
+      logEntry(`<span class="you">→ ${esc(hit.name || hit.go)}</span>`, "you"); send({ cmd: "travel", place: hit.id }); closeOverlay("mapview");
+    } else send({ cmd: "materialize", place: hit.id, kind: hit.kind });   // дом → наполнить
   } else if (hit.go) {
-    logEntry(`<span class="you">→ ${esc(hit.go)}</span>`, "you"); send({ cmd: "input", text: hit.go }); closeOverlay("mapview");
+    logEntry(`<span class="you">→ ${esc(hit.name || hit.go)}</span>`, "you"); send({ cmd: "travel", place: hit.id }); closeOverlay("mapview");
   }
   $("map-go").disabled = false; clearSelection();
 }

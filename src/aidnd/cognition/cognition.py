@@ -46,7 +46,7 @@ class Cognition:
     # --- recall: релевантные запросу факты под гейтом (граф знаний) -------- #
     def recall(self, npc_id: str, query: str, rel: RelEdge | None = None, *,
                gate_level: float | None = None, topic: str | None = None,
-               k: int = 5) -> list[dict]:
+               k: int = 5, exclude: set | None = None) -> list[dict]:
         """Наиболее релевантные запросу факты, которые NPC ЗНАЕТ и готов раскрыть.
 
         Гейт: эффективное доверие (gate_level от пройденной проверки убеждения/обмана,
@@ -59,6 +59,8 @@ class Cognition:
         from ..content.knowledge import disclosable
         trust = gate_level if gate_level is not None else (rel.trust if rel else 0.0)
         items = disclosable(persona, trust, topic)
+        if exclude:                                     # напр. факты, которые игрок уже знает (unknown-first)
+            items = [it for it in items if it.get("fact_id") not in exclude]
         # стем-токены (5-symbol prefix) гасят рус. словоизменение: «красных»≈«красные»
         qstem = _stems(_tokens(query or ""))
 

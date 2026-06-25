@@ -7,11 +7,12 @@ server-authoritative animated (док 07 §8): сервер кидает, кли
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .. import config
@@ -111,6 +112,46 @@ def town_layout(seed: int = config.WORLD_SEED) -> dict:
                           "affordances": list(p.affordances) if p else [],
                           "go": n.get("go")})
     return {"seed": int(seed), "settlement": "Фэндалин", "buildings": buildings}
+
+
+# --------------------------------------------------------------------------- #
+#  Процедурный город на Python (SVG) с выбором дома                            #
+# --------------------------------------------------------------------------- #
+_CITYGEN = None
+
+
+def _citygen():
+    """Ленивая загрузка self-contained модуля web/citygen.py."""
+    global _CITYGEN
+    if _CITYGEN is None:
+        spec = importlib.util.spec_from_file_location("citygen", os.path.join(WEB_DIR, "citygen.py"))
+        _CITYGEN = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_CITYGEN)
+    return _CITYGEN
+
+
+@app.get("/city_svg")
+def city_svg(seed: int = config.WORLD_SEED, w: int = 980, h: int = 700, page: int = 0):
+    """Интерактивный SVG города. Клик по дому → яркое выделение + событие cityHouse(id).
+    page=1 → готовая HTML-страница (для iframe), которая шлёт выбор в parent через postMessage."""
+    cg = _citygen()
+    layout = town_layout(seed)
+    blds = [{"kind": "building", "dx": b["dx"], "dy": b["dy"], "name": b["name"],
+             "affordances": b.get("affordances", []), "go": b.get("go"), "id": b["id"]}
+            for b in layout["buildings"]]
+    m = cg.build_city(int(seed), int(w), int(h), buildings=blds, title=layout["settlement"])
+    if not m:
+        return Response("<svg/>", media_type="image/svg+xml")
+    svg = cg.render_svg(m, interactive=True)
+    if page:
+        return HTMLResponse(
+            '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">'
+            '<style>body{margin:0;background:#15161a}svg{max-width:100vw;height:auto;display:block}</style>'
+            "</head><body>" + svg +
+            '<script>window.addEventListener("cityHouse",function(e){'
+            'try{parent.postMessage({type:"cityHouse",id:e.detail.id},"*");}catch(_){}'
+            '});</script></body></html>')
+    return Response(svg, media_type="image/svg+xml")
 
 
 # кэш сессий по сиду: чтобы материализация дома сохранялась в памяти между запросами

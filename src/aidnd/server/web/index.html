@@ -108,6 +108,7 @@
       <div class="map-layout">
         <div class="map-stage">
           <canvas id="map-canvas" width="560" height="400"></canvas>
+          <div id="map-svg" class="map-svg hidden"></div>
           <canvas id="map-fx" width="560" height="400"></canvas>
         </div>
         <div id="map-legend" class="map-legend"></div>
@@ -215,6 +216,7 @@
     </div>
   </div>
 
+  <script src="/static/vendor/d3-delaunay.min.js"></script>   <!-- вендорный d3-delaunay (offline-first, без CDN) -->
   <script type="module" src="/static/citygen.js"></script>
   <script type="module" src="/static/worldgen.js"></script>
   <script src="/static/main.js"></script>

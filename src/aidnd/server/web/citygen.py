@@ -632,7 +632,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Ф�
                              'kind': key['kind'], 'go': key['go'], 'landmark': bool(key['go']), 'key': True})
             else:
                 hits.append({'x': cc[0], 'y': cc[1], 'r': r, 'id': hid, 'kind': 'home', 'house': True})
-        wards.append({'ward': ward, 'fill': shade(c['roof'], 1.72) if lm else '#cdb585',
+        wards.append({'ward': ward, 'fill': '#cdb585',     # единый цвет двора — без цветной подложки под landmark
                       'houses': houses, 'lm': lm, 'roof': c['roof']})
 
     # мегакварталы = цветовые районы. Группируем кварталы по ближайшему dseed, одна надпись на район.
@@ -747,8 +747,6 @@ def render_svg(m, chrome=True, interactive=False):
             e.append(f'<line x1="{rg[0][0]:.1f}" y1="{rg[0][1]:.1f}" x2="{rg[1][0]:.1f}" y2="{rg[1][1]:.1f}" stroke="rgba(0,0,0,.22)" stroke-width="1"/>')
             key = h['key']
             e.append(f'<path d="{d}" fill="none" stroke="{"#3a2c14" if key else "rgba(40,28,12,.5)"}" stroke-width="{1.3 if key else 0.8}"/>')
-        if w['lm']:
-            e.append(f'<path d="{_poly_d(w["ward"])}" fill="none" stroke="{w["roof"]}" stroke-width="1.6"/>')
     # рыночная площадь
     sq = shrink(m['square']['poly'], 0.9)
     e.append(f'<path d="{_poly_d(sq)}" fill="#c9b486"/>')

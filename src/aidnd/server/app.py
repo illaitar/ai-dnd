@@ -154,6 +154,39 @@ def city_svg(seed: int = config.WORLD_SEED, w: int = 980, h: int = 700, page: in
     return Response(svg, media_type="image/svg+xml")
 
 
+_CITY_FULL_CACHE: dict = {}
+
+
+@app.get("/city_full")
+def city_full(seed: int = config.WORLD_SEED, w: int = 980, h: int = 700, keys: str = ""):
+    """JSON для встраивания в игровую карту: интерактивный SVG + hits/legend/streets
+    (та же геометрия) — фронт инлайнит SVG как базу, а FX-оверлей/навигацию берёт из данных."""
+    ckey = (int(seed), int(w), int(h), keys)
+    cached = _CITY_FULL_CACHE.get(ckey)
+    if cached is not None:
+        return cached
+    key_houses = []
+    if keys:
+        try:
+            key_houses = json.loads(keys)
+        except Exception:
+            key_houses = []
+    cg = _citygen()
+    layout = town_layout(seed)
+    blds = [{"kind": "building", "dx": b["dx"], "dy": b["dy"], "name": b["name"],
+             "affordances": b.get("affordances", []), "go": b.get("go"), "id": b["id"]}
+            for b in layout["buildings"]]
+    m = cg.build_city(int(seed), int(w), int(h), buildings=blds,
+                      key_houses=key_houses, title=layout["settlement"])
+    if not m:
+        return {"svg": "<svg/>", "hits": [], "legend": [],
+                "streets": {"nodes": [], "adj": [], "start": 0}}
+    out = {"svg": cg.render_svg(m, interactive=True), "hits": m["hits"],
+           "legend": m["legend"], "streets": m["streets"]}
+    _CITY_FULL_CACHE[ckey] = out
+    return out
+
+
 # кэш сессий по сиду: чтобы материализация дома сохранялась в памяти между запросами
 _CITY_SESSIONS: dict[int, object] = {}
 

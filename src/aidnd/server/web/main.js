@@ -394,6 +394,17 @@ async function ensureTown(seed) {
   catch (e) { townBuildings = []; }
 }
 let mapMode = "region", citySel = null, cityState = null, cityCur = 0, cityStep = 0, cityQuiet = 2, cityMarks = [];
+// HiDPI: рисуем во внутренний бэк-стор ~2× (CSS ужимает обратно) → резкие карты/подписи.
+// Геометрия карт строится от W/H, поэтому больший бэк-стор просто увеличивает чёткость;
+// citygen/worldgen масштабируют шрифты фактором s=W/560, чтобы подписи остались крупными.
+const MAP_BASE_W = 560, MAP_BASE_H = 400;
+function mapScale() { return Math.max(1.6, Math.min(2.2, (window.devicePixelRatio || 1) * 1.25)); }
+function sizeMapStage() {
+  const s = mapScale();
+  for (const id of ["map-canvas", "map-fx"]) {
+    const cv = $(id); if (cv) { cv.width = Math.round(MAP_BASE_W * s); cv.height = Math.round(MAP_BASE_H * s); }
+  }
+}
 function renderMap(ml) {
   if (!ml || !ml.levels || !ml.levels.length) return;
   if (!mapLevel || !ml.levels.some(l => l.id === mapLevel)) mapLevel = ml.current_level;
@@ -402,21 +413,53 @@ function renderMap(ml) {
   $("map-tabs").querySelectorAll("[data-lvl]").forEach(t => t.onclick = () => { mapLevel = t.dataset.lvl; citySel = null; renderMap(ml); });
   citySel = null;
   renderLegend(null);                                                // легенда только для town
-  if (mapLevel === "town" && window.drawCity) drawCityLevel();        // красивый процедурный город
+  sizeMapStage();                                                    // HiDPI бэк-стор перед отрисовкой
+  const svgHost = $("map-svg"); if (svgHost) { svgHost.innerHTML = ""; svgHost.classList.add("hidden"); }
+  if (mapLevel === "town") drawCityLevel();                          // процедурный город (Python-SVG, фолбэк на canvas)
   else if (mapLevel === "region" && window.drawWorld) drawWorldLevel(ml);
   else drawMapNodes(ml.levels.find(l => l.id === mapLevel));          // нод-граф для интерьера
   $("map-actions").classList.add("hidden");
   bindFx();
 }
+let cityFullCache = {};
 async function drawCityLevel() {
   const seed = (lastView && lastView.seed) || 1337;
-  await ensureTown(seed);
-  const cv = $("map-canvas");
+  const cv = $("map-canvas"), host = $("map-svg");
+  const CW = 980, CH = 700;                                    // фикс-размер генерации (аспект 1.4 == карта)
   const keyHouses = (lastView && lastView.key_houses) || [];   // дома, поднявшие важность → ключевые
-  const out = window.drawCity(cv.getContext("2d"), cv.width, cv.height, { seed, buildings: townBuildings || [], keyHouses, chrome: true });
-  mapHits = out.hits; cityState = { ...out, seed }; cityCur = out.streets.start;
-  renderLegend(out.legend);                                    // нумерованная легенда справа
+  const ck = seed + "|" + JSON.stringify(keyHouses);
+  let data = cityFullCache[ck];
+  if (!data) {
+    try {
+      const r = await fetch(`/city_full?seed=${seed}&w=${CW}&h=${CH}&keys=${encodeURIComponent(JSON.stringify(keyHouses))}`);
+      if (!r.ok) throw new Error("city_full " + r.status);
+      data = await r.json(); cityFullCache[ck] = data;
+    } catch (e) {                                              // фолбэк: старый canvas-генератор
+      if (host) { host.innerHTML = ""; host.classList.add("hidden"); }
+      if (!window.drawCity) return;
+      await ensureTown(seed);
+      const out = window.drawCity(cv.getContext("2d"), cv.width, cv.height, { seed, buildings: townBuildings || [], keyHouses, chrome: true });
+      mapHits = out.hits; cityState = { ...out, seed }; cityCur = out.streets.start;
+      renderLegend(out.legend); mapMode = "city"; cityStep = 0; cityQuiet = 2; cityMarks = []; drawFx();
+      return;
+    }
+  }
+  host.innerHTML = data.svg; host.classList.remove("hidden");  // SVG-город как база карты
+  cv.getContext("2d").clearRect(0, 0, cv.width, cv.height);    // canvas-базу для города гасим
+  const k = cv.width / CW;                                     // SVG(980×700) → координаты FX-бэкстора (аспект совпадает)
+  mapHits = data.hits.map(h => ({ ...h, x: h.x * k, y: h.y * k, r: (h.r || 14) * k }));
+  cityState = { seed, streets: { start: data.streets.start, adj: data.streets.adj,
+                                 nodes: data.streets.nodes.map(n => [n[0] * k, n[1] * k]) } };
+  cityCur = cityState.streets.start;
+  renderLegend(data.legend);                                   // нумерованная легенда справа
   mapMode = "city"; cityStep = 0; cityQuiet = 2; cityMarks = []; drawFx();
+}
+// подсветить выбранный дом прямо в SVG (яркая заливка); возвращает true, если дом найден
+function highlightSvgHouse(id) {
+  const host = $("map-svg"); if (!host) return false;
+  host.querySelectorAll(".h.sel").forEach(el => el.classList.remove("sel"));
+  if (id) { const el = host.querySelector('.h[data-id="' + String(id).replace(/["\\]/g, "\\$&") + '"]'); if (el) { el.classList.add("sel"); return true; } }
+  return false;
 }
 // легенда ключевых мест справа от карты: номер → название; клик = выбрать дом на карте
 function renderLegend(legend) {
@@ -439,10 +482,15 @@ function drawWorldLevel(ml) {
 function bindFx() {
   const fx = $("map-fx");
   fx.onclick = (e) => {
+    const svg = $("map-svg") && $("map-svg").querySelector("svg");
+    if (svg) {                                             // SVG-режим: точный дом-полигон ПОД курсором (не ближайший)
+      const houseEl = document.elementsFromPoint(e.clientX, e.clientY).find(el => el.classList && el.classList.contains("h"));
+      if (houseEl) { const hit = mapHits.find(h => h.id === houseEl.getAttribute("data-id")); if (hit) { setSelection(hit); return; } }
+    }
     const r = fx.getBoundingClientRect(), W = fx.width, H = fx.height;
     const mx = (e.clientX - r.left) / r.width * W, my = (e.clientY - r.top) / r.height * H;
-    let best = null, bd = 1e9;
-    for (const h of mapHits) { const d = Math.hypot(mx - h.x, my - h.y); if (d < (h.r || 14) + 4 && d < bd) { bd = d; best = h; } }
+    let best = null, bd = 1e9;                             // ратуша/замок (бейджи, не .h) и canvas-фолбэк — по близости
+    for (const h of mapHits) { if (svg && h.house) continue; const d = Math.hypot(mx - h.x, my - h.y); if (d < (h.r || 14) + 4 && d < bd) { bd = d; best = h; } }
     if (best) { setSelection(best); return; }
     if (mapMode === "city" && cityState) {                 // не дом → ближайший перекрёсток
       const i = nearestNode(cityState.streets, mx, my), p = cityState.streets.nodes[i];
@@ -456,14 +504,18 @@ function setSelection(hit) {
   $("map-go").textContent = hit.crossroad ? "🚶 Идти сюда"
     : (mapMode === "city" && !hit.go) ? "🚶 Подойти и осмотреть" : "🚶 Отправиться";
   $("map-actions").classList.remove("hidden");
+  highlightSvgHouse(hit && !hit.crossroad ? hit.id : null);   // яркая подсветка самого дома в SVG
   drawFx();
 }
-function clearSelection() { citySel = null; const a = $("map-actions"); if (a) a.classList.add("hidden"); drawFx(); }
+function clearSelection() { citySel = null; const a = $("map-actions"); if (a) a.classList.add("hidden"); highlightSvgHouse(null); drawFx(); }
 function drawFx() {
   const fx = $("map-fx"); if (!fx) return; const c = fx.getContext("2d"); c.clearRect(0, 0, fx.width, fx.height);
-  for (const m of cityMarks) { c.fillStyle = "#c0492c"; c.font = "bold 15px Georgia"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10); }
-  if (mapMode === "city" && cityState) { const p = cityState.streets.nodes[cityCur]; c.beginPath(); c.arc(p[0], p[1], 7, 0, 7); c.fillStyle = "#2f6fb0"; c.fill(); c.lineWidth = 2.5; c.strokeStyle = "#dfe9f6"; c.stroke(); }
-  if (citySel) { c.strokeStyle = "#d8b15a"; c.lineWidth = 3; c.setLineDash([4, 3]); c.beginPath(); c.arc(citySel.x, citySel.y, (citySel.r || 14) + 5, 0, 7); c.stroke(); c.setLineDash([]); }
+  const s = fx.width / 560;
+  for (const m of cityMarks) { c.fillStyle = "#e2604a"; c.font = `bold ${Math.round(16 * s)}px Inter`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10 * s); }
+  if (mapMode === "city" && cityState) { const p = cityState.streets.nodes[cityCur]; c.beginPath(); c.arc(p[0], p[1], 3.6 * s, 0, 7); c.fillStyle = "#3a78b0"; c.fill(); c.lineWidth = 1.4 * s; c.strokeStyle = "#eef4fb"; c.stroke(); }
+  // кольцо-выбор показываем только для НЕ-домов (перекрёсток/ратуша/замок); дом подсвечивается заливкой в SVG
+  const hl = $("map-svg") && $("map-svg").querySelector(".h.sel");
+  if (citySel && !hl) { c.strokeStyle = "#e0a64d"; c.lineWidth = 3 * s; c.setLineDash([5 * s, 4 * s]); c.beginPath(); c.arc(citySel.x, citySel.y, (citySel.r || 14) + 6 * s, 0, 7); c.stroke(); c.setLineDash([]); }
 }
 function bfs(adj, s, t) { if (s === t) return [s]; const prev = new Array(adj.length).fill(-1); prev[s] = s; const q = [s]; while (q.length) { const u = q.shift(); for (const v of adj[u]) if (prev[v] < 0) { prev[v] = u; if (v === t) { const p = [t]; let x = t; while (x !== s) { x = prev[x]; p.push(x); } return p.reverse(); } q.push(v); } } return null; }
 function nearestNode(s, x, y) { let bi = 0, bd = 1e9; s.nodes.forEach((n, i) => { const d = Math.hypot(n[0] - x, n[1] - y); if (d < bd) { bd = d; bi = i; } }); return bi; }
@@ -482,13 +534,13 @@ async function cityWalk(hit) {
 }
 function drawWalk(path, k) {
   const fx = $("map-fx"), c = fx.getContext("2d"); c.clearRect(0, 0, fx.width, fx.height);
-  const N = cityState.streets.nodes;
-  c.strokeStyle = "rgba(70,52,22,.45)"; c.setLineDash([5, 4]); c.lineWidth = 2; c.beginPath();
+  const N = cityState.streets.nodes, s = fx.width / 560;
+  c.strokeStyle = "rgba(120,90,40,.5)"; c.setLineDash([6 * s, 4 * s]); c.lineWidth = 2 * s; c.beginPath();
   for (let i = 0; i < path.length; i++) { const p = N[path[i]]; i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); } c.stroke(); c.setLineDash([]);
-  c.strokeStyle = "#d8b15a"; c.lineWidth = 3; c.beginPath();
+  c.strokeStyle = "#e0a64d"; c.lineWidth = 3 * s; c.beginPath();
   for (let i = 0; i <= k; i++) { const p = N[path[i]]; i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); } c.stroke();
-  for (const m of cityMarks) { c.fillStyle = "#c0492c"; c.font = "bold 15px Georgia"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10); }
-  const p = N[cityCur]; c.beginPath(); c.arc(p[0], p[1], 7, 0, 7); c.fillStyle = "#2f6fb0"; c.fill(); c.lineWidth = 2.5; c.strokeStyle = "#dfe9f6"; c.stroke();
+  for (const m of cityMarks) { c.fillStyle = "#e2604a"; c.font = `bold ${Math.round(16 * s)}px Inter`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10 * s); }
+  const p = N[cityCur]; c.beginPath(); c.arc(p[0], p[1], 3.6 * s, 0, 7); c.fillStyle = "#3a78b0"; c.fill(); c.lineWidth = 1.4 * s; c.strokeStyle = "#eef4fb"; c.stroke();
 }
 async function goSelection() {
   const hit = citySel; if (!hit) return;
@@ -512,29 +564,29 @@ function renderHouse(h) {
 }
 function drawMapNodes(level) {
   if (!level) return;
-  const cv = $("map-canvas"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
-  ctx.fillStyle = "#2a2118"; ctx.fillRect(0, 0, W, H);
+  const cv = $("map-canvas"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height, s = W / 560;
+  ctx.fillStyle = "#11141a"; ctx.fillRect(0, 0, W, H);
   const cx = W / 2, cy = H / 2, Rx = W * 0.34, Ry = H * 0.30;
   const pos = (n) => { const L = Math.hypot(n.dx, n.dy) || 0; return [L ? cx + n.dx / L * Rx : cx, L ? cy + n.dy / L * Ry : cy]; };
   for (const n of level.nodes) {                       // рёбра от хаба
     const L = Math.hypot(n.dx, n.dy); if (!L) continue;
     const [x, y] = pos(n);
-    ctx.strokeStyle = "rgba(200,170,90,.45)"; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(224,166,77,.32)"; ctx.lineWidth = 1.5 * s;
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke();
   }
   mapHits = [];
   for (const n of level.nodes) {
     const [x, y] = pos(n);
-    const col = n.current ? "#d8b15a" : n.display === "unknown" ? "#6b6450"
-      : n.kind === "settlement" ? "#3a6ea5" : n.kind === "site" ? "#9a6a32" : "#4a6a3a";
-    ctx.beginPath(); ctx.arc(x, y, 14, 0, 7); ctx.fillStyle = "#1d1812"; ctx.fill();
-    ctx.lineWidth = n.current ? 3.5 : 2; ctx.strokeStyle = col; ctx.stroke();
-    ctx.fillStyle = "#efe6d2"; ctx.font = "12px Georgia, serif"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    const col = n.current ? "#e0a64d" : n.display === "unknown" ? "#6b7283"
+      : n.kind === "settlement" ? "#5b8fc9" : n.kind === "site" ? "#c08a44" : "#5fb87f";
+    ctx.beginPath(); ctx.arc(x, y, 14 * s, 0, 7); ctx.fillStyle = "#171b22"; ctx.fill();
+    ctx.lineWidth = (n.current ? 3.5 : 2) * s; ctx.strokeStyle = col; ctx.stroke();
+    ctx.fillStyle = "#e8ebf1"; ctx.font = `${Math.round(13 * s)}px Inter`; ctx.textAlign = "center"; ctx.textBaseline = "top";
     const nm = n.name.length > 18 ? n.name.slice(0, 17) + "…" : n.name;
-    ctx.fillText(nm, x, y + 17);
-    if (n.dir_ru) { ctx.fillStyle = "#b8a877"; ctx.font = "10px Georgia, serif"; ctx.fillText(n.dir_ru, x, y - 27); }
-    if (n.occupants && n.occupants.length) { ctx.fillStyle = "#cd9a6a"; ctx.fillText("• " + n.occupants.length, x + 16, y - 6); }
-    if (n.go) mapHits.push({ x, y, r: 17, go: n.go, name: n.name });
+    ctx.fillText(nm, x, y + 17 * s);
+    if (n.dir_ru) { ctx.fillStyle = "#969db0"; ctx.font = `${Math.round(11 * s)}px Inter`; ctx.fillText(n.dir_ru, x, y - 27 * s); }
+    if (n.occupants && n.occupants.length) { ctx.fillStyle = "#c08a44"; ctx.fillText("• " + n.occupants.length, x + 16 * s, y - 6 * s); }
+    if (n.go) mapHits.push({ x, y, r: 17 * s, go: n.go, name: n.name });
   }
   mapMode = "interior"; drawFx();
 }
@@ -594,27 +646,30 @@ function drawBattle(cv) {
   cv2.style.display = "block";
   const { cols, rows } = cv.grid;
   const cell = Math.floor(Math.min(700 / cols, 460 / rows));
-  cv2.width = cols * cell; cv2.height = rows * cell;
+  const Wb = cols * cell, Hb = rows * cell, dpr = Math.min(2.5, window.devicePixelRatio || 1);
+  cv2.width = Math.round(Wb * dpr); cv2.height = Math.round(Hb * dpr);   // HiDPI бэк-стор
+  cv2.style.width = Wb + "px"; cv2.style.height = Hb + "px";             // CSS-размер = логический
   const ctx = cv2.getContext("2d");
   const paint = () => {
-    ctx.clearRect(0, 0, cv2.width, cv2.height);
-    if (battleImg && battleImg.complete) ctx.drawImage(battleImg, 0, 0, cv2.width, cv2.height);
-    else { ctx.fillStyle = "#1a1712"; ctx.fillRect(0, 0, cv2.width, cv2.height); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);                             // рисуем в логических координатах
+    ctx.clearRect(0, 0, Wb, Hb);
+    if (battleImg && battleImg.complete) ctx.drawImage(battleImg, 0, 0, Wb, Hb);
+    else { ctx.fillStyle = "#11141a"; ctx.fillRect(0, 0, Wb, Hb); }
     // достижимость (ход PC)
     if (cv.is_pc_turn && (combatMode === "move" || combatMode === "select")) {
-      ctx.fillStyle = "rgba(90,160,235,.34)";
+      ctx.fillStyle = "rgba(95,143,201,.32)";
       for (const [x, y] of cv.reachable || []) ctx.fillRect(x * cell, y * cell, cell, cell);
-      ctx.strokeStyle = "rgba(150,200,255,.5)"; ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(150,190,240,.5)"; ctx.lineWidth = 1;
       for (const [x, y] of cv.reachable || []) ctx.strokeRect(x * cell + 0.5, y * cell + 0.5, cell - 1, cell - 1);
     }
     // поверхности
-    for (const s of cv.surfaces || []) {
-      ctx.fillStyle = SURFACE_COLORS[s.kind] || "#888"; ctx.globalAlpha = .45;
-      ctx.fillRect(s.pos[0] * cell, s.pos[1] * cell, cell, cell); ctx.globalAlpha = 1;
+    for (const sf of cv.surfaces || []) {
+      ctx.fillStyle = SURFACE_COLORS[sf.kind] || "#888"; ctx.globalAlpha = .45;
+      ctx.fillRect(sf.pos[0] * cell, sf.pos[1] * cell, cell, cell); ctx.globalAlpha = 1;
     }
-    // цели (красная рамка) в режиме атаки/толчка
+    // цели (рамка) в режиме атаки/толчка
     if (cv.is_pc_turn && (combatMode === "attack" || combatMode === "shove")) {
-      ctx.strokeStyle = "#ff5a3c"; ctx.lineWidth = 2;
+      ctx.strokeStyle = "#e2604a"; ctx.lineWidth = 2;
       for (const id of cv.targets || []) {
         const t = cv.combatants.find(c => c.id === id);
         if (t) ctx.strokeRect(t.pos[0] * cell + 2, t.pos[1] * cell + 2, cell - 4, cell - 4);
@@ -625,18 +680,18 @@ function drawBattle(cv) {
       if (c.fled) continue;
       const cx = c.pos[0] * cell + cell / 2, cy = c.pos[1] * cell + cell / 2, r = cell * 0.38;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
-      ctx.fillStyle = c.hp <= 0 ? "#555" : (c.side === "party" ? "#3a6ea5" : "#b0402f");
+      ctx.fillStyle = c.hp <= 0 ? "#555c66" : (c.side === "party" ? "#3a78b0" : "#c0492c");
       ctx.fill();
       ctx.lineWidth = c.current ? 3 : 1.5;
-      ctx.strokeStyle = c.current ? "#d8b15a" : "#fff"; ctx.stroke();
-      ctx.fillStyle = "#fff"; ctx.font = `bold ${Math.floor(cell * 0.4)}px serif`;
+      ctx.strokeStyle = c.current ? "#e0a64d" : "#e8ebf1"; ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.font = `600 ${Math.floor(cell * 0.4)}px Inter`;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText((c.name || "?").trim()[0] || "?", cx, cy);
       // HP-полоска
       const bw = cell * 0.8, hp = Math.max(0, c.hp / (c.max_hp || 1));
-      ctx.fillStyle = "#400"; ctx.fillRect(cx - bw / 2, cy + r + 1, bw, 3);
-      ctx.fillStyle = c.side === "party" ? "#6abf4b" : "#d87a3a";
-      ctx.fillRect(cx - bw / 2, cy + r + 1, bw * hp, 3);
+      ctx.fillStyle = "rgba(0,0,0,.5)"; ctx.fillRect(cx - bw / 2, cy + r + 1, bw, 3.5);
+      ctx.fillStyle = c.side === "party" ? "#5fb87f" : "#e0a64d";
+      ctx.fillRect(cx - bw / 2, cy + r + 1, bw * hp, 3.5);
     }
   };
   if (cv.battlemap && battleImgSrc !== cv.battlemap) {

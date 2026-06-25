@@ -191,7 +191,7 @@ def _build_named_npcs(world: World) -> None:
     sildar = _add_npc(world, "npc:sildar_hallwinter", "Sildar Hallwinter", "knight", "srd:veteran",
                       faction="faction:lords_alliance", traits=["noble", "weary"],
                       place="building:stonehill_inn", aliases=["сильдар", "сильдар холлвинтер"])
-    world.ecs.get(sildar, Persona).companion = True   # эскорт LMoP: следует за партией и бьётся рядом
+    world.ecs.get(sildar, Persona).companion = False  # напарник временно отключён (тест соло)
     _add_npc(world, "npc:gundren_rockseeker", "Gundren Rockseeker", "prospector", "srd:commoner",
              race="dwarf", traits=["excitable", "secretive"], place="place:cragmaw_klarg_cave",
              aliases=["гундрен", "гундрен рокскикер"])

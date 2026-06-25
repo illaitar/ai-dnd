@@ -495,7 +495,8 @@ class GameSession:
         decision = self.cognition.policy(npc, "talk", action.tone, ctx, self.player)
         hooks = self.director.surface_hooks_near(npc)
         self.cognition.observe_and_appraise(npc, self.player, "talk", action.tone,
-                                            f"игрок сказал: {topic[:60]}")
+                                            f"игрок сказал: {topic[:120]}")
+        self._remember_salient(npc, text)             # имя/цель/намерение игрока → точная память для узнавания
         self.world.commit("talk", self.player, target=npc, payload={"topic": topic[:60]})
         self._player_shares_with(npc, topic)          # реплика игрока может научить NPC (игрок — источник молвы)
         line = self._strip_leading_name(self._npc_reply(npc, decision, topic, rel, first_meeting, hooks), npc)
@@ -991,12 +992,17 @@ class GameSession:
 
     def _do_attack(self, action: Action, text: str) -> dict:
         target = action.target or self._match_npc(text)
-        enemies = [n for n in self.npcs_here() if self._is_hostile(n)]
+        here = self.npcs_here()
+        enemies = [n for n in here if self._is_hostile(n)]
         if target and target not in enemies and self._is_hostile(target):
             enemies = [target] + [e for e in enemies if e != target]
-        if not enemies:                                   # «атака» без явного врага — враждебный freeform
-            return self._resolve_freeform(text, action.target, hostile=True)
-        return self.start_combat(enemies)
+        if enemies:
+            return self.start_combat(enemies)
+        if target and target in here:                     # игрок ЯВНО бьёт присутствующего (нейтрала) — его выбор
+            return self.start_combat([target])
+        # ни враждебных, ни названной присутствующей цели → НЕ бить случайного соседа/спутника
+        return {"kind": "narration", "view": self.view(),
+                "text": "Нападать не на кого — врага рядом нет."}
 
     # ===================================================================== #
     #  Бой (мост к CombatEngine)                                            #
@@ -1322,7 +1328,43 @@ class GameSession:
             if before < sp.spawn_tick <= after and sp.id not in fired:
                 fired.add(sp.id)
                 apply_incident_effects(self.world, sp)
+                self._spawn_incident_quest(sp)            # угроза-событие → задание на доске
                 self.__dict__.setdefault("_inc_pending", []).append(sp)
+
+    def _spawn_incident_quest(self, sp) -> None:
+        """Угроза-инцидент (вылазка монстров) → новое задание на доске объявлений, привязанное
+        к источнику. Один на сайт (дедуп); сдача — зачистка источника. Реактивно/сейв-сейф."""
+        if sp.kind != "monster":
+            return
+        from ..content.region import REGION_SITES
+        site = REGION_SITES.get(sp.source) or {}
+        site_place = site.get("place")
+        if not site_place or site_place not in self.world.spatial.places:
+            return
+        qid = f"quest:inc:{sp.source}"                    # один на источник
+        if qid in self.world.quests:
+            return
+        from ..gen.provenance import Provenance
+        from ..gen.quest_gen import Predicate, Quest, Rewards, Stage
+        from ..content.board import BOARD_PLACE
+        label = site.get("label", sp.source)
+        reward = Rewards(currency={"gp": 40}, xp=120, faction_rep={"faction:watch": 0.15})
+        q = Quest(
+            quest_id=qid, kind="board", title=f"Угроза: {sp.label}", giver_ref=BOARD_PLACE, state="offered",
+            stages=[
+                Stage("do", f"отразить угрозу — зачистить «{label}»",
+                      completion_conditions=[Predicate("Flag", [f"cleared:{site_place}"])], next_stages=["turnin"]),
+                Stage("turnin", "вернуться к доске объявлений и доложить",
+                      completion_conditions=[Predicate("Flag", [f"turnin:{qid}"])],
+                      on_complete=[{"effect": "complete"}]),
+            ],
+            current_stages=[], rewards=reward, framing=sp.desc or sp.label,
+            world_bindings=[BOARD_PLACE, site_place],
+            provenance=Provenance(source="incident", generator="incident@1.0"))
+        q.req_kind = "bounty"
+        q.req_ref = site_place
+        self.quests.register(q)
+        self._log_journal(f"📜 На доске появилось задание: «{q.title}»")
 
     def _expire_conditions(self) -> None:
         """Снимает состояния с длительностью по игровому времени, чей срок истёк."""
@@ -1521,6 +1563,12 @@ class GameSession:
         kind = out["kind"]
         if kind == "query":
             q = out.get("query_type")
+            low = text.lower()
+            # «кто такие/что за/кто это <X>» — вопрос о СУЩНОСТИ к собеседнику, а не «кто здесь»
+            if q == "who" and any(k in low for k in ("такие", "такой", "такая", "что за", "кто это")):
+                if self.dialogue_partner or self.npcs_here():
+                    return {"kind": "command", "verb": "talk",
+                            "target": self._match_npc(text) or self.dialogue_partner, "tone": "neutral"}
             return {"kind": "query", "query": q if q in self._QUERY_TYPES else "look"}
         tgt = self._match_npc(out.get("target") if isinstance(out.get("target"), str) else "") \
             or self._match_npc(text)
@@ -1599,13 +1647,43 @@ class GameSession:
             return "wary, somewhat hostile toward you"
         return f"acquaintance, neutral (trust {rel.trust:.2f})"
 
+    def _memory_summary(self, npc: str, rel, first_meeting: bool, topic: str = "") -> str:
+        """Грунт для нарратора: отношение + ЧТО NPC реально помнит об игроке. Первая встреча —
+        жёсткий запрет выдумывать знакомство; иначе — ссылаться ТОЛЬКО на реальную память
+        (чинит галлюцинации «узнаю тебя по телеге у ворот» и неверные «помню, ты говорил…»)."""
+        base = self._rel_summary(rel, first_meeting)
+        if first_meeting:
+            return (base + ". CRITICAL: you have NEVER met this person before — do NOT pretend to "
+                    "recognise them, do NOT invent any shared past or earlier conversation.")
+        mems = self.cognition.retrieve(npc, topic or "", self.player).memories
+        mem_txt = "; ".join(getattr(m, "text", "") for m in mems[:6] if getattr(m, "text", ""))
+        if mem_txt:
+            return (base + f". What you ACTUALLY remember about this person (reference ONLY this, "
+                    f"do not invent other shared history): {mem_txt}")
+        return base
+
+    def _remember_salient(self, npc: str, text: str) -> None:
+        """Извлекает из реплики игрока заметное (имя / цель пути / кого ищет) → отдельные ноды
+        памяти NPC, чтобы узнавание на возврате было ТОЧНЫМ, а не выдуманным."""
+        import re
+        low = text.lower()
+        m = re.search(r"(?:меня зовут|зови меня|моё имя|мое имя)\s+([а-яёa-z]{2,16})", low)
+        if m:
+            self.cognition.observe(npc, f"игрок представился: {m.group(1).capitalize()}", importance=7)
+        m2 = re.search(r"(?:иду|идти|направля\w+|держу путь|путь лежит|отправля\w+)\s+(?:в|к|на|до)\s+([а-яё«»\" ]{3,30})", low)
+        if m2:
+            self.cognition.observe(npc, f"игрок направляется в: {m2.group(1).strip(chr(32)+chr(34)+'«»')[:32]}", importance=6)
+        m3 = re.search(r"(?:я ищу|разыскиваю|ищу пропавш\w*|в поисках)\s+([а-яё«»\" ]{3,30})", low)
+        if m3:
+            self.cognition.observe(npc, f"игрок ищет: {m3.group(1).strip(chr(32)+chr(34)+'«»')[:32]}", importance=6)
+
     def _npc_greeting(self, npc: str, rel, first_meeting: bool) -> str:
         """Приветствие NPC при инициации — заземлено, без выдуманной истории."""
         persona = self.world.ecs.get(npc, Persona)
         if self.model is not None:
             from ..inference.agents import render_dialogue
             line = render_dialogue(
-                self.model, persona, self._rel_summary(rel, first_meeting),
+                self.model, persona, self._memory_summary(npc, rel, first_meeting),
                 situation=("A stranger walks up and greets you for the first time"
                            if first_meeting else "Someone you know greets you"),
                 player_line="", intent="greet and ask what they want",
@@ -1631,7 +1709,7 @@ class GameSession:
         if self.model is not None:
             from ..inference.agents import render_dialogue
             line = render_dialogue(
-                self.model, persona, self._rel_summary(rel, first_meeting),
+                self.model, persona, self._memory_summary(npc, rel, first_meeting, topic),
                 situation=f"The player says/asks: «{topic}». Your stance: {action}.",
                 player_line=topic, intent=action, scene=self._narrator_context(),
                 facts=[it["fact"] for it in feed], mode="dialogue")
@@ -1949,16 +2027,33 @@ class GameSession:
         return sorted(((pid, sc, sp.hops_between(cur, pid)) for pid, sc in scores.items()),
                       key=lambda x: (-x[1], not self._knows_place(x[0]), x[2]))
 
+    # обобщённые слова выхода → направление-ребро текущего узла (выйти из комнаты «вниз/наружу»)
+    _GEN_EXIT = {"спуст": "down", "вниз": "down", "внизу": "down", "первый этаж": "down",
+                 "общий зал": "down", "в зал": "down", "наверх": "up", "вверх": "up",
+                 "наружу": "out", "на улицу": "out"}
+
     def _match_place(self, text: str) -> str | None:
         sp = self.world.spatial
         cur = self.current_place()
-        d = self._direction_in(text.lower())             # 1) сторона света — однозначный сосед
+        low = text.lower()
+        d = self._direction_in(low)                      # 1) сторона света — однозначный сосед
         if d:
             exits = sp.exits_of(cur)
             if d in exits:
                 return exits[d]
         cands = self._place_candidates(text)             # 2) лучшее по имени/синониму (известные — раньше)
-        return cands[0][0] if cands else None
+        if cands:
+            return cands[0][0]
+        # 3) обобщённый выход: «спуститься/вниз/наружу/общий зал» → ребро по направлению
+        exits = sp.exits_of(cur)
+        for kw, dd in self._GEN_EXIT.items():
+            if kw in low and dd in exits:
+                return exits[dd]
+        # 4) «выйти/наружу/обратно/назад» из локации с единственной связью — это очевидный выход
+        conns = sp.connections(cur)
+        if len(conns) == 1 and any(k in low for k in ("выйт", "выход", "наружу", "обратно", "назад", "вон отсюда")):
+            return conns[0]
+        return None
 
     _AMBIG_SHARE = 0.30                                    # доля вероятности, при которой вариант стоит предложить
 
@@ -1986,17 +2081,28 @@ class GameSession:
     _MOVE_CUES = ("иди", "идти", "иду", "пойд", "пойт", "пошёл", "пошел", "подойд",
                   "подойти", "подойм", "подним", "подня", "наверх", "вверх", "вниз",
                   "спуст", "двигай", "двин", "направ", "войти", "войду", "зайти", "зайду",
-                  "перейти", "перехож", "топай", "шагай", "доберись", "добрать", "дойт",
-                  "дойд", "отправ", "сходи", "сходить", "go ", "вернуть", "вернусь", "вернёт")
+                  "выйт", "выход", "наружу", "уйт", "уход", "перейти", "перехож",
+                  "топай", "шагай", "доберись", "добрать", "дойт", "дойд", "отправ",
+                  "сходи", "сходить", "go ", "вернуть", "вернусь", "вернёт")
     _EXAMINE_CUES = ("осмотр", "оглядыв", "разгляд", "прочит", "почита", "читать", "изуч",
                      "глян", "посмотр", "что на ", "что там", "обыщ", "обыска", "что написа")
 
+    _DIALOG_CUES = ("здравству", "привет", "доброго", "хозяин", "меня зовут", "как тебя",
+                    "как вас", "расскажи", "поведай", "слыхал", "слышал", "знаешь ли",
+                    "помнишь", "узнаёшь", "узнаешь", "что слышно", "правда ли", "спрош",
+                    "представ", "я наёмник", "я ищу", "скажу", "не слыхал")
+
     def _movement_intent(self, text: str) -> str | None:
         """Детерминированно распознаёт явную команду «идти/подойти к <место>» к узнаваемой
-        локации (а НЕ осмотр/чтение). Возвращает place_id или None (тогда решает роутер).
-        Так навигация к видимому месту не зависит от настроения LLM-роутера."""
+        локации (а НЕ осмотр/чтение и НЕ реплику NPC). Возвращает place_id или None."""
         low = text.lower()
         if any(k in low for k in self._EXAMINE_CUES):     # «осмотреть доску» ≠ «подойти к доске»
+            return None
+        # разговорная фраза к NPC не должна перехватываться движением
+        # («Меня зовут Кейл, иду в Логово…» — это реплика, а не команда идти)
+        if any(k in low for k in self._DIALOG_CUES):
+            return None
+        if "?" in text and (self.dialogue_partner or self.npcs_here()):
             return None
         if not (any(k in low for k in self._MOVE_CUES) or self._direction_in(low)):
             return None
@@ -2972,6 +3078,7 @@ class GameSession:
             "time": self.world.clock.hhmm(),
             "game_over": self.is_game_over(),
             "in_combat": bool(self.combat and self.combat.state.mode == "active"),
+            "combat": self.combat_view(),                # бойцы/цели/действия — для UI и тестов боя
             "pending_roll": self._roll_req_dict(self.pending_roll["request"]) if self.pending_roll else None,
             "connectivity": self.connectivity(),
             "region_map": self.region_map(),

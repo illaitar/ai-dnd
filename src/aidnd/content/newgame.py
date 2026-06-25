@@ -93,7 +93,7 @@ SCENARIOS: dict[str, dict] = {
         "desc": "Вы вели припасы и Гундрена к Пещере Эха Волн — но на тракте неспокойно.",
         "intro": "Дикие земли вокруг. Сильдар рядом; свежие следы засады уходят на запад.",
         "start": "place:phandalin_wilds", "flags": ["escort_active"],
-        "companions": ["npc:sildar_hallwinter"], "reveals": ["faction:cragmaw"],
+        "companions": [], "reveals": ["faction:cragmaw"],   # напарник временно отключён (тест соло)
     },
     "redbrands": {
         "name": "Логово Красных плащей",

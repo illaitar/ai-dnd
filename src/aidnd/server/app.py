@@ -368,36 +368,71 @@ def _auto_roll(rr: dict, salt: int) -> list[int]:
 
 _active = {"n": 0}
 _MAX_SESSIONS = int(os.environ.get("AIDND_MAX_SESSIONS", "2"))  # демо на одной GPU: ограничить наплыв
+_badge_mgr = None
+
+
+def _model_online() -> bool:
+    """Доступна ли модель — для бейджа на стартовом меню (без сборки сессии). Кешируется."""
+    global _badge_mgr
+    try:
+        from ..inference import ModelManager
+        if _badge_mgr is None:
+            _badge_mgr = ModelManager()
+        return _badge_mgr.available()
+    except Exception:
+        return False
 
 
 @app.websocket("/ws")
 async def ws(sock: WebSocket) -> None:
     await sock.accept()
-    if _active["n"] >= _MAX_SESSIONS:                  # занято — мягкий отказ, без сборки мира
-        await sock.send_text(json.dumps(
-            {"kind": "system", "text": "Сервер сейчас занят (демо на одной видеокарте). "
-             "Зайди чуть позже."}, ensure_ascii=False))
-        await sock.close()
-        return
-    _active["n"] += 1
-    try:                                                  # счётчик сессий — строго внутри try/finally,
-        session = new_session(seed=config.WORLD_SEED, roster_size=12, use_model=True)
-        salt = {"n": 1}
+    salt = {"n": 1}
+    holds = {"slot": False}                               # слот гейтит ГЕНЕРАЦИЮ (GPU), не коннект
 
-        async def send(result: dict) -> None:
-            await sock.send_text(json.dumps(result, ensure_ascii=False, default=str))
+    async def send(result: dict) -> None:
+        await sock.send_text(json.dumps(result, ensure_ascii=False, default=str))
 
-        online = bool(session.model and session.model.available())
-        intro = session.look()
-        intro["server_online"] = online
-        intro = session.drain_toasts(intro)               # сбросить ген-трейс старта (чтоб не утёк в 1-ю команду)
-        await send(intro)                                 # иначе обрыв на intro течёт слотом (не декрементится)
+    async def start_menu() -> None:                       # при заходе — всегда явное меню, без фоновой сборки
+        from ..runtime.persistence import list_saves
+        await send({"kind": "menu", "server_online": _model_online(), "saves": list_saves()})
 
+    def acquire_slot() -> bool:                           # занять слот под генерацию; False — занято
+        if holds["slot"]:
+            return True
+        if _active["n"] >= _MAX_SESSIONS:
+            return False
+        _active["n"] += 1
+        holds["slot"] = True
+        return True
+
+    session = None
+    await start_menu()
+    try:
         while True:
             msg = json.loads(await sock.receive_text())
             cmd = msg.get("cmd")
+            if cmd in ("new_game", "new", "load") and not acquire_slot():   # генерация — под слот GPU
+                await send({"kind": "system", "text": "Сервер сейчас занят (демо на одной видеокарте). "
+                            "Зайди чуть позже."})
+                continue
+            if session is None and cmd not in ("new_game", "new", "load", "delete_save"):
+                await start_menu()                        # игры ещё нет — возвращаем меню (без неявной сборки)
+                continue
             if cmd == "input":
-                result = session.handle(msg.get("text", ""))
+                loop = asyncio.get_running_loop()         # ход в треде → стримим «мышление» в реальном времени
+                chain = []
+                def _think(role, model):                  # каждый LLM-вызов хода → кадр прогресса/роутинга
+                    chain.append({"role": role, "model": model})
+                    asyncio.run_coroutine_threadsafe(
+                        send({"kind": "thinking", "step": len(chain), "est": 5, "chain": list(chain)}), loop)
+                mgr = session.model
+                if mgr is not None:
+                    mgr.on_call = _think
+                try:
+                    result = await asyncio.to_thread(session.handle, msg.get("text", ""))
+                finally:
+                    if mgr is not None:
+                        mgr.on_call = None
             elif cmd == "look":
                 result = session.look()
             elif cmd == "combat_attack":
@@ -477,20 +512,23 @@ async def ws(sock: WebSocket) -> None:
             elif cmd == "delete_save":
                 from ..runtime.persistence import delete_save, list_saves
                 delete_save(msg.get("slug", ""))
-                result = {"kind": "saves", "saves": list_saves(), "view": session.view()}
+                result = {"kind": "saves", "saves": list_saves(),
+                          "view": session.view() if session else None}
             elif cmd == "new":
                 session = new_session(seed=msg.get("seed", config.WORLD_SEED),
                                       roster_size=12, use_model=True)
                 result = session.look()
             else:
                 result = {"kind": "error", "text": f"неизвестная команда {cmd}",
-                          "view": session.view()}
-            result = session.drain_toasts(result)         # тосты-«ачивки» за ход → фронту
+                          "view": session.view() if session else None}
+            if session is not None and isinstance(result, dict):
+                result = session.drain_toasts(result)     # тосты-«ачивки» за ход → фронту
             await send(result)
     except WebSocketDisconnect:
         pass
     finally:
-        _active["n"] -= 1
+        if holds["slot"]:                                 # вернуть слот только если занимали под генерацию
+            _active["n"] -= 1
 
 
 def run(host: str = "127.0.0.1", port: int | None = None) -> None:

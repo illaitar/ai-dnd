@@ -43,6 +43,22 @@ function showRouting(steps) {
   const chain = steps.map(s => `${s.role}·${shortModel(s.model)} ${s.ms}ms`).join("  →  ");
   logEntry("🔀 " + esc(chain), "routing");
 }
+
+// «мышление» в реальном времени: процент обработки ответа (всегда) + живой роутинг-чейн (в дебаге)
+const ROLE_RU = { router: "маршрут", cognition: "память", narrator: "рассказчик", event_director: "события",
+  arbiter: "арбитр", consequence: "последствия", plausibility: "проверка", lore_keeper: "знания", quest_writer: "квест" };
+let thinkingEl = null;
+function showThinking(f) {
+  if (!thinkingEl) { thinkingEl = document.createElement("div"); thinkingEl.className = "entry thinking"; $("log").appendChild(thinkingEl); }
+  const pct = Math.min(92, Math.round((f.step / (f.est || 5)) * 100));
+  const dbg = $("dbg-routing") && $("dbg-routing").checked;
+  const body = dbg
+    ? (f.chain || []).map(s => `${ROLE_RU[s.role] || s.role}·${shortModel(s.model)}`).join(" → ")
+    : "Обрабатываю ответ…";
+  thinkingEl.innerHTML = `⏳ ${esc(body)} <span class="thinking-pct">${pct}%</span>`;
+  $("log").scrollTop = $("log").scrollHeight;
+}
+function clearThinking() { if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; } }
 // журнал квестов — подробные записи (лор + стадии)
 function openJournal() {
   openOverlay("questlog");
@@ -86,7 +102,14 @@ function render(r) {
     $("load-pct").textContent = pct === null ? "" : pct + "%";
     return;
   }
+  if (r.kind === "thinking") { showThinking(r); return; }         // живой прогресс/роутинг ответа
+  clearThinking();                                                // любой реальный результат — убираем индикатор
   if (r.toasts && r.toasts.length) r.toasts.forEach(showToast);   // «ачивки»
+  if (r.kind === "menu") {                                        // стартовый экран при заходе (без фоновой сборки)
+    menuShown = true; hasGame = false; setMenuMode(false);
+    if (r.saves) renderSaves(r.saves);
+    openOverlay("menu");
+  }
   if (r.kind === "journal") renderJournal(r.journal);             // подробный журнал квестов
   if (r.text) {
     const cls = r.kind === "system" ? "system"
@@ -113,10 +136,10 @@ function render(r) {
   if (r.view) updateView(r.view);
   if (r.travel_far) openOverlay("mapview");           // «далеко — открой карту»: сразу показываем карту для маршрута
   if (r.kind === "error" && !$("levelup").classList.contains("hidden")) $("lvl-msg").textContent = r.text;
-  if (r.kind === "look") {
-    $("loading").classList.add("hidden");               // мир готов — прячем ползунок
+  if (r.kind === "look") {                               // игра началась/загружена — прячем стартовые экраны
+    ["loading", "menu", "loadgame"].forEach(id => { const e = $(id); if (e) e.classList.add("hidden"); });
+    hasGame = true; setMenuMode(true);
     renderExits(r.exits); renderNpcs(r.npcs); renderQuick();
-    if (!menuShown) { menuShown = true; openOverlay("menu"); }   // экран меню при первом входе
   }
   if (r.combat) renderCombat(r.combat);
   else if (r.view && !r.view.in_combat) $("combat").classList.add("hidden");
@@ -317,7 +340,14 @@ function openOverlay(id) {
 function closeOverlay(id) { $(id).classList.add("hidden"); }
 
 // ----------------------------------------------- меню / новая игра / сейвы ----
-let ngOpts = null, ngSel = { scenario: null, klass: null, kit: null, skills: [], l1: {} }, lvlSel = {}, menuShown = false;
+let ngOpts = null, ngSel = { scenario: null, klass: null, kit: null, skills: [], l1: {} }, lvlSel = {}, menuShown = false, hasGame = false;
+
+// стартовое меню (игры ещё нет) vs игровое: «Продолжить»/«Сохранить» и закрытие — только при игре
+function setMenuMode(game) {
+  ["m-continue", "m-save"].forEach(id => { const e = $(id); if (e) e.style.display = game ? "" : "none"; });
+  const x = document.querySelector('#menu .x');
+  if (x) x.style.display = game ? "" : "none";          // стартовое меню не закрыть — нужно выбрать игру
+}
 
 async function ensureNgOptions() {
   if (!ngOpts) {

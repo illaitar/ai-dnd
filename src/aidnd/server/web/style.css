@@ -192,6 +192,9 @@ main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }
 .dbg-toggle input { accent-color: var(--accent); cursor: pointer; margin: 0; }
 #log .routing { color: var(--accent2); font-family: var(--font-mono); font-size: 11.5px;
   opacity: .85; word-break: break-word; padding: 2px 0; }
+#log .thinking { color: var(--accent); font-family: var(--font-mono); font-size: 12px; opacity: .9;
+  padding: 3px 0; display: flex; align-items: center; gap: 8px; animation: none; }
+#log .thinking .thinking-pct { color: var(--gold); font-weight: 650; margin-left: auto; }
 
 /* журнал квестов */
 .jr-box { width: min(680px, 94vw); }

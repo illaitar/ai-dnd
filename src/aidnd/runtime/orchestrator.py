@@ -29,7 +29,7 @@ from .director import Director
 VERB_KEYWORDS = {
     "move": ["иди", "идти", "иду", "пойд", "go ", "move", "войти", "зайти", "направ",
              "подойд", "подойт", "подход", "верну", "вернис", "двигай", "топай"],
-    "attack": ["бью", "атак", "напад", "ударь", "attack", "kill", "убить", "руб"],
+    "attack": ["бью", "атак", "напад", "напас", "ударь", "attack", "kill", "убить", "руб", "сраж", "дерус"],
     "intimidate": ["запуга", "угрож", "intimidate", "припугн"],
     "persuade": ["убеди", "уговор", "persuade", "договор"],
     "deceive": ["обман", "соврат", "притвор", "блеф", "выдать себя", "deceive", "приврат"],
@@ -2268,14 +2268,34 @@ class GameSession:
             return None
         return self._match_place(text)
 
+    def _settlement_of(self, place_id: str) -> str | None:
+        """Поселение-предок места (вверх по parent), либо None (вне города — вылазка)."""
+        p = self.world.spatial.places.get(place_id)
+        for _ in range(12):
+            if not p:
+                return None
+            if p.kind == "settlement":
+                return p.place_id
+            p = self.world.spatial.places.get(p.parent) if p.parent else None
+        return None
+
+    # публичные лендмарки города видны жителю — известны в пределах поселения (логова/укрытия — нет)
+    _PUBLIC_AFF = frozenset({"shop", "inn", "townhall", "shrine", "work", "serve", "drink", "board"})
+
     def _known_places(self) -> set[str]:
-        """Места, куда игрок в принципе может направиться: примыкающие выходы (видны со
-        сцены) + текущее + всё, о чём есть запись на карте игрока (разведано / со слов)."""
+        """Места, куда игрок может направиться: текущее + примыкающие выходы + карта игрока
+        (разведано/со слов) + публичные лендмарки текущего поселения (лавки/ратуша/трактир…)."""
         cur = self.current_place()
         known = {cur} | set(self.world.spatial.connections(cur))
         for b in self.world.player_maps.get(self.player, {}).values():
             if b.get("place"):
                 known.add(b["place"])
+        sett = self._settlement_of(cur)                   # в городе — лендмарки известны (не нужно «разведывать» лавку)
+        if sett:
+            known.add(sett)
+            for pid, p in self.world.spatial.places.items():
+                if (set(p.affordances or []) & self._PUBLIC_AFF) and self._settlement_of(pid) == sett:
+                    known.add(pid)
         return known
 
     def _knows_place(self, place_id: str) -> bool:
@@ -2438,7 +2458,7 @@ class GameSession:
         return round(base * 100)
 
     _HOSTILE_KW = ["кин", "кид", "брос", "метн", "мета", "швыр", "ударь", "бью", "бей",
-                   "толкн", "пихн", "атак", "напад", "руб", "пни", "пина", "режу", "коли",
+                   "толкн", "пихн", "атак", "напад", "напас", "руб", "пни", "пина", "режу", "коли",
                    "стреля", "пыря", "плюн", "плюю", "плева", "врежу", "вмаж", "душу", "пощёчин",
                    "пощечин"]
 

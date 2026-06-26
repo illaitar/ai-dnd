@@ -109,9 +109,20 @@ def load_session(slug: str, use_model: bool = True) -> GameSession:
     for ed in d.get("events", []):                       # реплей рантайм-хвоста поверх
         world.apply(Event.from_dict(ed))
     world.clock.tick = int(d.get("clock", 0))
+    for _ in range(20):                                  # догнать стадии квестов: advance НЕ событийный,
+        progressed = False                               # реплей флагов сам по себе не двигает current_stages
+        for q in list(world.quests.values()):
+            if q.state == "active":
+                before = list(q.current_stages)
+                quests.advance(q)
+                if q.current_stages != before:
+                    progressed = True
+        if not progressed:
+            break
     session = GameSession(world, model=manager if use_model else None, quest_system=quests)
     from .snapshot import apply                           # снапшот обогащения поверх реконструкции
     apply(session, d.get("state"))                        # предметы/контейнеры/кошельки/персоны/память
+    session._quest_log_seen = session._toast_log_seen = len(quests.log)   # не всплывать из-за догоняющего advance
     session.boot = {"seed": d["seed"], "roster_size": d["roster_size"],
                     "scenario": d.get("scenario") or default_scenario(),
                     "pc_spec": resolve_pc_spec(d.get("pc_spec")), "baseline": d["baseline"],

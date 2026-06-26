@@ -23,6 +23,19 @@ function logEntry(html, cls) {
 function logSystem(t) { logEntry(esc(t), "system"); }
 function esc(s) { return (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 
+// всплывающая «ачивка»: слайд-ин справа, авто-исчезание
+function showToast(t) {
+  const box = $("toasts"); if (!box) return;
+  const el = document.createElement("div");
+  el.className = "toast toast-" + (t.kind || "event");
+  el.innerHTML = `<div class="toast-icon">${esc(t.icon || "🏆")}</div>`
+    + `<div class="toast-body"><div class="toast-title">${esc(t.title || "")}</div>`
+    + (t.text ? `<div class="toast-text">${esc(t.text)}</div>` : "") + `</div>`;
+  box.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("in"));
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 450); }, 4600);
+}
+
 // --------------------------------------------------------------- render ----
 function render(r) {
   if (r.server_online !== undefined) {
@@ -30,6 +43,17 @@ function render(r) {
     b.textContent = r.server_online ? "● модель ONLINE" : "○ модель OFFLINE (фоллбэки)";
     b.className = "badge " + (r.server_online ? "online" : "offline");
   }
+  if (r.kind === "loading") {                            // ползунок генерации новой игры
+    $("loading").classList.remove("hidden");
+    const pct = (r.total > 0) ? Math.round(100 * r.done / r.total) : null;
+    const fill = $("load-fill");
+    fill.classList.toggle("indet", pct === null);
+    fill.style.width = (pct === null ? 100 : Math.max(4, pct)) + "%";
+    $("load-label").textContent = r.label || "Генерация…";
+    $("load-pct").textContent = pct === null ? "" : pct + "%";
+    return;
+  }
+  if (r.toasts && r.toasts.length) r.toasts.forEach(showToast);   // «ачивки»
   if (r.text) {
     const cls = r.kind === "system" ? "system"
       : r.kind === "narration" ? "narration"
@@ -55,6 +79,7 @@ function render(r) {
   if (r.travel_far) openOverlay("mapview");           // «далеко — открой карту»: сразу показываем карту для маршрута
   if (r.kind === "error" && !$("levelup").classList.contains("hidden")) $("lvl-msg").textContent = r.text;
   if (r.kind === "look") {
+    $("loading").classList.add("hidden");               // мир готов — прячем ползунок
     renderExits(r.exits); renderNpcs(r.npcs); renderQuick();
     if (!menuShown) { menuShown = true; openOverlay("menu"); }   // экран меню при первом входе
   }
@@ -324,7 +349,11 @@ function renderNgForm() {
 function startNewGame() {
   send({ cmd: "new_game", scenario: ngSel.scenario, klass: ngSel.klass, kit: ngSel.kit,
          skills: ngSel.skills, l1: ngSel.l1, name: $("ng-name").value || "Герой" });
-  closeOverlay("newgame"); closeOverlay("menu"); logSystem("🆕 Новая игра…");
+  closeOverlay("newgame"); closeOverlay("menu");
+  $("loading").classList.remove("hidden");              // сразу показываем ползунок
+  $("load-fill").classList.add("indet"); $("load-fill").style.width = "100%";
+  $("load-label").textContent = "Строю мир…"; $("load-pct").textContent = "";
+  logSystem("🆕 Новая игра…");
 }
 // ---- повышение уровня (выборы 5e) ----
 function openLevelup(lv) { openOverlay("levelup"); renderLevelup(lv); }

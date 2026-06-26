@@ -147,6 +147,39 @@ main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }
 .combat-box { padding: 22px; width: min(800px, 94vw); }
 .dice-box { padding: 24px; width: min(440px, 92vw); text-align: center; }
 .ui-box { padding: 20px 22px; width: min(620px, 94vw); }
+.load-box { width: min(480px, 92vw); text-align: center; }
+.load-bar { height: 12px; background: var(--panel2); border: 1px solid var(--line2);
+  border-radius: 999px; overflow: hidden; margin: 16px 0 10px; }
+.load-fill { height: 100%; width: 4%; border-radius: 999px; transition: width .35s ease;
+  background: linear-gradient(90deg, var(--accent), var(--gold)); }
+.load-fill.indet { background: linear-gradient(90deg, var(--panel2) 0%, var(--accent) 50%, var(--panel2) 100%);
+  background-size: 200% 100%; animation: load-slide 1.1s linear infinite; }
+@keyframes load-slide { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.load-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.load-pct { color: var(--accent); font-family: var(--font-mono); font-size: 13px; font-weight: 650; }
+.load-hint { color: var(--faint); font-size: 12px; margin: 12px 0 0; line-height: 1.5; }
+
+/* всплывающие «ачивки» */
+.toasts { position: fixed; top: 16px; right: 16px; z-index: 50; display: flex; flex-direction: column;
+  gap: 10px; pointer-events: none; max-width: min(360px, 92vw); }
+.toast { display: flex; align-items: center; gap: 12px; padding: 12px 15px;
+  background: linear-gradient(135deg, var(--elev), var(--panel)); border: 1px solid var(--line2);
+  border-left: 3px solid var(--accent); border-radius: var(--r2); box-shadow: var(--sh2);
+  transform: translateX(118%); opacity: 0;
+  transition: transform .42s cubic-bezier(.2,.85,.25,1), opacity .42s; }
+.toast.in { transform: translateX(0); opacity: 1; }
+.toast.out { transform: translateX(118%); opacity: 0; }
+.toast-icon { font-size: 25px; line-height: 1; flex-shrink: 0; filter: drop-shadow(0 0 6px rgba(224,166,77,.4)); }
+.toast-body { min-width: 0; }
+.toast-title { color: var(--gold); font-weight: 700; font-size: 14px; letter-spacing: .2px; }
+.toast-text { color: var(--muted); font-size: 12.5px; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast-quest { border-left-color: var(--gold); }
+.toast-quest .toast-icon { filter: drop-shadow(0 0 7px rgba(236,210,154,.6)); }
+.toast-levelup { border-left-color: var(--accent2); }
+.toast-phase { border-left-color: var(--accent); }
+.toast-reshape { border-left-color: #b18cff; }
+.toast-event { border-left-color: var(--danger); }
 .combat-box h2, .dice-box h2, .ui-box h2 { color: var(--ink); margin-top: 0; font-size: 17px;
   display: flex; align-items: center; gap: 10px; }
 .ui-box h3 { margin: 6px 0; font-size: 13px; color: var(--muted); font-weight: 600;

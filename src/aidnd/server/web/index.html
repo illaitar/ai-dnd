@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+  <div id="toasts" class="toasts" aria-live="polite"></div>   <!-- всплывающие «ачивки» -->
   <header>
     <h1>⚔️ AI-DnD <span class="sub">вертикальный срез LMoP</span></h1>
     <div class="hdr-right">
@@ -164,6 +165,16 @@
         <span class="sp"></span>
         <button class="cbtn" id="ng-start">▶ Начать игру (1 ур.)</button>
       </div>
+    </div>
+  </div>
+
+  <!-- генерация новой игры: ползунок загрузки -->
+  <div id="loading" class="overlay hidden">
+    <div class="ui-box load-box">
+      <h2>✦ Создаётся мир</h2>
+      <div class="load-bar"><div id="load-fill" class="load-fill"></div></div>
+      <div class="load-row"><span id="load-label" class="state">Готовлю генерацию…</span><span id="load-pct" class="load-pct"></span></div>
+      <p class="load-hint">Оживляю фракции и жителей, проставляю лидеров и пишу сюжет кампании — это пара минут на одной видеокарте.</p>
     </div>
   </div>
 

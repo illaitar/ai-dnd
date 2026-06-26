@@ -4,8 +4,12 @@ A text-tactical **D&D 5e** engine with a persistent simulated world, LOD NPC sim
 and local **LLM agents** — a vertical slice of *Lost Mine of Phandalin*.
 
 - **[Architecture](architecture.md)** — the nine layers and the full turn pipeline.
-- **[Agent roles](agents.md)** — the eleven LLM roles and their deterministic fallbacks.
+- **[Agent roles](agents.md)** — the LLM roles, schemas, and their deterministic fallbacks.
+- **[Models & training](models.md)** — the fine-tuned LoRA adapters and the training pipeline.
+- **[Maps](maps.md)** — procedural town and dungeon generation.
 - **[Gameplay](gameplay.md)** — how to play, commands, map, pacing, dialogue.
+- **[Running locally](running.md)** — Ollama setup and model environment variables.
+- **[Development](development.md)** — source layout, testing, golden replay.
 
 ## Core principle: determinism is separated from language
 

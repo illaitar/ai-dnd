@@ -35,3 +35,81 @@ uv run aidnd doctor     # prints OLLAMA_HOST and whether the server is reachable
 
 Expose a local Ollama server (e.g. via SSH tunnel). When reachable, wired roles upgrade
 narration, NPC reasoning, item flavor, quests, and tactics; otherwise the fallbacks run.
+
+Several roles are fine-tuned LoRA adapters (`router`, `arbiter`, `consequence`, `narrator`,
+`quest_writer`, `location_writer`) — see [Models & training](models.md).
+
+## Role detail
+
+Grouped by where each fires in the [turn pipeline](architecture.md).
+
+### `intent` — understand the player
+- **Fires at:** *Parse intent*, only when the keyword parser is unsure.
+- **In:** player text + scene context (place, present NPCs, exits, affordances).
+- **Out:** `{ verb, target, tone, needs_clarification }` (`verb` is an enum of engine commands).
+- **Logic:** snaps to the nearest engine verb; a named NPC means `talk`, otherwise `freeform`.
+- **Fallback:** keyword parser (verbs, directions, aliases).
+
+### `plausibility` — feasibility gate
+- **Fires at:** *Resolve* for free-form/ambiguous actions, before anything is narrated.
+- **In:** the proposed action + world context.
+- **Out:** `{ plausibility 0..1, drivers, verdict_note }`.
+- **Fallback:** a rule list of impossible feats.
+
+### `narrator` — render the result
+- **Fires at:** *Narrate*, for dialogue replies **and** mechanical outcomes.
+- **In:** the structured outcome (verb, damage + damage type, dialogue decision, scene).
+- **Out:** prose narration — **never changes numbers**; no anachronisms, no invented NPC lines.
+- **Fallback:** grounded templates.
+
+### `cognition` — how an NPC reacts
+- **Fires at:** *World reacts*, during `talk`/social.
+- **In:** retrieved NPC memory + the relationship edge (trust/fear/affinity) + player verb/tone.
+- **Out:** an action policy `{ action, info_disclosed, rationale_tags }`; disclosure gated by trust/fear.
+- **Fallback:** a trust/fear gate table.
+
+### `reflection` — NPC belief synthesis
+- **Fires at:** *World reacts*, when an NPC's memory tree summarizes.
+- **In:** leaf observations. **Out:** higher-level reflections, each citing the observation ids.
+- **Fallback:** one aggregating reflection.
+
+### `character_gen` — fill the NPC pool
+- **Fires at:** lazily, at an NPC's first promotion (and when spawning passersby).
+- **In:** a skeleton persona. **Out:** `{ voice, traits }`; spawns satisfy world invariants.
+- **Fallback:** the deterministic skeleton persona.
+
+### `item_smith` — flavor an item instance
+- **Fires at:** *Resolve* for `search`/`loot`, when an item is spawned.
+- **In:** the item template + world context. **Out:** `{ name, description, properties }` — **cosmetic only**.
+- **Fallback:** the template name.
+
+### `tactician` — monster turns
+- **Fires at:** the *Combat loop*, on each monster's turn.
+- **In:** a battle-state digest + the monster's stat block. **Out:** `{ intent, target, move_to, ability }`.
+- **Fallback:** deterministic target selection / heuristic AI.
+
+### `director` — pacing
+- **Fires at:** *Pacing*, after a turn and during lulls.
+- **In:** a world digest, active quests, recent events, the quiet streak.
+- **Out:** a directive or an ambient beat; raises random-event odds the longer nothing happens.
+- **Fallback:** heuristics + seeded ambient beats.
+
+### `quest_writer` — side-quest text
+- **Fires at:** when a side quest is assembled.
+- **In:** the template, filled slots, world facts. **Out:** framing + giver/objective/completion text.
+- **Fallback:** template framing.
+
+### `lore_keeper` — invariant guard
+- **Fires at:** *Commit*, validating proposed/generated content.
+- **In:** the proposed content + the world knowledge graph. **Out:** a verdict with concrete fixes.
+- **Fallback:** direct invariant checks.
+
+### `faction_gen` — flesh out a faction
+- **Fires at:** lazily, the first time the player inspects a per-world faction.
+- **In:** the faction archetype + seed + the town. **Out:** `{ name, blurb, goals, values }`, persisted via an event.
+- **Fallback:** the archetype defaults.
+
+### `location_writer` — describe a place
+- **Fires at:** world enrichment, for notable places (and their sub-locations).
+- **In:** the location parameters (type, size, sensory fields, …). **Out:** persistent prose description.
+- **Fallback:** the short `ambiance` line. Fine-tuned as [`aidnd-location`](models.md) on the 14B base.

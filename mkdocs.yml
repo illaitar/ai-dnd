@@ -17,7 +17,11 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Agent roles: agents.md
+  - Models & training: models.md
+  - Maps: maps.md
   - Gameplay: gameplay.md
+  - Running locally: running.md
+  - Development: development.md
 
 markdown_extensions:
   - admonition

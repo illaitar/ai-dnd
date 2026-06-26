@@ -1,287 +1,71 @@
 # AI-DnD Engine
 
-A text-tactical **D&D 5e** engine with a persistent, simulated world, level-of-detail
-(LOD) NPC simulation, and a set of local **LLM agents**. It implements the nine-layer
-architecture from the AI-DnD design package as a vertical slice of *Lost Mine of
-Phandalin* (Phandalin town + the Cragmaw region).
+A text-tactical **D&D 5e** engine with a persistent, simulated world, level-of-detail (LOD)
+NPC simulation, and a set of local **LLM agents** — built as a vertical slice of *Lost Mine
+of Phandalin* (Phandalin town + the Cragmaw region). Backend in Python, presentation in JS.
 
-Backend in Python, presentation in JS.
-
----
-
-## Procedural maps
-
-The world is procedurally generated and **deterministic** — the same seed reproduces the
-same map. Towns are laid out Watabou-style (Voronoi wards, walls, a river, key buildings);
-dungeons are multi-level **tile maps** with varied room shapes, lock-and-key progression
-and hidden rooms. The model only adds flavor (names, descriptions) — never the layout.
-
-**Towns** — four seeds:
+**Determinism is separated from language.** Dice, rules, and world state are deterministic,
+auditable code; the LLM only *parses intent* and *renders results* — it never decides
+outcomes or computes mechanics. Every model path has a deterministic fallback, so the engine
+plays end-to-end **with no model server**, and the same seed + inputs reproduce the same
+`state_hash()` (golden replay).
 
 ![Generated town maps](docs/assets/city_maps.png)
 
-**Dungeons** — four themes (floor 1 shown, secret rooms revealed):
+## Highlights
 
-![Generated dungeon maps](docs/assets/dungeon_maps.png)
+- **Deterministic world** — procedural, seeded maps (Watabou-style towns; multi-level tile
+  dungeons with lock-and-key progression and hidden rooms). The model adds flavor, never
+  layout. → [Maps](docs/maps.md)
+- **Event-sourced state** — `world.commit(verb, …)` appends an `Event` applied through
+  `_h_*` handlers; read-models are derived, never authoritative. Auditable history + golden
+  replay. → [Architecture](docs/architecture.md)
+- **LOD NPC simulation** — per-NPC memory, relationships (affinity/trust/fear/respect) and
+  reflection; off-screen NPCs fast-forward by routine. → [Architecture](docs/architecture.md)
+- **LLM agent roles** — each a system prompt + JSON schema (structured decoding at
+  temperature 0) with a deterministic fallback. → [Agent roles](docs/agents.md)
 
-**A dungeon run** — fog lifts room by room, a locked door blocks the boss until the guard
-room is cleared, a hidden room is found by searching, then the boss falls (rendered from a
-deterministic, model-off playthrough):
+## Models
 
-![Dungeon playthrough](docs/assets/dungeon_playthrough.gif)
+Per-role **LoRA adapters** over a shared base, trained with QLoRA, exported to Ollama and
+published on Hugging Face. Each upgrades one role where wired in; all have deterministic
+fallbacks, so the engine runs fully without them. Details, datasets and the training
+pipeline: → [Models & training](docs/models.md).
 
-Regenerate with `python scripts/gen_map_collages.py dungeons` and
-`python scripts/gen_dungeon_anim.py` (dungeons/animation render in Python; town frames come
-from the in-browser city generator — see the script docstrings).
+| Adapter | Role | Base | Hugging Face |
+|---|---|---|---|
+| `aidnd-router` | parse player intent → verb / target / tone | Qwen3.5-9B | [nikalutis/aidnd-router](https://huggingface.co/nikalutis/aidnd-router) |
+| `aidnd-arbiter` | adjudicate free-form actions | Qwen3.5-9B | [nikalutis/aidnd-arbiter](https://huggingface.co/nikalutis/aidnd-arbiter) |
+| `aidnd-consequence` | world effects of a resolved action | Qwen3.5-9B | [nikalutis/aidnd-consequence](https://huggingface.co/nikalutis/aidnd-consequence) |
+| `aidnd-narrator` | render outcomes + dialogue as prose | Qwen3.5-9B | [nikalutis/aidnd-narrator](https://huggingface.co/nikalutis/aidnd-narrator) |
+| `aidnd-quest` | side-quest framing + giver lines | Qwen3.5-9B | [nikalutis/aidnd-quest](https://huggingface.co/nikalutis/aidnd-quest) |
+| `aidnd-location` | location descriptions (parameters → prose, with sub-locations) | Qwen3-14B | [nikalutis/aidnd-location](https://huggingface.co/nikalutis/aidnd-location) |
 
----
+Base models in Ollama: `qwen3.5:9b` (most roles) · `qwen3:14b` (location) · `qwen3.5:2b`
+(fast intent classifier).
 
-## Why it runs without a model
-
-**Determinism is separated from language.** Dice, rules, and world state are
-deterministic, auditable code. The LLM is used only to *parse the player's intent* and to
-*render results* — it never decides outcomes or computes mechanics. Every LLM path is
-guarded (`manager is None or not manager.available()` → `None`) and has a **deterministic
-fallback** (templates, seeded RNG, rule tables). So the engine plays end-to-end **with no
-model server**; a connected model only raises quality where a role is wired in.
-
-This is also what makes **golden-replay** possible: the same seed + same inputs reproduce
-the same `state_hash()`.
-
----
-
-## The pipeline
-
-The general flow after the player types text. This is the **control logic** — where LLM
-agents plug in is marked 🟣, but *what each agent does* is documented per-agent in
-[LLM agents](#llm-agents) below, not here.
-
-Node colour: 🟣 **may call an LLM agent** (always with a deterministic fallback) ·
-🟡 **decision** · 🟢 **in / out** · ⬜ **deterministic engine**.
-
-```mermaid
-flowchart TD
-  IN([Player types text]):::io --> H["GameSession.handle"]:::core
-  H --> CB{In combat?}:::dec
-  CB -- yes --> CMB["Combat loop<br/>attack · move · cast · end turn<br/>(monsters act via an agent)"]:::llm --> OUT
-  CB -- no --> PARSE["Parse intent<br/>keyword parser; unclear → LLM agent"]:::llm
-  PARSE --> ACT["Action<br/>verb · target · tone"]:::core
-
-  ACT --> DISP{Dispatch by verb}:::dec
-  DISP --> RES["Resolve verb<br/>rules + seeded RNG<br/>some verbs invoke an agent"]:::llm
-  RES --> ROLL{Roll needed?}:::dec
-  ROLL -- yes --> SUS["Suspend → RollRequest<br/>→ roll → adjudicate"]:::core --> COMMIT
-  ROLL -- no --> COMMIT
-
-  COMMIT["world.commit → Event → apply<br/>event-sourced · CQRS read-models<br/>content validated by an agent"]:::core
-  COMMIT --> REACT["World reacts<br/>cognition · LOD tiers · quests · factions"]:::core
-  REACT --> NARR["Narrate the outcome<br/>(agent; numbers never change)"]:::llm
-  NARR --> POST["Pacing<br/>(agent surfaces an ambient beat in a lull)"]:::llm
-  POST --> OUT([Response to player]):::io
-
-  classDef io fill:#1f6f4a,stroke:#5fd39a,color:#eafff4,font-weight:bold;
-  classDef llm fill:#3a2f6b,stroke:#9d8cff,color:#efeaff;
-  classDef dec fill:#7a5b16,stroke:#e6b84a,color:#fff7e6;
-  classDef core fill:#2b2f37,stroke:#6b7480,color:#eef1f5;
-```
-
-Stage by stage:
-
-1. **Handle / combat gate** — if a fight is active, only combat commands are accepted.
-2. **Parse intent** — a fast keyword parser; if the text isn't a clear command it falls
-   back to the `intent` agent, which maps free text onto the closest engine verb.
-3. **Dispatch** — the `Action` (verb · target · tone) is routed to a handler
-   (`move`, `talk`, `persuade`/`intimidate`, `attack`, `search`/`loot`, `buy`/`buyinfo`,
-   `freeform`, inventory, board, …).
-4. **Resolve** — deterministic rules + seeded dice decide the outcome; a roll, if needed,
-   suspends the turn as a `RollRequest` and resumes on the rolled faces.
-5. **Commit** — the only way state changes: `world.commit(verb, …)` appends an `Event` and
-   applies it to the read-models (event sourcing / CQRS).
-6. **World reacts** — cognition (NPC memory/relationships), LOD promotion, quest predicates,
-   and faction standing all update off the committed events.
-7. **Narrate & pace** — the outcome is rendered to prose and the director may inject an
-   ambient beat during a lull.
-
-Full write-up: [`docs/architecture.md`](docs/architecture.md).
-
----
-
-## LLM agents
-
-Each agent is a **system prompt + JSON schema** (constrained / structured decoding at
-temperature 0) with a **deterministic fallback**. Routing lives in
-`ModelManager.ROLE_MODELS`: `intent` uses a small fast model (`INTENT_MODEL`), every other
-role uses the base model (`BASE_MODEL`). Code: `src/aidnd/inference/agents.py`.
-
-Twelve roles, grouped by where they fire in the pipeline.
-
-### Input → output
-
-#### `intent` — understand the player
-- **Fires at:** *Parse intent*, only when the keyword parser is unsure.
-- **In:** player text + scene context (place, present NPCs, exits, affordances).
-- **Out:** `{ verb, target, tone, needs_clarification }` (`emit_intent`; `verb` is an enum of
-  engine commands).
-- **Logic:** few-shot, snaps to the nearest engine verb; unsure/"other" → a named NPC means
-  `talk`, otherwise `freeform`.
-- **Fallback:** keyword parser (verbs, directions, aliases).
-
-#### `plausibility` — feasibility gate
-- **Fires at:** *Resolve* for freeform/ambiguous actions, before anything is narrated.
-- **In:** the proposed action + world context.
-- **Out:** `{ plausibility 0..1, drivers, verdict_note }` (`estimate_plausibility`).
-- **Logic:** conservative — implausible-but-possible scores low, true contradictions and
-  impossible feats score near zero.
-- **Fallback:** a rule list of impossible feats.
-
-#### `narrator` — render the result
-- **Fires at:** *Narrate*, for dialogue replies **and** mechanical outcomes.
-- **In:** the structured outcome (verb, damage + damage type, dialogue decision, scene).
-- **Out:** prose narration — **never changes numbers**.
-- **Logic:** weapon/damage-type fidelity, no anachronisms, no invented NPC lines.
-- **Fallback:** grounded templates.
-
-#### `cognition` — how an NPC reacts
-- **Fires at:** *World reacts*, during `talk`/social.
-- **In:** retrieved NPC memory + the relationship edge (trust/fear/affinity) + player
-  verb/tone.
-- **Out:** an action policy `{ action, info_disclosed, rationale_tags }` (`propose_action`).
-- **Logic:** disclosure is gated by trust/fear; faction standing shifts the gate.
-- **Fallback:** a trust/fear gate table.
-
-#### `reflection` — NPC belief synthesis
-- **Fires at:** *World reacts*, when an NPC's memory tree summarizes.
-- **In:** leaf observations.
-- **Out:** higher-level reflections, each citing the observation ids it derives from
-  (`emit_reflections`).
-- **Fallback:** one aggregating reflection.
-
-#### `character_gen` — fill the NPC pool
-- **Fires at:** lazily, at an NPC's first promotion to L3 (and when spawning passersby).
-- **In:** a skeleton persona (name, archetype, race, traits).
-- **Out:** `{ voice, traits }` enrichment (`emit_persona`); spawns satisfy world invariants
-  (workplace, residence).
-- **Fallback:** the deterministic skeleton persona.
-
-#### `item_smith` — flavor an item instance
-- **Fires at:** *Resolve* for `search`/`loot`, when an item is spawned.
-- **In:** the item template + world context.
-- **Out:** `{ name, description, properties }` (`forge_item`) — **cosmetic only**; rarity,
-  bonuses and numbers stay fixed by the template.
-- **Fallback:** the template name.
-
-#### `tactician` — monster turns
-- **Fires at:** the *Combat loop*, on each monster's turn.
-- **In:** a battle-state digest + the monster's stat block.
-- **Out:** `{ intent, target, move_to, ability }` (`choose_tactic`); the rules engine
-  resolves dice and movement, the agent only *chooses*.
-- **Fallback:** deterministic target selection / heuristic AI.
-
-#### `director` — pacing
-- **Fires at:** *Pacing*, after a turn and during lulls.
-- **In:** a world digest, active quests, recent events, the quiet streak.
-- **Out:** a directive `{ directive, ref, reason }` (`emit_directive`) or an ambient beat.
-- **Logic:** raises random-event odds the longer nothing interesting happens, when the scene
-  allows it.
-- **Fallback:** heuristics + seeded ambient beats.
-
-#### `quest_writer` — side-quest text
-- **Fires at:** when a CSP side quest is assembled.
-- **In:** the template, filled slots (giver, target, location, reward), world facts.
-- **Out:** `{ title, framing, giver_lines, objective_text, completion_text }` (`write_quest`);
-  mechanics stay deterministic, the agent only writes flavor.
-- **Fallback:** template framing.
-
-#### `lore_keeper` — invariant guard
-- **Fires at:** *Commit*, validating proposed/generated content.
-- **In:** the proposed content + the world knowledge graph.
-- **Out:** a verdict with concrete fixes (every professional NPC has a workplace and
-  residence; every shop one owner; every named item an owner and a location).
-- **Fallback:** direct invariant checks.
-
-#### `faction_gen` — flesh out a faction
-- **Fires at:** lazily, the first time the player inspects a per-world faction.
-- **In:** the faction archetype kind + seed name/goals + the town.
-- **Out:** `{ name, blurb, goals, values }` (`forge_faction`); persisted via a
-  `faction_enrich` event so it survives save/load and replay.
-- **Fallback:** the archetype defaults (`rules/factions.py`).
-
----
-
-## Quickstart (uv)
+## Quickstart
 
 ```bash
 uv sync                      # runtime + dev group (pytest, ruff, zensical)
-uv run aidnd                 # play in the terminal
+uv run aidnd                 # play in the terminal — offline, no model required
 uv run aidnd serve           # web UI at http://127.0.0.1:8000  (live map at /map)
 uv run aidnd doctor          # check the model server (optional)
-uv run pytest -q             # tests
-uv run ruff check .          # lint
+uv run pytest -q             # deterministic test suite (runs model-off)
 ```
 
-No `uv`? A `.venv` + `pip install -e .` works too; or use `./run.sh`.
-
-### Connecting a model (optional)
-
-The engine runs fully offline. To enable model-rendered narration/judging, expose a local
-Ollama server (e.g. an SSH tunnel) and confirm with `uv run aidnd doctor`
-(`server available: True`). Without it, deterministic fallbacks are used.
-
-### Run on your own hardware (fully local)
-
-Run the model on your own machine via [Ollama](https://ollama.com) — no remote box, no
-tunnel. One-time setup installs Ollama, pulls the models and verifies:
-
-```bash
-bash scripts/setup_local.sh        # installs Ollama, pulls Qwen models, runs `doctor`
-./scripts/run_local.sh serve       # web UI on http://127.0.0.1:8000
-./scripts/run_local.sh             # play in the terminal
-./scripts/run_local.sh debug --quest dungeon   # console playthrough
-```
-
-Models are set in `scripts/local.env` and overridable by env var:
-
-| role | default | override |
-|---|---|---|
-| narration / cognition / combat / quests | `qwen2.5:7b-instruct` | `AIDND_MODEL` |
-| intent classifier (fast, small) | `qwen2.5:1.5b-instruct` | `AIDND_INTENT_MODEL` |
-
-Lighter machine? `AIDND_MODEL=qwen2.5:3b-instruct bash scripts/setup_local.sh`. The base
-model wants ~6–8 GB free RAM (7B) or ~3 GB (3B); the intent model is ~1 GB. Apple Silicon
-and recent Linux/NVIDIA work out of the box. The engine still falls back to deterministic
-behavior for any role if the server is down.
-
----
-
-## Layout
-
-```
-src/aidnd/
-  world/        # L1 ECS, event log, knowledge graph, spatial graph, environment
-  lod/          # L2 LOD tiers, salience, smart objects
-  cognition/    # L3 memory, relationships, reflection
-  inference/    # L4 model client, agent prompts+schemas, structured output
-  rules/        # L5 deterministic 5e rules, dice, progression, factions
-  combat/       # tactical combat (grid, surfaces, spells, tactician)
-  gen/          # L7 generation: NPCs, items, quests, factions, discovery, map info
-  runtime/      # L6/L8 orchestrator (game loop), leveling, director, persistence
-  content/      # authored Phandalin/Cragmaw content, classes, factions, board, quests
-  server/       # L9 FastAPI + WebSocket + web UI (game, /map, /city, /world, /eval)
-  eval/         # LLM-as-judge scene/conversation harness
-tests/          # pytest suite (deterministic, model-off)
-docs/           # documentation site (Zensical)
-scripts/        # asset generation (battle maps)
-```
-
----
-
-## Testing & determinism
-
-`uv run pytest -q` — the suite is deterministic (runs model-off). `tests/test_replay.py`
-guards golden-replay: identical seed + inputs reproduce identical `state_hash()`. Pacing,
-narration, and other model paths are read-only/flavor and never perturb the hash.
+No `uv`? A `.venv` + `pip install -e .` works too, or use `./run.sh`. To run the models on
+your own hardware (Ollama, no remote box), see [Running locally](docs/running.md).
 
 ## Docs
 
-Built with [Zensical](https://zensical.org): `uv run zensical serve` (or `build`).
-Source in [`docs/`](docs/).
+Built with [Zensical](https://zensical.org) — `uv run zensical serve` (or `build`). Source
+in [`docs/`](docs/):
+
+- **[Architecture](docs/architecture.md)** — the nine layers, the full turn pipeline, determinism.
+- **[Agent roles](docs/agents.md)** — every LLM role, its schema, where it fires, and its fallback.
+- **[Models & training](docs/models.md)** — the adapters, datasets, and the LoRA→GGUF→Ollama pipeline.
+- **[Maps](docs/maps.md)** — procedural town and dungeon generation.
+- **[Gameplay](docs/gameplay.md)** — how to play: commands, map, pacing, dialogue.
+- **[Running locally](docs/running.md)** — Ollama setup and model environment variables.
+- **[Development](docs/development.md)** — source layout, testing, and golden replay.

@@ -150,6 +150,7 @@ class ModelManager:
         self._available: bool | None = None
         self._models: set[str] = set()
         self._trace: list[dict] = []        # дебаг-трейс роутинга: какие роли→модели дёргались за ход
+        self.on_call = None                 # колбэк(role, model) на каждый LLM-вызов (для ползунка генерации)
 
     def available(self, recheck: bool = False) -> bool:
         """Проверяет доступность сервера (кешируется). False, если httpx не
@@ -176,6 +177,11 @@ class ModelManager:
         self._trace.append({"role": role, "model": resolved, "t": _perf_counter()})
         if len(self._trace) > 200:                       # safety: ограничить, если слив не зовут
             self._trace = self._trace[-100:]
+        if self.on_call is not None:                     # двигаем ползунок генерации на каждый вызов модели
+            try:
+                self.on_call(role, resolved)
+            except Exception:
+                pass
         return resolved
 
     def trace_take(self) -> list[dict]:

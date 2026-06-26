@@ -380,29 +380,39 @@ def phandalin_profile() -> SettlementProfile:
 
 
 def build_world(seed: int = 1337, roster_size: int = 12, model=None,
-                scenario: str | None = None, pc_spec: dict | None = None) -> World:
+                scenario: str | None = None, pc_spec: dict | None = None, progress=None) -> World:
     """Строит мир по манифесту предгенерации (док 01 §2).
 
     scenario/pc_spec задают старт новой игры (локация/флаги/спутники и класс/снаряжение).
     Применяются ДО фиксации baseline — поэтому детерминированно воспроизводятся при загрузке.
+    progress(0,0,label) — необяз. контекст-лейбл для ползунка генерации (что делаем сейчас).
     """
+    def _p(label):
+        if progress:
+            progress(0, 0, label)
     from .newgame import SCENARIOS, default_scenario
     sc = SCENARIOS.get(scenario or default_scenario(), SCENARIOS[default_scenario()])
     world = World(seed=seed)
     from .. import config
     world.clock.tick = config.START_HOUR * 60 // config.SIM_MINUTES_PER_TICK   # старт утром, а не в 00:00
+    _p("Загружаю правила и каталог предметов")
     register_item_templates(world)
     from .srd_pack import load_srd
     load_srd(world)                   # каталог SRD (монстры/предметы) поверх курируемого набора
+    _p("Строю кварталы Фэндалина")
     _build_places(world)              # 1. building graph
     from .maps import attach_battlemaps
     attach_battlemaps(world)          # боевые карты на узлы графа локаций
+    _p("Собираю слухи и знания мира")
     from .facts import build_fact_base
     build_fact_base(world, model=model)   # большой пул знаний мира/города (старт игры, до населения)
+    _p("Заселяю Фэндалин")
     _build_named_npcs(world)          # 2a. named population
     _build_encounter(world)           # 2b. encounter NPCs
+    _p("Рою окрестные подземелья")
     from .dungeons import build_dungeon, default_warren_brief
     build_dungeon(world, default_warren_brief(), seed)   # 2d. процедурное подземелье (пилот)
+    _p("Свожу фракции города")
     _build_factions(world)            # 5a. сюжетные фракции (LMoP)
     from ..gen.faction_gen import generate_factions
     generate_factions(world, "phandalin", model=model)   # 5b. гражданские фракции (per-world)
@@ -421,6 +431,7 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
         world.commit("set_position", "worldgen", target=cid,
                      payload={"region": REGION, "place": sc["start"]})
     # 2c. pregen roster поверх зданий (демография)
+    _p("Расселяю горожан и их распорядок")
     if roster_size > 0:
         CharacterGenerator(world, model=model).generate_roster(phandalin_profile(), roster_size)
     from ..gen.faction_gen import assign_faction_members, fill_faction_leaders

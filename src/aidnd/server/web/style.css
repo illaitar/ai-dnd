@@ -137,9 +137,14 @@ main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }
 
 /* ── overlays / cards ───────────────────────────────────────────────────── */
 .overlay { position: fixed; inset: 0; background: rgba(6,7,9,.66); display: flex;
-  align-items: center; justify-content: center; z-index: 10;
-  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: fade .2s ease; }
+  align-items: center; justify-content: center; z-index: 10; opacity: 1;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 .overlay.hidden { display: none; }
+/* появление — только по transform (opacity НЕ трогаем: anim на .overlay оставляла opacity:0 → оверлей-невидимка) */
+@keyframes box-in { from { transform: translateY(8px); } to { transform: none; } }
+.overlay:not(.hidden) > .ui-box,
+.overlay:not(.hidden) > .combat-box,
+.overlay:not(.hidden) > .dice-box { animation: box-in .18s ease; }
 .combat-box, .dice-box, .ui-box {
   background: var(--panel); border: 1px solid var(--line2); border-radius: var(--r3);
   box-shadow: var(--sh2); max-height: 92vh; overflow-y: auto;
@@ -180,6 +185,31 @@ main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }
 .toast-phase { border-left-color: var(--accent); }
 .toast-reshape { border-left-color: #b18cff; }
 .toast-event { border-left-color: var(--danger); }
+
+/* дебаг роутинга */
+.dbg-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted);
+  cursor: pointer; user-select: none; white-space: nowrap; }
+.dbg-toggle input { accent-color: var(--accent); cursor: pointer; margin: 0; }
+#log .routing { color: var(--accent2); font-family: var(--font-mono); font-size: 11.5px;
+  opacity: .85; word-break: break-word; padding: 2px 0; }
+
+/* журнал квестов */
+.jr-box { width: min(680px, 94vw); }
+.jr-list { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
+.jr-entry { background: var(--panel2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: var(--r2); padding: 13px 15px; }
+.jr-main { border-left-color: var(--gold); }
+.jr-board { border-left-color: var(--accent2); }
+.jr-head { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--ink); }
+.jr-tag { font-size: 10px; font-weight: 700; letter-spacing: .5px; color: var(--accent-ink);
+  background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+.jr-ok { color: var(--accent2); font-size: 12px; }
+.jr-brief { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 8px 0; white-space: pre-wrap; }
+.jr-stages { margin: 6px 0 0; padding: 0; list-style: none; }
+.jr-stages li { font-size: 13px; color: var(--faint); padding: 2px 0; }
+.jr-stages li.jr-done { color: var(--accent2); opacity: .8; }
+.jr-stages li.jr-cur { color: var(--gold); font-weight: 600; }
+.jr-meta { color: var(--faint); font-size: 11.5px; margin-top: 8px; }
 .combat-box h2, .dice-box h2, .ui-box h2 { color: var(--ink); margin-top: 0; font-size: 17px;
   display: flex; align-items: center; gap: 10px; }
 .ui-box h3 { margin: 6px 0; font-size: 13px; color: var(--muted); font-weight: 600;

@@ -11,6 +11,10 @@
   <header>
     <h1>⚔️ AI-DnD <span class="sub">вертикальный срез LMoP</span></h1>
     <div class="hdr-right">
+      <label class="dbg-toggle" title="Дебаг: показывать, в какие модели ушёл ввод (router→intent→…)">
+        <input type="checkbox" id="dbg-routing"> 🔀 роутинг
+      </label>
+      <button id="journal-btn" class="cbtn">📜 Журнал</button>
       <button id="menu-btn" class="cbtn">☰ Меню</button>
       <div id="server-badge" class="badge">…</div>
     </div>
@@ -175,6 +179,14 @@
       <div class="load-bar"><div id="load-fill" class="load-fill"></div></div>
       <div class="load-row"><span id="load-label" class="state">Готовлю генерацию…</span><span id="load-pct" class="load-pct"></span></div>
       <p class="load-hint">Оживляю фракции и жителей, проставляю лидеров и пишу сюжет кампании — это пара минут на одной видеокарте.</p>
+    </div>
+  </div>
+
+  <!-- журнал квестов: подробные записи с лором (id уникален — #journal уже занят панелью событий) -->
+  <div id="questlog" class="overlay hidden">
+    <div class="ui-box jr-box">
+      <h2>📜 Журнал квестов <button class="x" data-close="questlog">✕</button></h2>
+      <div id="jr-list" class="jr-list"></div>
     </div>
   </div>
 

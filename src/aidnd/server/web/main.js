@@ -36,6 +36,39 @@ function showToast(t) {
   setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 450); }, 4600);
 }
 
+// дебаг-трейс роутинга: в какие модели ушёл ввод (router→intent→narrator…), с длительностью
+function shortModel(m) { return (m || "").replace(/:latest$/, "").replace(/^aidnd-/, ""); }
+function showRouting(steps) {
+  if (!steps || !steps.length) return;
+  const chain = steps.map(s => `${s.role}·${shortModel(s.model)} ${s.ms}ms`).join("  →  ");
+  logEntry("🔀 " + esc(chain), "routing");
+}
+// журнал квестов — подробные записи (лор + стадии)
+function openJournal() {
+  openOverlay("questlog");
+  $("jr-list").innerHTML = "<div class='state'>Загрузка…</div>";
+  send({ cmd: "journal" });
+}
+function renderJournal(entries) {
+  const box = $("jr-list");
+  if (!entries || !entries.length) { box.innerHTML = "<div class='state'>Активных квестов пока нет.</div>"; return; }
+  const tag = k => k === "main" ? "ОСНОВНОЙ" : k === "board" ? "ДОСКА" : "ПОБОЧКА";
+  box.innerHTML = entries.map(q => {
+    const stages = (q.stages || []).map(s =>
+      `<li class="${s.done ? 'jr-done' : s.current ? 'jr-cur' : ''}">${s.done ? '✓' : s.current ? '▸' : '·'} ${esc(s.objective)}</li>`).join("");
+    const meta = [q.giver ? "Даёт: " + esc(q.giver) : "", q.reward ? "Награда: " + esc(q.reward) : ""].filter(Boolean).join(" · ");
+    return `<div class="jr-entry jr-${esc(q.kind)}">
+      <div class="jr-head"><span class="jr-tag">${tag(q.kind)}</span><b>${esc(q.title)}</b>${q.state === "completed" ? " <span class='jr-ok'>✓ выполнен</span>" : ""}</div>
+      <div class="jr-brief">${esc(q.brief || "")}</div>
+      <ul class="jr-stages">${stages}</ul>${meta ? `<div class="jr-meta">${meta}</div>` : ""}</div>`;
+  }).join("");
+}
+(() => {                                       // тумблер «роутинг» — состояние в localStorage
+  const c = document.getElementById("dbg-routing"); if (!c) return;
+  c.checked = localStorage.getItem("dbgRouting") === "1";
+  c.addEventListener("change", () => localStorage.setItem("dbgRouting", c.checked ? "1" : "0"));
+})();
+
 // --------------------------------------------------------------- render ----
 function render(r) {
   if (r.server_online !== undefined) {
@@ -54,6 +87,7 @@ function render(r) {
     return;
   }
   if (r.toasts && r.toasts.length) r.toasts.forEach(showToast);   // «ачивки»
+  if (r.kind === "journal") renderJournal(r.journal);             // подробный журнал квестов
   if (r.text) {
     const cls = r.kind === "system" ? "system"
       : r.kind === "narration" ? "narration"
@@ -61,6 +95,7 @@ function render(r) {
     const head = r.speaker ? `<span class="speaker">${esc(r.speaker)}</span> ` : "";
     logEntry(head + esc(r.text), cls);
   }
+  if (r.routing && $("dbg-routing") && $("dbg-routing").checked) showRouting(r.routing);  // дебаг роутинга
   if (r.clarify_places && r.clarify_places.length) {     // уточнение «куда именно» → кнопки выбора
     const div = document.createElement("div");
     div.className = "entry system"; div.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
@@ -860,6 +895,7 @@ $("map-go").onclick = goSelection;
 $("map-cancel").onclick = clearSelection;
 window.__map = { hits: () => mapHits, mode: () => mapMode, pick: (i) => setSelection(mapHits[i]), go: goSelection };
 $("menu-btn").onclick = () => openOverlay("menu");
+$("journal-btn").onclick = openJournal;
 $("m-new").onclick = () => { closeOverlay("menu"); openOverlay("newgame"); ensureNgOptions(); };
 $("m-continue").onclick = () => closeOverlay("menu");
 $("m-load").onclick = () => { closeOverlay("menu"); openLoad(); };

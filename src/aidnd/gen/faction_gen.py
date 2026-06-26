@@ -21,6 +21,15 @@ _CONTROL = {
     "thieves_guild": "building:sleeping_giant",
     "aristocracy": "building:edermath_orchard",
     "arcane": None,
+    "info_guild": None,                              # действует в тени, без фиксированной территории
+}
+# канонические лидеры сюжетных фракций (остальным лидер ставится из членов / заметного NPC)
+_CANON_LEADER = {
+    "faction:redbrands": "npc:iarno_glasstaff",
+    "faction:cragmaw": "npc:klarg",
+    "faction:info_guild": "npc:halia_thornton",      # Халия — брокер сведений (LMoP)
+    "faction:temple": "npc:sister_garaele",
+    "faction:lords_alliance": "npc:sildar_hallwinter",
 }
 # профессия NPC → членство в гражданской фракции (наполняет фракции людьми)
 PROF_FACTION = {
@@ -32,7 +41,7 @@ PROF_FACTION = {
 def generate_factions(world, profile_name: str = "phandalin", model=None) -> list[str]:
     """Детерминированно набрать гражданские фракции мира из пула архетипов."""
     rng = random.Random(subseed(world.seed, "factions", profile_name))
-    core = ["merchant_guild", "watch"]
+    core = ["merchant_guild", "watch", "info_guild"]      # info_guild теперь всегда в городе
     extra = rng.sample(["thieves_guild", "temple", "aristocracy", "arcane"], 2)
     kinds = core + extra
     made = []
@@ -74,6 +83,69 @@ def assign_faction_members(world) -> None:
             persona.faction = fid
             if npc not in fac.members:
                 fac.members.append(npc)
+
+
+def fill_faction_leaders(world) -> None:
+    """Проставить лидеров фракциям: канонический (Glasstaff/Klarg/Halia) → первый член →
+    детерминированный заметный беспартийный NPC. Закрывает дыру (leader=None у всех)."""
+    used = {getattr(f, "leader", None) for f in world.factions.values() if getattr(f, "leader", None)}
+    spare = None                                          # ленивый пул заметных беспартийных (для тайных фракций)
+    for fid, fac in world.factions.items():
+        if getattr(fac, "leader", None):
+            continue
+        leader = _CANON_LEADER.get(fid)
+        if not (leader and world.ecs.get(leader, Persona)):
+            leader = next((m for m in (getattr(fac, "members", None) or []) if m not in used), None)
+        if not leader:
+            if spare is None:
+                spare = [n for n in sorted(world.npcs())
+                         if (p := world.ecs.get(n, Persona)) and not getattr(p, "faction", None)
+                         and (getattr(p, "archetype", "") or getattr(p, "profession", "")).lower()
+                         not in _GENERIC_ROLE]
+            leader = next((n for n in spare if n not in used), None)
+        if not leader:
+            continue
+        fac.leader = leader
+        used.add(leader)
+        if leader not in fac.members:
+            fac.members.append(leader)
+        per = world.ecs.get(leader, Persona)
+        if per and not per.faction:
+            per.faction = fid
+
+
+_GENERIC_ROLE = {"", "none", "miner", "farmhand", "commoner", "townsfolk", "labourer"}
+
+
+def enrich_all(world, charts, model, progress=None) -> int:
+    """Жадно обогатить мир на старте: ВСЕ фракции (имя/цели/ценности) + заметные NPC (voice/traits).
+    progress(done, total, label) — для ползунка загрузки. Возвращает total."""
+    factions = list(world.factions.keys())
+    leaders = {getattr(f, "leader", None) for f in world.factions.values()}
+    npcs = []
+    for nid in world.npcs():
+        per = world.ecs.get(nid, Persona)
+        if not per or getattr(per, "enriched", False):
+            continue
+        role = (getattr(per, "archetype", "") or getattr(per, "profession", "") or "").lower()
+        if nid in leaders or role not in _GENERIC_ROLE:   # лидеры + неброские горожане
+            npcs.append(nid)
+    total = len(factions) + len(npcs)
+    done = 0
+    if progress:
+        progress(0, total, "Оживляю мир…")
+    for fid in factions:
+        enrich_faction(world, fid, model)
+        done += 1
+        if progress:
+            progress(done, total, f"Фракция: {world.factions[fid].name}")
+    for nid in npcs:
+        charts.enrich(nid)
+        done += 1
+        if progress:
+            per = world.ecs.get(nid, Persona)
+            progress(done, total, f"Персонаж: {getattr(per, 'name', nid)}")
+    return total
 
 
 def enrich_faction(world, fid: str, model=None) -> dict:

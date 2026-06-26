@@ -419,6 +419,7 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     # 2c. pregen roster поверх зданий (демография)
     if roster_size > 0:
         CharacterGenerator(world, model=model).generate_roster(phandalin_profile(), roster_size)
-    from ..gen.faction_gen import assign_faction_members
+    from ..gen.faction_gen import assign_faction_members, fill_faction_leaders
     assign_faction_members(world)     # 5c. раздать NPC по гражданским фракциям (по профессии)
+    fill_faction_leaders(world)       # 5d. проставить лидеров (канон/первый член) — детерминированно
     return world

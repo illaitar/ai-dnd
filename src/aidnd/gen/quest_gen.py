@@ -155,7 +155,8 @@ class QuestSystem:
                     self.world.flags.add(f"hook:{hook}")
                 quest.current_stages.remove(sid)
                 quest.current_stages.extend(stage.next_stages)
-                self.log.append(f"[{quest.title}] выполнено: {stage.objective}")
+                if quest.kind != "milestone":               # вехи невидимы в журнале
+                    self.log.append(f"[{quest.title}] выполнено: {stage.objective}")
                 progressed = True
         if progressed and not quest.current_stages:
             self.complete(quest)
@@ -179,7 +180,8 @@ class QuestSystem:
         if r.xp and self.world.player_id:
             self.world.commit("gain_xp", self.world.player_id,
                               payload={"xp": r.xp, "source": "quest"})
-        self.log.append(f"Квест завершён: {quest.title} (XP {r.xp})")
+        if quest.kind != "milestone":                       # вехи невидимы в журнале
+            self.log.append(f"Квест завершён: {quest.title} (XP {r.xp})")
 
 
 # --------------------------------------------------------------------------- #

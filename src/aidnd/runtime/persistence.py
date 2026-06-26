@@ -67,7 +67,7 @@ def save_session(session: GameSession, name: str) -> dict:
         "scenario": boot["scenario"], "pc_spec": boot["pc_spec"],
         "baseline": boot["baseline"], "clock": session.world.clock.tick,
         "journal": session.journal[-60:], "quiet": session.quiet_ticks,
-        "events": tail, "meta": meta,
+        "events": tail, "meta": meta, "main_quest": boot.get("main_quest"),
     }
     slug = _slug(name)
     with open(_path(slug), "w", encoding="utf-8") as f:
@@ -101,13 +101,17 @@ def load_session(slug: str, use_model: bool = True) -> GameSession:
                         scenario=d.get("scenario"), pc_spec=d.get("pc_spec"))
     quests = QuestSystem(world)
     register_quests(world, quests)                       # порядок как в new_session
+    if d.get("main_quest"):                              # сгенерированный сюжет — ДО реплея (его прогресс в хвосте)
+        from ..gen.campaign import plan_to_quest
+        quests.register(plan_to_quest(d["main_quest"]))
     for ed in d.get("events", []):                       # реплей рантайм-хвоста поверх
         world.apply(Event.from_dict(ed))
     world.clock.tick = int(d.get("clock", 0))
     session = GameSession(world, model=manager if use_model else None, quest_system=quests)
     session.boot = {"seed": d["seed"], "roster_size": d["roster_size"],
                     "scenario": d.get("scenario") or default_scenario(),
-                    "pc_spec": resolve_pc_spec(d.get("pc_spec")), "baseline": d["baseline"]}
+                    "pc_spec": resolve_pc_spec(d.get("pc_spec")), "baseline": d["baseline"],
+                    "main_quest": d.get("main_quest")}
     session.journal = list(d.get("journal", []))
     session.quiet_ticks = int(d.get("quiet", 0))
     return session

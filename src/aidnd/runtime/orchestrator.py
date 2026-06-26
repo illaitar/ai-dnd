@@ -70,6 +70,9 @@ class GameSession:
         self._history: list[dict] = []            # последние ходы (ввод/ответ) — контекст для роутера
         self.journal: list[str] = []              # журнал событий игрока (read-model)
         self._quest_log_seen = 0                  # сколько строк журнала квестов уже втянуто
+        self._toast_log_seen = 0                  # сколько строк журнала квестов уже превращено в тосты
+        self._toasts: list[dict] = []             # накопленные тосты-«ачивки» текущего хода (сливаются в send)
+        self._main_act: str | None = None         # текущий акт основного сюжета (для детекта перехода)
         self.quiet_ticks = 0                      # длина затишья для нарративного темпа
         self._log_journal("Ты прибыл в Фэндалин — фронтирный городок у Мечового Берега.")
 
@@ -248,6 +251,7 @@ class GameSession:
         if isinstance(result, dict) and result.get("kind") == "roll_request":
             return result
         result = self._surface_incidents(result)          # живые события, сработавшие за этот ход
+        result = self._director_reshape(result)            # квест-директор: переформат сюжета на переходе акта
         if self._is_eventful(result, verb):
             self.quiet_ticks = 0
             return result
@@ -271,6 +275,7 @@ class GameSession:
         for sp in pending:
             lines.append(f"⚡ В городе: {sp.label}" + (f" — {sp.desc}" if sp.desc else ""))
             self._log_journal("⚡ " + sp.label)
+            self._toast("event", "⚡", "Событие в городе", sp.label)
             if (sp.effects or {}).get("change"):
                 map_dirty = True
         result = dict(result)
@@ -278,6 +283,49 @@ class GameSession:
         result["incidents_fired"] = [sp.label for sp in pending]
         if map_dirty:
             result["map_dirty"] = True                     # фронту — перечитать карту (статусы изменились)
+        return result
+
+    def _world_delta_note(self) -> str:
+        """Чем мир изменился (для квест-директора): сработавшие события, мутации карты, союзы игрока."""
+        parts = []
+        incs = [j.split("⚡", 1)[1].strip() for j in self.journal if "⚡" in j][-5:]
+        if incs:
+            parts.append("События: " + "; ".join(incs))
+        _ST = {"closed": "закрыто", "ruined": "разрушено", "new": "новое", "open": ""}
+        changed = [f"{p.name} ({_ST.get(getattr(p, 'status', 'open'), p.status)})"
+                   for p in self.world.spatial.places.values() if getattr(p, "status", "open") != "open"]
+        if changed:
+            parts.append("Карта: " + ", ".join(changed[:5]))
+        pc = self.world.ecs.get(self.player, Persona)
+        if pc and getattr(pc, "faction", None):
+            fac = self.world.factions.get(pc.faction)
+            parts.append("Союз игрока: " + (fac.name if fac else pc.faction))
+        return "; ".join(parts)
+
+    def _director_reshape(self, result: dict) -> dict:
+        """На переходе акта основного сюжета — переформат ещё не пройденных актов под изменившийся
+        мир (этап 2). Тихий мир/нет модели/первая фиксация → без изменений."""
+        q = self.world.quests.get("quest:main")
+        if not q or q.state != "active" or not q.current_stages:
+            return result
+        cur = q.current_stages[0]
+        prev, self._main_act = self._main_act, cur
+        if cur == prev or prev is None:                    # нет перехода / первая фиксация на старте
+            return result
+        if self.model is None or not self.model.available():
+            return result
+        delta = self._world_delta_note()
+        if not delta:                                      # мир «тихий» — исходная арка остаётся
+            return result
+        from ..gen.campaign import reshape_main_quest
+        plan = (getattr(self, "boot", {}) or {}).get("main_quest") or {}
+        note = reshape_main_quest(self.world, q, plan, self.model, delta)
+        if note and isinstance(result, dict):
+            result = dict(result)
+            result["text"] = ((result.get("text") or "").rstrip() + "\n\n✶ " + note).strip()
+            result["main_reshaped"] = True
+            self._log_journal("✶ " + note)
+            self._toast("reshape", "✶", "Сюжет повернул", note)
         return result
 
     def _ambient_beat(self) -> dict | None:
@@ -2749,6 +2797,35 @@ class GameSession:
             self.journal.append(f"[{self.world.clock.hhmm()}] {line}")
         self._quest_log_seen = len(log)
 
+    # --------------------------------------------------- тосты-«ачивки» ----- #
+    def _toast(self, kind: str, icon: str, title: str, text: str = "") -> None:
+        """Поставить тост-«ачивку» в очередь текущего хода (сливается в drain_toasts при отправке)."""
+        self._toasts.append({"kind": kind, "icon": icon, "title": title, "text": text})
+
+    def _quest_toasts(self) -> list[dict]:
+        """Новые строки журнала квестов → тосты: фаза выполнена / квест завершён (вехи не логируются)."""
+        out = []
+        log = self.quests.log
+        for line in log[self._toast_log_seen:]:
+            if line.startswith("Квест завершён:"):
+                title = line[len("Квест завершён:"):].split("(XP")[0].strip()
+                out.append({"kind": "quest", "icon": "🏆", "title": "Квест выполнен", "text": title})
+            elif "] выполнено:" in line:
+                qt, obj = line[1:].split("] выполнено:", 1)
+                out.append({"kind": "phase", "icon": "✓", "title": qt.strip(), "text": obj.strip()})
+        self._toast_log_seen = len(log)
+        return out
+
+    def drain_toasts(self, result: dict) -> dict:
+        """Слить накопленные тосты (журнал квестов + поставленные за ход) в результат для фронта.
+        Единственная точка слива — вызывается WS-слоем перед отправкой, покрывает все пути."""
+        toasts = self._quest_toasts() + self._toasts
+        self._toasts = []
+        if toasts and isinstance(result, dict):
+            result = dict(result)
+            result["toasts"] = (result.get("toasts") or []) + toasts
+        return result
+
     def context_line(self) -> str:
         st = self.world.get_stats(self.player)
         p = self.world.ecs.get(self.player, Persona)
@@ -2760,7 +2837,7 @@ class GameSession:
     def active_quests(self) -> list[str]:
         out = []
         for q in self.world.quests.values():
-            if q.state not in ("offered", "active"):
+            if q.state not in ("offered", "active") or q.kind == "milestone":
                 continue
             obj = next((q.stage(sid).objective for sid in q.current_stages
                         if q.stage(sid)), "")
@@ -2860,6 +2937,7 @@ class GameSession:
         payload = build_payload(prog.class_id, target, st, prog, selections or {})
         self.world.commit("level_up", self.player, payload=payload)
         self._log_journal(f"Повышение до {target} уровня.")
+        self._toast("levelup", "⭐", f"{target} уровень!", f"{self._display(self.player)} стал сильнее")
         res = self.look()
         res["text"] = f"⬆ {self._display(self.player)} достигает {target} уровня!"
         return res
@@ -3010,6 +3088,20 @@ class GameSession:
             parts.append(f"реп. {self._faction_name(fid)} {'+' if d >= 0 else ''}{d}")
         return " · ".join(parts) or "—"
 
+    def _campaign_view(self) -> dict | None:
+        """Основной (сгенерированный) сюжет: интро-крючок, тема, текущая цель акта."""
+        plan = (getattr(self, "boot", {}) or {}).get("main_quest") or {}
+        mq = self.world.quests.get("quest:main")
+        obj = ""
+        if mq:
+            obj = next((mq.stage(s).objective for s in mq.current_stages if mq.stage(s)),
+                       mq.stages[0].objective if mq.stages else "")
+        if not (plan or mq):
+            return None
+        return {"title": (mq.title if mq else plan.get("title")), "premise": plan.get("premise"),
+                "intro": plan.get("intro"), "objective": obj,
+                "state": mq.state if mq else None}
+
     def board_view(self) -> dict | None:
         """Список простых заданий на доске (только когда игрок у доски объявлений)."""
         if not self._at_board():
@@ -3071,6 +3163,7 @@ class GameSession:
             "progression": prog_v,
             "levelup": self.pending_levelup(),
             "factions": self._factions_view(),
+            "campaign": self._campaign_view(),
             "board": self.board_view(),
             "inventory": self.inventory_view(),
             "place": place, "place_name": self._place_name(place),
@@ -3093,6 +3186,7 @@ class GameSession:
             "quests": [{"id": q.quest_id, "title": q.title, "state": q.state,
                         "objective": next((q.stage(sid).objective for sid in q.current_stages
                                            if q.stage(sid)), "")}
-                       for q in self.world.quests.values() if q.state in ("offered", "active")],
+                       for q in self.world.quests.values()
+                       if q.state in ("offered", "active") and q.kind != "milestone"],
             "quest_log": self.quests.log[-6:],
         }

@@ -11,7 +11,7 @@ from .runtime import GameSession
 
 def new_session(seed: int = config.WORLD_SEED, roster_size: int = 12,
                 use_model: bool = True, scenario: str | None = None,
-                pc_spec: dict | None = None) -> GameSession:
+                pc_spec: dict | None = None, progress=None) -> GameSession:
     """Строит мир (пре-ген), регистрирует квесты, возвращает игровую сессию.
 
     scenario/pc_spec — выбор старта новой игры. ModelManager передаётся всегда; если
@@ -31,7 +31,16 @@ def new_session(seed: int = config.WORLD_SEED, roster_size: int = 12,
     quests = QuestSystem(world)
     register_quests(world, quests)
     session = GameSession(world, model=manager if use_model else None, quest_system=quests)
+    if model is not None and progress is not None:        # жадное обогащение на старте (под ползунок загрузки)
+        from .gen.faction_gen import enrich_all
+        enrich_all(world, session.charts, model, progress)
+    from .gen.campaign import forge_main_quest, plan_to_quest   # сюжет — ПОСЛЕ обогащения (богаче лидеры/цели)
+    if progress:
+        progress(-1, -1, "Пишу сюжет кампании…")
+    main_plan = forge_main_quest(world, model)
+    quests.register(plan_to_quest(main_plan))
     session.boot = {"seed": seed, "roster_size": roster_size,
                     "scenario": scenario or default_scenario(),
-                    "pc_spec": resolve_pc_spec(pc_spec), "baseline": world.log.count()}
+                    "pc_spec": resolve_pc_spec(pc_spec), "baseline": world.log.count(),
+                    "main_quest": main_plan}                # план в boot → переживает сейв/лоад
     return session

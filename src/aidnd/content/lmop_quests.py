@@ -75,8 +75,25 @@ def _wyvern_tor_quest() -> Quest:
     )
 
 
+def _cragmaw_milestone() -> Quest:
+    """Скрытая мировая веха: смерть Кларга → флаг cragmaw_cleared (гейтит пейсинг и хук Красных
+    плащей в director/orchestrator). Раньше это давала стадия s1 lost_mine — сохраняем механизм
+    после замены основного сюжета на генерацию. Невидима в UI/журнале (kind=milestone)."""
+    return Quest(
+        quest_id="quest:milestone_cragmaw", kind="milestone", title="", giver_ref=None,
+        state="active", current_stages=["m1"],
+        stages=[Stage("m1", "", completion_conditions=[Predicate("NpcDead", ["npc:klarg"])],
+                      on_complete=[{"effect": "set_flag", "flag": "cragmaw_cleared"}], next_stages=[])])
+
+
 def register_quests(world, quest_system: QuestSystem) -> None:
-    for q in (_main_plot(), _lionshield_quest(), _wyvern_tor_quest()):
+    # основной сюжет теперь генерируется на старте (gen.campaign), а не lost_mine; здесь — побочки + вехи
+    for q in (_lionshield_quest(), _wyvern_tor_quest(), _cragmaw_milestone()):
         quest_system.register(q)
     from .board import register_board_quests
     register_board_quests(world, quest_system)          # простые задания с доски объявлений
+
+
+def classic_main_plot() -> Quest:
+    """Авторский LMoP-сюжет — для сценария-«классики» (по запросу)."""
+    return _main_plot()

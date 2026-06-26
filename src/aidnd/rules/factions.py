@@ -57,6 +57,14 @@ FACTION_ARCHETYPES = {
         "ranks": ["Ученик", "Адепт", "Архимаг"],
         "join_min_rep": 0.35,
     },
+    "info_guild": {
+        "name": "Информационная гильдия", "emblem": "👁", "kind": "info_guild",
+        "blurb": "Сеть осведомителей и скупщиков тайн: знает всё, торгует всем.",
+        "goals": ["собирать и продавать сведения", "держать руку на пульсе города"],
+        "values": ["знание", "сдержанность", "рычаги влияния"],
+        "ranks": ["Слушок", "Осведомитель", "Скупщик тайн", "Хозяин слухов"],
+        "join_min_rep": 0.3,
+    },
 }
 
 # взаимная неприязнь/союзничество по виду (faction kind -> {kind: value})
@@ -67,6 +75,7 @@ ARCHETYPE_RELATIONS = {
     "aristocracy": {"merchant_guild": 0.4, "thieves_guild": -0.3, "temple": 0.2},
     "temple": {"arcane": -0.2, "aristocracy": 0.2},
     "arcane": {"temple": -0.2},
+    "info_guild": {"thieves_guild": 0.3, "watch": -0.3, "merchant_guild": 0.2},
 }
 
 # тиры стояния игрока с фракцией

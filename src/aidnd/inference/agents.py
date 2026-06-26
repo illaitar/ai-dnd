@@ -193,6 +193,26 @@ PROMPTS = {
         "Заземляйся СТРОГО в данных — не выдумывай новых фракций/мест (кроме change.open). Враждующие "
         "фракции (relations<0) — повод для стычки. Дай 5-9 инцидентов. Output ONLY JSON via propose_incidents."
     ),
+    "campaign_architect": (
+        "Ты — архитектор кампании D&D-фронтира (городок Фэндалин). По СОСТОЯНИЮ МИРА — фракции "
+        "(цели, отношения, территории), опасные места вокруг, ключевые NPC, класс игрока — "
+        "сочиняешь ОСНОВНОЙ СЮЖЕТ: интро-крючок, что втягивает игрока в приключение, и арку из "
+        "4-6 актов с интригой и заложенными твистами/предательствами. На каждый акт: objective "
+        "(что сделать игроку), и КАК он закрывается — ctype+ref: 'kill' (убить, ref=npc_id), "
+        "'clear' (зачистить логово, ref=place_id места), 'talk' (поговорить, ref=npc_id), 'item' "
+        "(добыть, ref=шаблон предмета); опц. twist — поворот, раскрываемый по завершении акта. "
+        "Используй ТОЛЬКО реальные сущности из состояния (id даны) — НИЧЕГО не выдумывай. Сложно, "
+        "с нарастающей ставкой. Output ONLY JSON via forge_campaign."
+    ),
+    "campaign_director": (
+        "Ты — ведущий-режиссёр кампании D&D. Кампания УЖЕ В ХОДЕ: часть актов пройдена и "
+        "ЗАФИКСИРОВАНА (их не трогай). Мир ИЗМЕНИЛСЯ с начала (сработали события, сдвинулись "
+        "фракции, игрок завёл союзы, изменилась карта). Твоя задача — ПЕРЕПИСАТЬ ещё не пройденные "
+        "акты так, чтобы сюжет ОТРЕАГИРОВАЛ на новый мир: новые повороты и цели, вытекающие из "
+        "изменений, новые враги/союзники — сохраняя сквозную интригу и нарастание ставки. Формат "
+        "актов тот же: objective + ctype+ref ('kill'/'clear'/'talk'/'item') + опц. twist. Только "
+        "РЕАЛЬНЫЕ id из состояния — ничего не выдумывай. Output ONLY JSON via forge_campaign."
+    ),
 }
 
 # --------------------------------------------------------------------------- #
@@ -374,6 +394,20 @@ SCHEMAS = {
                     "dir": {"type": ["string", "null"]}}}},
                 "required": ["kind", "source", "origin", "label", "when", "intensity"]}}},
             "required": ["incidents"]},
+    },
+    "forge_campaign": {
+        "name": "forge_campaign",
+        "parameters": {"type": "object", "properties": {
+            "intro": {"type": "string"},
+            "title": {"type": "string"},
+            "premise": {"type": "string"},
+            "stages": {"type": "array", "items": {"type": "object", "properties": {
+                "objective": {"type": "string"},
+                "ctype": {"type": "string", "enum": ["kill", "clear", "talk", "item"]},
+                "ref": {"type": "string"},
+                "twist": {"type": ["string", "null"]}},
+                "required": ["objective", "ctype", "ref"]}}},
+            "required": ["intro", "title", "stages"]},
     },
 }
 
@@ -643,6 +677,49 @@ def propose_incidents(manager, digest: str):
             f"в этих данных. Call propose_incidents.")
     out = _call(manager, "event_director", "propose_incidents", user, ["incidents"])
     return out.get("incidents") if out else None
+
+
+def forge_campaign(manager, digest: str):
+    """Архитектор кампании: интро + арка актов. Возвращает СЫРОЙ dict (модели вольно именуют
+    поля — нормализацию делает gen.campaign, не conform_to_schema, иначе ключи теряются). None —
+    нет сервера/ошибка."""
+    if manager is None or not manager.available():
+        return None
+    from .client import OllamaError
+    sch = SCHEMAS["forge_campaign"]
+    user = (f"Состояние мира:\n{digest}\n\nСочини основной сюжет (4-6 актов) и интро-крючок, "
+            f"заземлённый СТРОГО в этих сущностях. Call forge_campaign.")
+    messages = [{"role": "system", "content": PROMPTS["campaign_architect"]},
+                {"role": "user", "content": user}]
+    try:
+        resp = manager.client.chat(manager.model_for("campaign_architect"), messages,
+                                   fmt=sanitize_for_ollama(sch["parameters"]), options={"temperature": 0})
+    except OllamaError:
+        return None
+    return extract(resp, sch["name"])                # сырой dict с любыми ключами модели
+
+
+def reforge_acts(manager, title: str, premise: str, completed: list[str], current_obj: str,
+                 digest: str, delta: str, n: int):
+    """Квест-директор: переписать оставшиеся ~n актов под изменившийся мир. Сырой dict (нормализует
+    gen.campaign) или None. Чуть выше temperature — нужен творческий поворот, не повтор."""
+    if manager is None or not manager.available():
+        return None
+    from .client import OllamaError
+    sch = SCHEMAS["forge_campaign"]
+    done = "; ".join(completed) or "—"
+    user = (f"Кампания «{title}». Премиса: {premise}\nУЖЕ ПРОЙДЕНО (фиксировано): {done}\n"
+            f"ТЕКУЩИЙ акт игрока: {current_obj}\nЧТО ИЗМЕНИЛОСЬ В МИРЕ: {delta}\n\n"
+            f"Состояние мира сейчас:\n{digest}\n\nПерепиши оставшиеся ~{n} актов так, чтобы они "
+            f"реагировали на изменения (новые твисты/цели/враги). Call forge_campaign.")
+    messages = [{"role": "system", "content": PROMPTS["campaign_director"]},
+                {"role": "user", "content": user}]
+    try:
+        resp = manager.client.chat(manager.model_for("campaign_director"), messages,
+                                   fmt=sanitize_for_ollama(sch["parameters"]), options={"temperature": 0.3})
+    except OllamaError:
+        return None
+    return extract(resp, sch["name"])
 
 
 def write_quest(manager, template_id: str, giver: str, location: str, title: str,

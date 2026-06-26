@@ -78,13 +78,12 @@ def test_player_death_is_game_over():
 
 
 def test_quest_advances_on_klarg_death():
+    # основной сюжет теперь генерируется (gen.campaign); веха «Крэгмо» сохраняет милстоун-флаг
     s = new_session(seed=1337, roster_size=4, use_model=False)
-    q = s.world.quests["quest:lost_mine"]
-    assert q.current_stages == ["s1"]
+    assert "cragmaw_cleared" not in s.world.flags
     st = s.world.get_stats("npc:klarg")
     s.world.commit("damage", "pc:hero", target="npc:klarg", payload={"amount": st.hp})
-    assert "cragmaw_cleared" in s.world.flags
-    assert q.current_stages == ["s2"]
+    assert "cragmaw_cleared" in s.world.flags          # смерть Кларга → веха срабатывает
 
 
 def test_corpse_after_victory():

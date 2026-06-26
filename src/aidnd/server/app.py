@@ -7,6 +7,7 @@ server-authoritative animated (док 07 §8): сервер кидает, кли
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import os
@@ -379,18 +380,18 @@ async def ws(sock: WebSocket) -> None:
         await sock.close()
         return
     _active["n"] += 1
-    session = new_session(seed=config.WORLD_SEED, roster_size=12, use_model=True)
-    salt = {"n": 1}
+    try:                                                  # счётчик сессий — строго внутри try/finally,
+        session = new_session(seed=config.WORLD_SEED, roster_size=12, use_model=True)
+        salt = {"n": 1}
 
-    async def send(result: dict) -> None:
-        await sock.send_text(json.dumps(result, ensure_ascii=False, default=str))
+        async def send(result: dict) -> None:
+            await sock.send_text(json.dumps(result, ensure_ascii=False, default=str))
 
-    online = bool(session.model and session.model.available())
-    intro = session.look()
-    intro["server_online"] = online
-    await send(intro)
+        online = bool(session.model and session.model.available())
+        intro = session.look()
+        intro["server_online"] = online
+        await send(intro)                                 # иначе обрыв на intro течёт слотом (не декрементится)
 
-    try:
         while True:
             msg = json.loads(await sock.receive_text())
             cmd = msg.get("cmd")
@@ -430,9 +431,15 @@ async def ws(sock: WebSocket) -> None:
                 pc_spec = {"klass": msg.get("klass"), "kit": msg.get("kit"),
                            "name": msg.get("name"), "skills": msg.get("skills"),
                            "l1": msg.get("l1")}
-                session = new_session(seed=int(msg.get("seed", config.WORLD_SEED)),
-                                      roster_size=12, use_model=True,
-                                      scenario=msg.get("scenario"), pc_spec=pc_spec)
+                loop = asyncio.get_running_loop()         # стримим прогресс генерации из рабочего треда
+                def _progress(done, total, label):
+                    asyncio.run_coroutine_threadsafe(
+                        send({"kind": "loading", "done": done, "total": total, "label": label}), loop)
+                await send({"kind": "loading", "done": 0, "total": 0, "label": "Строю мир…"})
+                session = await asyncio.to_thread(       # жадная генерация не блокирует event loop
+                    new_session, seed=int(msg.get("seed", config.WORLD_SEED)),
+                    roster_size=12, use_model=True, scenario=msg.get("scenario"),
+                    pc_spec=pc_spec, progress=_progress)
                 result = session.look()
                 result["server_online"] = bool(session.model and session.model.available())
             elif cmd == "levelup":
@@ -474,6 +481,7 @@ async def ws(sock: WebSocket) -> None:
             else:
                 result = {"kind": "error", "text": f"неизвестная команда {cmd}",
                           "view": session.view()}
+            result = session.drain_toasts(result)         # тосты-«ачивки» за ход → фронту
             await send(result)
     except WebSocketDisconnect:
         pass

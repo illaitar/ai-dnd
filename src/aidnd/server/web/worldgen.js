@@ -20,7 +20,7 @@ const BELIEF = { explored: "#2e7d32", confirmed: "#2f6fb0", hearsay: "#b07a1e", 
 
 export function drawWorld(ctx, W, H, opts = {}) {
   const seed = opts.seed || 1, nodes = opts.nodes || [], chrome = opts.chrome !== false;
-  const CX = W / 2, CY = H / 2, hits = [];
+  const CX = W / 2, CY = H / 2, hits = [], s = W / 560;   // s — масштаб шрифтов/хрома под HiDPI-бэкстор
   const CELL = 7, COLS = Math.ceil(W / CELL), ROWS = Math.ceil(H / CELL);
   const e1 = noise(seed * 7 + 1, 10, COLS, ROWS), e2 = noise(seed * 7 + 2, 4.5, COLS, ROWS),
     e3 = noise(seed * 7 + 3, 2, COLS, ROWS), e4 = noise(seed * 7 + 4, 1, COLS, ROWS),
@@ -62,13 +62,13 @@ export function drawWorld(ctx, W, H, opts = {}) {
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   [[COLS * 0.55, ROWS * 0.12], [COLS * 0.75, ROWS * 0.1], [COLS * 0.4, ROWS * 0.3]].forEach(s => {
     const p = river(Math.round(s[0]), Math.round(s[1])); if (p.length < 3) return;
-    ctx.strokeStyle = "rgba(48,96,138,.9)"; ctx.lineWidth = 2.6; ctx.beginPath();
+    ctx.strokeStyle = "rgba(48,96,138,.9)"; ctx.lineWidth = 2.6 * s; ctx.beginPath();
     ctx.moveTo(p[0][0] * CELL, p[0][1] * CELL); for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0] * CELL, p[i][1] * CELL); ctx.stroke();
-    ctx.strokeStyle = "rgba(150,200,225,.55)"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = "rgba(150,200,225,.55)"; ctx.lineWidth = 1 * s; ctx.stroke();
   });
   // виньетка + рамка
   const vg = ctx.createRadialGradient(CX, CY * 0.96, H * 0.34, CX, CY, H * 0.86); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(40,28,12,.4)"); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = "#4a3415"; ctx.lineWidth = 5; ctx.strokeRect(5, 5, W - 10, H - 10);
+  ctx.strokeStyle = "#4a3415"; ctx.lineWidth = 5 * s; ctx.strokeRect(5 * s, 5 * s, W - 10 * s, H - 10 * s);
   // точки региона по сторонам света (город в центре)
   const Rx = W * 0.34, Ry = H * 0.32;
   // тракты от центра к известным точкам
@@ -77,22 +77,22 @@ export function drawWorld(ctx, W, H, opts = {}) {
   for (const n of nodes) {
     const Ln2 = Math.hypot(n.dx, n.dy), x = Ln2 ? CX + n.dx / Ln2 * Rx : CX, y = Ln2 ? CY + n.dy / Ln2 * Ry : CY;
     const col = n.current ? "#d8b15a" : (BELIEF[n.display] || "#9a8458");
-    ctx.save(); ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1;
-    ctx.beginPath(); ctx.arc(x, y, Ln2 ? 10 : 12, 0, 7); ctx.fillStyle = "rgba(244,232,200,.96)"; ctx.fill(); ctx.restore();
-    ctx.lineWidth = n.current ? 3 : 2.2; ctx.strokeStyle = col; if (n.display === "hearsay") ctx.setLineDash([3, 2]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.font = "12px Georgia"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.save(); ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = 4 * s; ctx.shadowOffsetY = s;
+    ctx.beginPath(); ctx.arc(x, y, (Ln2 ? 10 : 12) * s, 0, 7); ctx.fillStyle = "rgba(244,232,200,.96)"; ctx.fill(); ctx.restore();
+    ctx.lineWidth = (n.current ? 3 : 2.2) * s; ctx.strokeStyle = col; if (n.display === "hearsay") ctx.setLineDash([3 * s, 2 * s]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.font = `${Math.round(13 * s)}px Inter`; ctx.textAlign = "center"; ctx.textBaseline = "top";
     const nm = n.name.length > 18 ? n.name.slice(0, 17) + "…" : n.name, w = ctx.measureText(nm).width;
-    ctx.fillStyle = "rgba(244,232,200,.92)"; ctx.strokeStyle = "#5a4222"; ctx.lineWidth = 0.7; rr(ctx, x - w / 2 - 5, y + 12, w + 10, 16, 4); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = "#2c2113"; ctx.fillText(nm, x, y + 14);
-    if (n.go) hits.push({ x, y, r: 15, go: n.go, name: n.name });
+    ctx.fillStyle = "rgba(244,232,200,.94)"; ctx.strokeStyle = "#5a4222"; ctx.lineWidth = 0.7 * s; rr(ctx, x - w / 2 - 5 * s, y + 12 * s, w + 10 * s, 18 * s, 4 * s); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#2c2113"; ctx.fillText(nm, x, y + 15 * s);
+    if (n.go) hits.push({ x, y, r: 15 * s, go: n.go, name: n.name });
   }
   // подпись моря + компас + картуш
-  ctx.fillStyle = "rgba(30,55,78,.55)"; ctx.font = "italic 15px Georgia"; ctx.save(); ctx.translate(34, CY); ctx.rotate(-Math.PI / 2); ctx.textAlign = "center"; ctx.fillText("М О Р Е", 0, 0); ctx.restore();
-  if (chrome) { compass(ctx, W); cartouche(ctx, W, opts.title || "Окрестности Фэндалина"); }
+  ctx.fillStyle = "rgba(30,55,78,.6)"; ctx.font = `${Math.round(15 * s)}px Inter`; ctx.save(); ctx.translate(34 * s, CY); ctx.rotate(-Math.PI / 2); ctx.textAlign = "center"; ctx.fillText("М О Р Е", 0, 0); ctx.restore();
+  if (chrome) { compass(ctx, W, s); cartouche(ctx, W, opts.title || "Окрестности Фэндалина", s); }
   return hits;
 }
 function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-function compass(ctx, W) { ctx.save(); ctx.translate(W - 42, 48); ctx.fillStyle = "rgba(244,232,200,.85)"; ctx.beginPath(); ctx.arc(0, 0, 18, 0, 7); ctx.fill(); ctx.strokeStyle = "#4a3415"; ctx.lineWidth = 1; ctx.stroke(); ctx.fillStyle = "#4a3415"; ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(4, -3); ctx.lineTo(-4, -3); ctx.fill(); ctx.font = "bold 9px Georgia"; ctx.textAlign = "center"; ctx.fillText("С", 0, -22); ctx.restore(); }
-function cartouche(ctx, W, t) { ctx.fillStyle = "rgba(202,164,74,.92)"; ctx.strokeStyle = "#5a4222"; ctx.lineWidth = 1.4; rr(ctx, W / 2 - 150, 14, 300, 28, 5); ctx.fill(); ctx.stroke(); ctx.fillStyle = "#2c2113"; ctx.font = "italic 16px Georgia"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(t, W / 2, 29); }
+function compass(ctx, W, s = 1) { ctx.save(); ctx.translate(W - 46 * s, 50 * s); ctx.fillStyle = "rgba(244,232,200,.9)"; ctx.beginPath(); ctx.arc(0, 0, 20 * s, 0, 7); ctx.fill(); ctx.strokeStyle = "#4a3415"; ctx.lineWidth = s; ctx.stroke(); ctx.fillStyle = "#4a3415"; ctx.beginPath(); ctx.moveTo(0, -22 * s); ctx.lineTo(4.5 * s, -3 * s); ctx.lineTo(-4.5 * s, -3 * s); ctx.fill(); ctx.font = `700 ${Math.round(11 * s)}px Inter`; ctx.textAlign = "center"; ctx.fillText("С", 0, -24 * s); ctx.restore(); }
+function cartouche(ctx, W, t, s = 1) { ctx.fillStyle = "rgba(202,164,74,.94)"; ctx.strokeStyle = "#5a4222"; ctx.lineWidth = 1.4 * s; rr(ctx, W / 2 - 155 * s, 14 * s, 310 * s, 30 * s, 6 * s); ctx.fill(); ctx.stroke(); ctx.fillStyle = "#2c2113"; ctx.font = `600 ${Math.round(15 * s)}px Inter`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(t, W / 2, 29 * s); }
 
 window.drawWorld = drawWorld;

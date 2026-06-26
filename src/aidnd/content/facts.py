@@ -240,7 +240,7 @@ def diffuse_rumors(world, max_spreads: int | None = None) -> int:
     spreadable = [fid for fid, f in world.facts.items()
                   if isinstance(f, Fact) and f.scope in ("world", "city")
                   and f.truth and f.sensitivity <= 0.2]
-    npcs = world.npcs()
+    npcs = [n for n in world.npcs() if world.is_alive(n)]   # мёртвые слухов не разносят
     if not spreadable or len(npcs) < 2:
         return 0
     rng.shuffle(spreadable)

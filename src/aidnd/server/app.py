@@ -390,6 +390,7 @@ async def ws(sock: WebSocket) -> None:
         online = bool(session.model and session.model.available())
         intro = session.look()
         intro["server_online"] = online
+        intro = session.drain_toasts(intro)               # сбросить ген-трейс старта (чтоб не утёк в 1-ю команду)
         await send(intro)                                 # иначе обрыв на intro течёт слотом (не декрементится)
 
         while True:
@@ -444,6 +445,9 @@ async def ws(sock: WebSocket) -> None:
                 result["server_online"] = bool(session.model and session.model.available())
             elif cmd == "levelup":
                 result = session.apply_levelup(msg.get("selections") or {})
+            elif cmd == "journal":                        # подробный журнал квестов (лор/стадии)
+                result = {"kind": "journal", "journal": session.quest_journal(),
+                          "view": session.view()}
             elif cmd == "faction_join":
                 result = session.join_faction(msg.get("faction", ""))
             elif cmd == "faction_leave":

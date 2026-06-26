@@ -51,9 +51,11 @@ def _build_places(world: World) -> None:
         ("building:edermath_orchard", "Сад Эдермата", "outskirts", ["farm", "work", "residential"]),
         ("building:alderleaf_farm", "Ферма Олдерлиф", "outskirts", ["farm", "work", "residential"]),
     ]
+    _HOURS = {"shop": (8, 20), "townhall": (9, 18), "shrine": (7, 21)}  # часы по аффордансу; инн/ферма — всегда
     for bid, name, district, affs in buildings:
+        hrs = next((_HOURS[a] for a in affs if a in _HOURS), None)
         sp.add_place(Place(bid, "building", name, parent="settlement:phandalin",
-                           district=district, affordances=affs))
+                           district=district, affordances=affs, hours=hrs))
         world.commit("kg_add", "worldgen", payload={"s": bid, "r": "located_in", "o": f"district:{district}"})
 
     # карта по сторонам света: рыночная площадь — хаб, здания вокруг по компасу.
@@ -387,6 +389,8 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     from .newgame import SCENARIOS, default_scenario
     sc = SCENARIOS.get(scenario or default_scenario(), SCENARIOS[default_scenario()])
     world = World(seed=seed)
+    from .. import config
+    world.clock.tick = config.START_HOUR * 60 // config.SIM_MINUTES_PER_TICK   # старт утром, а не в 00:00
     register_item_templates(world)
     from .srd_pack import load_srd
     load_srd(world)                   # каталог SRD (монстры/предметы) поверх курируемого набора

@@ -72,6 +72,7 @@ class Place:
     ambiance: str | None = None     # короткая физическая атмосфера (для нарратора)
     alterations: list[str] = field(default_factory=list)  # стойкие следы действий (агент последствий)
     status: str = "open"            # open | closed | ruined | new — меняется событиями (слой инцидентов)
+    hours: tuple | None = None      # (open_h, close_h) часы работы здания; None — всегда доступно
 
 
 class SpatialIndex:

@@ -9,7 +9,9 @@ BARTHEN = "building:barthens_provisions"
 
 
 def _sess():
+    from aidnd import config
     s = new_session(seed=1337, roster_size=4, use_model=False)
+    s.world.clock.tick = 12 * 60 // config.SIM_MINUTES_PER_TICK   # полдень — лавки открыты (часы работы)
     s.world.wallet("pc:hero").update({"gp": 200})
     return s
 

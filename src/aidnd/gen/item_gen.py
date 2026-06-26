@@ -122,3 +122,86 @@ def _pick_magic_template(world, rarity: str, rng: random.Random) -> str | None:
         # фоллбэк на расходник
         cands = [tid for tid, t in world.templates.items() if t.category == "consumable"]
     return rng.choice(sorted(cands)) if cands else None
+
+
+# ----------------------------------------------------------------------------- #
+#  Генерация НОВЫХ шаблонов: имя/описание от модели, механика — honored-поля     #
+#  (weapon_key/ac/ac_bonus/heal/slot) с клемпом по rarity → баланс безопасен.    #
+# ----------------------------------------------------------------------------- #
+_WEAPON_KEYS = ("dagger", "shortsword", "longsword", "scimitar", "mace", "morningstar", "greataxe", "shortbow")
+_MAGIC_SLOTS = ("cloak", "boots", "ring", "amulet", "head")
+_VALUE_BY_RARITY = {"common": (2000, 9000), "uncommon": (15000, 90000), "rare": (90000, 350000)}
+_AC_BONUS_CAP = {"common": 0, "uncommon": 1, "rare": 2}
+_HEAL_BY_RARITY = {"common": "2d4+2", "uncommon": "4d4+4", "rare": "8d4+8"}
+_ARMOR_AC = {"common": 11, "uncommon": 13, "rare": 15}
+_WEIGHT = {"weapon": 3.0, "armor": 12.0, "consumable": 0.5, "magic": 1.0, "gear": 1.0}
+_FALLBACK_NAMES = {
+    "weapon": ["Клинок странника", "Зазубренный тесак", "Старый палаш", "Гнутая алебарда"],
+    "armor": ["Латаный нагрудник", "Дорожный доспех", "Кожанка наёмника", "Помятый щит"],
+    "consumable": ["Мутное зелье", "Травяной отвар", "Фляга знахаря", "Склянка с осадком"],
+    "magic": ["Тусклый амулет", "Потёртое кольцо", "Странный талисман", "Холодная подвеска"],
+}
+
+
+def _validate_mechanic(category: str, rarity: str, raw: dict, rng: random.Random):
+    """Honored-механика по category+rarity (числа клемпит движок, не модель). → (base_stats, tags)."""
+    if category == "weapon":
+        wk = raw.get("weapon_key") if raw.get("weapon_key") in _WEAPON_KEYS else rng.choice(_WEAPON_KEYS)
+        return {"weapon_key": wk, "slot": "main_hand"}, ("martial",)
+    if category == "armor":
+        if rng.random() < 0.3:                            # щит
+            return {"ac_bonus": max(1, _AC_BONUS_CAP.get(rarity, 1) or 1), "slot": "off_hand"}, ("shield",)
+        return {"ac": _ARMOR_AC.get(rarity, 11), "max_dex": 99, "slot": "armor"}, ()
+    if category == "consumable":
+        return {"heal": _HEAL_BY_RARITY.get(rarity, "2d4+2")}, ()
+    slot = raw.get("slot") if raw.get("slot") in _MAGIC_SLOTS else rng.choice(_MAGIC_SLOTS)  # магия: +AC-тринкет
+    bs = {"slot": slot}
+    if _AC_BONUS_CAP.get(rarity, 0):
+        bs["ac_bonus"] = _AC_BONUS_CAP[rarity]
+    return bs, ()
+
+
+def generate_item_template(world, category: str, rarity: str, model, rng: random.Random,
+                           idx: int, context: str = "") -> tuple[str, str]:
+    """Зарегистрировать НОВЫЙ шаблон в world.templates. Возвращает (template_id, описание)."""
+    from ..inventory.items import ItemTemplate
+    raw, name, desc = {}, None, ""
+    if model is not None and getattr(model, "available", lambda: False)():
+        try:
+            from ..inference.agents import forge_item_template
+            out = forge_item_template(model, category, rarity, context) or {}
+            name, desc, raw = out.get("name"), out.get("description") or "", out
+        except Exception:
+            pass
+    bs, tags = _validate_mechanic(category, rarity, raw, rng)
+    if not name:
+        name = rng.choice(_FALLBACK_NAMES.get(category, ["Безымянная вещица"]))
+    lo, hi = _VALUE_BY_RARITY.get(rarity, (2000, 9000))
+    tid = f"tmpl:gen_{category}_{idx}"
+    world.templates[tid] = ItemTemplate(
+        template_id=tid, name=str(name)[:48], category=category, base_stats=bs,
+        weight=_WEIGHT.get(category, 1.0), base_value=rng.randint(lo, hi), rarity=rarity,
+        attunement=(rarity == "rare" and category == "magic"), tags=tags)
+    return tid, str(desc)[:160]
+
+
+_ARCH_ITEMS = {
+    "guard": ["tmpl:shortsword", "tmpl:leather"], "knight": ["tmpl:longsword", "tmpl:chain_shirt"],
+    "mage": ["tmpl:dagger"], "merchant": ["tmpl:rations", "tmpl:torch"],
+    "priest": ["tmpl:potion_healing"], "innkeeper": ["tmpl:rations", "tmpl:torch"],
+    "thug": ["tmpl:dagger", "tmpl:leather"], "guildmaster": ["tmpl:dagger"],
+}
+
+
+def npc_loot_pool(world, npc: str, archetype: str, rng: random.Random,
+                  bonus_pool: list[str], rich: bool) -> list[str]:
+    """Дать NPC owner_ref-предметы (на смерть авто-собираются в труп _spawn_corpse). rich → +предмет
+    из сгенерированного пула. Монеты — как предметы (tmpl:gp), чтобы тоже падали в труп."""
+    out = []
+    gp = rng.randint(1, 6) * (5 if rich else 1)
+    out.append(spawn_item(world, "tmpl:gp", None, qty=gp, owner=npc, source="pregen"))
+    cands = _ARCH_ITEMS.get(archetype) or ["tmpl:rations", "tmpl:torch", "tmpl:dagger"]
+    out.append(spawn_item(world, rng.choice(cands), None, qty=1, owner=npc, source="pregen"))
+    if rich and bonus_pool and rng.random() < 0.5:
+        out.append(spawn_item(world, rng.choice(bonus_pool), None, qty=1, owner=npc, source="pregen"))
+    return out

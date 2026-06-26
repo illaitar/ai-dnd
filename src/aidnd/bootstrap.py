@@ -34,6 +34,8 @@ def new_session(seed: int = config.WORLD_SEED, roster_size: int = 12,
     if model is not None and progress is not None:        # жадное обогащение на старте (под ползунок загрузки)
         from .gen.faction_gen import enrich_all
         enrich_all(world, session.charts, model, progress)
+        from .gen.economy import enrich_economy            # лавки/пулы лута/новые предметы (сохранится в снапшот)
+        enrich_economy(world, model, progress)
     from .gen.campaign import forge_main_quest, plan_to_quest   # сюжет — ПОСЛЕ обогащения (богаче лидеры/цели)
     if progress:
         progress(-1, -1, "Пишу сюжет кампании…")

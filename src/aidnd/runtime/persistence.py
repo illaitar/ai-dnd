@@ -61,6 +61,7 @@ def save_session(session: GameSession, name: str) -> dict:
         "scenario": SCENARIOS.get(boot["scenario"], {}).get("name", boot["scenario"]),
         "klass": CLASSES.get(boot["pc_spec"].get("klass"), {}).get("name", ""),
     }
+    from .snapshot import capture
     data = {
         "version": SAVE_VERSION, "name": name, "created": time.time(),
         "seed": boot["seed"], "roster_size": boot["roster_size"],
@@ -68,6 +69,7 @@ def save_session(session: GameSession, name: str) -> dict:
         "baseline": boot["baseline"], "clock": session.world.clock.tick,
         "journal": session.journal[-60:], "quiet": session.quiet_ticks,
         "events": tail, "meta": meta, "main_quest": boot.get("main_quest"),
+        "state": capture(session),                       # снапшот обогащения: предметы/персоны/память
     }
     slug = _slug(name)
     with open(_path(slug), "w", encoding="utf-8") as f:
@@ -108,6 +110,8 @@ def load_session(slug: str, use_model: bool = True) -> GameSession:
         world.apply(Event.from_dict(ed))
     world.clock.tick = int(d.get("clock", 0))
     session = GameSession(world, model=manager if use_model else None, quest_system=quests)
+    from .snapshot import apply                           # снапшот обогащения поверх реконструкции
+    apply(session, d.get("state"))                        # предметы/контейнеры/кошельки/персоны/память
     session.boot = {"seed": d["seed"], "roster_size": d["roster_size"],
                     "scenario": d.get("scenario") or default_scenario(),
                     "pc_spec": resolve_pc_spec(d.get("pc_spec")), "baseline": d["baseline"],

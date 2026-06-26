@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from time import perf_counter as _perf_counter
 
 from .. import config
 
@@ -148,6 +149,7 @@ class ModelManager:
         self.client = client or OllamaClient()
         self._available: bool | None = None
         self._models: set[str] = set()
+        self._trace: list[dict] = []        # дебаг-трейс роутинга: какие роли→модели дёргались за ход
 
     def available(self, recheck: bool = False) -> bool:
         """Проверяет доступность сервера (кешируется). False, если httpx не
@@ -163,12 +165,26 @@ class ModelManager:
         return self._available
 
     def model_for(self, role: str) -> str:
-        model = self.ROLE_MODELS.get(role, (config.BASE_MODEL, None))[0]
+        base = self.ROLE_MODELS.get(role, (config.BASE_MODEL, None))[0]
         # self._models заполняется в available(); если ещё не проверяли — отдаём как есть.
-        if not self._models or model in self._models:
-            return model
-        # Ollama хранит имена с тегом (aidnd-router:latest) — матчим терпимо.
-        if f"{model}:latest" in self._models:
-            return f"{model}:latest"
-        # Дообученной модели нет на сервере — откат на базовую, а не падение.
-        return config.BASE_MODEL
+        if not self._models or base in self._models:
+            resolved = base
+        elif f"{base}:latest" in self._models:           # Ollama хранит имена с тегом — матчим терпимо
+            resolved = f"{base}:latest"
+        else:                                            # дообученной модели нет на сервере — откат на базовую
+            resolved = config.BASE_MODEL
+        self._trace.append({"role": role, "model": resolved, "t": _perf_counter()})
+        if len(self._trace) > 200:                       # safety: ограничить, если слив не зовут
+            self._trace = self._trace[-100:]
+        return resolved
+
+    def trace_take(self) -> list[dict]:
+        """Снять накопленный трейс роутинга (роль→модель + прибл. длительность мс) и очистить.
+        Длительность шага ≈ интервал до следующего вызова model_for (для дебага «куда ушёл ввод»)."""
+        tr, self._trace = self._trace, []
+        now = _perf_counter()
+        out = []
+        for i, e in enumerate(tr):
+            end = tr[i + 1]["t"] if i + 1 < len(tr) else now
+            out.append({"role": e["role"], "model": e["model"], "ms": round((end - e["t"]) * 1000)})
+        return out[-40:]

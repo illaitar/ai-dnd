@@ -365,6 +365,21 @@ SCHEMAS = {
             "properties": {"type": "array", "items": {"type": "string"}}},
             "required": ["name"]},
     },
+    "forge_item_template": {
+        "name": "forge_item_template",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "weapon_key": {"type": ["string", "null"]},   # для оружия: dagger/shortsword/…
+            "slot": {"type": ["string", "null"]}},         # для магии: cloak/boots/ring/amulet/head
+            "required": ["name"]},
+    },
+    "forge_quest_brief": {
+        "name": "forge_quest_brief",
+        "parameters": {"type": "object", "properties": {
+            "brief": {"type": "string"}},                  # развёрнутая запись в журнал (2-4 предложения)
+            "required": ["brief"]},
+    },
     "forge_faction": {
         "name": "forge_faction",
         "parameters": {"type": "object", "properties": {
@@ -822,3 +837,24 @@ def forge_item(manager, template_name: str, category: str, rarity: str, context:
             f"Give a fitting in-world NAME, a one-sentence DESCRIPTION, and optional cosmetic "
             f"property tags. Do NOT change rarity/power/numbers. Call forge_item.")
     return _call(manager, "item_smith", "forge_item", user, ["name"])
+
+
+def forge_quest_brief(manager, title: str, objective: str, giver: str, framing: str):
+    """Развёрнутая запись квеста в журнал (лор/ставки/зацепки) — чтобы было понятно, о чём он."""
+    user = (f"Квест «{title}». Текущая цель: {objective or '—'}. Даёт: {giver or '—'}. "
+            f"Контекст: {framing or title}\n\nНапиши запись в журнал приключенца: 2-4 предложения о том, "
+            f"что происходит, чем это важно для фронтира, какие ставки и зацепки. Без спойлеров концовки. "
+            f"Call forge_quest_brief.")
+    return _call(manager, "quest_writer", "forge_quest_brief", user, ["brief"])
+
+
+def forge_item_template(manager, category: str, rarity: str, context: str = ""):
+    """Сочинить НОВЫЙ предмет (имя/описание + опц. хинт механики). Числа/баланс задаёт движок
+    (валидатор по rarity), модель — только флейвор. None — нет сервера."""
+    weapons = "dagger, shortsword, longsword, scimitar, mace, morningstar, greataxe, shortbow"
+    slots = "cloak, boots, ring, amulet, head"
+    user = (f"Придумай НОВЫЙ предмет: категория «{category}», редкость «{rarity}». Контекст: {context}\n"
+            f"Дай выразительное имя (in-world) и описание в одну фразу. Опц.: для оружия — weapon_key "
+            f"из [{weapons}]; для магии — slot из [{slots}]. Числа/урон/AC НЕ указывай — их задаёт движок. "
+            f"Call forge_item_template.")
+    return _call(manager, "item_smith", "forge_item_template", user, ["name"])

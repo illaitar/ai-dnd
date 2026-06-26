@@ -335,6 +335,77 @@ class GameSession:
             self.discovery.location_type(place), self.scene_context(),
             self.quiet_ticks, bool(self.npcs_here()))
 
+    # --------------------------------------------- «живое» население места --- #
+    def _anon_one(self, per) -> str:
+        """Незнакомец — общим описанием (пол/раса), без имени."""
+        g = {"male": "мужчина", "female": "женщина"}.get(getattr(per, "gender", ""), "горожанин")
+        race = getattr(per, "race", "human") or "human"
+        races = {"dwarf": "дворф", "halfling": "полурослик", "elf": "эльф", "half-elf": "полуэльф",
+                 "half-orc": "полуорк", "gnome": "гном", "tiefling": "тифлинг"}
+        return g if race in ("human", "") else f"{g}-{races.get(race, race)}"
+
+    def _crowd_names(self, npcs, cap: int = 4) -> str:
+        """Известных игроку (talked:) — по имени; незнакомцев — обезличенно."""
+        nums = {2: "двое", 3: "трое", 4: "четверо"}
+        known, unknown = [], []
+        for n in npcs:
+            per = self.world.ecs.get(n, Persona)
+            if not per:
+                continue
+            (known if f"talked:{n}" in self.world.flags else unknown).append(per)
+        parts = [p.name for p in known] + [self._anon_one(p) for p in unknown[:cap]]
+        if len(unknown) > cap:
+            e = len(unknown) - cap
+            parts.append(f"и ещё {nums.get(e, str(e))}")
+        return ", ".join(parts)
+
+    def _crowd_ambient(self) -> str | None:
+        """Кто пришёл/ушёл/в зале на публичном месте (днём). Сравнение с прошлым визитом → движение."""
+        place = self.current_place()
+        p = self.world.spatial.places.get(place)
+        pub = {"inn", "serve", "drink", "shop", "work", "shrine", "board"}
+        if not p or not (set(getattr(p, "affordances", []) or []) & pub):
+            return None
+        if self.world.clock.time_of_day() == "night":     # ночью пусто
+            return None
+        here = [n for n in self.npcs_here() if n != self.player]
+        prevmap = self.__dict__.setdefault("_crowd_prev", {})
+        first = place not in prevmap                      # первый осмотр места — не «заходят все», а «в зале»
+        prev, cur = prevmap.get(place, set()), set(here)
+        prevmap[place] = cur
+        if first:
+            return ("В зале " + self._crowd_names(here, cap=3) + ".") if here else None
+        arrived, left = cur - prev, prev - cur
+        bits = []
+        if arrived:
+            bits.append("заходят " + self._crowd_names(arrived))
+        if left:
+            bits.append("уходят " + self._crowd_names(left))
+        if not bits:
+            if not here:
+                return None
+            bits.append("в зале " + self._crowd_names(here, cap=3))
+        line = "; ".join(bits)
+        return line[0].upper() + line[1:] + "."
+
+    def _narrate_crowd(self) -> str | None:
+        """Факты толпы → нарратор для озвучки (или детерминированная строка как фоллбэк)."""
+        facts = self._crowd_ambient()
+        if not facts:
+            return None
+        if self.model is not None and self.model.available():
+            try:
+                from ..inference.agents import render_scene
+                sc = self.scene_context()
+                out = render_scene(self.model, f"Оживление публичного места: {facts} Незнакомцев — "
+                                   f"без имён, общими словами (пол/раса).", None,
+                                   scene=getattr(sc, "descriptor", ""), mode="outcome")
+                if out:
+                    return out.strip()
+            except Exception:
+                pass
+        return facts
+
     def submit_roll(self, raw_faces: list[int]) -> dict:
         """Принимает грани от игрока и возобновляет приостановленный ход (док 07 §4)."""
         if not self.pending_roll:
@@ -389,6 +460,9 @@ class GameSession:
         """Фактический переход в локацию dest (многоходовый путь допустим — для карты).
         Гейты знания/расстояния делает вызывающий; здесь — стоимость пути, спутники,
         журнал, разведка, туман подземелья, сверка наводок, тик времени и нарратив."""
+        gate = self._entry_blocked(dest)                  # ратуша/святилище закрыты ночью — внутрь не пускаем
+        if gate:
+            return gate
         cur = self.current_place()
         path = self.world.spatial.path_between(cur, dest)
         if not path:
@@ -775,6 +849,8 @@ class GameSession:
             if npc:
                 return self._do_talk(Action(actor=self.player, verb="talk", target=npc), text)
             return {"kind": "system", "text": "Поблизости нет лавки.", "view": self.view()}
+        if not self._place_open(self.current_place()):    # часы работы
+            return self._shop_closed_msg()
         c = self.world.containers[shop]
         if not c.items:
             return {"kind": "system", "text": "Лавка пуста.", "view": self.view()}
@@ -799,6 +875,8 @@ class GameSession:
         shop = self._shop_here()
         if not shop:
             return {"kind": "system", "text": "Поблизости нет лавки, чтобы продать.", "view": self.view()}
+        if not self._place_open(self.current_place()):    # часы работы
+            return self._shop_closed_msg()
         carry = self.world.containers.get(f"carry:{ids.name_of(self.player)}")
         if not carry or not carry.items:
             return {"kind": "system", "text": "В сумке нечего продавать.", "view": self.view()}
@@ -931,7 +1009,7 @@ class GameSession:
         кошелёк игрока и что из его сумки можно продать (с учётом deals_in). None —
         рядом нет лавки."""
         shop_id = self._shop_here()
-        if not shop_id:
+        if not shop_id or not self._place_open(self.current_place()):   # рядом нет лавки / закрыта
             return None
         c = self.world.containers[shop_id]
         goods = [{"id": i, "name": self._item_name(i),
@@ -1033,10 +1111,11 @@ class GameSession:
         # (праздно ждать в опасной глуши — напрашиваться на встречу)
         self.quiet_ticks += 2
         sc = self.scene_context()
-        return {"kind": "narration",
-                "text": f"Ты выжидаешь. Время идёт ({self.world.clock.hhmm()}). "
-                        f"{sc.descriptor}",
-                "view": self.view()}
+        parts = [f"Ты выжидаешь. Время идёт ({self.world.clock.hhmm()}). {sc.descriptor}"]
+        crowd = self._narrate_crowd()                     # видно, как заходят/уходят люди (днём, в людном месте)
+        if crowd:
+            parts.append(crowd)
+        return {"kind": "narration", "text": "\n\n".join(parts), "view": self.view()}
 
     def _do_attack(self, action: Action, text: str) -> dict:
         target = action.target or self._match_npc(text)
@@ -1325,6 +1404,36 @@ class GameSession:
             for _ in range(min(cycles, 24)):
                 diffuse_rumors(self.world)
         self._fire_due_incidents(before, self.world.clock.tick)  # живой слой событий (этап 3)
+        self._world_upkeep(before)                        # истлевание трупов + дневной ресток лавок
+
+    def _world_upkeep(self, before: int) -> None:
+        """Периодическое обслуживание: пустые трупы исчезают; раз в игровой день лавки
+        пополняются и кошелёк торговца не пустеет в ноль. Детерминировано по tick → реплей-сейф."""
+        for cid in [c for c, cont in self.world.containers.items()
+                    if cont.kind == "corpse" and not cont.items]:
+            self.world.containers.pop(cid, None)          # всё вылутано — труп истлевает
+        per_day = (24 * 60) // config.SIM_MINUTES_PER_TICK
+        if per_day and self.world.clock.tick // per_day > before // per_day:
+            self._restock_shops()
+
+    def _restock_shops(self) -> None:
+        import random
+        from ..gen.item_gen import spawn_item
+        from ..gen.seeds import subseed
+        for sid, shop in self.world.containers.items():
+            if getattr(shop, "kind", "") != "shop":
+                continue
+            if len(shop.items) < 6:                       # докинуть базовый категорийный товар
+                cats = tuple(shop.deals_in or ())
+                pool = [tid for tid, t in self.world.templates.items()
+                        if t.category in cats and t.rarity in ("mundane", "common")]
+                rng = random.Random(subseed(self.world.seed, "restock", sid, self.world.clock.tick))
+                for tid in (rng.sample(pool, min(3, len(pool))) if pool else []):
+                    spawn_item(self.world, tid, sid, qty=rng.randint(1, 4), source="restock")
+            if shop.owner_ref:                            # кошелёк торговца не уходит в ноль
+                w = self.world.wallets.setdefault(shop.owner_ref, {})
+                if w.get("gp", 0) < 50:
+                    w["gp"] = w.get("gp", 0) + 100
 
     # ===================================================================== #
     #  Живой слой инцидентов: события срабатывают по ходу времени           #
@@ -1459,6 +1568,9 @@ class GameSession:
         drunk = any(c.name == "опьянение" for c in self.world.conditions.get(self.player, []))
         txt = ("Ты осушаешь кружку доброго эля (−2 sp). Тепло растекается по телу, мир чуть "
                "покачивается — рука и глаз уже не так верны.") if drunk else "Ты выпиваешь кружку эля (−2 sp)."
+        crowd = self._narrate_crowd()                     # сидишь, потягиваешь — видно движение зала
+        if crowd:
+            txt += "\n\n" + crowd
         return {"kind": "narration", "text": txt, "view": self.view()}
 
     # --- услуги двора: комната/еда (реальные транзакции, не флавор) --------- #
@@ -2203,6 +2315,36 @@ class GameSession:
                    "building:lionshield_coster": "shop:lionshield"}
         return mapping.get(place)
 
+    def _hour_now(self) -> int:
+        return (self.world.clock.tick * config.SIM_MINUTES_PER_TICK // 60) % 24
+
+    def _place_open(self, place_id: str | None) -> bool:
+        """Открыто ли здание по часам работы (None hours → всегда)."""
+        p = self.world.spatial.places.get(place_id) if place_id else None
+        hrs = getattr(p, "hours", None) if p else None
+        if not hrs:
+            return True
+        o, c = hrs
+        h = self._hour_now()
+        return o <= h < c if o <= c else (h >= o or h < c)
+
+    def _shop_closed_msg(self) -> dict:
+        p = self.world.spatial.places.get(self.current_place())
+        hrs = getattr(p, "hours", None) if p else None
+        when = f" — откроется в {hrs[0]:02d}:00" if hrs else ""
+        return {"kind": "system", "text": f"Лавка сейчас закрыта{when}.", "view": self.view()}
+
+    def _entry_blocked(self, dest: str) -> dict | None:
+        """Гейт входа в гражданские здания (ратуша/святилище) по часам — закрыто внутрь не пускаем
+        (лавки пускают: можно осмотреться/поговорить, торговля гейтится отдельно)."""
+        p = self.world.spatial.places.get(dest)
+        if not p or not getattr(p, "hours", None):
+            return None
+        if set(getattr(p, "affordances", []) or []) & {"townhall", "shrine"} and not self._place_open(dest):
+            return {"kind": "system", "view": self.view(),
+                    "text": f"«{p.name}» сейчас закрыто — откроется в {p.hours[0]:02d}:00."}
+        return None
+
     def _is_hostile(self, npc: str) -> bool:
         if f"hostile:{npc}" in self.world.flags:          # озлоблен рантайм-событием (напр., напали)
             return True
@@ -2824,6 +2966,11 @@ class GameSession:
         if toasts and isinstance(result, dict):
             result = dict(result)
             result["toasts"] = (result.get("toasts") or []) + toasts
+        if self.model is not None and isinstance(result, dict):   # дебаг-трейс роутинга (роль→модель за ход)
+            routing = self.model.trace_take()
+            if routing:
+                result = dict(result)
+                result["routing"] = routing
         return result
 
     def context_line(self) -> str:
@@ -2848,6 +2995,48 @@ class GameSession:
         self._pull_quest_journal()
         return {"context": self.context_line(), "quests": self.active_quests(),
                 "events": self.journal[-14:]}
+
+    def quest_journal(self) -> list[dict]:
+        """Подробный журнал: бриф (лор) + стадии (done/current) + даритель/награда по каждому квесту.
+        Основной сюжет — первым; вехи скрыты."""
+        plan = (getattr(self, "boot", {}) or {}).get("main_quest") or {}
+        out = []
+        for q in self.world.quests.values():
+            if q.state not in ("active", "completed") or getattr(q, "kind", "") == "milestone":
+                continue
+            ids = [s.stage_id for s in q.stages]
+            cur_idx = min((ids.index(s) for s in q.current_stages if s in ids), default=len(ids))
+            stages = [{"objective": s.objective, "current": s.stage_id in q.current_stages,
+                       "done": ids.index(s.stage_id) < cur_idx} for s in q.stages]
+            out.append({"id": q.quest_id, "title": q.title, "kind": getattr(q, "kind", ""),
+                        "state": q.state, "brief": self._quest_brief(q, plan),
+                        "giver": self._display(q.giver_ref) if q.giver_ref else None,
+                        "reward": self._reward_text(q.rewards), "stages": stages})
+        out.sort(key=lambda e: 0 if e["kind"] == "main" else 1)
+        return out
+
+    def _quest_brief(self, q, plan: dict) -> str:
+        """Развёрнутое описание квеста. Основной сюжет — из интро+премисы кампании; побочки —
+        framing, а при наличии модели догенерим лор-бриф (лениво, кэш + снапшот)."""
+        if getattr(q, "kind", "") == "main":
+            intro = (plan or {}).get("intro") or ""
+            return (intro + ("\n\n" + q.framing if q.framing else "")).strip() or (q.framing or q.title)
+        cache = self.__dict__.setdefault("_quest_briefs", {})
+        if q.quest_id in cache:
+            return cache[q.quest_id]
+        brief = q.framing or q.title
+        if self.model is not None and self.model.available():
+            try:
+                from ..inference.agents import forge_quest_brief
+                obj = next((q.stage(s).objective for s in q.current_stages if q.stage(s)), "")
+                out = forge_quest_brief(self.model, q.title, obj,
+                                        self._display(q.giver_ref) if q.giver_ref else "", q.framing or q.title)
+                if out and out.get("brief"):
+                    brief = out["brief"]
+            except Exception:
+                pass
+        cache[q.quest_id] = brief
+        return brief
 
     def journal_text(self) -> str:
         j = self.journal_data()

@@ -27,9 +27,10 @@ _CONTROL = {
 _CANON_LEADER = {
     "faction:redbrands": "npc:iarno_glasstaff",
     "faction:cragmaw": "npc:klarg",
-    "faction:info_guild": "npc:halia_thornton",      # Халия — брокер сведений (LMoP)
     "faction:temple": "npc:sister_garaele",
     "faction:lords_alliance": "npc:sildar_hallwinter",
+    # info_guild НЕ канонизируем на Халию: она агент Жентарима (persona.faction=zhentarim) —
+    # иначе лидер инфо-гильдии числился бы в чужой фракции. Лидера даст фоллбэк (когерентно).
 }
 # профессия NPC → членство в гражданской фракции (наполняет фракции людьми)
 PROF_FACTION = {
@@ -97,11 +98,12 @@ def fill_faction_leaders(world) -> None:
         if not (leader and world.ecs.get(leader, Persona)):
             leader = next((m for m in (getattr(fac, "members", None) or []) if m not in used), None)
         if not leader:
-            if spare is None:
-                spare = [n for n in sorted(world.npcs())
-                         if (p := world.ecs.get(n, Persona)) and not getattr(p, "faction", None)
-                         and (getattr(p, "archetype", "") or getattr(p, "profession", "")).lower()
-                         not in _GENERIC_ROLE]
+            if spare is None:                            # беспартийные: сперва заметные, затем любые
+                unaff = [n for n in sorted(world.npcs())
+                         if (p := world.ecs.get(n, Persona)) and not getattr(p, "faction", None)]
+                notable = [n for n in unaff if (world.ecs.get(n, Persona).archetype
+                           or world.ecs.get(n, Persona).profession or "").lower() not in _GENERIC_ROLE]
+                spare = notable + [n for n in unaff if n not in notable]
             leader = next((n for n in spare if n not in used), None)
         if not leader:
             continue

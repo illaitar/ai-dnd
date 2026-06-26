@@ -91,6 +91,7 @@ SAVE_DIR: str = os.environ.get("AIDND_SAVE_DIR", os.path.expanduser("~/.aidnd/sa
 #  Время и окружение (док 08 §8)                                              #
 # --------------------------------------------------------------------------- #
 SIM_MINUTES_PER_TICK: int = 10
+START_HOUR: int = 9             # час начала новой игры (утро — лавки открыты, не глухая ночь)
 START_SEASON: str = os.environ.get("AIDND_SEASON", "autumn")  # стартовый сезон
 DAYS_PER_SEASON: int = 28
 

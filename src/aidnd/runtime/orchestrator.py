@@ -2852,8 +2852,11 @@ class GameSession:
         """Богатый контекст сцены для нарратора: время/сезон/погода/место (descriptor),
         кто рядом, последние ходы — чтобы он не выдумывал антураж и держал преемственность."""
         sc = self.scene_context()
+        place = self.world.spatial.places.get(self.current_place())
         npcs = ", ".join(self._display(n) for n in self.npcs_here()) or "никого нет"
         ctx = f"{sc.descriptor} Место: «{sc.place_name}». Рядом: {npcs}."
+        if place and getattr(place, "description", None):     # полное описание локации (если сгенерено)
+            ctx += f"\nО месте (антураж, держись его): {place.description}"
         recent = self._recent_context(3)
         if recent:
             ctx += f"\nЧто было только что:\n{recent}"

@@ -11,6 +11,7 @@ from .runtime import GameSession
 # роль LLM → короткая подпись для ползунка генерации (что именно делает модель сейчас)
 _ROLE_RU = {
     "lore_keeper": "знания мира", "cognition": "память жителей", "narrator": "описания",
+    "location_writer": "описания мест", "loremaster": "слухи",
     "faction_gen": "фракции", "item_smith": "предметы", "quest_writer": "квесты",
     "campaign_architect": "сюжет", "campaign_director": "сюжет", "character_gen": "характеры",
     "plausibility": "проверка", "arbiter": "арбитр", "consequence": "последствия",
@@ -72,6 +73,8 @@ def new_session(seed: int = config.WORLD_SEED, roster_size: int = 12,
         enrich_all(world, session.charts, model, bus)
         from .gen.economy import enrich_economy            # лавки/пулы лута/новые предметы
         enrich_economy(world, model, bus)
+        from .gen.locations import enrich_locations        # полные описания локаций (контекст нарратора)
+        enrich_locations(world, model, bus)
     from .gen.campaign import forge_main_quest, plan_to_quest   # сюжет — ПОСЛЕ обогащения (богаче лидеры/цели)
     if bus:
         bus(0, 0, "Пишу сюжет кампании")

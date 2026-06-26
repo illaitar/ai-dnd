@@ -29,6 +29,12 @@ class OllamaError(Exception):
     """Любая проблема при общении с сервером Ollama (или httpx не установлен)."""
 
 
+def is_offline(manager) -> bool:
+    """True, если модель-менеджер отсутствует или сервер недоступен → берём детерминированный
+    фоллбэк. Единый guard для всех агентов/оркестратора (вместо повтора проверки на местах)."""
+    return manager is None or not manager.available()
+
+
 class OllamaClient:
     def __init__(self, host: str | None = None, timeout: float | None = None,
                  keep_alive: str | None = None) -> None:
@@ -134,6 +140,7 @@ class ModelManager:
         "arbiter": (config.ARBITER_MODEL, "arbiter"),  # дообученный арбитр freeform (decide_resolution)
         "consequence": (config.CONSEQUENCE_MODEL, "consequence"),  # дообученный агент последствий
         "narrator": (config.NARRATOR_MODEL, "narrator-persona"),  # дообученный нарратор (см. training/)
+        "location_writer": (config.LOCATION_MODEL, "location"),  # отдельный адаптер описаний мест на 14B (aidnd-location)
         "cognition": (config.BASE_MODEL, "lore"),
         "lore_keeper": (config.BASE_MODEL, "lore"),
         "character_gen": (config.BASE_MODEL, "lore"),

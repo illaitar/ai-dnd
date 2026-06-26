@@ -40,6 +40,9 @@ CONSEQUENCE_MODEL: str = os.environ.get("AIDND_CONSEQUENCE_MODEL", "aidnd-conseq
 # проза по mode, before/after: канон-имена не коверкает, сухой живой стиль вместо
 # наигранного, см. training/). Откат на BASE_MODEL, если модели нет.
 NARRATOR_MODEL: str = os.environ.get("AIDND_NARRATOR_MODEL", "aidnd-narrator")
+# Генератор описаний локаций (отдельный LoRA на 14B → aidnd-location в Ollama; 14B лучше всего
+# в описаниях, см. training/). До тренировки откат на голую qwen3:14b (тоже лучшая база описаний).
+LOCATION_MODEL: str = os.environ.get("AIDND_LOCATION_MODEL", "qwen3:14b")
 
 KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
 HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))

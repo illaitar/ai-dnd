@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from .. import config
+from .client import is_offline
 from .structured import coerce, conform_to_schema, extract, sanitize_for_ollama
 
 LANG = {"ru": "Russian", "en": "English"}.get(config.NARRATIVE_LANGUAGE, "Russian")
@@ -177,6 +178,13 @@ PROMPTS = {
         "ремёслах, погоде, торговле, дорогах, мелких событиях. Без высокой эпики, без новых "
         "именованных боссов и без выдуманных квестов. Каждый факт — одно предложение, как сплетня "
         "горожанина или общее знание края. Не противоречь известному. Output ONLY the JSON."
+    ),
+    "location_writer": (
+        "Ты — мастер описаний мест фэнтези-фронтира (D&D, городок Фэндалин и окрестности). По "
+        "названию и типу места пишешь УСТОЙЧИВОЕ описание для рассказчика: облик и планировка, что "
+        "видно, слышно и чем пахнет, чем место живёт. 3-5 предложений, живой язык без пафоса и "
+        "клише. Только антураж: НЕ упоминай сиюминутные события, погоду, время суток и конкретных "
+        "NPC по именам. Пиши ТОЛЬКО сам текст описания, без преамбул и заголовков."
     ),
     "event_director": (
         "Ты — режиссёр живого города (D&D-фронтир, Фэндалин). По СОСТОЯНИЮ МИРА — фракции "
@@ -429,7 +437,7 @@ SCHEMAS = {
 
 def _call(manager, role: str, schema_name: str, user: str, required: list[str]):
     """Общий путь вызова агента под схемой. None, если сервер недоступен/невалидно."""
-    if manager is None or not manager.available():
+    if is_offline(manager):
         return None
     from .client import OllamaError
     schema = SCHEMAS[schema_name]
@@ -583,7 +591,7 @@ def render_scene(manager, outcome_summary: str, persona, dialogue_topic: str = "
     """Нарратор отрисовывает прозой. Это свободный текст, а не структура —
     constrained JSON ломает качество и грамматику Ollama (вложенный массив), поэтому
     берём контент как narration напрямую (формат гарантируется prompt'ом, main §12.3)."""
-    if manager is None or not manager.available():
+    if is_offline(manager):
         return None
     from .client import OllamaError
     # для исхода/обстановки говорящего NPC нет (повествование от 2-го лица)
@@ -608,7 +616,7 @@ def render_dialogue(manager, persona, rel_summary: str, situation: str,
     погода/место). tone — тон игрока. facts — что NPC реально знает и МОЖЕТ раскрыть при
     текущем доверии; мировую информацию давать ТОЛЬКО из них, иначе не выдумывать.
     """
-    if manager is None or not manager.available():
+    if is_offline(manager):
         return None
     from .client import OllamaError
     user = narrator_user(mode, rel=rel_summary, scene=scene, situation=situation,
@@ -698,7 +706,7 @@ def forge_campaign(manager, digest: str):
     """Архитектор кампании: интро + арка актов. Возвращает СЫРОЙ dict (модели вольно именуют
     поля — нормализацию делает gen.campaign, не conform_to_schema, иначе ключи теряются). None —
     нет сервера/ошибка."""
-    if manager is None or not manager.available():
+    if is_offline(manager):
         return None
     from .client import OllamaError
     sch = SCHEMAS["forge_campaign"]
@@ -718,7 +726,7 @@ def reforge_acts(manager, title: str, premise: str, completed: list[str], curren
                  digest: str, delta: str, n: int):
     """Квест-директор: переписать оставшиеся ~n актов под изменившийся мир. Сырой dict (нормализует
     gen.campaign) или None. Чуть выше temperature — нужен творческий поворот, не повтор."""
-    if manager is None or not manager.available():
+    if is_offline(manager):
         return None
     from .client import OllamaError
     sch = SCHEMAS["forge_campaign"]
@@ -804,7 +812,7 @@ def assess_feasibility(manager, action_text: str, context_digest: str):
     """Можно ли вообще совершить это действие игрока в данном контексте (док 06, main §2).
     Возвращает {plausibility, drivers, verdict_note} либо None (нет сервера). Разбор ЛОЯЛЬНЫЙ:
     строгий coerce ронял валидную оценку, т.к. база кладёт число под именем функции."""
-    if manager is None or not manager.available():
+    if is_offline(manager):
         return None
     from .client import OllamaError
     sch = SCHEMAS["estimate_plausibility"]
@@ -837,6 +845,51 @@ def forge_item(manager, template_name: str, category: str, rarity: str, context:
             f"Give a fitting in-world NAME, a one-sentence DESCRIPTION, and optional cosmetic "
             f"property tags. Do NOT change rarity/power/numbers. Call forge_item.")
     return _call(manager, "item_smith", "forge_item", user, ["name"])
+
+
+# параметры локации → русская подпись (порядок = как печатается в промпте); см. datasets/location
+_LOC_FIELDS = (
+    ("type", "тип"), ("function", "назначение"), ("size", "размер"), ("material", "материал"),
+    ("condition", "состояние"), ("enclosure", "крытость"), ("ambiance", "атмосфера"),
+    ("smell", "запах"), ("sound", "звук"), ("light", "свет"), ("air", "воздух"), ("mood", "настроение"),
+    ("frequented_by", "бывают"), ("notable", "приметы"), ("affordances", "функции"),
+    ("danger", "опасность"), ("region", "округа"), ("wealth", "достаток"),
+)
+
+
+def _loc_fmt(v) -> str:
+    return ", ".join(str(x) for x in v) if isinstance(v, (list, tuple)) else str(v)
+
+
+def location_user(name: str = "", kind: str = "", within: str = "", **params) -> str:
+    """ЕДИНЫЙ user-промпт описания локации — общий для рантайма (forge_location) и датасета
+    (datasets/location) → train==inference. params — поля схемы (тип/размер/запах/свет/настроение…);
+    within — имя родителя для суб-локации (дерево). Печатаются только заданные поля."""
+    head = f"Локация «{name}»" + (f" (класс: {kind})" if kind else "") + ". Мир: фронтир Фэндалина (D&D)."
+    if within:
+        head += f" Это часть места «{within}»."
+    spec = "; ".join(f"{ru}: {_loc_fmt(params[k])}" for k, ru in _LOC_FIELDS if params.get(k))
+    return (head + (f"\nПараметры — {spec}." if spec else "") +
+            "\nОпиши это место для рассказчика: облик и планировка, что видно/слышно/пахнет, чем "
+            "место живёт. 3-5 предложений, устойчивый антураж (без сиюминутных событий и без имён "
+            "конкретных NPC).")
+
+
+def forge_location(manager, name: str, kind: str, affordances: str, ambiance: str, context: str = ""):
+    """Полное описание локации для нарратора — СВОБОДНАЯ ПРОЗА (как нарратор; guided JSON ломает
+    грамматику Ollama). Возвращает {'description': текст} или None."""
+    if is_offline(manager):
+        return None
+    from .client import OllamaError
+    user = location_user(name, kind=kind, affordances=affordances, ambiance=ambiance, within=context)
+    try:
+        resp = manager.client.chat(manager.model_for("location_writer"),
+                                   [{"role": "system", "content": PROMPTS["location_writer"]},
+                                    {"role": "user", "content": user}])
+    except OllamaError:
+        return None
+    text = (resp.get("content") or "").replace("**", "").strip()
+    return {"description": text} if text else None
 
 
 def forge_quest_brief(manager, title: str, objective: str, giver: str, framing: str):

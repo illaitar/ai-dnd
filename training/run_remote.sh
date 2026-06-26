@@ -15,7 +15,7 @@ rsync -az --delete ../training ../datasets ../src "${SERVER}:${REMOTE_DIR}/" \
   --exclude 'unsloth_compiled_cache' --exclude 'dist' --exclude 'run.log' --exclude 'run.pid'
 
 echo "==> запуск pipeline.sh детачно (ADAPTER=${ADAPTER}, BASE_HF=${BASE_HF})"
-ssh "$SERVER" "cd ${REMOTE_DIR}/training && ADAPTER='${ADAPTER}' nohup bash pipeline.sh > run.log 2>&1 & echo \$! > run.pid; sleep 1; echo 'launched pid' \$(cat run.pid)"
+ssh "$SERVER" "cd ${REMOTE_DIR}/training && ADAPTER='${ADAPTER}' BASE_HF='${BASE_HF}' BASE_OLLAMA='${BASE_OLLAMA}' MAX_SEQ='${MAX_SEQ}' BATCH='${BATCH}' GRAD_ACCUM='${GRAD_ACCUM}' EPOCHS='${EPOCHS}' LR='${LR}' LORA_R='${LORA_R}' LORA_ALPHA='${LORA_ALPHA}' nohup bash pipeline.sh > run.log 2>&1 & echo \$! > run.pid; sleep 1; echo 'launched pid' \$(cat run.pid)"
 
 echo
 echo "монитор:        ./monitor.sh ${ADAPTER}"

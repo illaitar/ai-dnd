@@ -134,6 +134,17 @@ def buy(world, player: str, shop_id: str, instance_id: str) -> None:
     _pay(world, player, shop.owner_ref or shop_id, price_cp)
 
 
+def buy_at(world, player: str, shop_id: str, instance_id: str, price_cp: int) -> None:
+    """Покупка по ДОГОВОРНОЙ цене (после торга) — иначе как buy()."""
+    shop = world.containers[shop_id]
+    price_cp = max(1, int(price_cp))
+    if wallet_value_cp(world.wallet(player)) < price_cp:
+        raise InventoryError("недостаточно средств")
+    player_carry = f"carry:{player.split(':',1)[1]}"
+    move(world, shop_id, player_carry, instance_id, actor=player)
+    _pay(world, player, shop.owner_ref or shop_id, price_cp)
+
+
 def sell(world, player: str, shop_id: str, instance_id: str) -> None:
     shop = world.containers[shop_id]
     inst = world.items[instance_id]

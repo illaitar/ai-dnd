@@ -67,6 +67,7 @@ class GameSession:
         self.player = world.player_id or "pc:hero"
         self.dialogue_partner: str | None = None  # с кем сейчас идёт разговор
         self._last_item: str | None = None        # последний осмотренный предмет (для «на нём…»)
+        self._haggle: dict | None = None          # активный торг: оффер + цены (см. _do_trade)
         self._history: list[dict] = []            # последние ходы (ввод/ответ) — контекст для роутера
         self.journal: list[str] = []              # журнал событий игрока (read-model)
         self._quest_log_seen = 0                  # сколько строк журнала квестов уже втянуто
@@ -193,16 +194,23 @@ class GameSession:
                 and not self._item_in_carry(text)
                 and not any(k in text.lower() for k in (*self._HOSTILE_KW, *self._FREEFORM_KW))):
             route = {"kind": "command", "verb": "talk", "target": self.dialogue_partner}
+        # ТОРГ — после роутера, НЕЗАВИСИМО от его классификации: торговый сигнал в тексте + (активный
+        # торг ИЛИ распознанный оффер у торговца) → LLM-торговец (quote/concede/deal/refuse), цены движком.
+        if any(k in text.lower() for k in self._TRADE_CUES) and (
+                self._haggle or (self._merchant_here() and self._resolve_offer(text))):
+            return self._post(self._do_trade(text), "buy")
         if route["kind"] == "query":                      # вопрос о мире/себе → ответ из стейта, без броска
             out, verb = self._answer_query(route.get("query") or "look", text), "query"
         else:
             verb = route.get("verb") or "freeform"
-            # услуги двора (аренда/еда/сон) — реальные транзакции по affordance места: резолвим ПОСЛЕ
-            # роутера (не в обход), если он не дал явного механического verb — иначе механика сломается
+            # сон в своей комнате / меню двора — бесплатные услуги по affordance (не торг)
             if verb in ("freeform", "talk", "drink", "wait", "buy"):
-                svc = self._inn_service(text)
-                if svc is not None:
-                    return self._post(svc, "serve")
+                affs = {a["affordance"] for a in self.affordances_here()}
+                low = text.lower()
+                if "sleep" in affs and any(k in low for k in self._SLEEP_KW):
+                    return self._post(self._sleep_until_morning(), "serve")
+                if (affs & {"inn", "serve", "eat"}) and any(k in low for k in self._INN_MENU_KW):
+                    return self._post(self._inn_menu(), "serve")
             action = Action(actor=self.player, verb=verb, target=route.get("target"),
                             tone=route.get("tone", "neutral"))
             # действие (не разговор) завершает текущий диалог; покупка сведений/торговля
@@ -433,6 +441,7 @@ class GameSession:
     #  Обработчики глаголов (exploration)                                  #
     # ===================================================================== #
     def _do_move(self, action: Action, text: str) -> dict:
+        self._haggle = None                               # уход прерывает торг
         dest = self._match_place(text)
         if not dest:
             low = text.lower()                            # локация не распознана
@@ -970,6 +979,139 @@ class GameSession:
     def _item_match(self, iid: str, low: str) -> bool:
         name = self._item_name(iid).split("×")[0].strip().lower()
         return bool(name) and (name in low or any(w in low for w in name.split() if len(w) > 3))
+
+    # ----------------------------------------------------- торговля/торг ----
+    _GIVE_FRAC = {"none": 0.0, "small": 0.25, "fair": 0.5, "max": 0.85}
+
+    def _fmt_price(self, cp: int) -> str:
+        gp, rem = divmod(int(cp), 100)
+        sp, c = divmod(rem, 10)
+        parts = [f"{gp} зм"] if gp else []
+        if sp:
+            parts.append(f"{sp} ср")
+        if c or not parts:
+            parts.append(f"{c} мед")
+        return " ".join(parts)
+
+    def _merchant_here(self) -> str | None:
+        """С кем торговаться: владелец лавки, иначе текущий собеседник/первый NPC рядом."""
+        shop = self._shop_here()
+        if shop and self.world.containers[shop].owner_ref:
+            return self.world.containers[shop].owner_ref
+        here = self.npcs_here()
+        if self.dialogue_partner in here:
+            return self.dialogue_partner
+        return here[0] if here else None
+
+    def _make_offer(self, kind: str, ref, label: str, base_cp: int, merchant, place, shop=None) -> dict:
+        floor = max(1, int(base_cp * 0.65))   # жёсткая граница (макс ~35% уступки); сам торг ведёт LLM по персоне
+        return {"kind": kind, "ref": ref, "label": label, "base_cp": int(base_cp),
+                "quote_cp": int(base_cp), "floor_cp": floor, "rounds": 0,
+                "merchant": merchant, "place": place, "shop": shop}
+
+    def _resolve_offer(self, text: str) -> dict | None:
+        """Что игрок хочет купить/снять у торговца тут (предмет лавки или услуга двора). None — ничего."""
+        low = text.lower()
+        place = self.current_place()
+        shop = self._shop_here()
+        if shop:
+            c = self.world.containers[shop]
+            iid = next((i for i in c.items if self._item_match(i, low)), None)
+            if iid is not None:
+                base = inv.price_of(self.world, self.world.items[iid], c, self.player)
+                return self._make_offer("buy", iid, self._item_name(iid), base, c.owner_ref, place, shop=shop)
+            return None
+        from ..inventory.items import COIN
+        affs = {a["affordance"] for a in self.affordances_here()}
+        npc = self._merchant_here()
+        if affs & {"inn", "serve", "eat"}:
+            if any(k in low for k in self._ROOM_KW):
+                return self._make_offer("rent", None, "комната на ночь", 5 * COIN["sp"], npc, place)
+            if any(k in low for k in self._MEAL_KW):
+                return self._make_offer("meal", None, "горячая похлёбка", 3 * COIN["sp"], npc, place)
+        return None
+
+    def _do_trade(self, text: str) -> dict:
+        """Торг: LLM-торговец решает социальный исход (quote/concede/hold/deal/refuse/pass) + реплику
+        в голосе; ДВИЖОК считает цену в границах [floor, base] и проводит сделку. Не хардкод."""
+        hag = self._haggle
+        if not (hag and hag.get("merchant")):
+            hag = self._resolve_offer(text)
+            if hag is None:
+                npc = self._merchant_here()
+                if npc:
+                    return self._do_talk(Action(actor=self.player, verb="talk", target=npc), text)
+                return {"kind": "system", "text": "Поблизости не у кого торговать.", "view": self.view()}
+            self._haggle = hag
+        persona = self.world.ecs.get(hag["merchant"], Persona) if hag.get("merchant") else None
+        if self.model is None or persona is None:          # офлайн → детерминированный фоллбэк
+            return self._trade_fallback(hag, text)
+        from ..inference.agents import negotiate
+        rel = self.cognition.retrieve(hag["merchant"], "", self.player).rel
+        out = negotiate(self.model, persona, hag["label"], self._fmt_price(hag["quote_cp"]),
+                        self._fmt_price(hag["floor_cp"]), self._rel_summary(rel, False),
+                        hag["rounds"], text)
+        if out is None:
+            return self._trade_fallback(hag, text)
+        stance, give = (out.get("stance") or "quote"), (out.get("give") or "small")
+        line = (out.get("line") or "").strip() or {
+            "quote": "Вот моя цена.", "concede": "Так и быть, уступлю немного.",
+            "hold": "Цена честная, дешевле не отдам.", "refuse": "Нет, за столько не отдам.",
+            "deal": "Договорились.", "pass": "…"}.get(stance, "…")
+        hag["rounds"] += 1
+        if stance == "deal":
+            return self._close_deal(hag, line)
+        if stance == "pass":
+            self._haggle = None
+            return self._do_talk(Action(actor=self.player, verb="talk", target=hag["merchant"]), text)
+        if stance == "quote":
+            hag["quote_cp"] = hag["base_cp"]
+        elif stance == "concede":
+            frac = self._GIVE_FRAC.get(give, 0.25)
+            hag["quote_cp"] = max(hag["floor_cp"],
+                                  int(round(hag["quote_cp"] - (hag["quote_cp"] - hag["floor_cp"]) * frac)))
+        elif stance == "refuse" and hag["rounds"] >= 4:
+            self._haggle = None                            # затянувшийся торг — закрываем
+        self._tick()
+        tail = f"  💰 {self._fmt_price(hag['quote_cp'])}." if stance in ("quote", "concede", "hold") else ""
+        return {"kind": "narration", "npc": hag["merchant"], "text": (line or "…") + tail, "view": self.view()}
+
+    def _close_deal(self, hag: dict, line: str) -> dict:
+        price = hag["quote_cp"]
+        try:
+            if hag["kind"] == "buy":
+                inv.buy_at(self.world, self.player, hag["shop"], hag["ref"], price)
+            elif hag["kind"] == "rent":
+                self._haggle = None
+                return self._rent_room(price_cp=price)
+            elif hag["kind"] == "meal":
+                self._haggle = None
+                return self._eat_meal(price_cp=price)
+        except inv.InventoryError as e:
+            return {"kind": "system", "text": f"{line}  (не вышло: {e})", "view": self.view()}
+        self._haggle = None
+        self._tick()
+        return {"kind": "narration", "npc": hag["merchant"], "view": self.view(),
+                "text": f"{line}  Ты покупаешь «{hag['label']}» за {self._fmt_price(price)}. "
+                        f"Кошелёк: {self._coins()}."}
+
+    def _trade_fallback(self, hag: dict, text: str) -> dict:
+        """Без модели — детерминированно: покупка/услуга по базовой цене (без торга)."""
+        self._haggle = None
+        if hag["kind"] == "buy":
+            try:
+                inv.buy_at(self.world, self.player, hag["shop"], hag["ref"], hag["base_cp"])
+                self._tick()
+                return {"kind": "narration", "view": self.view(),
+                        "text": f"Ты покупаешь «{hag['label']}» за {self._fmt_price(hag['base_cp'])}. "
+                                f"Кошелёк: {self._coins()}."}
+            except inv.InventoryError as e:
+                return {"kind": "system", "text": f"Покупка не удалась: {e}", "view": self.view()}
+        if hag["kind"] == "rent":
+            return self._rent_room()
+        if hag["kind"] == "meal":
+            return self._eat_meal()
+        return {"kind": "system", "text": "Нечего купить.", "view": self.view()}
 
     def _coins(self) -> str:
         w = self.world.wallet(self.player)
@@ -1648,8 +1790,13 @@ class GameSession:
         return {"kind": "narration", "text": txt, "view": self.view()}
 
     # --- услуги двора: комната/еда (реальные транзакции, не флавор) --------- #
-    _ROOM_KW = ("снять комнат", "комнату на ночь", "снять номер", "снять угол", "переночев",
-                "ночлег", "заночев", "снять жиль", "снять койк", "на ночлег", "снять эту комнат")
+    # сигнал торгового НАМЕРЕНИЯ (исход решает LLM-торговец): запрос цены / покупка / торг / согласие
+    _TRADE_CUES = ("цен", "стоит", "сколько", "почём", "почем", "купить", "куплю", "покуп",
+                   "беру", "возьму", "взять", "торг", "скидк", "уступ", "сбав", "накин", "сторгу",
+                   "снять", "арендова", "заказать", "продаёшь", "продаешь", "дорог", "дешев",
+                   "ладно", "согласен", "договорил", "по рукам", "идёт", "идет")
+    _ROOM_KW = ("комнат", "номер", "ночлег", "переночев", "заночев", "ночёв", "снять угол",
+                "снять койк", "снять жиль", "постой", "на ночь", "ночь у вас")
     _MEAL_KW = ("поесть", "перекус", "поужина", "пообеда", "покуша", "похлёбк", "похлебк",
                 "горячего поес", "поедим", "перехвати", "поснедать", "трапез", "заказать ед")
     _INN_MENU_KW = ("отдохнуть и перекусить", "что предлага", "какие услуги", "что у вас есть",
@@ -1681,23 +1828,28 @@ class GameSession:
                         "кружка эля — 2 sp. Скажи, что берёшь: «снять комнату», «поесть» или «выпить».",
                 "view": self.view()}
 
-    def _rent_room(self) -> dict:
-        from ..inventory.container import transfer_currency
+    def _rent_room(self, price_cp: int | None = None) -> dict:
+        from ..inventory.container import _pay, transfer_currency
         from ..inventory.items import COIN, wallet_value_cp
         inn = self.current_place()
         rid = f"room:{inn.split(':')[-1]}_rented"
         if f"rented:{inn}" in self.world.flags and rid in self.world.spatial.places:
             return {"kind": "system", "text": "Комната уже за тобой — поднимись к себе "
                     "(выход «Снятая комната») и ложись спать, когда устанешь.", "view": self.view()}
-        if wallet_value_cp(self.world.wallets.get(self.player, {})) < 5 * COIN["sp"]:
-            return {"kind": "system", "text": "На комнату не хватает (нужно 5 sp).", "view": self.view()}
-        transfer_currency(self.world, self.player, None, {"sp": 5}, actor="inn")
+        cost = int(price_cp) if price_cp is not None else 5 * COIN["sp"]
+        if wallet_value_cp(self.world.wallets.get(self.player, {})) < cost:
+            return {"kind": "system", "text": f"На комнату не хватает (нужно {self._fmt_price(cost)}).",
+                    "view": self.view()}
+        if price_cp is not None:
+            _pay(self.world, self.player, self._merchant_here() or "inn", cost)   # договорная цена
+        else:
+            transfer_currency(self.world, self.player, None, {"sp": 5}, actor="inn")
         self.world.commit("rent_room", self.player, payload={
             "inn": inn, "room": rid, "name": "Снятая комната",
             "ambiance": "Тесная сухая комнатка наверху: лежанка, табурет, ставни глушат дождь."})
-        self._log_journal("Снял комнату на дворе (−5 sp).")
+        self._log_journal(f"Снял комнату на дворе (−{self._fmt_price(cost)}).")
         return {"kind": "narration",
-                "text": "Ты платишь 5 sp — комната твоя. Наверху открылась «Снятая комната»: "
+                "text": f"Комната твоя за {self._fmt_price(cost)}. Наверху открылась «Снятая комната»: "
                         "поднимись туда (выход наверх) и ложись спать, когда устанешь.",
                 "view": self.view()}
 
@@ -1714,22 +1866,27 @@ class GameSession:
                 "text": f"Ты заваливаешься на лежанку и спишь до утра ({self.world.clock.hhmm()}). "
                         f"Силы полностью восстановлены.", "view": self.view()}
 
-    def _eat_meal(self) -> dict:
-        from ..inventory.container import transfer_currency
+    def _eat_meal(self, price_cp: int | None = None) -> dict:
+        from ..inventory.container import _pay, transfer_currency
         from ..inventory.items import COIN, wallet_value_cp
-        if wallet_value_cp(self.world.wallets.get(self.player, {})) < 3 * COIN["sp"]:
-            return {"kind": "system", "text": "На еду не хватает (нужно 3 sp).", "view": self.view()}
-        transfer_currency(self.world, self.player, None, {"sp": 3}, actor="inn")
+        cost = int(price_cp) if price_cp is not None else 3 * COIN["sp"]
+        if wallet_value_cp(self.world.wallets.get(self.player, {})) < cost:
+            return {"kind": "system", "text": f"На еду не хватает (нужно {self._fmt_price(cost)}).",
+                    "view": self.view()}
+        if price_cp is not None:
+            _pay(self.world, self.player, self._merchant_here() or "inn", cost)
+        else:
+            transfer_currency(self.world, self.player, None, {"sp": 3}, actor="inn")
         st = self.world.get_stats(self.player)
         healed = 0
         if st and st.hp < st.max_hp:                      # горячая еда — небольшое лечение
             healed = min(5, st.max_hp - st.hp)
             self.world.commit("heal", self.player, target=self.player, payload={"amount": healed})
         self._tick(2)
-        self._log_journal("Поел горячего (−3 sp).")
+        self._log_journal(f"Поел горячего (−{self._fmt_price(cost)}).")
         extra = f" Восстановлено {healed} HP." if healed else ""
         return {"kind": "narration",
-                "text": f"Ты съедаешь миску горячей похлёбки с хлебом (−3 sp).{extra}",
+                "text": f"Ты съедаешь миску горячей похлёбки с хлебом (−{self._fmt_price(cost)}).{extra}",
                 "view": self.view()}
 
     # допустимые глаголы движка (валидация выхода LLM-парсера)

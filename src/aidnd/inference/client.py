@@ -150,6 +150,7 @@ class ModelManager:
         "director": (config.BASE_MODEL, None),
         "quest_writer": (config.QUEST_MODEL, "quest"),   # дообученная модель (см. training/)
         "plausibility": (config.BASE_MODEL, "validator"),
+        "merchant": (config.BASE_MODEL, "lore"),         # торговец: социальный исход торга (числа — движок)
         "faction_gen": (config.BASE_MODEL, "lore"),
     }
 

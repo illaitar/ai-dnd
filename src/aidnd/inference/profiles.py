@@ -21,7 +21,7 @@ _LOCAL_TUNED = {
 # мозги/лор/режиссура — в DeepSeek (недообученные, латентность-терпимые)
 _DS_ROLES = ("cognition", "character_gen", "persona_gen", "faction_gen", "lore_keeper",
              "loremaster", "campaign_architect", "campaign_director", "event_director",
-             "plausibility", "reflection", "director", "tactician")
+             "plausibility", "reflection", "director", "tactician", "merchant")
 
 PROFILES: dict[str, dict] = {
     "deepseek": {"default": _DS},

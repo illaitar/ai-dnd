@@ -120,6 +120,24 @@ PROMPTS = {
         "not zero. Reserve zero/near-zero for true contradictions and physically impossible "
         "feats. Output ONLY the plausibility JSON."
     ),
+    "merchant": (
+        "You play a merchant/innkeeper haggling with a customer in a D&D frontier town. You get your "
+        "persona (traits, voice, flaw), the item or service, its current ASKING price, your secret FLOOR "
+        "(the lowest you'd ever take — never reveal or go below it), the customer relationship, the haggle "
+        "round, and the customer's latest line. Pick a STANCE and speak ONE short in-character line in YOUR "
+        "voice:\n"
+        "  quote — they asked the price or just approached: state the asking price plainly.\n"
+        "  concede — they haggle and you choose to budge; set give = small|fair|max by your character "
+        "(greedy/stingy → small or refuse; easy-going/generous → fair|max; warm relationship → more).\n"
+        "  hold — restate the price with no real budge (politely or gruffly per your voice).\n"
+        "  deal — the customer agreed to the current price: close it (warmly or curtly).\n"
+        "  refuse — they lowball absurdly, insult you, or haggle too many rounds: turn them down in character.\n"
+        "  pass — the line is not about this trade (chit-chat / unrelated): a brief in-character aside.\n"
+        "NEVER invent items or numbers — the engine sets the actual price from your stance/give and clamps "
+        "to the floor. In your line do NOT state exact figures; speak qualitatively («чуть уступлю», "
+        "«по-честному», «накину за труды») — the engine appends the real price after your words. "
+        f"Speak ONLY as the merchant in {LANG}, 1-2 short sentences in their voice. Output ONLY the JSON."
+    ),
     "consequence": (
         "You are the WORLD-STATE consequence writer. After a player's freeform action RESOLVES, "
         "you record DURABLE changes the world should remember. You get the action, its outcome "
@@ -279,6 +297,10 @@ _DS_REINFORCE = {
         "\n\n[СТРОГО] Простой осмотр/чтение на виду при обычных условиях — auto_success, БЕЗ броска "
         "(прочитать доску объявлений, разглядеть товар на полке, оглядеть освещённую комнату). Бросок "
         "perception/investigation — ТОЛЬКО если цель скрыта, в темноте, далеко или замаскирована."),
+    "merchant": (
+        "\n\n[СТРОГО] Реплика — на русском, в голосе торговца, 1-2 коротких фразы, БЕЗ точных чисел "
+        "(их подставит движок). Жадный/расчётливый — почти не уступает или refuse; добродушный — "
+        "охотнее. Наглый лоу-болл/грубость/затянутый торг → refuse."),
     "router": (
         "\n\n[СТРОГО ДЛЯ ТЕБЯ] Действие игрока над ОБЪЕКТОМ/МЕСТОМ/мебелью/телом — это kind=command, "
         "НЕ dialogue, даже если рядом есть NPC. Примеры: «обыскать погреб/кладовую/стол/сундук» → "
@@ -442,6 +464,15 @@ SCHEMAS = {
             "lasting_effect": {"type": ["string", "null"]},
             "reason": {"type": "string"}},
             "required": ["resolution"]},
+    },
+    "negotiate": {
+        "name": "negotiate",
+        "parameters": {"type": "object", "properties": {
+            "stance": {"type": "string",
+                       "enum": ["quote", "concede", "hold", "deal", "refuse", "pass"]},
+            "give": {"type": ["string", "null"], "enum": ["none", "small", "fair", "max", None]},
+            "line": {"type": "string"}},     # реплика торговца в его голосе
+            "required": ["stance", "line"]},
     },
     "forge_item": {
         "name": "forge_item",
@@ -869,6 +900,20 @@ def decide_resolution(manager, action_text: str, context_digest: str, plausibili
             f"Decide how to resolve it. If a check is warranted, give ability, skill and dc "
             f"(lower dc the more plausible). Call decide_resolution.")
     return _call(manager, "arbiter", "decide_resolution", user, ["resolution"])
+
+
+def negotiate(manager, persona, offer: str, ask: str, floor_hint: str, rel: str,
+              rounds: int, player_line: str):
+    """Торговец решает социальный исход торга (stance/give) + реплику в голосе. Числа/границы —
+    движок. None — нет сервера (тогда детерминированный фоллбэк: фикс-цена/покупка)."""
+    traits = ", ".join(getattr(persona, "traits", None) or [])
+    user = (f"Ты — {getattr(persona, 'name', 'торговец')}; голос: {getattr(persona, 'voice', '') or '—'}; "
+            f"черты: {traits or '—'}; изъян: {getattr(persona, 'flaw', '') or '—'}.\n"
+            f"Товар/услуга: {offer}. Текущая запрашиваемая цена: {ask}. Твой ПОТОЛОК уступки "
+            f"(тайно, не называй и не опускайся ниже): {floor_hint}.\n"
+            f"Отношение к покупателю: {rel}. Раунд торга: {rounds}.\n"
+            f"Покупатель говорит: «{player_line}»\nВыбери stance/give и реплику. Call negotiate.")
+    return _call(manager, "merchant", "negotiate", user, ["stance"])
 
 
 def _lenient_plausibility(raw: dict):

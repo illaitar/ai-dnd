@@ -18,6 +18,7 @@
       <button id="journal-btn" class="cbtn">📜 Журнал</button>
       <button id="menu-btn" class="cbtn">☰ Меню</button>
       <button id="settings-btn" class="cbtn">⚙ Настройки</button>
+      <span id="usage-hud" class="badge hidden" title="Бесплатный тариф: запросы / миры"></span>
       <button id="account-btn" class="cbtn">👤 Войти</button>
       <div id="server-badge" class="badge">…</div>
     </div>
@@ -151,16 +152,18 @@
     </div>
   </div>
 
-  <!-- лобби: отдельный экран старта/загрузки (не всплывашка) -->
-  <div id="lobby" class="overlay screen hidden">
-    <div class="ui-box lobby-box">
-      <h2>⚔️ AI-DnD</h2>
-      <div class="menu-actions">
-        <button class="mbtn" id="lb-new">🆕 Новая игра</button>
-        <button class="mbtn" id="lb-load">📂 Загрузить</button>
-        <button class="mbtn" id="lb-continue" style="display:none">▶ Продолжить</button>
-        <button class="mbtn" id="lb-save" style="display:none">💾 Сохранить</button>
-      </div>
+  <!-- лобби: полноэкранная панель управления мирами (только после логина) -->
+  <div id="lobby" class="screen hidden">
+    <div class="lobby-panel">
+      <header class="lobby-head">
+        <h1>⚔️ Твои миры</h1>
+        <div class="lobby-head-acts">
+          <button class="cbtn" id="lb-continue" style="display:none">▶ Продолжить</button>
+          <button class="cbtn" id="lb-save" style="display:none">💾 Сохранить</button>
+          <button class="cbtn" id="lb-new">🆕 Новый мир</button>
+        </div>
+      </header>
+      <div id="lobby-list" class="lobby-list"></div>
     </div>
   </div>
 

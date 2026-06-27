@@ -171,7 +171,11 @@ PROMPTS = {
         "permanently ALTERS a specific object the player carries or sees, set target (its name) and "
         "lasting_effect — a short Russian description of the lasting change that should be remembered "
         "(e.g. «надпись „тест“ на клинке», «красная лента на рукояти», «зазубрина на лезвии»); else "
-        "leave them null. Output ONLY JSON via decide_resolution."
+        "leave them null. "
+        "Plain observation in normal conditions is auto_success, NOT a roll: reading a notice board, "
+        "looking at wares on a shelf, scanning a lit room — the player simply perceives it. Require a "
+        "perception/investigation roll ONLY when the target is hidden, in darkness, far away, disguised, "
+        "or deliberately concealed. Output ONLY JSON via decide_resolution."
     ),
     "item_smith": (
         "You name and flavour a single D&D 5e item instance from its template and the world "
@@ -271,6 +275,10 @@ _DS_REINFORCE = {
     "cognition": (
         "\n\n[СТРОГО] Верни ОДИН валидный JSON-объект полей action/target/info_disclosed/"
         "rationale_tags и НИЧЕГО больше."),
+    "arbiter": (
+        "\n\n[СТРОГО] Простой осмотр/чтение на виду при обычных условиях — auto_success, БЕЗ броска "
+        "(прочитать доску объявлений, разглядеть товар на полке, оглядеть освещённую комнату). Бросок "
+        "perception/investigation — ТОЛЬКО если цель скрыта, в темноте, далеко или замаскирована."),
     "router": (
         "\n\n[СТРОГО ДЛЯ ТЕБЯ] Действие игрока над ОБЪЕКТОМ/МЕСТОМ/мебелью/телом — это kind=command, "
         "НЕ dialogue, даже если рядом есть NPC. Примеры: «обыскать погреб/кладовую/стол/сундук» → "

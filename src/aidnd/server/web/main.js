@@ -21,8 +21,10 @@ async function logout() {
 function updateAccountBtn() {
   const b = $("account-btn"); if (b) b.textContent = ME ? ("👤 " + (ME.email || "вы")) : "👤 Войти";
 }
-function renderUsage(u) {                                   // шкала лимитов слева + текст в настройках
+function renderUsage(u) {                                   // шкала слева + счётчик в шапке + текст в настройках
   if (!u) return;
+  const hud = $("usage-hud");
+  if (hud) { hud.classList.remove("hidden"); hud.textContent = u.unlimited ? "∞ безлимит" : `⚡ ${u.requests.used}/${u.requests.free}`; }
   const bar = $("usage-bar"); if (!bar) return;
   bar.classList.remove("hidden");
   if (u.unlimited) {
@@ -137,9 +139,10 @@ function render(r) {
   if (r.kind === "thinking") { showThinking(r); return; }         // живой прогресс/роутинг ответа
   clearThinking();                                                // любой реальный результат — убираем индикатор
   if (r.toasts && r.toasts.length) r.toasts.forEach(showToast);   // «ачивки»
-  if (r.kind === "menu") {                                        // экран лобби при заходе (без фоновой сборки)
+  if (r.kind === "menu") {                                        // панель миров (только для залогиненных)
+    if (!r.user) { location.href = "/login"; return; }            // не залогинен → страница логина
     menuShown = true; hasGame = false; setMenuMode(false);
-    lobbyGames = r.games || null; lobbySaves = r.saves || null;
+    lobbyGames = r.games || []; lobbySaves = r.saves || null;
     showLobby();
   }
   if (r.kind === "journal") renderJournal(r.journal);             // подробный журнал квестов
@@ -163,8 +166,8 @@ function render(r) {
   }
   if (r.rolled_faces) logEntry(`🎲 выпало: [${r.rolled_faces.join(", ")}]`, "mech");
   if (r.kind === "house" && r.house) renderHouse(r.house);
-  if (r.kind === "saved") { logSystem(`💾 Сохранено: «${r.card ? (r.card.title || r.card.name || "") : ""}»`); const sv = r.games || r.saves; if (sv && !$("loadgame").classList.contains("hidden")) renderSaves(sv); }
-  if (r.kind === "saves" && r.saves) renderSaves(r.saves);
+  if (r.kind === "saved") { logSystem(`💾 Сохранено: «${r.card ? (r.card.title || r.card.name || "") : ""}»`); if (r.games) { lobbyGames = r.games; if (!$("lobby").classList.contains("hidden")) renderLobby(); } }
+  if (r.kind === "saves") { if (r.games) lobbyGames = r.games; if (!$("lobby").classList.contains("hidden")) renderLobby(); }
   if (r.view) updateView(r.view);
   if (r.travel_far) openOverlay("mapview");           // «далеко — открой карту»: сразу показываем карту для маршрута
   if (r.kind === "error" && !$("levelup").classList.contains("hidden")) $("lvl-msg").textContent = r.text;
@@ -183,7 +186,7 @@ function render(r) {
 
 function updateView(v) {
   lastView = v;
-  $("place-name").textContent = v.place_name || "—";
+  $("place-name").textContent = v.place_path || v.place_name || "—";   // хлебные крошки: Здание → Комната
   $("clock").textContent = "🕑 " + (v.time || "—");
   const p = v.player, pr = v.progression;
   const xppct = p.xp_next ? Math.min(100, 100 * p.xp / p.xp_next) : 100;
@@ -379,9 +382,27 @@ let lobbyGames = null, lobbySaves = null;                // что показы�
 function setMenuMode(game) {
   ["lb-continue", "lb-save"].forEach(id => { const e = $(id); if (e) e.style.display = game ? "" : "none"; });
 }
-function showLobby() {                                   // показать экран лобби (скрыв подэкраны)
+function showLobby() {                                   // показать панель миров (скрыв подэкраны)
   ["newgame", "loadgame"].forEach(id => $(id).classList.add("hidden"));
+  renderLobby();
   $("lobby").classList.remove("hidden");
+}
+function renderLobby() {                                 // панель управления мирами (карточки игр юзера)
+  const box = $("lobby-list"); if (!box) return;
+  const games = lobbyGames || [];
+  if (!games.length) {
+    box.innerHTML = '<div class="lobby-empty">Пока нет миров. Нажми «Новый мир», чтобы начать.</div>';
+    return;
+  }
+  box.innerHTML = games.map(g => {
+    const m = g.meta || {};
+    return `<div class="world-card"><div class="info"><div class="nm">${esc(g.title || "Мир")}</div>`
+      + `<div class="sub2">${esc(m.klass || "")}${m.klass ? " · " : ""}${esc(m.place || "")}${m.time ? " · 🕑 " + esc(m.time) : ""}</div></div>`
+      + `<div class="world-acts"><button data-play="${g.id}">▶ Играть</button>`
+      + `<button class="del" data-del="${g.id}" title="Удалить">✕</button></div></div>`;
+  }).join("");
+  box.querySelectorAll("[data-play]").forEach(b => b.onclick = () => { send({ cmd: "load", game_id: +b.dataset.play }); logSystem("📂 Загрузка мира…"); });
+  box.querySelectorAll("[data-del]").forEach(b => b.onclick = () => send({ cmd: "delete_save", game_id: +b.dataset.del }));
 }
 
 async function ensureNgOptions() {
@@ -967,7 +988,6 @@ $("menu-btn").onclick = () => showLobby();
 $("journal-btn").onclick = openJournal;
 $("lb-new").onclick = () => { $("lobby").classList.add("hidden"); openOverlay("newgame"); ensureNgOptions(); };
 $("lb-continue").onclick = () => $("lobby").classList.add("hidden");
-$("lb-load").onclick = () => openLoad();
 $("lb-save").onclick = doSave;
 $("ng-back").onclick = () => showLobby();
 $("lg-back").onclick = () => showLobby();

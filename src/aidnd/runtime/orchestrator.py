@@ -271,15 +271,12 @@ class GameSession:
         if not pending or not isinstance(result, dict):
             return result
         self._inc_pending = []
-        lines, map_dirty = [], False
+        map_dirty = False
         for sp in pending:
-            lines.append(f"⚡ В городе: {sp.label}" + (f" — {sp.desc}" if sp.desc else ""))
-            self._log_journal("⚡ " + sp.label)
-            self._toast("event", "⚡", "Событие в городе", sp.label)
+            self._log_journal("⚡ " + sp.label)            # тихо в журнал; детали игрок узнаёт от NPC, не из чата
             if (sp.effects or {}).get("change"):
                 map_dirty = True
         result = dict(result)
-        result["text"] = ((result.get("text") or "").rstrip() + "\n\n" + "\n".join(lines)).strip()
         result["incidents_fired"] = [sp.label for sp in pending]
         if map_dirty:
             result["map_dirty"] = True                     # фронту — перечитать карту (статусы изменились)
@@ -2186,6 +2183,19 @@ class GameSession:
         p = self.world.spatial.places.get(pid)
         return p.name if p else pid
 
+    def _place_path(self, pid: str) -> str:
+        """Хлебные крошки локации «Здание → Комната» — явный индикатор, где мы (и в какой суб-локации)."""
+        sp = self.world.spatial.places
+        p = sp.get(pid)
+        if not p:
+            return self._place_name(pid)
+        chain = [p.name]
+        parent = sp.get(p.parent) if p.parent else None
+        while parent and parent.kind in ("building", "site"):   # до здания/сайта (регион — не «локация»)
+            chain.append(parent.name)
+            parent = sp.get(parent.parent) if parent.parent else None
+        return " → ".join(reversed(chain))
+
     def _item_name(self, iid: str) -> str:
         inst = self.world.items.get(iid)
         if not inst:
@@ -3469,6 +3479,7 @@ class GameSession:
             "board": self.board_view(),
             "inventory": self.inventory_view(),
             "place": place, "place_name": self._place_name(place),
+            "place_path": self._place_path(place),
             "seed": self.world.seed,
             "time": self.world.clock.hhmm(),
             "game_over": self.is_game_over(),

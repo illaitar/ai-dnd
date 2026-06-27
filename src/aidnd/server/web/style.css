@@ -408,8 +408,22 @@ main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .login-box { max-width: 360px; width: 100%; text-align: center; }
 .login-box h1 { margin-top: 0; }
-/* .screen — отдельный экран (непрозрачный фон, широкий бокс), а не всплывашка */
+/* .screen — отдельный полноэкранный экран (непрозрачный фон), не всплывашка */
 .overlay.screen { background: #0a0c10; backdrop-filter: none; }
 .overlay.screen > .ui-box { width: min(960px, 96vw); max-height: 92vh; overflow: auto; }
-.lobby-box { text-align: center; }
-.lobby-box .menu-actions { display: flex; flex-direction: column; gap: 10px; max-width: 320px; margin: 18px auto 0; }
+.screen { position: fixed; inset: 0; z-index: 11; overflow: auto; background: #0a0c10; }
+.screen.hidden { display: none; }
+/* лобби = панель управления мирами */
+.lobby-panel { max-width: 880px; margin: 0 auto; padding: 28px 22px; }
+.lobby-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; border-bottom: 1px solid rgba(255,255,255,.1); padding-bottom: 14px; }
+.lobby-head h1 { margin: 0; }
+.lobby-head-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.lobby-list { display: grid; gap: 10px; margin-top: 18px; }
+.lobby-empty { color: var(--muted); text-align: center; padding: 40px 0; }
+.world-card { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(255,255,255,.03); }
+.world-card .nm { font-weight: 600; }
+.world-card .sub2 { color: var(--muted); font-size: 12px; }
+.world-acts { display: flex; gap: 6px; }
+#usage-hud { background: rgba(255,255,255,.08); }

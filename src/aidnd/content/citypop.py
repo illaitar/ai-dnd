@@ -10,9 +10,11 @@
 
 from __future__ import annotations
 
-# тяга места (по аффордансам): куда тянет вечером (досуг) и днём (работа)
+# тяга места (по аффордансам): куда тянет вечером (досуг) и днём (работа). Место может и работать, и манить
+# одновременно (таверна: днём — работники/обедающие, вечером — гуляки).
 LEISURE = {"inn": 6, "drink": 6, "serve": 3, "shrine": 2, "shop": 1, "guild": 1, "board": 1}
-WORKAFF = {"shop": 4, "work": 2, "serve": 3, "shrine": 2, "guild": 2, "townhall": 2, "farm": 2, "mine": 2}
+WORKAFF = {"shop": 4, "work": 2, "serve": 3, "shrine": 2, "guild": 2, "townhall": 2, "farm": 2, "mine": 2,
+           "inn": 3, "drink": 2}
 # профессия по главной аффордансе места работы
 PROF_BY_AFF = {"inn": "слуга", "serve": "слуга", "drink": "разносчик", "shop": "лавочник", "farm": "фермер",
                "mine": "рудокоп", "shrine": "служка", "guild": "писарь", "townhall": "чиновник",
@@ -82,11 +84,16 @@ class CityPopulation:
         self.world = world
         self.materialized: dict[str, str] = {}                 # stub_id → npc_id (после знакомства)
         rng = random.Random(subseed(int(seed), "citypop_world"))
-        # публичные места города (по аффордансам) + их тяга
+        # публичные места города + тяга: работа И досуг считаются отдельно (место может быть и тем, и тем)
         pubs = self._public_places(world)
-        leisure_w = [(pid, LEISURE.get(self._aff(world, pid), 0)) for pid in pubs]
-        leisure_w = [(p, w) for p, w in leisure_w if w] or [(pubs[0], 1)] if pubs else []
-        work_w = [(pid, WORKAFF.get(self._aff(world, pid), 0)) for pid in pubs]
+
+        def _affs(pid):
+            p = world.spatial.places.get(pid)
+            return set(getattr(p, "affordances", []) or []) if p else set()
+
+        leisure_w = [(pid, max((LEISURE.get(a, 0) for a in _affs(pid)), default=0)) for pid in pubs]
+        leisure_w = [(p, w) for p, w in leisure_w if w] or ([(pubs[0], 1)] if pubs else [])
+        work_w = [(pid, max((WORKAFF.get(a, 0) for a in _affs(pid)), default=0)) for pid in pubs]
         work_w = [(p, w) for p, w in work_w if w]
         # сколько жителей (масштаб от домов), детерминированно
         houses = (getattr(world, "city_profile", None) or {}).get("houses", 60)
@@ -153,6 +160,8 @@ class CityPopulation:
             return None
         ph = _phase(minute)
         if ph == "day":
+            if 12 * 60 <= minute < 14 * 60 and ag["evening"] and (abs(hash(aid)) % 2 == 0):
+                return ag["evening"]                           # обеденный наплыв: завсегдатаи забегают в досуг
             return ag["work"]
         if ph == "evening":
             return ag["evening"]

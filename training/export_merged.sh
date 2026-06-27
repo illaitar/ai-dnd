@@ -39,9 +39,9 @@ fi
 step "4/5 Modelfile (рендерер/парсер из базы $BASE_OLLAMA) + ollama create aidnd-$ADAPTER"
 {
   echo "FROM ./${GGUF_USE}"
-  # переносим qwen3.5 RENDERER/PARSER/TEMPLATE из рабочей базы (без её FROM)
-  ollama show --modelfile "$BASE_OLLAMA" 2>/dev/null \
-    | grep -E '^(TEMPLATE|RENDERER|PARSER)' || true
+  # переносим ПОЛНЫЙ TEMPLATE/RENDERER/PARSER базы (без её FROM/комментов). grep '^TEMPLATE'
+  # рвал многострочный TEMPLATE qwen3:14b → «unexpected EOF» в ollama create.
+  ollama show --modelfile "$BASE_OLLAMA" 2>/dev/null | grep -vE '^(FROM |#)' || true
   echo "PARAMETER temperature 0"
   echo "PARAMETER top_p 0.95"
 } > "${OUT}/Modelfile"

@@ -47,8 +47,9 @@ def _path(slug: str) -> str:
     return os.path.join(_dir(), os.path.basename(slug) + ".json")
 
 
-def save_session(session: GameSession, name: str) -> dict:
-    """Сохранить текущую партию в файл. Возвращает карточку сейва для UI."""
+def serialize_session(session: GameSession, name: str) -> dict:
+    """Сериализовать партию в dict (boot + хвост event-лога + снапшот обогащения). БЕЗ записи в файл —
+    общая основа для файловых сейвов И для игр в БД (server/games)."""
     boot = getattr(session, "boot", None)
     if not boot:
         raise ValueError("сессия без boot — сохранять нечего")
@@ -62,7 +63,7 @@ def save_session(session: GameSession, name: str) -> dict:
         "klass": CLASSES.get(boot["pc_spec"].get("klass"), {}).get("name", ""),
     }
     from .snapshot import capture
-    data = {
+    return {
         "version": SAVE_VERSION, "name": name, "created": time.time(),
         "seed": boot["seed"], "roster_size": boot["roster_size"],
         "scenario": boot["scenario"], "pc_spec": boot["pc_spec"],
@@ -71,11 +72,16 @@ def save_session(session: GameSession, name: str) -> dict:
         "events": tail, "meta": meta, "main_quest": boot.get("main_quest"),
         "state": capture(session),                       # снапшот обогащения: предметы/персоны/память
     }
+
+
+def save_session(session: GameSession, name: str) -> dict:
+    """Сохранить текущую партию в файл. Возвращает карточку сейва для UI."""
+    data = serialize_session(session, name)
     slug = _slug(name)
     with open(_path(slug), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     return {"slug": slug, "name": name, "created": data["created"],
-            "meta": meta, "events": len(tail)}
+            "meta": data["meta"], "events": len(data["events"])}
 
 
 def list_saves() -> list[dict]:
@@ -94,9 +100,15 @@ def list_saves() -> list[dict]:
 
 
 def load_session(slug: str, use_model: bool = True) -> GameSession:
-    """Восстановить партию: пре-ген из параметров → квесты → реплей рантайм-хвоста."""
+    """Восстановить партию из файла-сейва."""
     with open(_path(slug), encoding="utf-8") as f:
         d = json.load(f)
+    return deserialize_session(d, use_model)
+
+
+def deserialize_session(d: dict, use_model: bool = True) -> GameSession:
+    """Восстановить партию из dict: пре-ген из параметров → квесты → реплей рантайм-хвоста.
+    Общая основа для файловых сейвов И игр в БД (server/games)."""
     manager = ModelManager() if use_model else None
     model = manager if (manager and manager.available()) else None
     world = build_world(seed=d["seed"], roster_size=d["roster_size"], model=model,
@@ -120,7 +132,7 @@ def load_session(slug: str, use_model: bool = True) -> GameSession:
         if not progressed:
             break
     session = GameSession(world, model=manager if use_model else None, quest_system=quests)
-    from .snapshot import apply                           # снапшот обогащения поверх реконструкции
+    from .snapshot import apply  # снапшот обогащения поверх реконструкции
     apply(session, d.get("state"))                        # предметы/контейнеры/кошельки/персоны/память
     session._quest_log_seen = session._toast_log_seen = len(quests.log)   # не всплывать из-за догоняющего advance
     session.boot = {"seed": d["seed"], "roster_size": d["roster_size"],

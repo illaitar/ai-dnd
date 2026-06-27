@@ -20,10 +20,12 @@ from .. import config
 from ..bootstrap import new_session
 from ..rules.dice import roll_expr
 from .routes_auth import router as _auth_router
+from .routes_games import router as _games_router
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 app = FastAPI(title="AI-DnD Engine")
 app.include_router(_auth_router)
+app.include_router(_games_router)
 
 
 @app.on_event("startup")

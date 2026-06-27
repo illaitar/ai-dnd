@@ -227,20 +227,28 @@ function updateView(v) {
 }
 
 // ------------------------------------------------ доска объявлений ---------
+function boardNews(news) {
+  return (news && news.length) ? `<div class="board-news">📰 ${news.map(esc).join("<br>")}</div>` : "";
+}
 function renderBoard(b) {
   const box = $("board-list");
-  if (!b || !b.quests || !b.quests.length) { box.innerHTML = "<div class='saves-empty'>Объявлений нет.</div>"; return; }
-  box.innerHTML = b.quests.map(q => {
+  const news = boardNews(b && b.news);
+  if (!b || !b.quests || !b.quests.length) { box.innerHTML = news + "<div class='saves-empty'>Объявлений нет.</div>"; return; }
+  box.innerHTML = news + b.quests.map(q => {
+    const gone = q.status === "done_elsewhere" || q.status === "withdrawn";
     let act;
     if (q.can_accept) act = `<button data-accept="${q.id}">Взять</button>`;
     else if (q.can_turn_in) act = `<button data-turnin="${q.id}">Сдать</button>`;
+    else if (gone) act = `<span class="note">снято</span>`;
     else if (q.state === "active") act = `<span class="note">в работе…</span>`;
     else if (q.state === "completed") act = `<span class="note">✓ сдано</span>`;
     else act = "";
-    return `<div class="fac-card ${q.state === "completed" ? "member" : ""}"><h3>📜 ${esc(q.title)}<span class="sp"></span>`
+    const noteRow = q.note ? `<div class="board-note ${q.status === "reward_up" ? "up" : "gone"}">${esc(q.note)}</div>` : "";
+    return `<div class="fac-card ${q.state === "completed" ? "member" : ""} ${gone ? "board-gone" : ""}"><h3>📜 ${esc(q.title)}<span class="sp"></span>`
       + `<span class="stand" style="color:var(--gold)">${esc(q.reward)}</span></h3>`
       + `<div class="blurb">${esc(q.framing)}</div>`
       + `<div class="meta"><b>Задача:</b> ${esc(q.objective)}</div>`
+      + noteRow
       + `<div class="acts">${act}</div></div>`;
   }).join("");
   box.querySelectorAll("[data-accept]").forEach(el => el.onclick = () => send({ cmd: "quest_accept", quest: el.dataset.accept }));

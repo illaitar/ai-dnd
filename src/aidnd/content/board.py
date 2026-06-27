@@ -15,7 +15,8 @@ BOARD_PLACE = "building:notice_board"
 
 
 def _board_quest(qid: str, title: str, objective: str, cond: Predicate,
-                 rewards: Rewards, framing: str, req_kind: str, req_ref: str) -> Quest:
+                 rewards: Rewards, framing: str, req_kind: str, req_ref: str,
+                 ttl_days: int = 3) -> Quest:
     q = Quest(
         quest_id=qid, kind="board", title=title, giver_ref=BOARD_PLACE, state="offered",
         stages=[
@@ -30,6 +31,8 @@ def _board_quest(qid: str, title: str, objective: str, cond: Predicate,
     )
     q.req_kind = req_kind          # для UI: тип требования (item|talk|bounty)
     q.req_ref = req_ref
+    q.ttl_days = ttl_days          # срок жизни объявления (дней) — после него судьба: сделали другие/сняли
+    q.req_place = req_ref if str(req_ref).startswith(("place:", "building:", "site:")) else None
     return q
 
 

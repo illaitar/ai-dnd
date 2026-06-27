@@ -3820,36 +3820,92 @@ class GameSession:
                 "intro": plan.get("intro"), "objective": obj,
                 "state": mq.state if mq else None}
 
+    def _board_mutation(self, q) -> dict | None:
+        """Ленивая судьба НЕвзятого board-объявления по времени (детерм. seed+квест+дни).
+        Игрок взял/сделал → не трогаем. Иначе: подняли награду / выполнили другие / сняли."""
+        if q.state in ("active", "completed"):
+            return None
+        ttl = getattr(q, "ttl_days", 0)
+        if ttl <= 0:
+            return None
+        import random
+
+        from ..gen.seeds import subseed
+        from ..world.environment import day_number
+        days = day_number(self.world.clock.tick)          # статичные объявления вывешены в день 0
+        if days < 1:
+            return None
+        rng = random.Random(subseed(self.world.seed, "boardmut", q.quest_id))
+        bump_day = 1 + rng.randrange(2)                   # 1..2 дня без желающих → награду вверх
+        fate = rng.random()
+        if days >= ttl:                                   # срок вышел — судьба решена
+            if days > ttl + 1:                            # уже снято и показано — больше не висит
+                return {"status": "gone"}
+            if fate < 0.55:
+                return {"status": "done_elsewhere",
+                        "note": "Пока тебя не было, задание выполнил кто-то другой — объявление сняли."}
+            return {"status": "withdrawn", "note": "Надобность отпала — объявление сняли."}
+        if days >= bump_day:
+            base = (q.rewards.currency or {}).get("gp", 0)
+            bumped = int(round(base * 1.5)) if base else 0
+            return {"status": "reward_up", "bump_gp": bumped,
+                    "note": (f"Никто не берётся — награду подняли до {bumped} зм." if bumped
+                             else "Никто не берётся — награду подняли.")}
+        return None
+
     def board_view(self) -> dict | None:
-        """Список простых заданий на доске (только когда игрок у доски объявлений)."""
+        """Список заданий на доске (только у доски). С учётом срока жизни: невзятые со временем
+        дорожают, выполняются другими или снимаются — игрок видит это, вернувшись к доске."""
         if not self._at_board():
             return None
-        items = []
+        items, news = [], []
         for q in self.world.quests.values():
             if getattr(q, "kind", "") != "board":
                 continue
+            mut = self._board_mutation(q)
+            if mut and mut["status"] == "gone":           # снято ранее — на доске больше нет
+                continue
             cur = next((q.stage(s).objective for s in q.current_stages if q.stage(s)),
                        q.stages[0].objective if q.stages else "")
+            reward, status, note = self._reward_text(q.rewards), "open", ""
+            can_accept = q.state in ("offered", "not_offered")
+            if mut:
+                status, note = mut["status"], mut.get("note", "")
+                if status in ("done_elsewhere", "withdrawn"):
+                    can_accept = False
+                elif status == "reward_up" and mut.get("bump_gp"):
+                    from .quest_gen import Rewards
+                    reward = self._reward_text(Rewards(currency={"gp": mut["bump_gp"]},
+                                                       xp=q.rewards.xp, faction_rep=q.rewards.faction_rep))
+                if note:
+                    news.append(f"«{q.title}»: {note}")
             items.append({
                 "id": q.quest_id, "title": q.title, "framing": q.framing, "objective": cur,
-                "state": q.state, "reward": self._reward_text(q.rewards),
-                "req_kind": getattr(q, "req_kind", ""),
-                "can_accept": q.state in ("offered", "not_offered"),
+                "state": q.state, "reward": reward, "status": status, "note": note,
+                "req_kind": getattr(q, "req_kind", ""), "can_accept": can_accept,
                 "can_turn_in": q.state == "active" and "turnin" in q.current_stages,
             })
-        return {"place": self._place_name(self.current_place()), "quests": items}
+        return {"place": self._place_name(self.current_place()), "quests": items, "news": news}
 
     def accept_quest(self, qid: str) -> dict:
         q = self.world.quests.get(qid)
         if not q or getattr(q, "kind", "") != "board" or q.state not in ("offered", "not_offered"):
             return {"kind": "system", "text": "Это задание сейчас нельзя принять.", "view": self.view()}
+        mut = self._board_mutation(q)                     # выполнили другие/сняли — взять нельзя
+        if mut and mut["status"] in ("done_elsewhere", "withdrawn", "gone"):
+            return {"kind": "system", "view": self.view(),
+                    "text": "📜 " + (mut.get("note") or "Этого объявления на доске больше нет.")}
+        bumped = ""
+        if mut and mut["status"] == "reward_up" and mut.get("bump_gp"):  # дорожало — фиксируем повышенную награду
+            self.world.commit("set_flag", self.player, payload={"flag": f"qrew:{qid}:{mut['bump_gp']}"})
+            bumped = f" Награда повышена до {mut['bump_gp']} зм."
         first = q.stages[0].stage_id if q.stages else None
         self.world.commit("quest_state", self.player, target=qid,
                           payload={"state": "active", "current_stages": [first] if first else []})
         self._log_journal(f"Принято задание: «{q.title}».")
-        self.quests.note(qid, f"{qid}:accept", f"Принял задание: «{q.title}» (доска объявлений).")
+        self.quests.note(qid, f"{qid}:accept", f"Принял задание: «{q.title}» (доска объявлений).{bumped}")
         res = self.look()
-        res["text"] = f"📜 Принято задание: «{q.title}». {q.framing}"
+        res["text"] = f"📜 Принято задание: «{q.title}».{bumped} {q.framing}"
         return res
 
     def turn_in_quest(self, qid: str) -> dict:

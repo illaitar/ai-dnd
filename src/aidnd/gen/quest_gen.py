@@ -179,11 +179,19 @@ class QuestSystem:
     def complete(self, quest: Quest) -> None:
         quest.state = "completed"
         r = quest.rewards
-        if r.currency:
+        currency = dict(r.currency or {})
+        for f in self.world.flags:               # повышенная награда (board reward_up) перебивает базовый gp
+            if f.startswith(f"qrew:{quest.quest_id}:"):
+                try:
+                    currency = {"gp": int(f.rsplit(":", 1)[1])}
+                except ValueError:
+                    pass
+                break
+        if currency:
             from ..inventory.container import transfer_currency
             if self.world.player_id:
                 transfer_currency(self.world, None, self.world.player_id,
-                                  r.currency, actor="quest")
+                                  currency, actor="quest")
         for faction, delta in r.faction_rep.items():           # числовое стояние (событийно)
             self.world.commit("faction_rep", self.world.player_id or "dm",
                               payload={"faction": faction, "delta": delta})
@@ -193,8 +201,8 @@ class QuestSystem:
         if quest.kind != "milestone":                       # вехи невидимы в журнале
             self.log.append(f"Квест завершён: {quest.title} (XP {r.xp})")
             parts = []
-            if r.currency:
-                parts.append(" ".join(f"{v}{k}" for k, v in r.currency.items()))
+            if currency:
+                parts.append(" ".join(f"{v}{k}" for k, v in currency.items()))
             if r.xp:
                 parts.append(f"{r.xp} опыта")
             rew = (" Награда: " + ", ".join(parts) + ".") if parts else ""

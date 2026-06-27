@@ -463,4 +463,6 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     register_watch(world, seed)       # 5e. городская стража — ПОСЛЕ полной застройки (масштаб от размера города)
     from ..gen.faction_gen import seed_leader_knowledge
     seed_leader_knowledge(world)      # 5f. память руководителей: организация + подчинённые (обкатано на страже)
+    from .citypop import CityPopulation
+    world.citypop = CityPopulation(world, seed)   # 5g. именованные жители — наполняют публичные места
     return world

@@ -115,6 +115,7 @@ class GameSession:
         if getattr(self, "_sched_tick", None) == tick:
             return
         self._sched_tick = tick
+        from ..content.agency import active_place
         from ..lod.smart_objects import block_at
         from ..world.components import Schedule
         hhmm = self.world.clock.hhmm()
@@ -124,13 +125,16 @@ class GameSession:
             per = self.world.ecs.get(npc, Persona)
             if per and (per.companion or getattr(per, "following", False)):
                 continue                                  # идут с игроком — не по расписанию
-            blk = block_at(self.world.ecs.get(npc, Schedule), hhmm)
-            if not blk:
-                continue
+            target = active_place(self.world, npc)        # важный деятель — по СВОЕМУ плану, не по рутине
+            if not target:
+                blk = block_at(self.world.ecs.get(npc, Schedule), hhmm)
+                if not blk:
+                    continue
+                target = blk.place
             pos = self.world.position(npc)
-            if not pos or pos.place_id != blk.place:
+            if not pos or pos.place_id != target:
                 self.world.commit("set_position", "schedule", target=npc,
-                                  payload={"region": "region:phandalin", "place": blk.place})
+                                  payload={"region": "region:phandalin", "place": target})
 
     def _asleep(self, npc: str) -> bool:
         """NPC сейчас спит по расписанию (ночь дома) — присутствует, но не бодрствует."""
@@ -300,6 +304,15 @@ class GameSession:
             wnote = self._watch_reaction_note()
             if wnote:
                 text += "\n" + wnote
+        pop = getattr(self.world, "citypop", None)        # именованные горожане, что сейчас тут (заглушки)
+        if pop:
+            from ..content.citypop import _minute
+            present = pop.present_at(place, _minute(self.world))
+            if present:
+                names = ", ".join(pop.name_of(a) for a in present[:6])
+                more = f" и ещё {len(present) - 6}" if len(present) > 6 else ""
+                text += (f"\n👥 Здесь также: {names}{more}. "
+                         "Заговори с любым по имени — он станет живым собеседником.")
         return {
             "kind": "look", "text": text,
             "place": place, "place_name": name, "scene": sc.to_dict(),
@@ -2236,6 +2249,8 @@ class GameSession:
             self._dungeon_cycle()                         # переоккупация зачищенных логов со временем
             from ..content.cases import decay_cases
             decay_cases(self.world)                        # подозрение к игроку стихает со временем
+            from ..content.agency import advance_agendas
+            advance_agendas(self.world)                    # важные NPC продвигают свои планы (шаг в день)
 
     def _threat_notices(self) -> None:
         """Рост угрозы: высокоугрожающие незачищенные логова всё чаще беспокоят округу (вести в журнал)."""
@@ -3088,7 +3103,23 @@ class GameSession:
                         score += 1
             if score > best_score:
                 best, best_score = npc, score
-        return best
+        return best or self._match_pop(low)               # никто из живых не подошёл → фоновый житель?
+
+    def _match_pop(self, low: str) -> str | None:
+        """Общий переход ФОН→СОБЕСЕДНИК: упомянул присутствующего фонового жителя по имени →
+        он материализуется в полноценного NPC (персона, статы/навыки, профессия, семья, знания)."""
+        pop = getattr(self.world, "citypop", None)
+        if not pop:
+            return None
+        from ..content.citypop import _minute
+        aid = pop.match(low, self.current_place(), _minute(self.world))
+        if not aid:
+            return None
+        npc_id = pop.materialize(aid, self.current_place(), self.model)
+        if npc_id:
+            self.charts.enrich(npc_id)                    # полная персона (LLM, если есть)
+            self._log_journal(f"{self._display(npc_id)} выходит из толпы — теперь это собеседник.")
+        return npc_id
 
     def _direction_in(self, low: str) -> str | None:
         from ..world.spatial import DIR_ALIASES

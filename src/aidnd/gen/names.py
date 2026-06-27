@@ -39,13 +39,34 @@ NAME_POOLS = {
     },
 }
 
-_SYLL = ["ar", "en", "or", "il", "an", "ek", "us", "in", "od", "el", "ra", "th", "ow"]
+# расово-окрашенные слоги (onset+nucleus+coda) — для процедурных фэнтези-имён, когда пул исчерпан
+_RACE_SYL = {
+    "human": {"on": ["br", "th", "mar", "cor", "el", "gar", "wes", "hal", "ald", "ren", "dor", "mil", "ros",
+                     "fen", "bal", "kar", "der", "ost", "lin", "ned", "tor", "vel"],
+              "nu": ["a", "e", "i", "o", "an", "en", "or", "ar"],
+              "co": ["n", "r", "s", "th", "din", "win", "mar", "ric", "da", "len", "ric", "mon", "ric", "wel"]},
+    "dwarf": {"on": ["thr", "gr", "br", "dur", "bal", "gim", "thor", "dwa", "kaz", "mor", "tor", "nor", "von"],
+              "nu": ["a", "u", "o", "ar", "or", "un", "um"],
+              "co": ["in", "rik", "din", "grim", "li", "nar", "dur", "gar", "bek", "rund", "dan", "lic"]},
+    "halfling": {"on": ["mil", "pip", "and", "fen", "dob", "rell", "per", "lil", "tans", "bree", "mer", "cob"],
+                 "nu": ["o", "i", "a", "e"],
+                 "co": ["o", "by", "ck", "wick", "ny", "ble", "dle", "kin", "low"]},
+    "half-elf": {"on": ["ael", "il", "sil", "cae", "fae", "lor", "thal", "ny", "ela", "ari", "fel"],
+                 "nu": ["a", "e", "i", "ia", "ae"],
+                 "co": ["riel", "wen", "las", "mir", "dor", "nor", "wyn", "lian", "neth"]},
+    "elf": {"on": ["ael", "sil", "cae", "fae", "lor", "thal", "ny", "ela", "ari", "myr", "tha", "lue"],
+            "nu": ["a", "e", "i", "ia", "ae", "io", "ea"],
+            "co": ["riel", "wen", "las", "mir", "thil", "dor", "nor", "wyn", "dril", "loth", "anil"]},
+}
 
 
 def markov_name(race: str, rng: random.Random) -> str:
-    n = rng.randint(2, 3)
-    s = "".join(rng.choice(_SYLL) for _ in range(n))
-    return s.capitalize()
+    """Процедурное фэнтези-имя с расовым звучанием (onset+nucleus+coda, иногда длиннее)."""
+    syl = _RACE_SYL.get(race, _RACE_SYL["human"])
+    name = rng.choice(syl["on"]) + rng.choice(syl["nu"]) + rng.choice(syl["co"])
+    if rng.random() < 0.32:
+        name += rng.choice(syl["nu"]) + rng.choice(syl["co"])
+    return name[0].upper() + name[1:]
 
 
 def draw(pool_key: str, race: str, rng: random.Random) -> str | None:

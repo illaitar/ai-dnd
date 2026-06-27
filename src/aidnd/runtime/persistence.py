@@ -78,6 +78,7 @@ def serialize_session(session: GameSession, name: str) -> dict:
                         for ld in session.event_leads if ld.get("id") in session.world.quests],
         "dungeon_status": session.dungeon_status,          # cleared|occupied подземелий (переоккупация)
         "cases": getattr(session.world, "cases", {}) or {},  # дела дознавателей (подозрение к игроку)
+        "agendas": getattr(session.world, "agendas", {}) or {},  # замыслы важных деятельных NPC
         "events": tail, "meta": meta, "main_quest": boot.get("main_quest"),
         "state": capture(session),                       # снапшот обогащения: предметы/персоны/память
     }
@@ -165,6 +166,7 @@ def deserialize_session(d: dict, use_model: bool = True) -> GameSession:
     session.dungeon_status = dict(d.get("dungeon_status") or {})
     session._apply_dungeon_status()                       # переоккупация: снять cleared-флаги/переоткрыть контракты
     session.world.cases = {k: dict(v) for k, v in (d.get("cases") or {}).items()}   # дела дознавателей
+    session.world.agendas = {k: dict(v) for k, v in (d.get("agendas") or {}).items()}   # замыслы важных NPC
     session.boot = {"seed": d["seed"], "roster_size": d["roster_size"],
                     "scenario": d.get("scenario") or default_scenario(),
                     "pc_spec": resolve_pc_spec(d.get("pc_spec")), "baseline": d["baseline"],

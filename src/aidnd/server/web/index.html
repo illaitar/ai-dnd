@@ -151,22 +151,23 @@
     </div>
   </div>
 
-  <div id="menu" class="overlay hidden">
-    <div class="ui-box menu-box">
-      <h2>☰ Меню <button class="x" data-close="menu">✕</button></h2>
+  <!-- лобби: отдельный экран старта/загрузки (не всплывашка) -->
+  <div id="lobby" class="overlay screen hidden">
+    <div class="ui-box lobby-box">
+      <h2>⚔️ AI-DnD</h2>
       <div class="menu-actions">
-        <button class="mbtn" id="m-new">🆕 Новая игра</button>
-        <button class="mbtn" id="m-continue">▶ Продолжить</button>
-        <button class="mbtn" id="m-load">📂 Загрузить</button>
-        <button class="mbtn" id="m-save">💾 Сохранить</button>
+        <button class="mbtn" id="lb-new">🆕 Новая игра</button>
+        <button class="mbtn" id="lb-load">📂 Загрузить</button>
+        <button class="mbtn" id="lb-continue" style="display:none">▶ Продолжить</button>
+        <button class="mbtn" id="lb-save" style="display:none">💾 Сохранить</button>
       </div>
     </div>
   </div>
 
-  <!-- новая игра: сценарий + класс + снаряжение -->
-  <div id="newgame" class="overlay hidden">
+  <!-- новая игра: сценарий + класс + снаряжение (отдельный экран) -->
+  <div id="newgame" class="overlay screen hidden">
     <div class="ui-box ng-box">
-      <h2>🆕 Новая игра <button class="x" data-close="newgame">✕</button></h2>
+      <h2>🆕 Новая игра <button class="x" id="ng-back" title="В меню">✕</button></h2>
       <div class="ng-grid">
         <div><h3>Сценарий</h3><div id="ng-scenarios" class="ng-cards"></div></div>
         <div><h3>Класс</h3><div id="ng-classes" class="ng-cards"></div></div>
@@ -194,7 +195,7 @@
       <h2>✦ Создаётся мир</h2>
       <div class="load-bar"><div id="load-fill" class="load-fill"></div></div>
       <div class="load-row"><span id="load-label" class="state">Готовлю генерацию…</span><span id="load-pct" class="load-pct"></span></div>
-      <p class="load-hint">Оживляю фракции и жителей, проставляю лидеров и пишу сюжет кампании — это пара минут на одной видеокарте.</p>
+      <p class="load-hint">Оживляю фракции и жителей, проставляю лидеров и пишу сюжет кампании — это занимает немного времени.</p>
     </div>
   </div>
 
@@ -248,9 +249,9 @@
   </div>
 
   <!-- загрузка / удаление сейвов -->
-  <div id="loadgame" class="overlay hidden">
+  <div id="loadgame" class="overlay screen hidden">
     <div class="ui-box">
-      <h2>📂 Сейвы <button class="x" data-close="loadgame">✕</button></h2>
+      <h2>📂 Загрузить <button class="x" id="lg-back" title="В меню">✕</button></h2>
       <div id="saves-list" class="saves-list"></div>
     </div>
   </div>

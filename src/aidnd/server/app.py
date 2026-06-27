@@ -457,8 +457,7 @@ async def ws(sock: WebSocket) -> None:
             msg = json.loads(await sock.receive_text())
             cmd = msg.get("cmd")
             if cmd in ("new_game", "new", "load") and not acquire_slot():   # генерация — под слот GPU
-                await send({"kind": "system", "text": "Сервер сейчас занят (демо на одной видеокарте). "
-                            "Зайди чуть позже."})
+                await send({"kind": "system", "text": "Сервер сейчас занят, зайди чуть позже."})
                 continue
             if session is None and cmd not in ("new_game", "new", "load", "delete_save", "redeem"):
                 await start_menu()                        # игры ещё нет — возвращаем меню (без неявной сборки)

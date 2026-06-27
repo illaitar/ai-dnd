@@ -137,10 +137,10 @@ function render(r) {
   if (r.kind === "thinking") { showThinking(r); return; }         // живой прогресс/роутинг ответа
   clearThinking();                                                // любой реальный результат — убираем индикатор
   if (r.toasts && r.toasts.length) r.toasts.forEach(showToast);   // «ачивки»
-  if (r.kind === "menu") {                                        // стартовый экран при заходе (без фоновой сборки)
+  if (r.kind === "menu") {                                        // экран лобби при заходе (без фоновой сборки)
     menuShown = true; hasGame = false; setMenuMode(false);
-    if (r.saves) renderSaves(r.saves);
-    openOverlay("menu");
+    lobbyGames = r.games || null; lobbySaves = r.saves || null;
+    showLobby();
   }
   if (r.kind === "journal") renderJournal(r.journal);             // подробный журнал квестов
   if (r.text) {
@@ -163,13 +163,13 @@ function render(r) {
   }
   if (r.rolled_faces) logEntry(`🎲 выпало: [${r.rolled_faces.join(", ")}]`, "mech");
   if (r.kind === "house" && r.house) renderHouse(r.house);
-  if (r.kind === "saved") { logSystem(`💾 Сохранено: «${r.card ? r.card.name : ""}»`); if (r.saves && !$("loadgame").classList.contains("hidden")) renderSaves(r.saves); }
+  if (r.kind === "saved") { logSystem(`💾 Сохранено: «${r.card ? (r.card.title || r.card.name || "") : ""}»`); const sv = r.games || r.saves; if (sv && !$("loadgame").classList.contains("hidden")) renderSaves(sv); }
   if (r.kind === "saves" && r.saves) renderSaves(r.saves);
   if (r.view) updateView(r.view);
   if (r.travel_far) openOverlay("mapview");           // «далеко — открой карту»: сразу показываем карту для маршрута
   if (r.kind === "error" && !$("levelup").classList.contains("hidden")) $("lvl-msg").textContent = r.text;
   if (r.kind === "look") {                               // игра началась/загружена — прячем стартовые экраны
-    ["loading", "menu", "loadgame"].forEach(id => { const e = $(id); if (e) e.classList.add("hidden"); });
+    ["loading", "lobby", "newgame", "loadgame"].forEach(id => { const e = $(id); if (e) e.classList.add("hidden"); });
     hasGame = true; setMenuMode(true);
     renderExits(r.exits); renderNpcs(r.npcs); renderQuick();
   }
@@ -373,12 +373,15 @@ function closeOverlay(id) { $(id).classList.add("hidden"); }
 
 // ----------------------------------------------- меню / новая игра / сейвы ----
 let ngOpts = null, ngSel = { scenario: null, klass: null, kit: null, skills: [], l1: {} }, lvlSel = {}, menuShown = false, hasGame = false;
+let lobbyGames = null, lobbySaves = null;                // что показывать в «Загрузить»: игры юзера или файловые сейвы
 
-// стартовое меню (игры ещё нет) vs игровое: «Продолжить»/«Сохранить» и закрытие — только при игре
+// «Продолжить»/«Сохранить» в лобби — только когда игра уже есть
 function setMenuMode(game) {
-  ["m-continue", "m-save"].forEach(id => { const e = $(id); if (e) e.style.display = game ? "" : "none"; });
-  const x = document.querySelector('#menu .x');
-  if (x) x.style.display = game ? "" : "none";          // стартовое меню не закрыть — нужно выбрать игру
+  ["lb-continue", "lb-save"].forEach(id => { const e = $(id); if (e) e.style.display = game ? "" : "none"; });
+}
+function showLobby() {                                   // показать экран лобби (скрыв подэкраны)
+  ["newgame", "loadgame"].forEach(id => $(id).classList.add("hidden"));
+  $("lobby").classList.remove("hidden");
 }
 
 async function ensureNgOptions() {
@@ -446,7 +449,7 @@ function renderNgForm() {
 function startNewGame() {
   send({ cmd: "new_game", scenario: ngSel.scenario, klass: ngSel.klass, kit: ngSel.kit,
          skills: ngSel.skills, l1: ngSel.l1, name: $("ng-name").value || "Герой" });
-  closeOverlay("newgame"); closeOverlay("menu");
+  closeOverlay("newgame"); $("lobby").classList.add("hidden");
   $("loading").classList.remove("hidden");              // сразу показываем ползунок
   $("load-fill").classList.add("indet"); $("load-fill").style.width = "100%";
   $("load-label").textContent = "Строю мир…"; $("load-pct").textContent = "";
@@ -481,7 +484,8 @@ function renderLevelup(lv) {
 }
 function applyLevelup() { send({ cmd: "levelup", selections: lvlSel }); }
 async function openLoad() {
-  openOverlay("loadgame");
+  $("lobby").classList.add("hidden"); openOverlay("loadgame");
+  if (lobbyGames) { renderSaves(lobbyGames); return; }    // авторизован → игры из БД (пришли в меню)
   try { const r = await fetch("/saves"); if (r.ok) renderSaves((await r.json()).saves); } catch (e) {}
 }
 function fmtDate(ts) { if (!ts) return ""; try { return new Date(ts * 1000).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }); } catch (e) { return ""; } }
@@ -489,15 +493,18 @@ function renderSaves(list) {
   const box = $("saves-list");
   if (!list || !list.length) { box.innerHTML = '<div class="saves-empty">Сохранений пока нет.</div>'; return; }
   box.innerHTML = list.map(s => {
-    const m = s.meta || {};
-    return `<div class="save-row"><div class="info"><div class="nm">${esc(s.name || s.slug)}</div>`
-      + `<div class="sub2">${esc(m.klass || "")} · ${esc(m.place || "")} · 🕑 ${esc(m.time || "")} · ${esc(fmtDate(s.created))}</div></div>`
-      + `<button data-load="${esc(s.slug)}">Загрузить</button><button class="del" data-del="${esc(s.slug)}">Удалить</button></div>`;
+    const m = s.meta || {}, isGame = s.id != null, key = isGame ? s.id : s.slug;
+    return `<div class="save-row"><div class="info"><div class="nm">${esc(s.title || s.name || s.slug)}</div>`
+      + `<div class="sub2">${esc(m.klass || "")} · ${esc(m.place || "")} · 🕑 ${esc(m.time || "")}</div></div>`
+      + `<button data-load="${esc(key)}" data-game="${isGame ? 1 : 0}">Загрузить</button>`
+      + `<button class="del" data-del="${esc(key)}" data-game="${isGame ? 1 : 0}">Удалить</button></div>`;
   }).join("");
   box.querySelectorAll("[data-load]").forEach(b => b.onclick = () => {
-    send({ cmd: "load", slug: b.dataset.load }); closeOverlay("loadgame"); closeOverlay("menu"); logSystem("📂 Загрузка…");
+    send(b.dataset.game === "1" ? { cmd: "load", game_id: +b.dataset.load } : { cmd: "load", slug: b.dataset.load });
+    closeOverlay("loadgame"); logSystem("📂 Загрузка…");
   });
-  box.querySelectorAll("[data-del]").forEach(b => b.onclick = () => send({ cmd: "delete_save", slug: b.dataset.del }));
+  box.querySelectorAll("[data-del]").forEach(b => b.onclick = () =>
+    send(b.dataset.game === "1" ? { cmd: "delete_save", game_id: +b.dataset.del } : { cmd: "delete_save", slug: b.dataset.del }));
 }
 function doSave() {
   const def = lastView ? `${(lastView.player && lastView.player.name) || "Герой"} — ${lastView.place_name || ""}` : "Сейв";
@@ -956,12 +963,14 @@ document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closeOv
 $("map-go").onclick = goSelection;
 $("map-cancel").onclick = clearSelection;
 window.__map = { hits: () => mapHits, mode: () => mapMode, pick: (i) => setSelection(mapHits[i]), go: goSelection };
-$("menu-btn").onclick = () => openOverlay("menu");
+$("menu-btn").onclick = () => showLobby();
 $("journal-btn").onclick = openJournal;
-$("m-new").onclick = () => { closeOverlay("menu"); openOverlay("newgame"); ensureNgOptions(); };
-$("m-continue").onclick = () => closeOverlay("menu");
-$("m-load").onclick = () => { closeOverlay("menu"); openLoad(); };
-$("m-save").onclick = doSave;
+$("lb-new").onclick = () => { $("lobby").classList.add("hidden"); openOverlay("newgame"); ensureNgOptions(); };
+$("lb-continue").onclick = () => $("lobby").classList.add("hidden");
+$("lb-load").onclick = () => openLoad();
+$("lb-save").onclick = doSave;
+$("ng-back").onclick = () => showLobby();
+$("lg-back").onclick = () => showLobby();
 $("ng-start").onclick = startNewGame;
 $("lvl-apply").onclick = applyLevelup;
 $("fac-open").onclick = () => openFactions();

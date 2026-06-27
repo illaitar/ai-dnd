@@ -238,7 +238,7 @@ def city_full(seed: int = config.WORLD_SEED, w: int = 980, h: int = 700, keys: s
     if not m:
         return {"svg": "<svg/>", "hits": [], "legend": [],
                 "streets": {"nodes": [], "adj": [], "start": 0}}
-    out = {"svg": cg.render_svg(m, interactive=True), "hits": m["hits"],
+    out = {"svg": cg.render_svg(m, interactive=True, marks=False), "hits": m["hits"],
            "legend": m["legend"], "streets": m["streets"]}
     _CITY_FULL_CACHE[ckey] = out
     return out

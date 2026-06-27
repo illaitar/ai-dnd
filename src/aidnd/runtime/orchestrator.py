@@ -1276,20 +1276,16 @@ class GameSession:
                            "go": ("идти в " + s["label"]) if s["display"] != "unknown" else None})
         levels = [{"id": "region", "title": "Окрестности Фэндалина", "nodes": region}]
 
-        # --- город: площадь-хаб + ТОЛЬКО ЗАПИСАННЫЕ здания, пронумерованные ---
-        recorded = self._recorded_places()
-        town = [{"id": SQ, "name": self._place_name(SQ), "kind": "settlement", "dx": 0, "dy": 0,
+        # --- город: площадь-хаб + ВСЕ здания (реальные позиции города); фильтр «только записанные»
+        # и номера/стрелку игрока кладёт фронт поверх city-SVG по map_recorded/place из view ---------
+        town = [{"id": SQ, "name": self._place_name(SQ), "kind": "room", "dx": 0, "dy": 0,
                  "dir_ru": "", "current": place == SQ, "go": "идти на площадь", "occupants": occ(SQ)}]
-        num = 0
         for d, dest in sp.exits_of(SQ).items():
-            if dest not in recorded and dest != place:    # на карте — только записанные (и где стоишь)
-                continue
             if d in DIRECTIONS:
                 dx, dy, dir_ru = *DIRECTIONS[d], DIR_RU.get(d, "")
             else:
                 dx, dy, dir_ru = 0.0, -0.55, ""          # внекомпасные (доска объявлений) — у центра
-            num += 1
-            town.append({"id": dest, "name": self._place_name(dest), "num": num,
+            town.append({"id": dest, "name": self._place_name(dest),
                          "kind": sp.places[dest].kind if dest in sp.places else "",
                          "dx": dx, "dy": dy, "dir_ru": dir_ru, "current": place == dest,
                          "go": "идти в " + self._place_name(dest), "occupants": occ(dest)})
@@ -3720,6 +3716,7 @@ class GameSession:
             "inventory": self.inventory_view(),
             "place": place, "place_name": self._place_name(place),
             "place_path": self._place_path(place),
+            "map_recorded": sorted(self._recorded_places()),   # записанные места — фронт метит их на city-SVG
             "seed": self.world.seed,
             "time": self.world.clock.hhmm(),
             "game_over": self.is_game_over(),

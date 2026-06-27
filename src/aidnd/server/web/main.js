@@ -556,6 +556,7 @@ async function ensureTown(seed) {
   catch (e) { townBuildings = []; }
 }
 let mapMode = "region", citySel = null, cityState = null, cityCur = 0, cityStep = 0, cityQuiet = 2, cityMarks = [];
+let cityBadges = [], cityArrow = null;                 // записанные места (номера) + стрелка игрока поверх city-SVG
 // HiDPI: рисуем во внутренний бэк-стор ~2× (CSS ужимает обратно) → резкие карты/подписи.
 // Геометрия карт строится от W/H, поэтому больший бэк-стор просто увеличивает чёткость;
 // citygen/worldgen масштабируют шрифты фактором s=W/560, чтобы подписи остались крупными.
@@ -577,8 +578,9 @@ function renderMap(ml) {
   renderLegend(null);                                                // легенда только для town
   sizeMapStage();                                                    // HiDPI бэк-стор перед отрисовкой
   const svgHost = $("map-svg"); if (svgHost) { svgHost.innerHTML = ""; svgHost.classList.add("hidden"); }
-  if (mapLevel === "region" && window.drawWorld) drawWorldLevel(ml);
-  else drawMapNodes(ml.levels.find(l => l.id === mapLevel));          // нод-граф: город (записанные, нумерованные) + интерьер
+  if (mapLevel === "town") drawCityLevel();                          // реальный город (SVG) + поверх: записанные/стрелка
+  else if (mapLevel === "region" && window.drawWorld) drawWorldLevel(ml);
+  else drawMapNodes(ml.levels.find(l => l.id === mapLevel));          // нод-граф связности — ТОЛЬКО интерьер
   $("map-actions").classList.add("hidden");
   bindFx();
 }
@@ -613,7 +615,8 @@ async function drawCityLevel(tick = -1) {
   cityState = { seed, streets: { start: data.streets.start, adj: data.streets.adj,
                                  nodes: data.streets.nodes.map(n => [n[0] * k, n[1] * k]) } };
   cityCur = cityState.streets.start;
-  renderLegend(data.legend);                                   // нумерованная легенда справа
+  computeCityOverlay();                                        // бейджи записанных + стрелка игрока на реальных точках
+  renderLegend(cityBadges.map(b => ({ n: b.n, name: b.name, id: b.id })));   // легенда — только записанные
   mapMode = "city"; cityStep = 0; cityQuiet = 2; cityMarks = []; drawFx();
   ensureIncidentControls();                                    // дебаг-слой событий (тумблер + скраббер)
   if (incidentMode) fetchIncidents();
@@ -672,11 +675,32 @@ function setSelection(hit) {
   drawFx();
 }
 function clearSelection() { citySel = null; const a = $("map-actions"); if (a) a.classList.add("hidden"); highlightSvgHouse(null); drawFx(); }
+function computeCityOverlay() {                          // записанные места → нумерованные бейджи; текущее → стрелка
+  const recorded = new Set((lastView && lastView.map_recorded) || []);
+  const cur = lastView && lastView.place;
+  cityBadges = mapHits.filter(h => h.landmark && recorded.has(h.id))
+    .map((h, i) => ({ x: h.x, y: h.y, n: i + 1, name: h.name, id: h.id }));
+  const ch = mapHits.find(h => h.id === cur);
+  cityArrow = ch ? { x: ch.x, y: ch.y }
+    : (cityState && cityState.streets.nodes[cityCur]
+      ? { x: cityState.streets.nodes[cityCur][0], y: cityState.streets.nodes[cityCur][1] } : null);
+}
 function drawFx() {
   const fx = $("map-fx"); if (!fx) return; const c = fx.getContext("2d"); c.clearRect(0, 0, fx.width, fx.height);
   const s = fx.width / 560;
   for (const m of cityMarks) { c.fillStyle = "#e2604a"; c.font = `bold ${Math.round(16 * s)}px Inter`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10 * s); }
-  if (mapMode === "city" && cityState) { const p = cityState.streets.nodes[cityCur]; c.beginPath(); c.arc(p[0], p[1], 3.6 * s, 0, 7); c.fillStyle = "#3a78b0"; c.fill(); c.lineWidth = 1.4 * s; c.strokeStyle = "#eef4fb"; c.stroke(); }
+  if (mapMode === "city") {                              // записанные места — красные нумерованные бейджи
+    for (const b of cityBadges) {
+      c.beginPath(); c.arc(b.x, b.y, 11 * s, 0, 7); c.fillStyle = "#e2453a"; c.fill();
+      c.lineWidth = 1.5 * s; c.strokeStyle = "#fff"; c.stroke();
+      c.fillStyle = "#fff"; c.font = `bold ${Math.round(12 * s)}px Inter`; c.textAlign = "center"; c.textBaseline = "middle";
+      c.fillText(String(b.n), b.x, b.y);
+    }
+    if (cityArrow) {                                     // ИГРОК — красная стрелка над реальной точкой
+      const x = cityArrow.x, ay = cityArrow.y - 20 * s;
+      c.fillStyle = "#e2453a"; c.beginPath(); c.moveTo(x, ay + 11 * s); c.lineTo(x - 8 * s, ay); c.lineTo(x + 8 * s, ay); c.closePath(); c.fill();
+    }
+  }
   // кольцо-выбор показываем только для НЕ-домов (перекрёсток/ратуша/замок); дом подсвечивается заливкой в SVG
   const hl = $("map-svg") && $("map-svg").querySelector(".h.sel");
   if (citySel && !hl) { c.strokeStyle = "#e0a64d"; c.lineWidth = 3 * s; c.setLineDash([5 * s, 4 * s]); c.beginPath(); c.arc(citySel.x, citySel.y, (citySel.r || 14) + 6 * s, 0, 7); c.stroke(); c.setLineDash([]); }

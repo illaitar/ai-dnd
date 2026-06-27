@@ -119,6 +119,10 @@ def price_of(world, inst: ItemInstance, shop: Container, buyer: str) -> int:
     tmpl = world.templates.get(inst.template_id)
     base = (tmpl.base_value if tmpl else 0) * inst.quantity
     mult = max(0.8, min(1.25, 1.0 - _faction_reaction(world, shop, buyer) * 0.15))
+    from ..content.economy import (
+        price_factor,  # снабжение: дефицит ресурса дороже, скидка гильдии дешевле
+    )
+    mult *= price_factor(world, tmpl.category if tmpl else "", buyer)
     return max(1, int(base * mult))
 
 

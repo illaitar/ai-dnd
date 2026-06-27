@@ -1491,9 +1491,11 @@ class GameSession:
                 continue
             sellable.append({"id": i, "name": self._item_name(i),
                              "price_gp": max(1, int(tmpl.base_value * inst.quantity * c.buy_rate) // 100)})
+        from ..content.economy import shop_supply_note
         return {"shop": shop_id, "merchant": self._display(c.owner_ref) if c.owner_ref else "лавка",
                 "deals_in": list(c.deals_in or []), "wallet": self._coins(),
-                "goods": goods, "sellable": sellable}
+                "goods": goods, "sellable": sellable,
+                "supply": shop_supply_note(self.world, c.deals_in)}   # заметка снабжения (дефицит/изобилие)
 
     def map_levels(self) -> dict:
         """Многоуровневая карта: континент/регион → город (улицы) → интерьер (комнаты).
@@ -1933,13 +1935,18 @@ class GameSession:
         for sid, shop in self.world.containers.items():
             if getattr(shop, "kind", "") != "shop":
                 continue
-            if len(shop.items) < 6:                       # докинуть базовый категорийный товар
-                cats = tuple(shop.deals_in or ())
+            cats = tuple(shop.deals_in or ())
+            from ..content.economy import stock_factor  # дефицит ресурса → меньше товара
+            sf = stock_factor(self.world, cats)
+            target = max(2, int(round(6 * sf)))           # потолок ассортимента по снабжению
+            if len(shop.items) < target:
                 pool = [tid for tid, t in self.world.templates.items()
                         if t.category in cats and t.rarity in ("mundane", "common")]
                 rng = random.Random(subseed(self.world.seed, "restock", sid, self.world.clock.tick))
-                for tid in (rng.sample(pool, min(3, len(pool))) if pool else []):
-                    spawn_item(self.world, tid, sid, qty=rng.randint(1, 4), source="restock")
+                add = max(1, int(round(3 * sf)))
+                for tid in (rng.sample(pool, min(add, len(pool))) if pool else []):
+                    spawn_item(self.world, tid, sid, qty=rng.randint(1, max(1, int(round(4 * sf)))),
+                               source="restock")
             if shop.owner_ref:                            # кошелёк торговца не уходит в ноль
                 w = self.world.wallets.setdefault(shop.owner_ref, {})
                 if w.get("gp", 0) < 50:

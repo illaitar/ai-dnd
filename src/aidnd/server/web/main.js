@@ -586,7 +586,8 @@ function renderTrade(shop) {
       + `<span class="pr">${g.price_gp} зм</span>`
       + `<button data-trade="${verb} ${esc(bare)}">${verb === "купить" ? "Купить" : "Продать"}</button></div>`;
   };
-  $("trade-goods").innerHTML = (shop.goods || []).map(g => row(g, "купить")).join("") || "<span class='state'>пусто</span>";
+  const note = shop.supply ? `<div class="trade-supply">${esc(shop.supply)}</div>` : "";
+  $("trade-goods").innerHTML = note + ((shop.goods || []).map(g => row(g, "купить")).join("") || "<span class='state'>пусто</span>");
   $("trade-sell").innerHTML = (shop.sellable || []).map(g => row(g, "продать")).join("") || "<span class='state'>нечего продать</span>";
   document.querySelectorAll("[data-trade]").forEach(b => b.onclick = () => {
     logEntry(`<span class="you">→ ${esc(b.dataset.trade)}</span>`, "you");

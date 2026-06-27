@@ -1,0 +1,62 @@
+"""HTTP-эндпоинты auth: /auth/register, /auth/login, /auth/google, /auth/logout, /auth/me.
+
+Email+пароль (argon2) и Google (id_token от клиентской кнопки Sign-In) — оба способа
+возвращают непрозрачный токен сессии. Защищённые ручки требуют Bearer-токен (current_user)."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header
+from pydantic import BaseModel
+
+from . import auth
+from .db import DbSession
+from .models import User
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+CurrentUser = Annotated[User, Depends(auth.current_user)]
+
+
+class Credentials(BaseModel):
+    email: str
+    password: str
+
+
+class GoogleToken(BaseModel):
+    id_token: str
+
+
+def _user_out(user: User) -> dict:
+    return {"id": user.id, "email": user.email, "display_name": user.display_name,
+            "google": bool(user.google_sub)}
+
+
+@router.post("/register")
+async def register(body: Credentials, db: DbSession) -> dict:
+    user, token = await auth.register(db, body.email, body.password)
+    return {"token": token, "user": _user_out(user)}
+
+
+@router.post("/login")
+async def login(body: Credentials, db: DbSession) -> dict:
+    user, token = await auth.login(db, body.email, body.password)
+    return {"token": token, "user": _user_out(user)}
+
+
+@router.post("/google")
+async def google(body: GoogleToken, db: DbSession) -> dict:
+    user, token = await auth.login_google(db, body.id_token)
+    return {"token": token, "user": _user_out(user)}
+
+
+@router.post("/logout")
+async def logout(db: DbSession, authorization: Annotated[str, Header()] = "") -> dict:
+    await auth.revoke(db, auth._bearer(authorization))
+    return {"ok": True}
+
+
+@router.get("/me")
+async def me(user: CurrentUser) -> dict:
+    return _user_out(user)

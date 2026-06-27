@@ -19,9 +19,22 @@ from fastapi.staticfiles import StaticFiles
 from .. import config
 from ..bootstrap import new_session
 from ..rules.dice import roll_expr
+from .routes_auth import router as _auth_router
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 app = FastAPI(title="AI-DnD Engine")
+app.include_router(_auth_router)
+
+
+@app.on_event("startup")
+async def _init_service_db() -> None:
+    """Создать таблицы сервиса. БД недоступна → анонимный демо-режим всё равно работает."""
+    try:
+        from .db import init_db
+        await init_db()
+    except Exception as exc:                       # noqa: BLE001
+        import logging
+        logging.getLogger("aidnd").warning("service DB unavailable (%s) — auth disabled", exc)
 
 
 @app.middleware("http")

@@ -63,6 +63,39 @@ def board_quests() -> list[Quest]:
     ]
 
 
+def build_merged_quest(qid: str, a: Quest, b: Quest, title: str, framing: str,
+                       bonus: float = 1.15) -> Quest:
+    """Один подряд из двух близких объявлений: ОБЕ цели (все условия), суммарная награда + бонус.
+    Источники после слияния помечаются superseded (см. оркестратор)."""
+    conds = list(a.stages[0].completion_conditions) + list(b.stages[0].completion_conditions)
+    cur: dict = {}
+    rep: dict = {}
+    for q in (a, b):
+        for k, v in (q.rewards.currency or {}).items():
+            cur[k] = cur.get(k, 0) + v
+        for k, v in (q.rewards.faction_rep or {}).items():
+            rep[k] = rep.get(k, 0) + v
+    cur = {k: int(round(v * bonus)) for k, v in cur.items()}
+    obj = f"{a.stages[0].objective}; {b.stages[0].objective}"
+    q = Quest(
+        quest_id=qid, kind="board", title=title or "Объединённый подряд",
+        giver_ref=BOARD_PLACE, state="offered",
+        stages=[
+            Stage("do", obj, completion_conditions=conds, next_stages=["turnin"]),
+            Stage("turnin", "сдать объединённый подряд у доски",
+                  completion_conditions=[Predicate("Flag", [f"turnin:{qid}"])],
+                  on_complete=[{"effect": "complete"}]),
+        ],
+        current_stages=[], rewards=Rewards(currency=cur, xp=a.rewards.xp + b.rewards.xp,
+                                           faction_rep=rep),
+        framing=framing, world_bindings=[BOARD_PLACE],
+        provenance=Provenance(source="merged", generator="board@1.0"))
+    q.req_kind = "bundle"
+    q.ttl_days = 0                  # объединённый подряд — без авто-судьбы
+    q.merged_from = [a.quest_id, b.quest_id]
+    return q
+
+
 def register_board_quests(world, quest_system) -> None:
     for q in board_quests():
         quest_system.register(q)

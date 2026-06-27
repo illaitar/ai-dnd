@@ -287,6 +287,13 @@ PROMPTS = {
         "без высокого фэнтези, без боя, без сюжетных персонажей. Заголовок — 2-4 слова. "
         "Call street_event."
     ),
+    "quest_merge": (
+        "Ты решаешь, можно ли ДВА простых городских объявления-задания естественно объединить в "
+        "ОДИН подряд. Тебе дают два задания (название + цель + место). Объединяй ТОЛЬКО если это "
+        "органично: один район/маршрут, связанная угроза или один поход их закрывает. Если связь "
+        "натянутая, цели разнородны или далеко друг от друга — merge=false. Если да: дай общее "
+        "название (3-6 слов) и одну строку-подводку, связывающую оба дела. По-русски. Call merge_quests."
+    ),
 }
 
 # --- бэкенд-специфичные промпты: база + усиление под конкретный провайдер -------------- #
@@ -314,6 +321,9 @@ _DS_REINFORCE = {
         "\n\n[СТРОГО] Реплика — на русском, в голосе торговца, 1-2 коротких фразы, БЕЗ точных чисел "
         "(их подставит движок). Жадный/расчётливый — почти не уступает или refuse; добродушный — "
         "охотнее. Наглый лоу-болл/грубость/затянутый торг → refuse."),
+    "quest_merge": (
+        "\n\n[СТРОГО] Объединяй ТОЛЬКО органичные пары (один район/маршрут/связанная угроза). "
+        "Сомнительно или разнородно → merge=false. По-русски: название 3-6 слов, подводка — одна строка."),
     "street_event": (
         "\n\n[СТРОГО] На русском, во 2-м лице ЕД. числа (на «ты», НЕ «вы»), 1-2 коротких "
         "предложения, обыденный фронтирный городок — без пафоса, без боя, без сюжетных/"
@@ -500,6 +510,14 @@ SCHEMAS = {
             "title": {"type": "string"},
             "line": {"type": "string"}},     # строка нарратора (2-е лицо, рус.)
             "required": ["kind", "line"]},
+    },
+    "merge_quests": {
+        "name": "merge_quests",
+        "parameters": {"type": "object", "properties": {
+            "merge": {"type": "boolean"},    # органично ли объединять
+            "title": {"type": "string"},     # общее название подряда
+            "framing": {"type": "string"}},  # одна строка-подводка
+            "required": ["merge"]},
     },
     "forge_item": {
         "name": "forge_item",
@@ -967,6 +985,26 @@ def street_event(manager, settlement: str, frm: str, to: str, time_of_day: str =
         return None
     kind = out.get("kind") if out.get("kind") in ("ambient", "involves") else "ambient"
     return {"kind": kind, "title": out.get("title") or "", "line": line}
+
+
+def merge_quests(manager, a_desc: str, b_desc: str):
+    """Судит, можно ли органично слить два объявления, и как. {merge, title, framing} или None (офлайн)."""
+    if is_offline(manager):
+        return None
+    sch = SCHEMAS["merge_quests"]
+    user = (f"Задание A: {a_desc}\nЗадание B: {b_desc}\n"
+            f"Можно ли естественно объединить их в один подряд? Call merge_quests.")
+    resp = manager.call("quest_merge",
+                        [{"role": "system", "content": prompt_for("quest_merge", manager)},
+                         {"role": "user", "content": user}],
+                        schema=sch, options={"temperature": 0})
+    if resp is None:
+        return None
+    out = conform_to_schema(extract(resp, sch["name"]), sch["parameters"]) or {}
+    if not out.get("merge"):
+        return {"merge": False}
+    return {"merge": True, "title": (out.get("title") or "").strip(),
+            "framing": (out.get("framing") or "").strip()}
 
 
 def _lenient_plausibility(raw: dict):

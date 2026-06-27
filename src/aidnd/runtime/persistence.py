@@ -70,6 +70,9 @@ def serialize_session(session: GameSession, name: str) -> dict:
         "baseline": boot["baseline"], "clock": session.world.clock.tick,
         "journal": session.journal[-60:], "quiet": session.quiet_ticks,
         "quest_timeline": session.quest_timeline,         # хроника квестов (день/время по участию) — персист
+        "merges": [{**m, "state": session.world.quests[m["id"]].state,    # слияния (+живое состояние подряда)
+                    "current_stages": session.world.quests[m["id"]].current_stages}
+                   for m in session.merges if m.get("id") in session.world.quests],
         "events": tail, "meta": meta, "main_quest": boot.get("main_quest"),
         "state": capture(session),                       # снапшот обогащения: предметы/персоны/память
     }
@@ -122,6 +125,15 @@ def deserialize_session(d: dict, use_model: bool = True) -> GameSession:
     for ed in d.get("events", []):                       # реплей рантайм-хвоста поверх
         world.apply(Event.from_dict(ed))
     world.clock.tick = int(d.get("clock", 0))
+    for m in d.get("merges", []):                        # объединённые подряды — ПОСЛЕ реплея (источники уже есть:
+        a, b = world.quests.get(m.get("a")), world.quests.get(m.get("b"))   # статичные + threat из реплея)
+        if a and b and m.get("id") and m["id"] not in world.quests:
+            from ..content.board import build_merged_quest
+            mq = build_merged_quest(m["id"], a, b, m.get("title", ""), m.get("framing", ""))
+            mq.state = m.get("state", "offered")          # прогресс берём из сейва (не из реплея)
+            mq.current_stages = list(m.get("current_stages", []))
+            quests.register(mq)
+            a.state = b.state = "superseded"
     for _ in range(20):                                  # догнать стадии квестов: advance НЕ событийный,
         progressed = False                               # реплей флагов сам по себе не двигает current_stages
         for q in list(world.quests.values()):
@@ -138,6 +150,7 @@ def deserialize_session(d: dict, use_model: bool = True) -> GameSession:
     session._quest_log_seen = session._toast_log_seen = len(quests.log)   # не всплывать из-за догоняющего advance
     session._quest_entries_seen = len(quests.entries)     # хронику не пересобираем реплеем — берём из сейва
     session.quest_timeline = {k: list(v) for k, v in (d.get("quest_timeline") or {}).items()}
+    session.merges = [dict(m) for m in (d.get("merges") or [])]   # слияния уже пересозданы выше
     session.boot = {"seed": d["seed"], "roster_size": d["roster_size"],
                     "scenario": d.get("scenario") or default_scenario(),
                     "pc_spec": resolve_pc_spec(d.get("pc_spec")), "baseline": d["baseline"],

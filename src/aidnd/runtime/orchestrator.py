@@ -77,6 +77,8 @@ class GameSession:
         self._quest_log_seen = 0                  # сколько строк журнала квестов уже втянуто
         self.quest_timeline: dict[str, list[dict]] = {}   # хроника по квесту: [{stamp, text, key}] (персист)
         self._quest_entries_seen = 0              # сколько структурных событий квестов уже проштамповано
+        self.merges: list[dict] = []              # совершённые слияния объявлений (персист; пересоздаём на load)
+        self._merge_seen: set = set()             # пары, уже опрошенные на слияние в этой сессии (транзиент)
         self._toast_log_seen = 0                  # сколько строк журнала квестов уже превращено в тосты
         self._toasts: list[dict] = []             # накопленные тосты-«ачивки» текущего хода (сливаются в send)
         self._main_act: str | None = None         # текущий акт основного сюжета (для детекта перехода)
@@ -3853,14 +3855,84 @@ class GameSession:
                              else "Никто не берётся — награду подняли.")}
         return None
 
+    def _quest_place(self, q) -> str | None:
+        """Целевое МЕСТО квеста (для слияния по территории). Только req_place — НЕ доска/bindings."""
+        return getattr(q, "req_place", None)
+
+    def _close_quests(self, q1, q2) -> bool:
+        """Территориально ли близки два квеста: то же место, примыкающее (≤1 переход) или тот же сайт."""
+        a, b = self._quest_place(q1), self._quest_place(q2)
+        if not a or not b:
+            return False
+        if a == b:
+            return True
+        sp = self.world.spatial
+        if a in sp.places and b in sp.places:
+            h = sp.hops_between(a, b)
+            if h is not None and h <= 1:
+                return True
+        from ..content.region import reachable_place_to_site
+        sa, sb = reachable_place_to_site(a), reachable_place_to_site(b)
+        return bool(sa and sa == sb)
+
+    def _maybe_merge_board(self) -> str | None:
+        """РЕДКОЕ слияние близких невзятых объявлений по времени; LLM решает — органично ли и как.
+        Натяжка по мнению LLM → не сливаем. Возвращает название нового подряда или None."""
+        if self.model is None:
+            return None
+        import random
+
+        from ..gen.seeds import subseed
+        from ..world.environment import day_number
+        day = day_number(self.world.clock.tick)
+        boards = [q for q in self.world.quests.values()
+                  if getattr(q, "kind", "") == "board" and q.state in ("offered", "not_offered")
+                  and self._quest_place(q) and not getattr(q, "merged_from", None)]
+        for i, a in enumerate(boards):
+            for b in boards[i + 1:]:
+                if not self._close_quests(a, b):
+                    continue
+                pair = tuple(sorted((a.quest_id, b.quest_id)))
+                if pair in self._merge_seen:
+                    continue
+                rng = random.Random(subseed(self.world.seed, "qmerge", pair[0], pair[1], day))
+                if rng.random() >= 0.15:                  # низкая вероятность слияния от времени
+                    continue
+                self._merge_seen.add(pair)                # в этой сессии пару больше не трогаем
+                from ..inference.agents import merge_quests
+                out = merge_quests(self.model,
+                                   f"«{a.title}» — {a.stages[0].objective}",
+                                   f"«{b.title}» — {b.stages[0].objective}")
+                if not out or not out.get("merge"):       # LLM: натяжка — не сливаем
+                    continue
+                return self._apply_merge(a, b, out.get("title") or "", out.get("framing") or "")
+        return None
+
+    def _apply_merge(self, a, b, title: str, framing: str) -> str:
+        """Создать объединённый подряд из двух объявлений, источники → superseded; запись в self.merges."""
+        from ..content.board import build_merged_quest
+        mid = f"quest:merge_{a.quest_id.split(':')[-1]}_{b.quest_id.split(':')[-1]}"
+        if mid in self.world.quests:
+            return self.world.quests[mid].title
+        merged = build_merged_quest(mid, a, b, title, framing)
+        self.quests.register(merged)
+        a.state = b.state = "superseded"
+        self.merges.append({"id": mid, "a": a.quest_id, "b": b.quest_id,
+                            "title": merged.title, "framing": merged.framing})
+        return merged.title
+
     def board_view(self) -> dict | None:
         """Список заданий на доске (только у доски). С учётом срока жизни: невзятые со временем
-        дорожают, выполняются другими или снимаются — игрок видит это, вернувшись к доске."""
+        дорожают, выполняются другими или снимаются — игрок видит это, вернувшись к доске.
+        Изредка два близких объявления сливаются в один подряд (если LLM считает это органичным)."""
         if not self._at_board():
             return None
+        merged_title = self._maybe_merge_board()          # вернулся к доске — мог появиться объединённый подряд
         items, news = [], []
+        if merged_title:
+            news.append(f"Два дела свели в один подряд: «{merged_title}».")
         for q in self.world.quests.values():
-            if getattr(q, "kind", "") != "board":
+            if getattr(q, "kind", "") != "board" or q.state == "superseded":
                 continue
             mut = self._board_mutation(q)
             if mut and mut["status"] == "gone":           # снято ранее — на доске больше нет

@@ -56,6 +56,8 @@ DEEPSEEK_CONCURRENCY: int = int(os.environ.get("AIDND_DEEPSEEK_CONCURRENCY", "8"
 # --- сервис: БД пользователей/сессий/игр (Postgres, async) + auth ---
 DATABASE_URL: str = os.environ.get("AIDND_DATABASE_URL", "postgresql+asyncpg://localhost/aidnd_dev")
 SESSION_TTL_DAYS: int = int(os.environ.get("AIDND_SESSION_TTL_DAYS", "30"))
+FREE_ENRICH: int = int(os.environ.get("AIDND_FREE_ENRICH", "1"))       # бесплатных генераций мира
+FREE_REQUESTS: int = int(os.environ.get("AIDND_FREE_REQUESTS", "100"))  # бесплатных игровых запросов
 GOOGLE_CLIENT_ID: str = os.environ.get("AIDND_GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET: str = os.environ.get("AIDND_GOOGLE_CLIENT_SECRET", "")
 

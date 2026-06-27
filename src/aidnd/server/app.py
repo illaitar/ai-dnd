@@ -21,14 +21,17 @@ from ..bootstrap import new_session
 from ..rules.dice import roll_expr
 from . import auth as _svc_auth
 from . import games as _svc_games
+from . import usage as _svc_usage
 from .db import SessionLocal
 from .routes_auth import router as _auth_router
 from .routes_games import router as _games_router
+from .routes_usage import router as _usage_router
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 app = FastAPI(title="AI-DnD Engine")
 app.include_router(_auth_router)
 app.include_router(_games_router)
+app.include_router(_usage_router)
 
 
 @app.on_event("startup")
@@ -426,6 +429,7 @@ async def ws(sock: WebSocket) -> None:
                 payload["games"] = await _svc_games.list_games(_db, me["user"].id)
             payload["user"] = {"id": me["user"].id, "email": me["user"].email,
                                "name": me["user"].display_name}
+            payload["usage"] = _svc_usage.snapshot(me["user"])   # шкала лимитов
         else:                                             # аноним → файловые сейвы (как было)
             from ..runtime.persistence import list_saves
             payload["saves"] = list_saves()
@@ -450,10 +454,29 @@ async def ws(sock: WebSocket) -> None:
                 await send({"kind": "system", "text": "Сервер сейчас занят (демо на одной видеокарте). "
                             "Зайди чуть позже."})
                 continue
-            if session is None and cmd not in ("new_game", "new", "load", "delete_save"):
+            if session is None and cmd not in ("new_game", "new", "load", "delete_save", "redeem"):
                 await start_menu()                        # игры ещё нет — возвращаем меню (без неявной сборки)
                 continue
-            if cmd == "input":
+            if cmd == "redeem":                           # код разблокировки безлимита (меню настроек)
+                if not me["user"]:
+                    result = {"kind": "auth_required", "text": "Войдите, чтобы ввести код."}
+                else:
+                    async with SessionLocal() as _db:
+                        _ok, _u = await _svc_usage.redeem(_db, me["user"].id, msg.get("code", ""))
+                    me["user"] = _u
+                    result = {"kind": "redeem", "ok": _ok, "usage": _svc_usage.snapshot(_u),
+                              "text": "Безлимит активирован!" if _ok else "Код неверный или уже использован."}
+            elif cmd == "input":
+                if not me["user"]:                        # игра требует входа (лимиты на аккаунт)
+                    await send({"kind": "auth_required", "text": "Войдите, чтобы играть."})
+                    continue
+                async with SessionLocal() as _db:         # списать 1 игровой запрос из лимита
+                    _ok, _u = await _svc_usage.consume_request(_db, me["user"].id)
+                me["user"] = _u
+                if not _ok:
+                    await send({"kind": "limit", "what": "requests", "usage": _svc_usage.snapshot(_u),
+                                "text": "Бесплатные запросы кончились — введите код в настройках."})
+                    continue
                 loop = asyncio.get_running_loop()         # ход в треде → стримим «мышление» в реальном времени
                 chain = []
                 def _think(role, model):                  # каждый LLM-вызов хода → кадр прогресса/роутинга
@@ -499,6 +522,16 @@ async def ws(sock: WebSocket) -> None:
             elif cmd == "roll_manual":
                 result = session.submit_roll(msg.get("faces", []))
             elif cmd == "new_game":
+                if not me["user"]:                        # генерация требует входа (лимит на аккаунт)
+                    await send({"kind": "auth_required", "text": "Войдите, чтобы начать игру."})
+                    continue
+                async with SessionLocal() as _db:         # списать 1 генерацию мира из лимита
+                    _ok, _u = await _svc_usage.consume_enrich(_db, me["user"].id)
+                me["user"] = _u
+                if not _ok:
+                    await send({"kind": "limit", "what": "enrich", "usage": _svc_usage.snapshot(_u),
+                                "text": "Бесплатная генерация мира исчерпана — введите код в настройках."})
+                    continue
                 pc_spec = {"klass": msg.get("klass"), "kit": msg.get("kit"),
                            "name": msg.get("name"), "skills": msg.get("skills"),
                            "l1": msg.get("l1")}
@@ -584,6 +617,8 @@ async def ws(sock: WebSocket) -> None:
                           "view": session.view() if session else None}
             if session is not None and isinstance(result, dict):
                 result = session.drain_toasts(result)     # тосты-«ачивки» за ход → фронту
+            if me["user"] and isinstance(result, dict) and "usage" not in result:
+                result["usage"] = _svc_usage.snapshot(me["user"])   # шкала лимитов обновляется каждым ответом
             await send(result)
     except WebSocketDisconnect:
         pass

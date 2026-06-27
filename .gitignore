@@ -29,3 +29,8 @@ docs/_build/
 # секреты (API-ключи) — НЕ коммитить
 .secrets/
 *.key
+
+# артефакты симуляции города
+citysim.gif
+citysim.mp4
+frame_*.png

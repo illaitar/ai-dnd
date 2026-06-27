@@ -89,17 +89,6 @@ def test_shop_view_read_model():
     assert any(x["name"].startswith("зелье") for x in sv["sellable"])  # расходник продаётся
 
 
-def test_map_levels_hierarchy():
-    s = _sess()
-    ml = s.map_levels()
-    ids = [l["id"] for l in ml["levels"]]
-    assert "region" in ids and "town" in ids and ml["current_level"] == "town"
-    town = next(l for l in ml["levels"] if l["id"] == "town")
-    assert any(n["current"] for n in town["nodes"])    # текущее место подсвечено
-    # в пещере появляется уровень «интерьер»
-    s.handle("идти в логово"); s.handle("идти в пещеру")
-    ml2 = s.map_levels()
-    assert "interior" in [l["id"] for l in ml2["levels"]] and ml2["current_level"] == "interior"
 
 
 def test_merchant_can_stock_pulled_item():

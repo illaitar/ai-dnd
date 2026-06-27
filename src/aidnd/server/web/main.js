@@ -142,6 +142,14 @@ function render(r) {
     const head = r.speaker ? `<span class="speaker">${esc(r.speaker)}</span> ` : "";
     logEntry(head + esc(r.text), cls);
   }
+  document.querySelectorAll(".record-signs").forEach(b => b.remove());   // прошлый офер вывесок истёк
+  if (r.signs_offer && r.signs_offer.length) {            // увидел вывески → кнопка «записать на карту»
+    const b = document.createElement("button");
+    b.className = "cbtn record-signs";
+    b.textContent = "📍 Записать на карту";
+    b.onclick = () => { b.disabled = true; send({ cmd: "record_signs" }); };
+    $("log").appendChild(b); $("log").scrollTop = $("log").scrollHeight;
+  }
   if (r.routing && $("dbg-routing") && $("dbg-routing").checked) showRouting(r.routing);  // дебаг роутинга
   if (r.clarify_places && r.clarify_places.length) {     // уточнение «куда именно» → кнопки выбора
     const div = document.createElement("div");

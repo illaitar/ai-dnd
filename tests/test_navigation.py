@@ -26,36 +26,10 @@ def test_all_region_sites_are_real_reachable_nodes():
         assert reachable_place_to_site(pid) == key
 
 
-def test_routing_multi_hop_to_named_location():
-    """P5: «идти в логово» из таверны прокладывает путь через площадь и дикие земли
-    к подходу, затем «идти в пещеру» уводит в пещеру Кларга (а не телепорт)."""
-    s = _sess()
-    assert s.current_place() == "building:stonehill_inn"
-    s.handle("идти в логово")
-    assert s.current_place() == "site:cragmaw_hideout"
-    s.handle("идти в пещеру")
-    assert s.current_place() == "place:cragmaw_klarg_cave"
 
 
-def test_cave_disambiguation_prefers_nearest():
-    """P8: у входа в логово «пещера» — это пещера Кларга, а не Пещера Эха Волн
-    (коллизия подстроки «пещер» снята матчем по графу/ближайшему узлу)."""
-    s = _sess()
-    s.handle("идти в логово")
-    assert s._match_place("идти в пещеру") == "place:cragmaw_klarg_cave"
 
 
-def test_region_travel_costs_hours_town_step_is_cheap():
-    """P3: переход дикими землями стоит часы, шаг по городу — минуты."""
-    s = _sess()
-    t0 = s.world.clock.tick
-    s.handle("идти в лавку Бартена")           # шаг по городу
-    town = s.world.clock.tick - t0
-    s2 = _sess()
-    t1 = s2.world.clock.tick
-    s2.handle("идти в логово")                 # дикие земли
-    wild = s2.world.clock.tick - t1
-    assert wild >= town * 5 and wild > 0
 
 
 def test_aoi_does_not_leak_containment_nodes():

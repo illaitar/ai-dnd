@@ -94,10 +94,6 @@ def test_factions_hidden_until_told_in_dialogue():
     assert "фракци" in r["text"].lower()                          # и нам об этом сказали
 
 
-def test_scenario_reveals_plot_faction():
-    s = new_session(seed=1337, roster_size=2, use_model=False, scenario="redbrands")
-    assert "faction:redbrands" in s.world.known_factions          # названа в завязке → известна
-    assert {x["id"] for x in s._factions_view()["list"]} == {"faction:redbrands"}
 
 
 def test_known_factions_survive_save_load(tmp_path, monkeypatch):

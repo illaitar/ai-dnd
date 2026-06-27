@@ -497,7 +497,9 @@ async def ws(sock: WebSocket) -> None:
                     if mgr is not None:
                         mgr.on_call = None
             elif cmd == "look":
-                result = session.look()
+                result = session.look_around()            # осмотр + видимые вывески вокруг
+            elif cmd == "record_signs":                   # «галочка»: записать увиденные вывески на карту
+                result = session._record_signs()
             elif cmd == "combat_attack":
                 result = session.combat_attack(msg["target"])
             elif cmd == "combat_move":

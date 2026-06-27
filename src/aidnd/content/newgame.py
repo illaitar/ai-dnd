@@ -88,21 +88,7 @@ SCENARIOS: dict[str, dict] = {
         "intro": "Дорога позади. Ты входишь в «Каменный Холм» — отогреться и осмотреться.",
         "start": "building:stonehill_inn", "flags": [], "companions": [],
     },
-    "escort": {
-        "name": "Эскорт к руднику",
-        "desc": "Вы вели припасы и Гундрена к Пещере Эха Волн — но на тракте неспокойно.",
-        "intro": "Дикие земли вокруг. Сильдар рядом; свежие следы засады уходят на запад.",
-        "start": "place:phandalin_wilds", "flags": ["escort_active"],
-        "companions": [], "reveals": ["faction:cragmaw"],   # напарник временно отключён (тест соло)
-    },
-    "redbrands": {
-        "name": "Логово Красных плащей",
-        "desc": "Красные плащи терроризируют город из поместья Тресендар. Пора в их укрытие.",
-        "intro": "Поместье Тресендар. За обвалившейся стеной — лаз в подземелье Красных плащей.",
-        "start": "building:tresendar_manor", "flags": ["redbrands_alerted"], "companions": [],
-        "reveals": ["faction:redbrands"],
-    },
-}
+}   # пока единственный сценарий — исследование города с нуля
 
 
 def default_scenario() -> str:

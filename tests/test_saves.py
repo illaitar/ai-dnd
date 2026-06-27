@@ -13,15 +13,6 @@ def test_default_pc_is_fighter_at_inn():
     assert s.world.position("pc:hero").place_id == "building:stonehill_inn"
 
 
-def test_new_game_rogue_escort_scenario():
-    s = new_session(seed=1337, roster_size=2, use_model=False, scenario="escort",
-                    pc_spec={"klass": "rogue", "kit": "blades", "name": "Тень"})
-    p = s.world.ecs.get("pc:hero", Persona)
-    assert p.archetype == "rogue" and p.name == "Тень"
-    assert "it:hero_blade" in s.world.items                      # снаряжение плута
-    assert s.world.position("pc:hero").place_id == "place:phandalin_wilds"
-    assert "escort_active" in s.world.flags                      # флаг сценария
-    assert s.world.position("npc:sildar_hallwinter").place_id == "place:phandalin_wilds"
 
 
 def test_save_load_roundtrip(tmp_path, monkeypatch):

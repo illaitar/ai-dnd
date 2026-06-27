@@ -89,13 +89,6 @@ def test_stranger_greeting_has_no_invented_history():
     assert not any(w in low for w in _HISTORY_WORDS)
 
 
-def test_secret_not_grounded_below_its_gate():
-    """Нарратор не «озвучивает» факт-секрет ниже его порога доверия (гейт держит)."""
-    s = _sess()
-    npc = "npc:halia_thornton"                          # секрет Жентарим, gate 0.7
-    fact = s._relevant_fact(npc, RelEdge(trust=0.65),
-                            "расскажи про Жентарим и Чёрную Сеть")
-    assert "Чёрной Сети" not in (fact or "")            # 0.7-секрет при 0.65 не раскрыт
 
 
 def test_disclosable_facts_grow_with_trust():

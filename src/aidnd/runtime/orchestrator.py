@@ -68,6 +68,7 @@ class GameSession:
         self.dialogue_partner: str | None = None  # с кем сейчас идёт разговор
         self._last_item: str | None = None        # последний осмотренный предмет (для «на нём…»)
         self._haggle: dict | None = None          # активный торг: оффер + цены (см. _do_trade)
+        self._sign_offer: list = []               # увиденные вывески, ждущие записи на карту (живут 1 ход)
         self._history: list[dict] = []            # последние ходы (ввод/ответ) — контекст для роутера
         self.journal: list[str] = []              # журнал событий игрока (read-model)
         self._quest_log_seen = 0                  # сколько строк журнала квестов уже втянуто
@@ -165,7 +166,7 @@ class GameSession:
             tail = (" Можно: " + ", ".join(a["label"] for a in affs) + ".") if affs else ""
             base = dict(base)
             base["text"] = narr.strip() + tail
-        return base
+        return self._offer_signs(base)                    # при осмотре тоже видны вывески/знаки вокруг
 
     # ===================================================================== #
     #  Главный обработчик ввода                                             #
@@ -185,6 +186,9 @@ class GameSession:
         if self.combat and self.combat.state.mode == "active":
             return {"kind": "combat", "text": "Идёт бой — используй боевые действия.",
                     "view": self.view()}
+        if self._sign_offer and self._is_record_yes(text):   # «да»/«запиши» на увиденные вывески → на карту
+            return self._post(self._record_signs(), "map")
+        self._sign_offer = []                             # не отреагировал на прошлые вывески → забыл
         route = self._route(text)                         # ВСЁ типизированное — через роутер (детерминированы только кнопки-панели)
         # продолжение разговора: при активном собеседнике рядом «расскажи о…/что слышно»
         # (freeform или общий look) — это реплика ему, а не бросок/мировой-запрос
@@ -526,7 +530,7 @@ class GameSession:
         look["text"] = lead + " " + look["text"]
         if debunked:
             look["text"] += "\n⚠ Сведения об этом месте оказались ложными!"
-        return look
+        return self._offer_signs(look)                    # на новой улице — видны вывески соседних зданий
 
     # стоимость пути: шаг по городу дёшев, дикие земли — часы и риск (док §3.4)
     _DANGER_FACTOR = {"высокая": 1.4, "смертельная": 1.8}
@@ -2552,20 +2556,77 @@ class GameSession:
     _PUBLIC_AFF = frozenset({"shop", "inn", "townhall", "shrine", "work", "serve", "drink", "board"})
 
     def _known_places(self) -> set[str]:
-        """Места, куда игрок может направиться: текущее + примыкающие выходы + карта игрока
-        (разведано/со слов) + публичные лендмарки текущего поселения (лавки/ратуша/трактир…)."""
+        """Куда игрок может направиться: текущее + примыкающие выходы + карта игрока (разведано/
+        записано/со слов). Лендмарки города НЕ известны по умолчанию — их надо увидеть на улице
+        и записать на карту (исследование; см. _offer_signs / _record_signs)."""
         cur = self.current_place()
         known = {cur} | set(self.world.spatial.connections(cur))
         for b in self.world.player_maps.get(self.player, {}).values():
             if b.get("place"):
                 known.add(b["place"])
-        sett = self._settlement_of(cur)                   # в городе — лендмарки известны (не нужно «разведывать» лавку)
+        sett = self._settlement_of(cur)
         if sett:
             known.add(sett)
-            for pid, p in self.world.spatial.places.items():
-                if (set(p.affordances or []) & self._PUBLIC_AFF) and self._settlement_of(pid) == sett:
-                    known.add(pid)
         return known
+
+    def _recorded_places(self) -> set[str]:
+        """Места, уже отмеченные на карте игрока (визит/запись/слух) — их не предлагаем записать."""
+        return {b["place"] for b in self.world.player_maps.get(self.player, {}).values() if b.get("place")}
+
+    def _visible_signs(self) -> list[dict]:
+        """Вывески/здания, видимые с текущей улицы: примыкающие публичные места (лавка/таверна/
+        ратуша/святилище), ещё не записанные на карту. Детерминированно, без LLM."""
+        recorded = self._recorded_places()
+        out, seen = [], set()
+        for pid in self.world.spatial.connections(self.current_place()):
+            p = self.world.spatial.places.get(pid)
+            if not p or pid in recorded or pid in seen:
+                continue
+            if set(p.affordances or []) & self._PUBLIC_AFF:
+                out.append({"place": pid, "label": p.name})
+                seen.add(pid)
+        return out
+
+    def _offer_signs(self, result: dict) -> dict:
+        """Доклеить к ответу замеченные вывески + предложить записать (живёт 1 ход: не отреагировал → забыл)."""
+        signs = self._visible_signs()
+        self._sign_offer = signs
+        if signs and isinstance(result, dict):
+            names = ", ".join(f"«{s['label']}»" for s in signs)
+            result = dict(result)
+            result["text"] = ((result.get("text") or "").rstrip()
+                              + f"\n📍 Вокруг — вывески: {names}. Записать на карту? («да» или кнопкой)")
+            result["signs_offer"] = [dict(s) for s in signs]
+        return result
+
+    def _record_signs(self) -> dict:
+        """Записать увиденные вывески на карту — ДЕТЕРМИНИРОВАННО, без LLM."""
+        signs, self._sign_offer = self._sign_offer, []
+        if not signs:
+            return {"kind": "system", "text": "Записывать нечего.", "view": self.view()}
+        from ..content.region import REGION_SITES, reachable_place_to_site
+        for s in signs:
+            pid, bid = s["place"], f"belief:seen:{s['place']}"
+            if bid in self.world.player_maps.get(self.player, {}):
+                continue
+            key = reachable_place_to_site(pid)
+            truth = REGION_SITES.get(key, {}) if key else {}
+            self.world.commit("map_update", self.player, payload={"player": self.player, "belief": {
+                "id": bid, "site": key, "place": pid, "source": "seen", "label": s["label"],
+                "terrain": truth.get("terrain", ""), "direction": truth.get("direction", ""),
+                "contents": truth.get("contents", ""), "danger": truth.get("danger", ""),
+                "reliability": "seen", "true": True, "verified": False}})
+        return {"kind": "narration", "map_dirty": True, "view": self.view(),
+                "text": "📍 На карту записано: " + ", ".join(f"«{s['label']}»" for s in signs) + "."}
+
+    def _is_record_yes(self, text: str) -> bool:
+        low = text.strip().lower()
+        return any(low == k or low.startswith(k + " ") or low.startswith(k + ",") for k in
+                   ("да", "ага", "запиши", "записать", "на карту", "отметь", "ок", "yes", "конечно", "запомни"))
+
+    def look_around(self) -> dict:
+        """Осмотр кнопкой-«глаз»: детерминированно + видимые вывески вокруг (как при шаге/осмотре текстом)."""
+        return self._offer_signs(self.look())
 
     def _knows_place(self, place_id: str) -> bool:
         return place_id in self._known_places()

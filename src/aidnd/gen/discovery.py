@@ -202,6 +202,40 @@ class DiscoveryService:
                                      model=getattr(self.char_gen, "model", None))
         return cid
 
+    def resolve_room(self, place_id: str, idx: int, room: dict) -> Resolution:
+        """«Есть ли в этой КОМНАТЕ тайник?» Богатство/тема — по виду лута комнаты
+        (gen/room_loot). Существование фиксируется навсегда (replay-устойчиво)."""
+        from .room_loot import profile_for
+        kind = room.get("loot") or "mundane"
+        prof = profile_for(kind)
+        key = f"hidden:{place_id}:room{idx}"
+        rec = self.world.resolutions.get(key)
+        if rec:
+            return Resolution(key, exists=rec["exists"], container=rec.get("container"),
+                              p=rec.get("p", 0.0), recorded=True)
+        rng = self._rng(key)
+        exists = rng.random() <= prof["chance"]
+        container = self._spawn_room_container(place_id, idx, prof, rng) if exists else None
+        self.world.commit("resolve", "dm", payload={
+            "key": key, "exists": exists, "container": container,
+            "p": round(prof["chance"], 3), "loc": f"room:{kind}"})
+        return Resolution(key, exists=exists, container=container, p=prof["chance"])
+
+    def _spawn_room_container(self, place_id: str, idx: int, prof: dict, rng) -> str:
+        from ..inventory.container import Container
+        from .item_gen import generate_individual_treasure
+        cid = f"container:room_{ids.name_of(place_id)}_{idx}"
+        if cid in self.world.containers:
+            return cid
+        # owner_ref=place_id → тайник «принадлежит» месту: оркестратор покажет его
+        # в _containers_here, существование контейнера = тайник уже найден
+        self.world.containers[cid] = Container(container_id=cid, owner_ref=place_id, kind="stash", items=[])
+        generate_individual_treasure(self.world, prof["cr"], self._party_level(),
+                                     self.world.seed, cid,
+                                     model=getattr(self.char_gen, "model", None),
+                                     theme=prof["theme"], min_items=1)
+        return cid
+
     def _party_level(self) -> int:
         from ..world.components import Stats5e
         if self.world.player_id:

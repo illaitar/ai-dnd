@@ -196,8 +196,25 @@ class CharacterGenerator:
                 "voice": f"говорит как {persona.archetype}, по делу",
                 "traits": persona.traits + ["wary of strangers"],
             }
-        persona.voice = result.get("voice", persona.voice)
-        persona.traits = result.get("traits", persona.traits)
+        persona.voice = result.get("voice") or persona.voice
+        persona.traits = result.get("traits") or persona.traits
+        persona.appearance = result.get("appearance") or persona.appearance
+        persona.ideal = result.get("ideal") or persona.ideal
+        persona.bond = result.get("bond") or persona.bond
+        persona.flaw = result.get("flaw") or persona.flaw
+        if result.get("epithet"):
+            persona.epithet = result["epithet"]
+        # секреты/слухи → гейтованные knowledge-items: слухи (gate 0) делятся свободно,
+        # секреты (gate 0.6) — только при доверии (живой мир, content/knowledge.disclosable)
+        have = {k.get("fact") for k in persona.knowledge}
+        for s in result.get("secrets") or []:
+            if s and s not in have:
+                item = {"fact": s, "topic": "тайна", "disclosure_gate": {"trust": 0.6}}
+                persona.knowledge.append(item); persona.secrets.append(item); have.add(s)
+        for k in result.get("knowledge") or []:
+            if k and k not in have:
+                persona.knowledge.append({"fact": k, "topic": "слухи", "disclosure_gate": {"trust": 0.0}})
+                have.add(k)
         persona.enriched = True
 
     # ------------------------------------------ player-spawned -------------

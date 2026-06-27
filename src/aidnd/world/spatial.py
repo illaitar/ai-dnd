@@ -71,6 +71,7 @@ class Place:
     battlemap: str | None = None    # файл боевой карты (визуальная подложка боя)
     ambiance: str | None = None     # короткая физическая атмосфера (для нарратора)
     description: str | None = None  # полное описание места (облик/планировка/сенсорика) — LLM на старте
+    rooms: list = field(default_factory=list)  # предложенные моделью комнаты/части места [{name, desc}]
     alterations: list[str] = field(default_factory=list)  # стойкие следы действий (агент последствий)
     status: str = "open"            # open | closed | ruined | new — меняется событиями (слой инцидентов)
     hours: tuple | None = None      # (open_h, close_h) часы работы здания; None — всегда доступно

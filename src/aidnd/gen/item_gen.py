@@ -83,23 +83,35 @@ def roll_coins(cr_tier: int, rng: random.Random) -> dict[str, int]:
 
 def generate_individual_treasure(
     world, cr: float, level: int, seed: int, container_id: str, model=None,
+    theme: str = "", min_items: int = 0,
 ) -> dict:
-    """Лут одного монстра: монеты + изредка предмет (док 03 §4, док 04 §8).
-    model (опц.) включает роль item_smith — флейвор имени/описания добытого предмета."""
+    """Лут одного монстра/тайника: монеты + предмет(ы) (док 03 §4, док 04 §8).
+    model (опц.) — роль item_smith (флейвор имени/описания). theme — характер находки
+    (для смита). min_items — гарантированный минимум предметов (тайник комнаты: ≥1)."""
     rng = random.Random(subseed(seed, "loot", container_id))
     cr_tier = 0 if cr < 5 else 1
     coins = roll_coins(cr_tier, rng)
     items: list[str] = []
-    # ~20% шанс расходника на CR<1, выше — чаще
-    if rng.random() < min(0.5, 0.15 + cr * 0.3):
+    ctx = theme or f"найдено в тайнике, CR≈{cr}"
+
+    def _spawn_one() -> None:
         rarity = _weighted_pick(RARITY_GATE[party_tier(level)], rng)
         tmpl_id = _pick_magic_template(world, rarity, rng)
-        if tmpl_id:
-            iid = spawn_item(world, tmpl_id, container_id, source="lazy", seed=seed,
-                             smith=_smith_for(model, f"найдено в тайнике, CR≈{cr}"))
-            inst = world.items[iid]
-            inst.identified = world.templates[tmpl_id].rarity in ("mundane", "common")
-            items.append(iid)
+        if not tmpl_id:
+            return
+        iid = spawn_item(world, tmpl_id, container_id, source="lazy", seed=seed,
+                         smith=_smith_for(model, ctx))
+        world.items[iid].identified = world.templates[tmpl_id].rarity in ("mundane", "common")
+        items.append(iid)
+
+    # ~20% шанс расходника на CR<1, выше — чаще
+    if rng.random() < min(0.5, 0.15 + cr * 0.3):
+        _spawn_one()
+    while len(items) < min_items:                    # гарантия осязаемой находки в тайнике
+        n = len(items)
+        _spawn_one()
+        if len(items) == n:                          # подходящий шаблон не нашёлся — не зацикливаемся
+            break
     return {"coins": coins, "items": items}
 
 

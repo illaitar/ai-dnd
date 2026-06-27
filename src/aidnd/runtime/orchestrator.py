@@ -721,6 +721,9 @@ class GameSession:
 
     def _do_search(self, action: Action, text: str) -> dict:
         place = self.current_place()
+        room = self._match_room(place, text)          # «обыскать погреб/кабинет» → конкретная комната
+        if room is not None:
+            return self._search_room(action, text, place, room)
         dc = 15
         # секретная дверь в подземелье — ищется тем же чеком, что и тайники
         secret = self.world.dungeon_secrets.get(place)
@@ -758,6 +761,62 @@ class GameSession:
                     "view": self.view()}
 
         return self._suspend(req, resume, f"Обыск: Investigation против DC {dc}.")
+
+    def _match_room(self, place_id: str, text: str) -> dict | None:
+        """Найти комнату текущего места, упомянутую в запросе («обыскать погреб»)."""
+        import os
+        import re
+        p = self.world.spatial.places.get(place_id)
+        rooms = getattr(p, "rooms", None) or []
+        low = text.lower()
+        text_words = [w for w in re.findall(r"[а-яёa-z]+", low) if len(w) >= 4]
+        for idx, r in enumerate(rooms):
+            nm = (r.get("name") or "").lower()
+            if not nm:
+                continue
+            if nm in low:
+                return {"idx": idx, "name": r.get("name"), "loot": r.get("loot") or "mundane"}
+            # сравнение по общему префиксу ≥5 — терпимо к склонению («сокровищницу»≈«сокровищница»)
+            room_words = [w for w in re.findall(r"[а-яёa-z]+", nm) if len(w) >= 4]
+            for rw in room_words:
+                if any(len(os.path.commonprefix([rw, tw])) >= 5 for tw in text_words):
+                    return {"idx": idx, "name": r.get("name"), "loot": r.get("loot") or "mundane"}
+        return None
+
+    def _search_room(self, action: Action, text: str, place: str, room: dict) -> dict:
+        """Обыск конкретной комнаты: Investigation DC 12, на успехе — тайник комнаты
+        (вид лута по характеру комнаты, gen/room_loot). Содержимое лутается _do_loot."""
+        idx, rname = room["idx"], room["name"]
+        dc = 12
+
+        def reveal() -> dict:
+            res = self.discovery.resolve_room(place, idx, room)
+            c = self.world.containers.get(res.container) if res.exists else None
+            if c and c.items:
+                names = ", ".join(self._item_name(i) for i in c.items)
+                self._log_journal(f"Обыскал «{rname}» — нашёл тайник.")
+                return {"kind": "narration", "container": res.container, "view": self.view(),
+                        "text": f"Обыскивая «{rname}», ты находишь тайник. Внутри: {names}."}
+            return {"kind": "narration", "view": self.view(),
+                    "text": f"Ты тщательно обыскиваешь «{rname}», но ничего стоящего не находишь."}
+
+        if self.rules.try_passive(self.player, "perception", dc):
+            return reveal()
+        req = self.rules.build_check_request(self.player, "investigation", dc, kind="skill",
+                                             env_adv=self._env_check_adv("investigation"))
+
+        def resume(result: RollResult) -> dict:
+            outcome = self.rules.adjudicate(action, req, result)
+            self.world.commit("search", self.player,
+                              payload={"success": outcome.success, "room": rname},
+                              roll=result.to_record(req.dice))
+            self._tick()
+            if outcome.success:
+                return reveal()
+            return {"kind": "narration", "view": self.view(),
+                    "text": outcome.summary + f" В «{rname}» ничего не найти."}
+
+        return self._suspend(req, resume, f"Обыск «{rname}»: Investigation против DC {dc}.")
 
     def _do_scan(self, action: Action, text: str) -> dict:
         """«Осматриваюсь — не наблюдает ли кто?» Существование решает правдоподобие
@@ -1418,6 +1477,7 @@ class GameSession:
 
     def _restock_shops(self) -> None:
         import random
+
         from ..gen.item_gen import spawn_item
         from ..gen.seeds import subseed
         for sid, shop in self.world.containers.items():
@@ -1457,8 +1517,8 @@ class GameSession:
         когда время подходит к концу окна — так события идут потоком всю партию."""
         cur = self.world.clock.tick
         if getattr(self, "_inc_sched", None) is None or cur >= getattr(self, "_inc_horizon", -1):
-            from .incidents import build_schedule
             from ..content.region import REGION_SITES
+            from .incidents import build_schedule
             w = self.world
             factions = [{"id": fid, "name": getattr(f, "name", fid),
                          "controls": list(getattr(f, "controls", []) or []),
@@ -1501,9 +1561,9 @@ class GameSession:
         qid = f"quest:inc:{sp.source}"                    # один на источник
         if qid in self.world.quests:
             return
+        from ..content.board import BOARD_PLACE
         from ..gen.provenance import Provenance
         from ..gen.quest_gen import Predicate, Quest, Rewards, Stage
-        from ..content.board import BOARD_PLACE
         label = site.get("label", sp.source)
         reward = Rewards(currency={"gp": 40}, xp=120, faction_rep={"faction:watch": 0.15})
         q = Quest(
@@ -1808,19 +1868,42 @@ class GameSession:
         return f"acquaintance, neutral (trust {rel.trust:.2f})"
 
     def _memory_summary(self, npc: str, rel, first_meeting: bool, topic: str = "") -> str:
-        """Грунт для нарратора: отношение + ЧТО NPC реально помнит об игроке. Первая встреча —
-        жёсткий запрет выдумывать знакомство; иначе — ссылаться ТОЛЬКО на реальную память
-        (чинит галлюцинации «узнаю тебя по телеге у ворот» и неверные «помню, ты говорил…»)."""
+        """rel-грунт для нарратора (отношение + гард первой встречи). Память об игроке теперь —
+        отдельным полем `memory` (см. _npc_memory), чтобы train==inference с датасетом."""
         base = self._rel_summary(rel, first_meeting)
         if first_meeting:
             return (base + ". CRITICAL: you have NEVER met this person before — do NOT pretend to "
                     "recognise them, do NOT invent any shared past or earlier conversation.")
-        mems = self.cognition.retrieve(npc, topic or "", self.player).memories
-        mem_txt = "; ".join(getattr(m, "text", "") for m in mems[:6] if getattr(m, "text", ""))
-        if mem_txt:
-            return (base + f". What you ACTUALLY remember about this person (reference ONLY this, "
-                    f"do not invent other shared history): {mem_txt}")
         return base
+
+    def _pc_brief(self) -> str:
+        """Кто игрок: раса + класс (для отсылок в прозе, напр. «дворф-воин»)."""
+        from ..rules.progression import CLASSES
+        from ..world.components import Progression
+        per = self.world.ecs.get(self.player, Persona)
+        race = (getattr(per, "race", "") or "").strip()
+        races = {"dwarf": "дворф", "halfling": "полурослик", "elf": "эльф", "half-elf": "полуэльф",
+                 "half-orc": "полуорк", "gnome": "гном", "tiefling": "тифлинг"}
+        ru_race = "человек" if race in ("human", "") else races.get(race, race)
+        prog = self.world.ecs.get(self.player, Progression)
+        cls = CLASSES.get(prog.class_id, {}).get("name", "") if prog else ""
+        return f"{ru_race}-{cls.lower()}" if cls else ru_race
+
+    def _pc_gear(self) -> str:
+        """Надетое оружие/броня игрока — чтобы нарратор отсылался к ним в бою/исходе."""
+        from ..inventory import container as invc
+        eq = invc._equipped(self.world, self.player)
+        parts = [self._item_name(it.instance_id) for slot in ("main_hand", "armor")
+                 if (it := eq.get(slot))]
+        return "; ".join(parts)
+
+    def _npc_memory(self, npc: str, topic: str = "", first_meeting: bool = False) -> list:
+        """Что NPC реально помнит об игроке (1-2 ярких эпизода) — для личных реплик. Первая
+        встреча → пусто (чинит галлюцинации знакомства)."""
+        if first_meeting:
+            return []
+        mems = self.cognition.retrieve(npc, topic or "", self.player).memories
+        return [m.text for m in mems[:2] if getattr(m, "text", "")]
 
     def _remember_salient(self, npc: str, text: str) -> None:
         """Извлекает из реплики игрока заметное (имя / цель пути / кого ищет) → отдельные ноды
@@ -1847,7 +1930,8 @@ class GameSession:
                 situation=("A stranger walks up and greets you for the first time"
                            if first_meeting else "Someone you know greets you"),
                 player_line="", intent="greet and ask what they want",
-                scene=self._narrator_context(), mode="greeting")
+                scene=self._narrator_context(), mode="greeting", pc=self._pc_brief(),
+                memory=self._npc_memory(npc, "", first_meeting), history=self._recent_context())
             if line:
                 return line
         return self._greeting_fallback(persona, first_meeting)
@@ -1872,7 +1956,8 @@ class GameSession:
                 self.model, persona, self._memory_summary(npc, rel, first_meeting, topic),
                 situation=f"The player says/asks: «{topic}». Your stance: {action}.",
                 player_line=topic, intent=action, scene=self._narrator_context(),
-                facts=[it["fact"] for it in feed], mode="dialogue")
+                facts=[it["fact"] for it in feed], mode="dialogue", pc=self._pc_brief(),
+                memory=self._npc_memory(npc, topic, first_meeting), history=self._recent_context())
             if line and not self._degenerate(line):     # отсеять мусорный вывод модели («??????»)
                 if sharing:
                     self._record_player_learned(npc, feed)
@@ -2325,6 +2410,8 @@ class GameSession:
         for cid, c in self.world.containers.items():
             if c.kind == "corpse":
                 out.append(cid)                       # трупы лутаются где угодно (упрощённо)
+            elif c.kind in ("chest", "stash") and c.owner_ref == place and c.items:
+                out.append(cid)                       # найденный непустой тайник комнаты/места (room_loot)
             elif c.kind == "chest" and place == "place:cragmaw_klarg_cave":
                 out.append(cid)                       # тайник Klarg доступен в его пещере
         return out
@@ -2845,7 +2932,8 @@ class GameSession:
         out = render_scene(self.model, summary,
                            persona or self.world.ecs.get(self.player, Persona), topic,
                            scene=self._narrator_context(),
-                           mode="combat" if topic == "combat" else "outcome")
+                           mode="combat" if topic == "combat" else "outcome",
+                           pc=self._pc_brief(), gear=self._pc_gear())
         return out.get("narration") if out else None
 
     def _narrator_context(self) -> str:
@@ -2857,6 +2945,8 @@ class GameSession:
         ctx = f"{sc.descriptor} Место: «{sc.place_name}». Рядом: {npcs}."
         if place and getattr(place, "description", None):     # полное описание локации (если сгенерено)
             ctx += f"\nО месте (антураж, держись его): {place.description}"
+            if getattr(place, "rooms", None):                 # части места (кухня/погреб/…) — для отсылок
+                ctx += "\nЧасти места: " + "; ".join(r.get("name", "") for r in place.rooms if r.get("name"))
         recent = self._recent_context(3)
         if recent:
             ctx += f"\nЧто было только что:\n{recent}"

@@ -38,8 +38,8 @@ def capture(session) -> dict:
         "memory": _capture_memory(session),
         "incidents": _capture_incidents(session),
         "quest_briefs": dict(getattr(session, "_quest_briefs", {}) or {}),
-        "place_descriptions": {pid: p.description for pid, p in w.spatial.places.items()
-                               if getattr(p, "description", None)},
+        "place_descriptions": {pid: {"description": p.description, "rooms": list(getattr(p, "rooms", []) or [])}
+                               for pid, p in w.spatial.places.items() if getattr(p, "description", None)},
     }
 
 
@@ -129,10 +129,15 @@ def apply(session, snap: dict | None) -> None:
         session._inc_horizon = inc.get("horizon", -1)
         session._inc_fired = set(inc.get("fired") or [])
     session._quest_briefs = dict(snap.get("quest_briefs") or {})   # сген. лор-брифы квестов
-    for pid, d in (snap.get("place_descriptions") or {}).items():  # сген. описания локаций
+    for pid, d in (snap.get("place_descriptions") or {}).items():  # сген. описания локаций (+комнаты)
         p = w.spatial.places.get(pid)
-        if p:
-            p.description = d
+        if not p:
+            continue
+        if isinstance(d, dict):
+            p.description = d.get("description")
+            p.rooms = list(d.get("rooms") or [])
+        else:
+            p.description = d                                       # старые сейвы — только строка
 
 
 def _restore_memory(session, mem_snap) -> None:

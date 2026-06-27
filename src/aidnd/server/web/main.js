@@ -21,24 +21,13 @@ async function logout() {
 function updateAccountBtn() {
   const b = $("account-btn"); if (b) b.textContent = ME ? ("👤 " + (ME.email || "вы")) : "👤 Войти";
 }
-function renderUsage(u) {                                   // шкала слева + счётчик в шапке + текст в настройках
+function renderUsage(u) {                                   // счётчик лимита в шапке + текст в настройках
   if (!u) return;
   const hud = $("usage-hud");
   if (hud) { hud.classList.remove("hidden"); hud.textContent = u.unlimited ? "∞ безлимит" : `⚡ ${u.requests.used}/${u.requests.free}`; }
-  const bar = $("usage-bar"); if (!bar) return;
-  bar.classList.remove("hidden");
-  if (u.unlimited) {
-    bar.innerHTML = `<div class="ub-cap">∞</div><div class="ub-lbl">безлимит</div>`;
-    if ($("set-usage")) $("set-usage").textContent = "Тариф: безлимит ∞";
-    return;
-  }
-  const rq = u.requests, en = u.enrich;
-  const left = Math.max(0, Math.min(100, Math.round(100 * (rq.free - rq.used) / Math.max(1, rq.free))));
-  bar.innerHTML =
-    `<div class="ub-lbl">${rq.used}/${rq.free}</div>` +
-    `<div class="ub-track"><div class="ub-fill" style="height:${left}%"></div></div>` +
-    `<div class="ub-lbl">миры ${en.used}/${en.free}</div>`;
-  if ($("set-usage")) $("set-usage").textContent = `Запросы ${rq.used}/${rq.free} · миры ${en.used}/${en.free}`;
+  if ($("set-usage")) $("set-usage").textContent = u.unlimited
+    ? "Тариф: безлимит ∞"
+    : `Запросы ${u.requests.used}/${u.requests.free} · миры ${u.enrich.used}/${u.enrich.free}`;
 }
 
 // ----------------------------------------------------------------- log ----

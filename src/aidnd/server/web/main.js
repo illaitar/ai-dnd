@@ -577,9 +577,8 @@ function renderMap(ml) {
   renderLegend(null);                                                // легенда только для town
   sizeMapStage();                                                    // HiDPI бэк-стор перед отрисовкой
   const svgHost = $("map-svg"); if (svgHost) { svgHost.innerHTML = ""; svgHost.classList.add("hidden"); }
-  if (mapLevel === "town") drawCityLevel();                          // процедурный город (Python-SVG, фолбэк на canvas)
-  else if (mapLevel === "region" && window.drawWorld) drawWorldLevel(ml);
-  else drawMapNodes(ml.levels.find(l => l.id === mapLevel));          // нод-граф для интерьера
+  if (mapLevel === "region" && window.drawWorld) drawWorldLevel(ml);
+  else drawMapNodes(ml.levels.find(l => l.id === mapLevel));          // нод-граф: город (записанные, нумерованные) + интерьер
   $("map-actions").classList.add("hidden");
   bindFx();
 }
@@ -801,19 +800,33 @@ function drawMapNodes(level) {
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke();
   }
   mapHits = [];
+  const legend = [];
   for (const n of level.nodes) {
     const [x, y] = pos(n);
-    const col = n.current ? "#e0a64d" : n.display === "unknown" ? "#6b7283"
+    const col = n.display === "unknown" ? "#6b7283"
       : n.kind === "settlement" ? "#5b8fc9" : n.kind === "site" ? "#c08a44" : "#5fb87f";
     ctx.beginPath(); ctx.arc(x, y, 14 * s, 0, 7); ctx.fillStyle = "#171b22"; ctx.fill();
-    ctx.lineWidth = (n.current ? 3.5 : 2) * s; ctx.strokeStyle = col; ctx.stroke();
-    ctx.fillStyle = "#e8ebf1"; ctx.font = `${Math.round(13 * s)}px Inter`; ctx.textAlign = "center"; ctx.textBaseline = "top";
-    const nm = n.name.length > 18 ? n.name.slice(0, 17) + "…" : n.name;
-    ctx.fillText(nm, x, y + 17 * s);
-    if (n.dir_ru) { ctx.fillStyle = "#969db0"; ctx.font = `${Math.round(11 * s)}px Inter`; ctx.fillText(n.dir_ru, x, y - 27 * s); }
-    if (n.occupants && n.occupants.length) { ctx.fillStyle = "#c08a44"; ctx.fillText("• " + n.occupants.length, x + 16 * s, y - 6 * s); }
+    ctx.lineWidth = 2 * s; ctx.strokeStyle = col; ctx.stroke();
+    ctx.textAlign = "center";
+    if (n.num != null) {                                 // записанное место → НОМЕР на карте + в легенду
+      ctx.fillStyle = "#e8ebf1"; ctx.font = `bold ${Math.round(15 * s)}px Inter`; ctx.textBaseline = "middle";
+      ctx.fillText(String(n.num), x, y);
+      legend.push({ n: n.num, name: n.name, id: n.id });
+    } else {                                             // хаб/комната → имя под узлом
+      ctx.fillStyle = "#e8ebf1"; ctx.font = `${Math.round(13 * s)}px Inter`; ctx.textBaseline = "top";
+      const nm = n.name.length > 18 ? n.name.slice(0, 17) + "…" : n.name;
+      ctx.fillText(nm, x, y + 17 * s);
+    }
+    if (n.dir_ru) { ctx.fillStyle = "#969db0"; ctx.font = `${Math.round(11 * s)}px Inter`; ctx.textBaseline = "top"; ctx.fillText(n.dir_ru, x, y - 30 * s); }
+    if (n.occupants && n.occupants.length) { ctx.fillStyle = "#c08a44"; ctx.font = `${Math.round(13 * s)}px Inter`; ctx.textBaseline = "top"; ctx.fillText("• " + n.occupants.length, x + 16 * s, y - 6 * s); }
+    if (n.current) {                                     // ПОЛОЖЕНИЕ ИГРОКА — красная стрелка над узлом (старый маркер убран)
+      ctx.fillStyle = "#e2453a";
+      const ay = y - 20 * s;
+      ctx.beginPath(); ctx.moveTo(x, ay + 11 * s); ctx.lineTo(x - 8 * s, ay); ctx.lineTo(x + 8 * s, ay); ctx.closePath(); ctx.fill();
+    }
     if (n.go) mapHits.push({ x, y, r: 17 * s, go: n.go, name: n.name });
   }
+  renderLegend(legend.length ? legend.sort((a, b) => a.n - b.n) : null);   // легенда — только записанные
   mapMode = "interior"; drawFx();
 }
 

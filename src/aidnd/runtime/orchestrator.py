@@ -1276,15 +1276,20 @@ class GameSession:
                            "go": ("идти в " + s["label"]) if s["display"] != "unknown" else None})
         levels = [{"id": "region", "title": "Окрестности Фэндалина", "nodes": region}]
 
-        # --- город: площадь-хаб + здания по компасу --------------------------
-        town = [{"id": SQ, "name": self._place_name(SQ), "kind": "room", "dx": 0, "dy": 0,
+        # --- город: площадь-хаб + ТОЛЬКО ЗАПИСАННЫЕ здания, пронумерованные ---
+        recorded = self._recorded_places()
+        town = [{"id": SQ, "name": self._place_name(SQ), "kind": "settlement", "dx": 0, "dy": 0,
                  "dir_ru": "", "current": place == SQ, "go": "идти на площадь", "occupants": occ(SQ)}]
+        num = 0
         for d, dest in sp.exits_of(SQ).items():
+            if dest not in recorded and dest != place:    # на карте — только записанные (и где стоишь)
+                continue
             if d in DIRECTIONS:
                 dx, dy, dir_ru = *DIRECTIONS[d], DIR_RU.get(d, "")
             else:
                 dx, dy, dir_ru = 0.0, -0.55, ""          # внекомпасные (доска объявлений) — у центра
-            town.append({"id": dest, "name": self._place_name(dest),
+            num += 1
+            town.append({"id": dest, "name": self._place_name(dest), "num": num,
                          "kind": sp.places[dest].kind if dest in sp.places else "",
                          "dx": dx, "dy": dy, "dir_ru": dir_ru, "current": place == dest,
                          "go": "идти в " + self._place_name(dest), "occupants": occ(dest)})

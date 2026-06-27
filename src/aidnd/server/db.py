@@ -11,6 +11,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from .. import config
 
@@ -19,7 +20,9 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_async_engine(config.DATABASE_URL, pool_pre_ping=True)
+# NullPool: свежее соединение на операцию. asyncpg-соединения привязаны к event-loop;
+# без пула нет кросс-loop проблем (HTTP+WS, тесты). Для нашего масштаба оверхед минимален.
+engine = create_async_engine(config.DATABASE_URL, poolclass=NullPool)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 

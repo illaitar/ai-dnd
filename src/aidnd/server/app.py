@@ -19,6 +19,9 @@ from fastapi.staticfiles import StaticFiles
 from .. import config
 from ..bootstrap import new_session
 from ..rules.dice import roll_expr
+from . import auth as _svc_auth
+from . import games as _svc_games
+from .db import SessionLocal
 from .routes_auth import router as _auth_router
 from .routes_games import router as _games_router
 
@@ -404,12 +407,29 @@ async def ws(sock: WebSocket) -> None:
     salt = {"n": 1}
     holds = {"slot": False}                               # слот гейтит ГЕНЕРАЦИЮ (GPU), не коннект
 
+    me = {"user": None}                                   # авторизация по ?token= (иначе анонимный демо)
+    _tok = sock.query_params.get("token", "")
+    if _tok:
+        try:
+            async with SessionLocal() as _db:
+                me["user"] = await _svc_auth.user_for_token(_db, _tok)
+        except Exception:                                 # БД недоступна → анонимно
+            me["user"] = None
+
     async def send(result: dict) -> None:
         await sock.send_text(json.dumps(result, ensure_ascii=False, default=str))
 
     async def start_menu() -> None:                       # при заходе — всегда явное меню, без фоновой сборки
-        from ..runtime.persistence import list_saves
-        await send({"kind": "menu", "server_online": _model_online(), "saves": list_saves()})
+        payload = {"kind": "menu", "server_online": _model_online()}
+        if me["user"]:                                    # юзер → его игры из БД
+            async with SessionLocal() as _db:
+                payload["games"] = await _svc_games.list_games(_db, me["user"].id)
+            payload["user"] = {"id": me["user"].id, "email": me["user"].email,
+                               "name": me["user"].display_name}
+        else:                                             # аноним → файловые сейвы (как было)
+            from ..runtime.persistence import list_saves
+            payload["saves"] = list_saves()
+        await send(payload)
 
     def acquire_slot() -> bool:                           # занять слот под генерацию; False — занято
         if holds["slot"]:
@@ -515,20 +535,46 @@ async def ws(sock: WebSocket) -> None:
             elif cmd == "use_item":
                 result = session.use_item(msg.get("item", ""))
             elif cmd == "save":
-                from ..runtime.persistence import list_saves, save_session
-                card = save_session(session, msg.get("name", "Без названия"))
-                result = {"kind": "saved", "card": card, "saves": list_saves(),
-                          "view": session.view()}
+                if me["user"]:                            # игра пользователя → БД
+                    async with SessionLocal() as _db:
+                        g = await _svc_games.save_game(_db, me["user"].id, session,
+                                                       msg.get("name"), msg.get("game_id"))
+                        glist = await _svc_games.list_games(_db, me["user"].id)
+                    result = {"kind": "saved", "card": {"id": g.id, "title": g.title},
+                              "games": glist, "view": session.view()}
+                else:
+                    from ..runtime.persistence import list_saves, save_session
+                    card = save_session(session, msg.get("name", "Без названия"))
+                    result = {"kind": "saved", "card": card, "saves": list_saves(),
+                              "view": session.view()}
             elif cmd == "load":
-                from ..runtime.persistence import load_session
-                session = load_session(msg.get("slug", ""), use_model=True)
-                result = session.look()
-                result["server_online"] = bool(session.model and session.model.available())
+                if me["user"] and msg.get("game_id") is not None:   # игра пользователя из БД
+                    async with SessionLocal() as _db:
+                        snap = await _svc_games.get_snapshot(_db, me["user"].id, int(msg["game_id"]))
+                    if snap is None:
+                        result = {"kind": "error", "text": "игра не найдена"}
+                    else:
+                        from ..runtime.persistence import deserialize_session
+                        session = await asyncio.to_thread(deserialize_session, snap, True)
+                        result = session.look()
+                        result["server_online"] = bool(session.model and session.model.available())
+                else:
+                    from ..runtime.persistence import load_session
+                    session = load_session(msg.get("slug", ""), use_model=True)
+                    result = session.look()
+                    result["server_online"] = bool(session.model and session.model.available())
             elif cmd == "delete_save":
-                from ..runtime.persistence import delete_save, list_saves
-                delete_save(msg.get("slug", ""))
-                result = {"kind": "saves", "saves": list_saves(),
-                          "view": session.view() if session else None}
+                if me["user"] and msg.get("game_id") is not None:
+                    async with SessionLocal() as _db:
+                        await _svc_games.delete_game(_db, me["user"].id, int(msg["game_id"]))
+                        glist = await _svc_games.list_games(_db, me["user"].id)
+                    result = {"kind": "saves", "games": glist,
+                              "view": session.view() if session else None}
+                else:
+                    from ..runtime.persistence import delete_save, list_saves
+                    delete_save(msg.get("slug", ""))
+                    result = {"kind": "saves", "saves": list_saves(),
+                              "view": session.view() if session else None}
             elif cmd == "new":
                 session = new_session(seed=msg.get("seed", config.WORLD_SEED),
                                       roster_size=12, use_model=True)

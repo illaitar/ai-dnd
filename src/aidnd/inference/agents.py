@@ -140,15 +140,26 @@ PROMPTS = {
         '  "query_type": when kind=query — one of "look","items","who","exits","inventory",'
         '"status","map"; else null\n'
         '  "verb": when kind=command — one of "move","talk","attack","inspect","search","loot",'
-        '"buy","sell","inventory","wait","drink"; else null\n'
+        '"buy","sell","buyinfo","scan","inventory","wait","drink"; else null\n'
         '  "target": the named NPC / place / object, or null\n'
         '  "tone": "neutral" | "friendly" | "hostile" | "deceptive" | "fearful"\n'
         "Meaning: query = player ASKS about current state (what I see / items nearby / who is here / "
         "where can I go / my bag / my HP / the map) → engine answers from state, no dice. "
-        "dialogue = player SPEAKS/asks a present NPC. command = an explicit game command. "
-        "freeform = any other attempted action to adjudicate (climb, throw, engrave, shove, hide…). "
-        "Prefer query for questions about the world/self; prefer freeform over forcing a creative "
-        "action into a command. Output ONLY the JSON object."
+        "dialogue = player SPEAKS to a present NPC (greeting, chatting, persuading by speech). "
+        "command = an explicit game action; key verbs:\n"
+        "  search = examine a PLACE/furniture/room for hidden things (обыскать погреб/стол/комнату);\n"
+        "  loot = take from a corpse/chest/stash (обобрать труп, открыть сундук);\n"
+        "  inspect = look closely at one object/feature (осмотреть алтарь/предмет);\n"
+        "  buyinfo = BUY or extract directions / a map / info about a PLACE or route from an NPC "
+        "(купить сведения о дороге к X, разузнать где X, что знаешь о пути к X) — target = that NPC;\n"
+        "  scan = check whether someone is watching/following you (не следит ли кто, нет ли слежки);\n"
+        "  buy/sell = trade ITEMS with a merchant; attack = strike; move = go to a place/direction.\n"
+        "freeform = any other improvised physical action to adjudicate (climb, throw, engrave, shove, hide…). "
+        "CRUCIAL: an action performed ON an object/place/corpse is a command "
+        "(search/inspect/loot/buyinfo/scan), NOT dialogue — even when an NPC is present. Use dialogue "
+        "ONLY when the player addresses an NPC with speech. "
+        "Prefer query for questions about your own state/surroundings; prefer freeform over forcing a "
+        "creative action into a command. Output ONLY the JSON object."
     ),
     "arbiter": (
         "You are a D&D 5e referee deciding HOW to resolve ONE freeform player action that is "
@@ -260,6 +271,14 @@ _DS_REINFORCE = {
     "cognition": (
         "\n\n[СТРОГО] Верни ОДИН валидный JSON-объект полей action/target/info_disclosed/"
         "rationale_tags и НИЧЕГО больше."),
+    "router": (
+        "\n\n[СТРОГО ДЛЯ ТЕБЯ] Действие игрока над ОБЪЕКТОМ/МЕСТОМ/мебелью/телом — это kind=command, "
+        "НЕ dialogue, даже если рядом есть NPC. Примеры: «обыскать погреб/кладовую/стол/сундук» → "
+        "command, verb=search (или loot для трупа/сундука); «осмотреть алтарь/полку» → verb=inspect; "
+        "«купить/разузнать сведения о дороге к X / где находится X» → verb=buyinfo (target — этот NPC); "
+        "«не следит ли кто, нет ли слежки» → verb=scan; «ударить/напасть» → verb=attack; "
+        "«спрятаться/перелезть/поджечь» → freeform. dialogue — ТОЛЬКО когда игрок ОБРАЩАЕТСЯ к NPC речью "
+        "(«привет», «спроси, как дела»). Никогда не подменяй механическое действие игрока ответом NPC."),
 }
 PROMPTS_BACKEND = {"deepseek": {r: PROMPTS[r] + s for r, s in _DS_REINFORCE.items()}}
 

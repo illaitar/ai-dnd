@@ -127,3 +127,30 @@ def clear_case(world, subject: str, drop: float = 1.0) -> None:
     c["suspicion"] = round(max(0.0, c["suspicion"] * (1.0 - drop)), 3)
     if c["suspicion"] <= 0.02:
         cases.pop(subject, None)
+
+
+# --- честное обнаружение трупа: тело находят, когда кто-то реально проходит рядом --------------- #
+def note_corpse(world, subject: str, kind: str, place: str, victim: str = "") -> None:
+    """Незамеченное убийство: оставить ТЕЛО (дело пока НЕ заводим — подозрения нет, пока не найдут)."""
+    if not getattr(world, "pending_corpses", None):
+        world.pending_corpses = []
+    world.pending_corpses.append({"subject": subject, "kind": kind, "place": place,
+                                  "victim": victim, "day": day_number(world.clock.tick)})
+
+
+def discover_corpses(world) -> list:
+    """Найдены ли тела: если у места трупа СЕЙЧАС есть живой прохожий ИЛИ патруль — тело обнаружено,
+    поднимается тревога и заводится дело (с этого момента копится подозрение). Возвращает найденные."""
+    pending = getattr(world, "pending_corpses", None) or []
+    if not pending:
+        return []
+    from ..content.watch import patrol_place, patrols_of
+    from .citypop import crowd_at
+    found = []
+    for c in list(pending):
+        patrol_here = any(patrol_place(p, world.clock.tick) == c["place"] for p in patrols_of(world))
+        if crowd_at(world, c["place"]) > 0 or patrol_here:    # кто-то наткнулся на тело
+            note_deed(world, c["subject"], c["kind"], c["place"], witnessed=True)
+            found.append({**c, "by_patrol": patrol_here})
+            pending.remove(c)
+    return found

@@ -135,6 +135,11 @@ class GameSession:
             if not pos or pos.place_id != target:
                 self.world.commit("set_position", "schedule", target=npc,
                                   payload={"region": "region:phandalin", "place": target})
+        from ..content.cases import discover_corpses  # тела находят, когда кто-то проходит мимо
+        for c in discover_corpses(self.world):
+            who = "Патруль" if c.get("by_patrol") else "Прохожий"
+            self._log_journal(f"🪦 {who} наткнулся на тело ({c.get('victim') or 'неизвестного'}) у "
+                              f"«{self._place_name(c['place'])}» — пошли слухи, стража взялась за дело.")
 
     def _asleep(self, npc: str) -> bool:
         """NPC сейчас спит по расписанию (ночь дома) — присутствует, но не бодрствует."""
@@ -2050,10 +2055,12 @@ class GameSession:
                 fac = getattr(self.world.ecs.get(victim, Persona), "faction", None)
                 if fac in ("faction:cragmaw", "faction:redbrands"):
                     continue                              # прикончить бандита — не преступление
-                from ..content.cases import note_deed
-                note_deed(self.world, self.player,
-                          "kill_guard" if fac == "faction:watch" else "kill_townsperson",
-                          self.current_place(), witnessed=self._deed_witnessed([victim]))
+                kind = "kill_guard" if fac == "faction:watch" else "kill_townsperson"
+                from ..content.cases import note_corpse, note_deed
+                if self._deed_witnessed([victim]):        # видели → дело сразу
+                    note_deed(self.world, self.player, kind, self.current_place(), witnessed=True)
+                else:                                     # без свидетелей → ТЕЛО, найдут когда кто-то пройдёт мимо
+                    note_corpse(self.world, self.player, kind, self.current_place(), self._display(victim))
         if cs.outcome == "victory" and not cs.guard_intervened:   # зачистка только при реальной победе
             place = self.current_place()
             self.world.commit("set_flag", self.player, payload={"flag": f"cleared:{place}"})

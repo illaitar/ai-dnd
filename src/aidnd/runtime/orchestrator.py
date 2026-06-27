@@ -80,6 +80,7 @@ class GameSession:
         self.merges: list[dict] = []              # совершённые слияния объявлений (персист; пересоздаём на load)
         self._merge_seen: set = set()             # пары, уже опрошенные на слияние в этой сессии (транзиент)
         self.event_leads: list[dict] = []         # зацепки из уличных событий → объявления (персист)
+        self.dungeon_status: dict[str, str] = {}   # место подземелья → cleared|occupied (персист; правит cleared-флаг)
         self._toast_log_seen = 0                  # сколько строк журнала квестов уже превращено в тосты
         self._toasts: list[dict] = []             # накопленные тосты-«ачивки» текущего хода (сливаются в send)
         self._main_act: str | None = None         # текущий акт основного сюжета (для детекта перехода)
@@ -1738,8 +1739,11 @@ class GameSession:
     def _on_combat_end(self) -> str:
         cs = self.combat.state
         if cs.outcome == "victory" and not cs.guard_intervened:   # зачистка только при реальной победе
-            self.world.commit("set_flag", self.player,
-                              payload={"flag": f"cleared:{self.current_place()}"})
+            place = self.current_place()
+            self.world.commit("set_flag", self.player, payload={"flag": f"cleared:{place}"})
+            from ..content.region import REGION_SITES
+            if any(sp["place"] == place for sp in REGION_SITES.values()):   # подземелье региона зачищено
+                self.dungeon_status[place] = "cleared"
         for q in list(self.world.quests.values()):
             if q.state == "active":
                 self.quests.advance(q)
@@ -1927,6 +1931,7 @@ class GameSession:
         if per_day and self.world.clock.tick // per_day > before // per_day:
             self._restock_shops()
             self._threat_notices()                        # рост угрозы незачищенных логов → вести в журнал
+            self._dungeon_cycle()                         # переоккупация зачищенных логов со временем
 
     def _threat_notices(self) -> None:
         """Рост угрозы: высокоугрожающие незачищенные логова всё чаще беспокоят округу (вести в журнал)."""
@@ -1941,6 +1946,41 @@ class GameSession:
                 continue
             if random.Random(subseed(self.world.seed, "raid", sk, self.world.clock.tick)).random() < threat * 0.5:
                 self._log_journal(f"🔺 Из «{sp['label']}» всё чаще выходят твари — в округе неспокойно.")
+
+    def _dungeon_cycle(self) -> None:
+        """Переоккупация: зачищенное логово со временем могут снова занять (детерм. seed+место+день) —
+        угроза возвращается, ресурс перекрывается, контракт гильдии переоткрывается."""
+        import random
+
+        from ..content.region import REGION_SITES
+        from ..gen.seeds import subseed
+        for sp in REGION_SITES.values():
+            place = sp["place"]
+            if self.dungeon_status.get(place) != "cleared":
+                continue
+            if random.Random(subseed(self.world.seed, "reoccupy", place, self.world.clock.tick)).random() < 0.08:
+                self.dungeon_status[place] = "occupied"
+                self._apply_dungeon_status()
+                self._log_journal(f"🔻 Логово «{sp['label']}» снова заняли — угроза вернулась в округу.")
+
+    def _apply_dungeon_status(self) -> None:
+        """Привести cleared-флаги и контракты гильдии в соответствие с dungeon_status (правда персиста).
+        Вызывается при переоккупации и ПОСЛЕ реплея на загрузке (снятие флага реплеем не воспроизводится)."""
+        from ..content.guild import contract_id
+        from ..content.region import REGION_SITES
+        site_of = {sp["place"]: sk for sk, sp in REGION_SITES.items()}
+        for place, state in self.dungeon_status.items():
+            sk = site_of.get(place)
+            if state == "occupied":
+                self.world.flags.discard(f"cleared:{place}")     # угроза снова активна (ресурс/threat реагируют)
+                if sk:
+                    for f in [x for x in self.world.flags if x.startswith(f"qrew:{contract_id(sk)}:")]:
+                        self.world.flags.discard(f)
+                    q = self.world.quests.get(contract_id(sk))
+                    if q and q.state == "completed":             # переоткрыть контракт под новую угрозу
+                        q.state, q.current_stages = "not_offered", []
+            elif state == "cleared":
+                self.world.flags.add(f"cleared:{place}")
 
     def _restock_shops(self) -> None:
         import random
@@ -2018,7 +2058,17 @@ class GameSession:
                 fired.add(sp.id)
                 apply_incident_effects(self.world, sp)
                 self._spawn_incident_quest(sp)            # угроза-событие → задание на доске
+                self._disrupt_from_incident(sp)           # инцидент бьёт по снабжению (временное нарушение)
                 self.__dict__.setdefault("_inc_pending", []).append(sp)
+
+    def _disrupt_from_incident(self, sp) -> None:
+        """Инцидент → временное нарушение снабжения: беспорядки бьют по караванам (товары), катаклизм
+        (пожар/буря) — ещё и по подвозу металла. Через флаг disrupt:<res>:<до_тика> (читается с истечением)."""
+        per_day = (24 * 60) // config.SIM_MINUTES_PER_TICK
+        until = self.world.clock.tick + 3 * per_day
+        self.world.commit("set_flag", self.player, payload={"flag": f"disrupt:goods:{until}"})
+        if getattr(sp, "kind", "") not in ("monster", "faction"):    # катаклизм — и по металлу
+            self.world.commit("set_flag", self.player, payload={"flag": f"disrupt:metal:{until}"})
 
     def _spawn_incident_quest(self, sp) -> None:
         """Угроза-инцидент (вылазка монстров) → новое задание на доске объявлений, привязанное

@@ -19,10 +19,12 @@ RESOURCES = {
     "metal": {
         "label": "металл и руда", "source": "place:wave_echo_cave",
         "severed": "Рудник в руках чудовищ — металл в дефиците: кузнечные товары дороги и редки.",
+        "disrupted": "Из-за беспорядков подвоз металла сбоит — цены у кузнеца подросли.",
         "flowing": "Рудник снова работает — металла вдоволь, цены у кузнеца упали."},
     "goods": {
         "label": "товары с трактов", "source": "place:cragmaw_klarg_cave",
         "severed": "На трактах разбойники — караваны почти не доходят, припасы дорожают.",
+        "disrupted": "После недавних бед караваны идут с перебоями — товары вздорожали.",
         "flowing": "Дороги спокойны — караваны идут исправно, товары в достатке."},
 }
 
@@ -31,14 +33,23 @@ _STATUS = {"flowing": (1.0, 1.0), "disrupted": (1.3, 0.6), "severed": (1.7, 0.35
 
 
 def resource_status(world, res: str) -> str:
-    """Состояние ресурса: течёт, если источник зачищен; иначе перекрыт. + нарушение активным инцидентом."""
+    """Состояние ресурса: перекрыт, если источник-подземелье не зачищен; иначе — нарушен временно
+    активным инцидентом (disrupt:<res>:<до_тика>); иначе течёт."""
     meta = RESOURCES.get(res)
     if not meta:
         return "flowing"
     src = meta.get("source")
-    if src and f"cleared:{src}" in world.flags:
-        return "flowing"
-    return "severed"                                   # источник под угрозой — ресурс перекрыт
+    if src and f"cleared:{src}" not in world.flags:
+        return "severed"                              # источник под угрозой — ресурс перекрыт
+    now = world.clock.tick                            # источник в порядке — но возможен временный сбой
+    for f in world.flags:
+        if f.startswith(f"disrupt:{res}:"):
+            try:
+                if int(f.rsplit(":", 1)[1]) > now:
+                    return "disrupted"
+            except ValueError:
+                pass
+    return "flowing"
 
 
 def price_markup(world, category: str) -> float:
@@ -80,6 +91,8 @@ def shop_supply_note(world, categories) -> str:
         st = resource_status(world, res)
         if st == "severed":
             parts.append("🔺 " + RESOURCES[res]["severed"])
+        elif st == "disrupted":
+            parts.append("🟡 " + RESOURCES[res]["disrupted"])
         elif st == "flowing" and f"cleared:{RESOURCES[res]['source']}" in world.flags:
             parts.append("🟢 " + RESOURCES[res]["flowing"])
     return " ".join(parts)

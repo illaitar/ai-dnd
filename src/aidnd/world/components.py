@@ -129,6 +129,7 @@ class Persona:
     marks: list[str] = field(default_factory=list)  # стойкие следы на персонаже (синяк, метка) — агент последствий
     enriched: bool = False              # прошёл ли first-L3 обогащение моделью
     companion: bool = False             # спутник партии: следует за игроком и бьётся на его стороне
+    following: bool = False             # временно идёт с игроком (уговорил/нанял) — следует, но не в партии
 
 
 @dataclass

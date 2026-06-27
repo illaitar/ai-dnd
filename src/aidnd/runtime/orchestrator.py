@@ -95,6 +95,7 @@ class GameSession:
         return pos.place_id if pos else "place:phandalin_square"
 
     def npcs_here(self) -> list[str]:
+        self._apply_schedules()                           # расставить NPC по времени суток перед опросом присутствия
         place = self.current_place()
         out = []
         for npc in self.world.npcs():
@@ -102,6 +103,41 @@ class GameSession:
             if pos and pos.place_id == place and self.world.is_alive(npc):
                 out.append(npc)
         return out
+
+    def _apply_schedules(self) -> None:
+        """Расставить NPC по их распорядку на текущее время суток (детерминированно, раз на тик).
+
+        Спутники/ведомые (идут с игроком) и текущий собеседник — не трогаются. Позиция меняется только
+        на стыке блоков расписания (днём на работе, ночью дома/спит) → событий мало, реплей-сейф."""
+        if self.combat and self.combat.state.mode == "active":
+            return                                        # в бою NPC не телепортируются по распорядку
+        tick = self.world.clock.tick
+        if getattr(self, "_sched_tick", None) == tick:
+            return
+        self._sched_tick = tick
+        from ..lod.smart_objects import block_at
+        from ..world.components import Schedule
+        hhmm = self.world.clock.hhmm()
+        for npc in self.world.npcs():
+            if npc == self.player or npc == self.dialogue_partner or not self.world.is_alive(npc):
+                continue
+            per = self.world.ecs.get(npc, Persona)
+            if per and (per.companion or getattr(per, "following", False)):
+                continue                                  # идут с игроком — не по расписанию
+            blk = block_at(self.world.ecs.get(npc, Schedule), hhmm)
+            if not blk:
+                continue
+            pos = self.world.position(npc)
+            if not pos or pos.place_id != blk.place:
+                self.world.commit("set_position", "schedule", target=npc,
+                                  payload={"region": "region:phandalin", "place": blk.place})
+
+    def _asleep(self, npc: str) -> bool:
+        """NPC сейчас спит по расписанию (ночь дома) — присутствует, но не бодрствует."""
+        from ..lod.smart_objects import block_at
+        from ..world.components import Schedule
+        blk = block_at(self.world.ecs.get(npc, Schedule), self.world.clock.hhmm())
+        return bool(blk and blk.affordance == "sleep")
 
     def exits(self) -> list[str]:
         """Связанные локации из графа связности (порталы текущего узла)."""
@@ -112,6 +148,75 @@ class GameSession:
         return [n for n in self.world.npcs()
                 if (p := self.world.ecs.get(n, Persona)) and p.companion
                 and self.world.is_alive(n)]
+
+    def _followers(self) -> list[str]:
+        """Временно ведомые (уговорил «пойдём со мной») — следуют, но не в партии и не бьются за тебя."""
+        return [n for n in self.world.npcs()
+                if (p := self.world.ecs.get(n, Persona)) and getattr(p, "following", False)
+                and not p.companion and self.world.is_alive(n)]
+
+    _FOLLOW_CUES = ("следуй за мной", "иди за мной", "ступай за мной", "идём за мной", "за мной",
+                    "проводи меня", "пойдём со мной", "идём со мной", "пошли со мной", "идёмте со мной",
+                    "пойдёмте со мной", "идём, провод", "будь со мной рядом")
+    _UNFOLLOW_CUES = ("оставайся", "оставайтесь", "жди здесь", "ждите здесь", "стой здесь", "стойте здесь",
+                      "иди обратно", "ступай обратно", "можешь идти", "отпуска", "свободен", "свободна",
+                      "не ходи за мной", "отстань")
+
+    def _is_follow_request(self, low: str) -> bool:
+        return any(k in low for k in self._FOLLOW_CUES)
+
+    def _ask_follow(self, text: str) -> dict:
+        """Уговорить присутствующего NPC пойти с игроком — проверка убеждения, DC от доверия и риска."""
+        here = [n for n in self.npcs_here() if n != self.player]
+        npc = self._match_npc(text) or (self.dialogue_partner if self.dialogue_partner in here else None) \
+            or (here[0] if len(here) == 1 else None)
+        if not npc or npc not in here:
+            return {"kind": "system", "text": "Рядом некого звать с собой (укажи, кого).", "view": self.view()}
+        per = self.world.ecs.get(npc, Persona)
+        if per and (per.following or per.companion):
+            return {"kind": "system", "text": f"{self._display(npc)} и так с тобой.", "view": self.view()}
+        if self._is_hostile(npc):
+            return {"kind": "narration", "text": f"{self._display(npc)} не пойдёт с тобой — вы не в ладах.",
+                    "view": self.view()}
+        ctx = self.cognition.retrieve(npc, "", self.player)
+        trust = getattr(getattr(ctx, "rel", None), "trust", 0.2) or 0.2
+        low = text.lower()
+        risk = 3 if any(k in low for k in ("переул", "тёмн", "темн", "глух", "закоул", "подвал",
+                                           "за угол", "в сторон", "уедин")) else 0
+        dc = max(8, min(20, round(10 + (1 - trust) * 10) + risk))
+        action = Action(actor=self.player, verb="persuade", target=npc)
+        req = self.rules.build_check_request(self.player, "persuasion", dc, target=npc, kind="skill",
+                                             env_adv=self._env_check_adv("persuasion"))
+
+        def resume(result) -> dict:
+            outcome = self.rules.adjudicate(action, req, result)
+            self.cognition.observe_and_appraise(npc, self.player, "persuasion", "friendly", outcome.summary)
+            if outcome.success:
+                p2 = self.world.ecs.get(npc, Persona)
+                if p2:
+                    p2.following = True
+                self._log_journal(f"{self._display(npc)} согласился пойти с тобой.")
+                line = f"{self._display(npc)}: «Ладно, веди — я за тобой»."
+            else:
+                line = f"{self._display(npc)} мотает головой: «Нет уж, сам ходи»."
+            self._tick()
+            return {"kind": "narration", "text": f"{outcome.summary} {line}", "npc": npc, "view": self.view()}
+
+        return self._suspend(req, resume, f"Проверка убеждения против DC {dc}.")
+
+    def _dismiss_followers(self, text: str) -> dict:
+        """Отпустить ведомого(-ых) — перестают идти за игроком (вернутся к распорядку)."""
+        fol = self._followers()
+        if not fol:
+            return {"kind": "system", "text": "С тобой никто не идёт.", "view": self.view()}
+        npc = self._match_npc(text)
+        targets = [npc] if npc and npc in fol else fol
+        for n in targets:
+            p = self.world.ecs.get(n, Persona)
+            if p:
+                p.following = False
+        names = ", ".join(self._display(n) for n in targets)
+        return {"kind": "narration", "text": f"{names} остаётся на месте.", "view": self.view()}
 
     # человекочитаемые взаимодействия с окружением по аффордансам места
     AFFORD_LABEL = {
@@ -187,6 +292,9 @@ class GameSession:
         at_hq = bool(self.npcs_here()) and place == "building:townmaster_hall"
         if guards:
             text += f"\n🛡 Здесь патрулирует стража: {', '.join(guards)}."
+        asleep = [self._display(n) for n in self.npcs_here() if self._asleep(n)]
+        if asleep:                                         # по распорядку ночью NPC спят (видно в осмотре)
+            text += f"\n💤 Спит: {', '.join(asleep)}."
         if guards or at_hq:                               # стража рядом — реагирует на розыск/подозрение
             wnote = self._watch_reaction_note()
             if wnote:
@@ -256,6 +364,10 @@ class GameSession:
         low = text.lower()
         if "штраф" in low and any(k in low for k in ("заплат", "уплат", "оплат", "плачу")):
             return self._post(self.pay_fine(), "freeform")   # уладить дело со стражей
+        if self._followers() and any(k in low for k in self._UNFOLLOW_CUES):
+            return self._post(self._dismiss_followers(text), "freeform")  # отпустить ведомого
+        if self._is_follow_request(low):                     # «пойдём со мной» → проверка убеждения
+            return self._post(self._ask_follow(text), "freeform")
         route = self._route(text)                         # ВСЁ типизированное — через роутер (детерминированы только кнопки-панели)
         # продолжение разговора: при активном собеседнике рядом «расскажи о…/что слышно»
         # (freeform или общий look) — это реплика ему, а не бросок/мировой-запрос
@@ -622,7 +734,8 @@ class GameSession:
         """Фактический приход в dest: позиция, спутники, журнал, разведка, туман, тик, нарратив, вывески."""
         self.world.commit("set_position", self.player, target=self.player,
                           payload={"region": "region:phandalin", "place": dest})
-        for comp in self._companions():               # спутники идут с игроком
+        movers = self._companions() + [f for f in self._followers() if f not in self._companions()]
+        for comp in movers:                           # спутники И ведомые (уговорённые) идут с игроком
             self.world.commit("set_position", comp, target=comp,
                               payload={"region": "region:phandalin", "place": dest})
         hours = ticks * config.SIM_MINUTES_PER_TICK // 60

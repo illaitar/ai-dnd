@@ -147,6 +147,13 @@ def _add_npc(world: World, npc_id: str, name: str, archetype: str, stat_ref: str
         world.commit("kg_set", "worldgen", payload={"s": npc_id, "r": "works_at", "o": works_at})
     if lives_in:
         world.commit("kg_set", "worldgen", payload={"s": npc_id, "r": "lives_in", "o": lives_in})
+    work = works_at or place or lives_in                  # распорядок: днём на работе/месте, ночью дома/спит
+    home = lives_in or place or work
+    if work or home:
+        from ..world.components import Schedule, ScheduleBlock
+        world.ecs.add(npc_id, Schedule(routine=[
+            ScheduleBlock(t="06:00", place=work or home, affordance="work"),
+            ScheduleBlock(t="20:00", place=home or work, affordance="sleep")]))
     if faction:
         world.commit("kg_add", "worldgen", payload={"s": npc_id, "r": "member_of", "o": faction})
     pos_place = place or lives_in or "building:stonehill_inn"

@@ -3104,7 +3104,48 @@ class GameSession:
                         score += 1
             if score > best_score:
                 best, best_score = npc, score
-        return best or self._match_pop(low)               # никто из живых не подошёл → фоновый житель?
+        if best and best_score >= 3:                      # уверенный детерм. матч — без ML
+            return best
+        return self._resolve_ref_ml(text) or best or self._match_pop(low)   # слабо/нет → лёгкая ML по кличке/описанию
+
+    def _npc_hint(self, npc: str) -> str:
+        """Краткая подсказка о присутствующем для ML-резолюции (профессия/эпитет/черта)."""
+        p = self.world.ecs.get(npc, Persona)
+        if not p:
+            return ""
+        bits = [p.profession or p.archetype or "", p.epithet or ""]
+        bits += (p.traits or [])[:1]
+        return ", ".join(b for b in bits if b)
+
+    def _resolve_ref_ml(self, text: str) -> str | None:
+        """Лёгкая ML-резолюция: кого из ПРИСУТСТВУЮЩИХ имеет в виду игрок (кличка/роль/описание).
+        Кандидаты — живые NPC + фоновые жители; выбранную заглушку материализуем."""
+        if self.model is None:
+            return None
+        place = self.current_place()
+        cands = [{"id": n, "stub": False, "name": self._display(n), "hint": self._npc_hint(n)}
+                 for n in self.npcs_here() if n != self.player and self.world.is_alive(n)]
+        pop = getattr(self.world, "citypop", None)
+        if pop:
+            from ..content.citypop import _minute
+            for aid in pop.present_at(place, _minute(self.world)):
+                ag = pop.agents.get(aid, {})
+                cands.append({"id": aid, "stub": True, "name": pop.name_of(aid),
+                              "hint": f"{ag.get('race', '')}, горожанин"})
+        if len(cands) < 2:                                # резолвить нечего
+            return None
+        from ..inference.agents import resolve_npc_ref
+        idx = resolve_npc_ref(self.model, text, [{"name": c["name"], "hint": c["hint"]} for c in cands])
+        if idx < 0:
+            return None
+        chosen = cands[idx]
+        if not chosen["stub"]:
+            return chosen["id"]
+        npc_id = pop.materialize(chosen["id"], place, self.model)
+        if npc_id:
+            self.charts.enrich(npc_id)
+            self._log_journal(f"{self._display(npc_id)} выходит из толпы — теперь это собеседник.")
+        return npc_id
 
     def _match_pop(self, low: str) -> str | None:
         """Общий переход ФОН→СОБЕСЕДНИК: упомянул присутствующего фонового жителя по имени →

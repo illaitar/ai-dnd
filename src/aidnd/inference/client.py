@@ -156,6 +156,7 @@ class ModelManager:
         "event_quest": (config.BASE_MODEL, "lore"),       # уличная сценка → зацепка-объявление
         "map_features": (config.BASE_MODEL, "lore"),      # описание локации → фичи боевой карты
         "faction_gen": (config.BASE_MODEL, "lore"),
+        "npc_ref": (config.INTENT_MODEL, None),           # лёгкая резолюция ссылки на присутствующего NPC
     }
 
     def __init__(self, client: OllamaClient | None = None) -> None:

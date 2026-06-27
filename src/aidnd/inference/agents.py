@@ -289,6 +289,14 @@ PROMPTS = {
         "без высокого фэнтези, без боя, без сюжетных персонажей. Заголовок — 2-4 слова. "
         "Call street_event."
     ),
+    "npc_ref": (
+        "Игрок в людном месте обращается к кому-то — по имени, прозвищу, роли или описанию "
+        "(«тот кузнец у стойки», «сплетник», «стражница», «рыжая девка»). Тебе дают реплику игрока "
+        "и пронумерованный список ПРИСУТСТВУЮЩИХ с краткой подсказкой о каждом. Определи, кого из "
+        "списка он имеет в виду, и верни ЕГО индекс (число из списка). Если игрок не обращается ни "
+        "к кому конкретному, либо никто не подходит — верни -1. Никогда не выдумывай людей вне списка. "
+        "Call npc_ref с полем index."
+    ),
     "map_features": (
         "Из описания локации выпиши предметы/детали, которые станут тактическими элементами боевой "
         "карты. Для каждого: краткое имя, РОЛЬ и примерное количество. Роли:\n"
@@ -348,6 +356,9 @@ _DS_REINFORCE = {
         "именованных персонажей. БЕЗ магии и диковинных тварей (псы, лошади, куры, козы — да; "
         "грифоны/драконы/монстры — нет). ambient — просто видишь со стороны; involves — к тебе "
         "обращаются/преграждают/просят. Большинство — ambient, involves пореже."),
+    "npc_ref": (
+        "\n\n[СТРОГО] Ответ — только JSON {\"index\": N}, где N — номер из данного списка ПРИСУТСТВУЮЩИХ "
+        "или -1. Никаких людей вне списка. Если обращение общее («эй, кто-нибудь», «зал») — -1."),
     "router": (
         "\n\n[СТРОГО ДЛЯ ТЕБЯ] Действие игрока над ОБЪЕКТОМ/МЕСТОМ/мебелью/телом — это kind=command, "
         "НЕ dialogue, даже если рядом есть NPC. Примеры: «обыскать погреб/кладовую/стол/сундук» → "
@@ -531,6 +542,12 @@ SCHEMAS = {
             "title": {"type": "string"},
             "line": {"type": "string"}},     # строка нарратора (2-е лицо, рус.)
             "required": ["kind", "line"]},
+    },
+    "npc_ref": {
+        "name": "npc_ref",
+        "parameters": {"type": "object", "properties": {
+            "index": {"type": "integer"}},   # индекс выбранного присутствующего из списка, или -1
+            "required": ["index"]},
     },
     "merge_quests": {
         "name": "merge_quests",
@@ -1025,6 +1042,19 @@ def street_event(manager, settlement: str, frm: str, to: str, time_of_day: str =
     kind = out.get("kind") if out.get("kind") in ("ambient", "involves") else "ambient"
     return {"kind": kind, "title": out.get("title") or "", "line": line,
             "hostile": bool(out.get("hostile"))}
+
+
+def resolve_npc_ref(manager, player_text: str, candidates: list) -> int:
+    """Лёгкая ML-резолюция: кого из ПРИСУТСТВУЮЩИХ имеет в виду игрок (имя/кличка/роль/описание).
+    candidates: [{name, hint}]. Возвращает индекс выбранного или -1 (никого конкретно/нет сервера)."""
+    if not candidates or is_offline(manager):
+        return -1
+    listing = "\n".join(f"{i}. {c['name']} — {c.get('hint', '')}" for i, c in enumerate(candidates))
+    user = (f"Реплика игрока: «{player_text}»\n\nПрисутствующие:\n{listing}\n\n"
+            "Кого он имеет в виду? Верни index (число из списка) или -1. Call npc_ref.")
+    out = _call(manager, "npc_ref", "npc_ref", user, ["index"])
+    idx = out.get("index", -1) if out else -1
+    return idx if isinstance(idx, int) and 0 <= idx < len(candidates) else -1
 
 
 def map_features(manager, description: str):

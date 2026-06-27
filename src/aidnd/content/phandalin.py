@@ -454,4 +454,6 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     fill_faction_leaders(world)       # 5d. проставить лидеров (канон/первый член) — детерминированно
     from .watch import register_watch
     register_watch(world, seed)       # 5e. городская стража — ПОСЛЕ полной застройки (масштаб от размера города)
+    from ..gen.faction_gen import seed_leader_knowledge
+    seed_leader_knowledge(world)      # 5f. память руководителей: организация + подчинённые (обкатано на страже)
     return world

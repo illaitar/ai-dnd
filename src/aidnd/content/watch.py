@@ -99,6 +99,9 @@ def register_watch(world, seed: int = 0) -> None:
     for nid, name, arch, sb, traits in plan["roster"]:
         _add_npc(world, nid, name, arch, sb, faction=WATCH, profession="guard",
                  works_at=HQ, lives_in=HQ, place=HQ, traits=list(traits))
+    fac = world.factions[WATCH]                            # стража — фракция как все: лидер + состав
+    fac.leader = CAPTAIN
+    fac.members = [nid for nid, *_ in plan["roster"]]
     world.watch_patrols = plan["patrols"]
     world.watch_investigators = plan["investigators"]
     world.watch_garrison = plan["garrison"]

@@ -225,6 +225,24 @@ def _register_personal(world, npc_id: str, item: dict) -> str:
     return fid
 
 
+def teach_personal_fact(world, npc_id: str, item: dict) -> str:
+    """Записать ЛИЧНЫЙ факт в память NPC: личный факт-нод + ребро knows + Persona.knowledge. → fact_id.
+
+    item: {fact, topic, tags, trust (порог раскрытия 0..1), unlocks_quest?}. Идемпотентно по содержанию
+    в рамках одной сборки мира; на load пересоздаётся в build_world (рёбра графа — множество)."""
+    from ..world.components import Persona
+    payload = {"fact": item.get("fact", ""), "topic": item.get("topic", "rumors"),
+               "tags": list(item.get("tags") or []),
+               "disclosure_gate": {"trust": float(item.get("trust", 0.1))},
+               "unlocks_quest": item.get("unlocks_quest")}
+    fid = _register_personal(world, npc_id, payload)
+    world.commit("kg_add", "worldgen", payload={"s": npc_id, "r": "knows", "o": fid})
+    per = world.ecs.get(npc_id, Persona)
+    if per is not None and world.facts.get(fid):
+        per.knowledge.append(as_knowledge_item(world.facts[fid]))
+    return fid
+
+
 def knowers_of(world, fact_id: str) -> list[str]:
     """Обход графа: кто знает факт (ноды-сущности с ребром knows → fact_id)."""
     return world.kg.subjects_of("knows", fact_id)

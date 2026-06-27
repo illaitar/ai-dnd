@@ -169,3 +169,66 @@ def enrich_faction(world, fid: str, model=None) -> dict:
         payload.update({k: out[k] for k in ("name", "blurb", "goals", "values") if out.get(k)})
     world.commit("faction_enrich", "lore", payload=payload)
     return {"id": fid, "recorded": False}
+
+
+# ---------------------------------------------------------------------------- #
+#  Память руководителя: знание об организации (структура/подразделения) + люди  #
+# ---------------------------------------------------------------------------- #
+def _pname(world, pid: str) -> str:
+    p = world.spatial.places.get(pid)
+    return p.name if p else pid
+
+
+def _nname(world, nid: str) -> str:
+    per = world.ecs.get(nid, Persona)
+    return per.name if per else nid
+
+
+def seed_leader_knowledge(world) -> None:
+    """В память РУКОВОДИТЕЛЯ каждой фракции — знание об организации и поимённо о подчинённых.
+
+    Обкатано на городской страже (капитан знает гарнизон, число патрулей, их маршруты и состав,
+    дознавателей), затем — на ВСЕ фракции (лидер знает, что возглавляет, что под контролем, своих людей).
+    Чувствительные оперативные детали (маршруты патрулей) — с высоким порогом доверия для раскрытия."""
+    from ..content.facts import teach_personal_fact
+    for fid, fac in world.factions.items():
+        leader = getattr(fac, "leader", None)
+        if not leader or world.ecs.get(leader, Persona) is None:
+            continue
+        members = [m for m in (getattr(fac, "members", None) or []) if m != leader]
+        for item in _leader_facts(world, fid, fac, leader, members):
+            teach_personal_fact(world, leader, item)
+
+
+def _leader_facts(world, fid: str, fac, leader: str, members: list) -> list[dict]:
+    name = getattr(fac, "name", fid)
+    facts: list[dict] = []
+    controls = [_pname(world, c) for c in (getattr(fac, "controls", None) or [])]
+    org = f"Я возглавляю «{name}»" + (f"; под нашим присмотром: {', '.join(controls)}" if controls else "")
+    facts.append({"fact": org + ".", "topic": "factions", "tags": ["организация", fid], "trust": 0.15})
+    if members:
+        names = [_nname(world, m) for m in members]
+        shown = ", ".join(names[:8]) + ("…" if len(names) > 8 else "")
+        facts.append({"fact": f"Под моим началом в «{name}»: {shown}.",
+                      "topic": "factions", "tags": ["подчинённые", "люди", fid], "trust": 0.3})
+    if fid == "faction:watch":
+        facts += _watch_facts(world)
+    return facts
+
+
+def _watch_facts(world) -> list[dict]:
+    from ..content.watch import patrols_of
+    pats = patrols_of(world)
+    garr = getattr(world, "watch_garrison", 0)
+    out = [{"fact": f"Городская стража держит около {garr} человек; по городу ходят {len(pats)} патрулей.",
+            "topic": "watch", "tags": ["стража", "патрули", "гарнизон"], "trust": 0.2}]
+    for p in pats:                                          # оперативные детали — порог выше (не для встречного)
+        route = " → ".join(_pname(world, x) for x in p["route"])
+        mem = ", ".join(_nname(world, m) for m in p["members"])
+        out.append({"fact": f"{p['name'].capitalize()} обходит: {route}; в нём {mem}.",
+                    "topic": "watch", "tags": ["патруль", "маршрут", p["id"]], "trust": 0.45})
+    invs = getattr(world, "watch_investigators", []) or []
+    if invs:
+        out.append({"fact": f"Дознаватели под моим началом: {', '.join(_nname(world, i) for i in invs)}.",
+                    "topic": "watch", "tags": ["дознаватели", "стража"], "trust": 0.3})
+    return out

@@ -69,6 +69,7 @@ def serialize_session(session: GameSession, name: str) -> dict:
         "scenario": boot["scenario"], "pc_spec": boot["pc_spec"],
         "baseline": boot["baseline"], "clock": session.world.clock.tick,
         "journal": session.journal[-60:], "quiet": session.quiet_ticks,
+        "quest_timeline": session.quest_timeline,         # хроника квестов (день/время по участию) — персист
         "events": tail, "meta": meta, "main_quest": boot.get("main_quest"),
         "state": capture(session),                       # снапшот обогащения: предметы/персоны/память
     }
@@ -135,6 +136,8 @@ def deserialize_session(d: dict, use_model: bool = True) -> GameSession:
     from .snapshot import apply  # снапшот обогащения поверх реконструкции
     apply(session, d.get("state"))                        # предметы/контейнеры/кошельки/персоны/память
     session._quest_log_seen = session._toast_log_seen = len(quests.log)   # не всплывать из-за догоняющего advance
+    session._quest_entries_seen = len(quests.entries)     # хронику не пересобираем реплеем — берём из сейва
+    session.quest_timeline = {k: list(v) for k, v in (d.get("quest_timeline") or {}).items()}
     session.boot = {"seed": d["seed"], "roster_size": d["roster_size"],
                     "scenario": d.get("scenario") or default_scenario(),
                     "pc_spec": resolve_pc_spec(d.get("pc_spec")), "baseline": d["baseline"],

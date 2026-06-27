@@ -119,8 +119,15 @@ class QuestSystem:
 
     def __init__(self, world) -> None:
         self.world = world
-        self.log: list[str] = []        # человекочитаемый журнал для UI
+        self.log: list[str] = []        # человекочитаемый журнал для UI (тосты/лента)
+        self.entries: list[dict] = []   # структурные события квестов (quest_id/key/text) → штампует оркестратор
         world.subscribe(self.on_event)
+
+    def note(self, quest_id: str, key: str, text: str) -> None:
+        """Факт по квесту для журнала-хроники (оркестратор проштампует день/время). Dedup по key."""
+        if any(e.get("key") == key for e in self.entries):
+            return
+        self.entries.append({"quest_id": quest_id, "key": key, "text": text})
 
     def register(self, quest: Quest) -> None:
         self.world.quests[quest.quest_id] = quest
@@ -138,6 +145,7 @@ class QuestSystem:
             if not q.current_stages and q.stages:
                 q.current_stages = [q.stages[0].stage_id]
             self.log.append(f"Принят квест: {q.title}")
+            self.note(quest_id, f"{quest_id}:accept", f"Принял задание: «{q.title}».")
 
     def on_event(self, ev, world) -> None:
         for q in list(world.quests.values()):
@@ -157,6 +165,8 @@ class QuestSystem:
                 quest.current_stages.extend(stage.next_stages)
                 if quest.kind != "milestone":               # вехи невидимы в журнале
                     self.log.append(f"[{quest.title}] выполнено: {stage.objective}")
+                    self.note(quest.quest_id, f"{quest.quest_id}:stage:{sid}",
+                              f"{stage.objective[:1].upper()}{stage.objective[1:]} — выполнено.")
                 progressed = True
         if progressed and not quest.current_stages:
             self.complete(quest)
@@ -182,6 +192,14 @@ class QuestSystem:
                               payload={"xp": r.xp, "source": "quest"})
         if quest.kind != "milestone":                       # вехи невидимы в журнале
             self.log.append(f"Квест завершён: {quest.title} (XP {r.xp})")
+            parts = []
+            if r.currency:
+                parts.append(" ".join(f"{v}{k}" for k, v in r.currency.items()))
+            if r.xp:
+                parts.append(f"{r.xp} опыта")
+            rew = (" Награда: " + ", ".join(parts) + ".") if parts else ""
+            self.note(quest.quest_id, f"{quest.quest_id}:complete",
+                      f"Задание выполнено и сдано.{rew}")
 
 
 # --------------------------------------------------------------------------- #

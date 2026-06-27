@@ -75,6 +75,8 @@ class GameSession:
         self._history: list[dict] = []            # последние ходы (ввод/ответ) — контекст для роутера
         self.journal: list[str] = []              # журнал событий игрока (read-model)
         self._quest_log_seen = 0                  # сколько строк журнала квестов уже втянуто
+        self.quest_timeline: dict[str, list[dict]] = {}   # хроника по квесту: [{stamp, text, key}] (персист)
+        self._quest_entries_seen = 0              # сколько структурных событий квестов уже проштамповано
         self._toast_log_seen = 0                  # сколько строк журнала квестов уже превращено в тосты
         self._toasts: list[dict] = []             # накопленные тосты-«ачивки» текущего хода (сливаются в send)
         self._main_act: str | None = None         # текущий акт основного сюжета (для детекта перехода)
@@ -3447,11 +3449,26 @@ class GameSession:
         self.journal.append(f"[{self.world.clock.hhmm()}] {msg}")
         self.journal = self.journal[-50:]
 
+    def _quest_stamp(self, tick: int | None = None) -> str:
+        """Штамп события «День N, ЧЧ:ММ» по тику мира (для хроники квестов)."""
+        from ..world.environment import day_number
+        t = self.world.clock.tick if tick is None else tick
+        mins = (t * config.SIM_MINUTES_PER_TICK) % (24 * 60)
+        return f"День {day_number(t) + 1}, {mins // 60:02d}:{mins % 60:02d}"
+
     def _pull_quest_journal(self) -> None:
         log = self.quests.log
         for line in log[self._quest_log_seen:]:
             self.journal.append(f"[{self.world.clock.hhmm()}] {line}")
         self._quest_log_seen = len(log)
+        # структурные события квестов → персистимая хроника по квесту (день/время по участию игрока)
+        ents = self.quests.entries
+        stamp = self._quest_stamp()
+        for e in ents[self._quest_entries_seen:]:
+            tl = self.quest_timeline.setdefault(e["quest_id"], [])
+            if not any(x.get("key") == e["key"] for x in tl):
+                tl.append({"stamp": stamp, "text": e["text"], "key": e["key"]})
+        self._quest_entries_seen = len(ents)
 
     # --------------------------------------------------- тосты-«ачивки» ----- #
     def _toast(self, kind: str, icon: str, title: str, text: str = "") -> None:
@@ -3511,21 +3528,19 @@ class GameSession:
                 "events": self.journal[-14:]}
 
     def quest_journal(self) -> list[dict]:
-        """Подробный журнал: бриф (лор) + стадии (done/current) + даритель/награда по каждому квесту.
-        Основной сюжет — первым; вехи скрыты."""
-        plan = (getattr(self, "boot", {}) or {}).get("main_quest") or {}
+        """Журнал-хроника: по каждому квесту — текущая цель + ЛОГ фактов с днём/временем (по участию
+        игрока). Основной сюжет — первым; вехи скрыты. Без абстрактного лор-брифа."""
         out = []
         for q in self.world.quests.values():
             if q.state not in ("active", "completed") or getattr(q, "kind", "") == "milestone":
                 continue
-            ids = [s.stage_id for s in q.stages]
-            cur_idx = min((ids.index(s) for s in q.current_stages if s in ids), default=len(ids))
-            stages = [{"objective": s.objective, "current": s.stage_id in q.current_stages,
-                       "done": ids.index(s.stage_id) < cur_idx} for s in q.stages]
+            now = next((q.stage(s).objective for s in q.current_stages if q.stage(s)), "")
             out.append({"id": q.quest_id, "title": q.title, "kind": getattr(q, "kind", ""),
-                        "state": q.state, "brief": self._quest_brief(q, plan),
+                        "state": q.state,
                         "giver": self._display(q.giver_ref) if q.giver_ref else None,
-                        "reward": self._reward_text(q.rewards), "stages": stages})
+                        "reward": self._reward_text(q.rewards),
+                        "now": "" if q.state == "completed" else now,
+                        "timeline": list(self.quest_timeline.get(q.quest_id, []))})
         out.sort(key=lambda e: 0 if e["kind"] == "main" else 1)
         return out
 
@@ -3832,6 +3847,7 @@ class GameSession:
         self.world.commit("quest_state", self.player, target=qid,
                           payload={"state": "active", "current_stages": [first] if first else []})
         self._log_journal(f"Принято задание: «{q.title}».")
+        self.quests.note(qid, f"{qid}:accept", f"Принял задание: «{q.title}» (доска объявлений).")
         res = self.look()
         res["text"] = f"📜 Принято задание: «{q.title}». {q.framing}"
         return res

@@ -88,13 +88,15 @@ function renderJournal(entries) {
   if (!entries || !entries.length) { box.innerHTML = "<div class='state'>Активных квестов пока нет.</div>"; return; }
   const tag = k => k === "main" ? "ОСНОВНОЙ" : k === "board" ? "ДОСКА" : "ПОБОЧКА";
   box.innerHTML = entries.map(q => {
-    const stages = (q.stages || []).map(s =>
-      `<li class="${s.done ? 'jr-done' : s.current ? 'jr-cur' : ''}">${s.done ? '✓' : s.current ? '▸' : '·'} ${esc(s.objective)}</li>`).join("");
+    const tl = (q.timeline || []).map(e =>
+      `<li><span class="jr-stamp">${esc(e.stamp)}</span> ${esc(e.text)}</li>`).join("");
     const meta = [q.giver ? "Даёт: " + esc(q.giver) : "", q.reward ? "Награда: " + esc(q.reward) : ""].filter(Boolean).join(" · ");
+    const now = (q.state !== "completed" && q.now) ? `<div class="jr-now">▸ Сейчас: ${esc(q.now)}</div>` : "";
     return `<div class="jr-entry jr-${esc(q.kind)}">
       <div class="jr-head"><span class="jr-tag">${tag(q.kind)}</span><b>${esc(q.title)}</b>${q.state === "completed" ? " <span class='jr-ok'>✓ выполнен</span>" : ""}</div>
-      <div class="jr-brief">${esc(q.brief || "")}</div>
-      <ul class="jr-stages">${stages}</ul>${meta ? `<div class="jr-meta">${meta}</div>` : ""}</div>`;
+      ${now}
+      ${tl ? `<ul class="jr-timeline">${tl}</ul>` : "<div class='jr-empty'>Событий пока нет — журнал заполнится по ходу дела.</div>"}
+      ${meta ? `<div class="jr-meta">${meta}</div>` : ""}</div>`;
   }).join("");
 }
 (() => {                                       // тумблер «роутинг» — состояние в localStorage

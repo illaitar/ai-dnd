@@ -30,6 +30,39 @@ def _phase(minute: int) -> str:
         "day" if minute < 18 * 60 else "evening"
 
 
+def crowd_at(world, place: str) -> int:
+    """Сколько живых людей СЕЙЧАС в этом месте по честной симуляции (фон-жители + материализованные)."""
+    pop = getattr(world, "citypop", None)
+    n = len(pop.present_at(place, _minute(world))) if pop else 0
+    n += sum(1 for npc in world.npcs()                     # уже материализованные/именные NPC, что тут
+             if (p := world.position(npc)) and p.place_id == place and world.is_alive(npc))
+    return n
+
+
+def density_label(n: int) -> str:
+    return ("безлюдно" if n == 0 else "малолюдно" if n <= 3 else "оживлённо" if n <= 12
+            else "людно" if n <= 22 else "не протолкнуться")
+
+
+def event_pressure(n: int) -> float:
+    """U-образный множитель шанса прервать игрока: и пусто (засада/грабёж в безлюдье), и битком
+    (карманники/свалка/перебранки) повышают; около обычной людности — спокойнее."""
+    if n <= 1:
+        return 2.4
+    if n <= 3:
+        return 1.6
+    if n <= 12:
+        return 1.0
+    if n <= 22:
+        return 1.5
+    return 2.2
+
+
+def demand_factor(world, place: str) -> float:
+    """Спрос от людности места → к цене (больше народу у лавки — дороже, в разумных пределах)."""
+    return 1.0 + min(0.25, crowd_at(world, place) * 0.012)
+
+
 def _pick(rng, weighted):
     total = sum(w for _, w in weighted) or 1
     r = rng.random() * total

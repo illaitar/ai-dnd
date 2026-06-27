@@ -306,13 +306,13 @@ class GameSession:
                 text += "\n" + wnote
         pop = getattr(self.world, "citypop", None)        # именованные горожане, что сейчас тут (заглушки)
         if pop:
-            from ..content.citypop import _minute
+            from ..content.citypop import _minute, crowd_at, density_label
             present = pop.present_at(place, _minute(self.world))
             if present:
                 names = ", ".join(pop.name_of(a) for a in present[:6])
                 more = f" и ещё {len(present) - 6}" if len(present) > 6 else ""
-                text += (f"\n👥 Здесь также: {names}{more}. "
-                         "Заговори с любым по имени — он станет живым собеседником.")
+                text += (f"\n👥 {density_label(crowd_at(self.world, place)).capitalize()}. Среди прочих: "
+                         f"{names}{more}. Заговори с любым по имени — он станет живым собеседником.")
         return {
             "kind": "look", "text": text,
             "place": place, "place_name": name, "scene": sc.to_dict(),
@@ -805,7 +805,8 @@ class GameSession:
         from ..gen.seeds import subseed
         rng = random.Random(subseed(self.world.seed, "street", frm, to, self._street_seq))
         self._street_seq += 1
-        p = 0.05                                          # шанс события на один перекрёсток
+        from ..content.citypop import crowd_at, event_pressure
+        p = 0.05 * event_pressure(crowd_at(self.world, to))   # людность U-образно: пусто/битком → чаще прерывают
         fired = any(rng.random() < p for _ in range(max(1, steps - 1)))
         if not fired:
             return None

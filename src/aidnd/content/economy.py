@@ -76,8 +76,17 @@ def guild_discount(world, buyer: str) -> float:
 
 
 def price_factor(world, category: str, buyer: str) -> float:
-    """Итоговый множитель цены покупки: наценка дефицита × (1 − скидка гильдии)."""
-    return price_markup(world, category) * (1.0 - guild_discount(world, buyer))
+    """Итоговый множитель цены покупки: наценка дефицита × (1 − скидка гильдии) × спрос (людность места)."""
+    return price_markup(world, category) * (1.0 - guild_discount(world, buyer)) * _demand_at(world, buyer)
+
+
+def _demand_at(world, buyer: str) -> float:
+    """Спрос от людности места покупки (честная симуляция толпы) — больше народу, дороже."""
+    pos = world.position(buyer)
+    if not pos:
+        return 1.0
+    from .citypop import demand_factor
+    return demand_factor(world, pos.place_id)
 
 
 def shop_supply_note(world, categories) -> str:

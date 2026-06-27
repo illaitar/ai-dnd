@@ -136,14 +136,15 @@ def enrich_all(world, charts, model, progress=None) -> int:
     done = 0
     if progress:
         progress(0, total, "Оживляю мир…")
-    for fid in factions:
-        enrich_faction(world, fid, model)
+    conc = model.enrich_concurrency() if model is not None and hasattr(model, "enrich_concurrency") else 1
+    from .parallel import pmap
+    fac_out = pmap(factions, lambda fid: faction_fetch(world, fid, model), conc)  # фракции — ПАРАЛЛЕЛЬНО
+    for fid, out in zip(factions, fac_out):              # apply последовательно → детерминизм/replay
+        faction_apply(world, fid, out)
         done += 1
         if progress:
             progress(done, total, f"Фракция: {world.factions[fid].name}")
-    conc = model.enrich_concurrency() if model is not None and hasattr(model, "enrich_concurrency") else 1
-    from .parallel import pmap
-    fetched = pmap(npcs, charts.enrich_fetch, conc)      # модель-вызовы параллельно (облако), =1 локально
+    fetched = pmap(npcs, charts.enrich_fetch, conc)      # заметные NPC (вкл. стражу) — ПАРАЛЛЕЛЬНО
     for nid, res in zip(npcs, fetched):                  # apply ПОСЛЕДОВАТЕЛЬНО → детерминизм/replay
         charts.enrich_apply(nid, res)
         done += 1
@@ -153,21 +154,34 @@ def enrich_all(world, charts, model, progress=None) -> int:
     return total
 
 
+def faction_fetch(world, fid: str, model=None) -> dict | None:
+    """Только МОДЕЛЬ-вызов forge_faction (для ПАРАЛЛЕЛЬНОГО enrich). None — пропуск/нет модели."""
+    fac = world.ecs.get(fid, Faction)
+    if not fac or fac.enriched or model is None or not getattr(model, "available", lambda: False)():
+        return None
+    from ..inference.agents import forge_faction
+    return forge_faction(model, fac)
+
+
+def faction_apply(world, fid: str, out: dict | None) -> None:
+    """Зафиксировать обогащение фракции событием (apply ПОСЛЕДОВАТЕЛЬНО → детерминизм/replay)."""
+    fac = world.ecs.get(fid, Faction)
+    if not fac or fac.enriched:
+        return
+    payload = {"id": fid}
+    if out:
+        payload.update({k: out[k] for k in ("name", "blurb", "goals", "values") if out.get(k)})
+    world.commit("faction_enrich", "lore", payload=payload)
+
+
 def enrich_faction(world, fid: str, model=None) -> dict:
-    """Лениво обогатить фракцию LLM (имя/описание/цели) и зафиксировать событием."""
+    """Лениво обогатить ОДНУ фракцию (fetch+apply) — для точечного вызова вне массового enrich."""
     fac = world.ecs.get(fid, Faction)
     if not fac:
         return {}
     if fac.enriched:
         return {"id": fid, "recorded": True}
-    out = None
-    if model is not None and getattr(model, "available", lambda: False)():
-        from ..inference.agents import forge_faction
-        out = forge_faction(model, fac)
-    payload = {"id": fid}
-    if out:
-        payload.update({k: out[k] for k in ("name", "blurb", "goals", "values") if out.get(k)})
-    world.commit("faction_enrich", "lore", payload=payload)
+    faction_apply(world, fid, faction_fetch(world, fid, model))
     return {"id": fid, "recorded": False}
 
 

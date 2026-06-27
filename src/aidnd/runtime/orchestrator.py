@@ -179,10 +179,10 @@ class GameSession:
         if roads:
             text += f"\n🧭 Отсюда можно пойти: {roads}."
         from ..content.watch import (  # патруль стражи, что сейчас здесь (симуляция)
-            PATROLS,
             patrol_place,
+            patrols_of,
         )
-        guards = [self._display(m) for pt in PATROLS if patrol_place(pt, self.world.clock.tick) == place
+        guards = [self._display(m) for pt in patrols_of(self.world) if patrol_place(pt, self.world.clock.tick) == place
                   for m in pt["members"] if self.world.is_alive(m)]
         if guards:
             text += f"\n🛡 Здесь патрулирует стража: {', '.join(guards)}."
@@ -1647,10 +1647,10 @@ class GameSession:
 
     def _patrol_response(self, place: str) -> tuple[str, int]:
         """Ближайший живой патруль и через сколько РАУНДОВ он подоспеет (по расстоянию города, не рандом)."""
-        from ..content.watch import PATROLS, patrol_place, patrol_size
+        from ..content.watch import patrol_place, patrol_size, patrols_of
         g = self._city_graph()
         best = None
-        for p in PATROLS:
+        for p in patrols_of(self.world):
             if not patrol_size(p, self.world):                # патруль выбит — не отвечает
                 continue
             ppl = patrol_place(p, self.world.clock.tick)

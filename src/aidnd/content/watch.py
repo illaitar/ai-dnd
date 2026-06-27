@@ -59,7 +59,9 @@ def build_watch(world, seed: int) -> dict:
     rng.shuffle(inv_names)
     blds = _town_buildings(world)
 
-    roster = [(CAPTAIN, "Капитан Норвейн", "captain", "srd:veteran", ["дисциплинированный", "справедливый"])]
+    temp = getattr(world, "watch_temperament", None) or {}   # характер стражи → черты капитана
+    cap_traits = list(temp.get("traits") or ["дисциплинированный", "справедливый"])
+    roster = [(CAPTAIN, "Капитан Норвейн", "captain", "srd:veteran", cap_traits)]
     patrols, gi = [], 0
     for pi in range(plan["n_patrols"]):
         members = []
@@ -87,18 +89,24 @@ def register_watch(world, seed: int = 0) -> None:
     """Профиль города + фракция стражи + ростер под РЕАЛЬНЫЙ размер; патрули/дознаватели/гарнизон — на world."""
     from ..gen.citymap import profile_for
     from ..world.components import Faction
+    from .cases import watch_temperament
     from .phandalin import _add_npc
     if not getattr(world, "city_profile", None):           # полный профиль города (для стражи И контекстов)
         world.city_profile = profile_for(world, seed)
+    world.watch_temperament = watch_temperament(seed)      # характер стражи (жёсткость дел, разный по городам)
+    if not getattr(world, "cases", None):
+        world.cases = {}
     if WATCH not in world.factions:
         world.ecs.spawn(WATCH)
         fac = Faction(name="Городская стража", kind="watch", controls=[HQ], joinable=True)
         world.ecs.add(WATCH, fac)
         world.factions[WATCH] = fac
     plan = build_watch(world, seed)
+    temp = world.watch_temperament
     for nid, name, arch, sb, traits in plan["roster"]:
         _add_npc(world, nid, name, arch, sb, faction=WATCH, profession="guard",
-                 works_at=HQ, lives_in=HQ, place=HQ, traits=list(traits))
+                 works_at=HQ, lives_in=HQ, place=HQ, traits=list(traits),
+                 epithet=temp["epithet"] if nid == CAPTAIN else None)
     fac = world.factions[WATCH]                            # стража — фракция как все: лидер + состав
     fac.leader = CAPTAIN
     fac.members = [nid for nid, *_ in plan["roster"]]

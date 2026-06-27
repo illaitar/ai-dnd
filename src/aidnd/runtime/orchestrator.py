@@ -184,8 +184,13 @@ class GameSession:
         )
         guards = [self._display(m) for pt in patrols_of(self.world) if patrol_place(pt, self.world.clock.tick) == place
                   for m in pt["members"] if self.world.is_alive(m)]
+        at_hq = bool(self.npcs_here()) and place == "building:townmaster_hall"
         if guards:
             text += f"\n🛡 Здесь патрулирует стража: {', '.join(guards)}."
+        if guards or at_hq:                               # стража рядом — реагирует на розыск/подозрение
+            wnote = self._watch_reaction_note()
+            if wnote:
+                text += "\n" + wnote
         return {
             "kind": "look", "text": text,
             "place": place, "place_name": name, "scene": sc.to_dict(),
@@ -248,6 +253,9 @@ class GameSession:
         if self._sign_offer and self._is_record_yes(text):   # «да»/«запиши» на увиденные вывески → на карту
             return self._post(self._record_signs(), "map")
         self._sign_offer = []                             # не отреагировал на прошлые вывески → забыл
+        low = text.lower()
+        if "штраф" in low and any(k in low for k in ("заплат", "уплат", "оплат", "плачу")):
+            return self._post(self.pay_fine(), "freeform")   # уладить дело со стражей
         route = self._route(text)                         # ВСЁ типизированное — через роутер (детерминированы только кнопки-панели)
         # продолжение разговора: при активном собеседнике рядом «расскажи о…/что слышно»
         # (freeform или общий look) — это реплика ему, а не бросок/мировой-запрос
@@ -1601,12 +1609,70 @@ class GameSession:
         if target and target not in enemies and self._is_hostile(target):
             enemies = [target] + [e for e in enemies if e != target]
         if enemies:
-            return self.start_combat(enemies)
+            r = self.start_combat(enemies)
+            self._note_town_deed(enemies, innocent=False)  # драка (мог и защищаться) — стража отметит
+            return r
         if target and target in here:                     # игрок ЯВНО бьёт присутствующего (нейтрала) — его выбор
-            return self.start_combat([target])
+            r = self.start_combat([target])
+            self._note_town_deed([target], innocent=True)  # напал на нейтрала — это уже преступление
+            return r
         # ни враждебных, ни названной присутствующей цели → НЕ бить случайного соседа/спутника
         return {"kind": "narration", "view": self.view(),
                 "text": "Нападать не на кого — врага рядом нет."}
+
+    def _note_town_deed(self, targets: list, innocent: bool) -> None:
+        """Заметный поступок в городе → подозрение (если бой городской и есть свидетели-патрули)."""
+        cs = self.combat.state if self.combat else None
+        if not cs or not cs.town:
+            return
+        from ..world.components import Persona
+        is_guard = any(getattr(self.world.ecs.get(t, Persona), "faction", None) == "faction:watch"
+                       for t in targets)
+        kind = "attack_townsperson" if innocent else ("assault_guard" if is_guard else "brawl")
+        from ..content.cases import note_deed
+        note_deed(self.world, self.player, kind, self.current_place(), witnessed=True)
+
+    def _watch_reaction_note(self) -> str:
+        """Реакция стражи на подозрение/розыск игрока (жёсткость задаёт характер стражи)."""
+        from ..content.cases import confront_action, fine_amount, wanted_status
+        st = wanted_status(self.world, self.player)
+        if st == "clear":
+            return ""
+        if st == "suspect":
+            return "🚨 Стража косится на тебя — о твоих делах уже поговаривают."
+        if confront_action(self.world, self.player) == "hostile":   # розыск + крутой характер
+            return "🚨 «Вот он!» — стража узнаёт тебя и хватается за оружие. Уноси ноги или дерись."
+        fine = fine_amount(self.world, self.player)
+        return (f"🚨 Патруль преграждает путь: «С тебя {fine} зм за твои дела». "
+                "Скажи «заплатить штраф», чтобы уладить — или уходи, пока не вышло хуже.")
+
+    def _watch_view(self) -> dict | None:
+        """Статус у стражи для UI: None если чист; иначе подозрение/розыск + штраф."""
+        from ..content.cases import fine_amount, suspicion_of, wanted_status
+        st = wanted_status(self.world, self.player)
+        if st == "clear":
+            return None
+        return {"status": st, "label": "в розыске" if st == "wanted" else "под подозрением",
+                "suspicion": suspicion_of(self.world, self.player),
+                "fine": fine_amount(self.world, self.player) if st == "wanted" else 0}
+
+    def pay_fine(self) -> dict:
+        """Уплатить страже штраф — закрыть дело (если хватает монет)."""
+        from ..content.cases import clear_case, fine_amount, wanted_status
+        from ..inventory.container import _pay
+        from ..inventory.items import COIN, wallet_value_cp
+        if wanted_status(self.world, self.player) == "clear":
+            return {"kind": "system", "text": "За тобой нет дел — платить не за что.", "view": self.view()}
+        fine = fine_amount(self.world, self.player)
+        cost = fine * COIN["gp"]
+        if wallet_value_cp(self.world.wallet(self.player)) < cost:
+            return {"kind": "system", "text": f"На штраф не хватает (нужно {fine} зм).", "view": self.view()}
+        _pay(self.world, self.player, "npc:watch_captain", cost)
+        clear_case(self.world, self.player)
+        self._log_journal(f"Уплатил страже штраф {fine} зм — дела улажены.")
+        return {"kind": "narration", "view": self.view(),
+                "text": f"Ты отсчитываешь {fine} зм. Дознаватель прячет монеты: "
+                        "«Впредь не зарывайся». Дела улажены."}
 
     # ===================================================================== #
     #  Бой (мост к CombatEngine)                                            #
@@ -1965,6 +2031,8 @@ class GameSession:
             self._restock_shops()
             self._threat_notices()                        # рост угрозы незачищенных логов → вести в журнал
             self._dungeon_cycle()                         # переоккупация зачищенных логов со временем
+            from ..content.cases import decay_cases
+            decay_cases(self.world)                        # подозрение к игроку стихает со временем
 
     def _threat_notices(self) -> None:
         """Рост угрозы: высокоугрожающие незачищенные логова всё чаще беспокоят округу (вести в журнал)."""
@@ -3150,6 +3218,9 @@ class GameSession:
         if f"hostile:{npc}" in self.world.flags:          # озлоблен рантайм-событием (напр., напали)
             return True
         p = self.world.ecs.get(npc, Persona)
+        if p and p.faction == "faction:watch":            # стража враждебна объявленному в розыск (по характеру)
+            from ..content.cases import confront_action
+            return confront_action(self.world, self.player) == "hostile"
         return bool(p and p.faction in ("faction:cragmaw", "faction:redbrands"))
 
     def _do_freeform(self, action: Action, text: str) -> dict:
@@ -4413,6 +4484,7 @@ class GameSession:
             "place_path": self._place_path(place),
             "map_recorded": sorted(self._recorded_places()),   # записанные места — фронт метит их на city-SVG
             "guild_here": self._at_guild(),                     # игрок в Доме гильдии → доступен экран гильдии
+            "watch": self._watch_view(),                        # статус розыска/штрафа у городской стражи
             "journey": ({"dest_name": self._place_name(self._journey["dest"])}
                         if self._journey else None),           # путь прерван событием → индикатор «в пути»
             "seed": self.world.seed,

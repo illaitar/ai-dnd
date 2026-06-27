@@ -4079,7 +4079,7 @@ class GameSession:
                 if status in ("done_elsewhere", "withdrawn"):
                     can_accept = False
                 elif status == "reward_up" and mut.get("bump_gp"):
-                    from .quest_gen import Rewards
+                    from ..gen.quest_gen import Rewards
                     reward = self._reward_text(Rewards(currency={"gp": mut["bump_gp"]},
                                                        xp=q.rewards.xp, faction_rep=q.rewards.faction_rep))
                 if note:

@@ -145,6 +145,27 @@ class GameSession:
             "view": self.view(),
         }
 
+    def _narrate_look(self) -> dict:
+        """Типизированный осмотр идёт через нарратора (mode=ambient): он оживляет сцену прозой,
+        заземляясь на факты look() и НИКОГО не выдумывая. Кнопка-«глаз» (cmd look) — детерминированна.
+        Офлайн / сбой нарратора → детерминированный текст как есть."""
+        base = self.look()
+        if self.model is None:
+            return base
+        from ..inference.agents import render_scene
+        summary = ("Игрок осматривается по сторонам — опиши обстановку живо, во 2-м лице, СТРОГО по "
+                   "фактам, никого и ничего не выдумывая. Факты сцены: " + (base.get("text") or ""))
+        out = render_scene(self.model, summary, self.world.ecs.get(self.player, Persona),
+                           scene=self._narrator_context(), mode="ambient",
+                           pc=self._pc_brief(), gear=self._pc_gear())
+        narr = (out or {}).get("narration")
+        if narr:
+            affs = base.get("actions") or []
+            tail = (" Можно: " + ", ".join(a["label"] for a in affs) + ".") if affs else ""
+            base = dict(base)
+            base["text"] = narr.strip() + tail
+        return base
+
     # ===================================================================== #
     #  Главный обработчик ввода                                             #
     # ===================================================================== #
@@ -2714,7 +2735,7 @@ class GameSession:
                 return {"kind": "narration", "text": txt, "view": self.view()}
             return {"kind": "narration", "text": self._describe_item(iid), "view": self.view()}
         if qtype == "look":
-            return self.look()
+            return self._narrate_look()       # типизированный осмотр — через нарратора (кнопка-глаз детерминированна)
         if qtype == "map":
             return {"kind": "look", "text": self.map_text(), "view": self.view()}
         if qtype == "inventory":

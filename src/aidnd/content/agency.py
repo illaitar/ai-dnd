@@ -81,22 +81,28 @@ def _gen_agenda(world, npc, model=None) -> dict:
             "since_day": day_number(world.clock.tick), "active": True}
 
 
+def _apply_agenda(world, npc: str, ag: dict | None) -> dict | None:
+    """Зафиксировать замысел: world.agendas[npc] + факт в памяти (apply ПОСЛЕ параллельного fetch)."""
+    if not ag:
+        return None
+    if not getattr(world, "agendas", None):
+        world.agendas = {}
+    world.agendas[npc] = ag
+    from .facts import teach_personal_fact  # замысел живёт в памяти (раскроется доверенному)
+    teach_personal_fact(world, npc, {"fact": f"Втайне задумал: {ag['goal']} ({ag['motive']}).",
+                                     "topic": "plans", "tags": ["замысел", "план"], "trust": 0.7})
+    return ag
+
+
 def promote_to_active(world, npc: str, model=None) -> dict | None:
     """СОБЕСЕДНИК → ВАЖНЫЙ ДЕЯТЕЛЬ: дать замысел и включить агентность (действует вне рутины).
     Триггеры (точки расширения): решение режиссёра, повторное вовлечение игрока, роль в квесте."""
     from ..world.components import Persona
     if world.ecs.get(npc, Persona) is None:
         return None
-    if not hasattr(world, "agendas") or world.agendas is None:
-        world.agendas = {}
-    if npc in world.agendas:
+    if getattr(world, "agendas", None) and npc in world.agendas:
         return world.agendas[npc]
-    ag = _gen_agenda(world, npc, model)
-    world.agendas[npc] = ag
-    from .facts import teach_personal_fact  # замысел живёт в памяти (раскроется доверенному)
-    teach_personal_fact(world, npc, {"fact": f"Втайне задумал: {ag['goal']} ({ag['motive']}).",
-                                     "topic": "plans", "tags": ["замысел", "план"], "trust": 0.7})
-    return ag
+    return _apply_agenda(world, npc, _gen_agenda(world, npc, model))   # fetch (LLM) + apply
 
 
 def active_place(world, npc: str) -> str | None:
@@ -144,19 +150,28 @@ def _apply_step(world, npc, step) -> str | None:
     return summ
 
 
-def maybe_promote(world, model=None, cap: int = 6, per_day: int = 2) -> list:
-    """Авто-промоушн (режиссёр): главы фракций становятся важными деятелями со своими планами — по
-    несколько в день, пока не наберётся cap. Стражу не трогаем (у неё свой институт). → имена новых.
+def maybe_promote(world, model=None, cap: int = 6) -> list:
+    """Авто-промоушн (режиссёр): главы фракций → важные деятели. Замыслы генерятся ПАРАЛЛЕЛЬНО (pmap),
+    применяются последовательно (детерминизм). Стражу не трогаем (свой институт). → имена новых.
     Точка расширения: + повторное вовлечение игрока (talk≥N) и роль в квесте."""
-    agendas = getattr(world, "agendas", None) or {}
-    if len(agendas) >= cap:
+    from ..world.components import Persona
+    if not getattr(world, "agendas", None):
+        world.agendas = {}
+    free = cap - len(world.agendas)
+    if free <= 0:
         return []
-    promoted = []
+    seen, eligible = set(world.agendas), []
     for fac in world.factions.values():
-        if len(promoted) >= per_day or len(getattr(world, "agendas", {})) >= cap:
-            break
         leader = getattr(fac, "leader", None)
-        if leader and leader not in (getattr(world, "agendas", None) or {}) \
-           and getattr(fac, "kind", "") != "watch" and promote_to_active(world, leader, model):
-            promoted.append(leader)
-    return promoted
+        if leader and leader not in seen and getattr(fac, "kind", "") != "watch" \
+           and world.ecs.get(leader, Persona) is not None:
+            seen.add(leader)
+            eligible.append(leader)
+            if len(eligible) >= free:
+                break
+    if not eligible:
+        return []
+    from ..gen.parallel import pmap
+    conc = model.enrich_concurrency() if model is not None and hasattr(model, "enrich_concurrency") else 1
+    fetched = pmap(eligible, lambda n: _gen_agenda(world, n, model), conc)   # замыслы ПАРАЛЛЕЛЬНО (облако)
+    return [n for n, ag in zip(eligible, fetched) if _apply_agenda(world, n, ag)]   # apply последовательно

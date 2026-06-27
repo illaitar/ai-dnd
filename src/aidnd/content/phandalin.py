@@ -382,9 +382,9 @@ def _create_pc(world: World, pc_spec: dict | None = None,
 # --------------------------------------------------------------------------- #
 #  Сборка                                                                      #
 # --------------------------------------------------------------------------- #
-def phandalin_profile() -> SettlementProfile:
+def phandalin_profile(target_population: int = 45) -> SettlementProfile:
     return SettlementProfile(
-        name="phandalin", target_population=45,
+        name="phandalin", target_population=target_population,
         profession_dist={"farmhand": 0.3, "miner": 0.25, "merchant": 0.1, "laborer": 0.15,
                          "guard": 0.05, "hunter": 0.1, "none": 0.05},
         race_dist={"human": 0.6, "halfling": 0.15, "dwarf": 0.15, "half-elf": 0.1},
@@ -424,6 +424,8 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     _p("Рою окрестные подземелья")
     from .dungeons import build_dungeon, default_warren_brief
     build_dungeon(world, default_warren_brief(), seed)   # 2d. процедурное подземелье (пилот)
+    from ..gen.citymap import profile_for
+    world.city_profile = profile_for(world, seed)        # 2e. ПОЛНЫЙ профиль города (демография, стража, контексты)
     _p("Свожу фракции города")
     _build_factions(world)            # 5a. сюжетные фракции (LMoP)
     from ..gen.faction_gen import generate_factions
@@ -445,7 +447,8 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     # 2c. pregen roster поверх зданий (демография)
     _p("Расселяю горожан и их распорядок")
     if roster_size > 0:
-        CharacterGenerator(world, model=model).generate_roster(phandalin_profile(), roster_size)
+        pop = int((getattr(world, "city_profile", None) or {}).get("houses", 0) * 3) or 45  # масштаб демографии
+        CharacterGenerator(world, model=model).generate_roster(phandalin_profile(pop), roster_size)
     from ..gen.faction_gen import assign_faction_members, fill_faction_leaders
     assign_faction_members(world)     # 5c. раздать NPC по гражданским фракциям (по профессии)
     fill_faction_leaders(world)       # 5d. проставить лидеров (канон/первый член) — детерминированно

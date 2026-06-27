@@ -41,7 +41,68 @@ def build_graph(seed: int, buildings: list) -> CityGraph:
     """Собрать CityGraph для (seed, здания) — детерминированно (та же геометрия города, что в SVG)."""
     cg = _citygen()
     m = cg.build_city(int(seed), 980, 700, buildings=_blds(buildings), key_houses=[])
-    return CityGraph(cg.city_graph(m))
+    g = CityGraph(cg.city_graph(m))
+    g.profile = city_profile(m)
+    return g
+
+
+def city_profile(m: dict) -> dict:
+    """ПОЛНЫЙ профиль города из процедурной генерации: строений, кварталов, река, стены, ворота, мосты."""
+    hits = m.get("hits", [])
+    return {
+        "buildings": len(hits),                            # всего строений (дома + лендмарки)
+        "houses": sum(1 for h in hits if h.get("house")),
+        "landmarks": sum(1 for h in hits if h.get("landmark")),
+        "wards": len(m.get("wards", [])),
+        "has_river": bool(m.get("river_pts")),
+        "has_walls": bool(m.get("wall_poly")),
+        "gates": len(m.get("gate_edges", [])),
+        "bridges": len(m.get("bridges", [])),
+        "roads_out": len(m.get("roads_out", [])),
+    }
+
+
+def city_brief(profile: dict, settlement: str = "Фэндалин") -> str:
+    """Краткая фактическая справка о городе для контекстов (NPC, нарратор и пр.)."""
+    if not profile:
+        return ""
+    b = profile.get("buildings", 0)
+    tier = "крупный город" if b > 600 else "город" if b > 200 else "городок"
+    s = f"{settlement} — {tier}: ~{b} строений в {profile.get('wards', 0)} кварталах"
+    feats = []
+    if profile.get("has_river"):
+        feats.append(f"его пересекает река, мостов — {profile.get('bridges', 0)}")
+    if profile.get("has_walls"):
+        feats.append(f"обнесён крепостной стеной, ворот — {profile.get('gates', 0)}")
+    if profile.get("roads_out"):
+        feats.append(f"дорог в округу — {profile['roads_out']}")
+    if not feats:
+        return s + "."
+    tail = "; ".join(feats)
+    return f"{s}. {tail[0].upper()}{tail[1:]}."
+
+
+def _town_nodes(world) -> list:
+    """Здания-узлы поселения из мира (для построения процедурного города/профиля), dx/dy по компасу."""
+    from ..world.spatial import DIRECTIONS
+    sp = world.spatial
+    out = []
+    for d, dest in sp.exits_of("place:phandalin_square").items():
+        p = sp.places.get(dest)
+        if not p:
+            continue
+        dx, dy = DIRECTIONS.get(d, (0.0, -0.55))
+        out.append({"id": dest, "name": p.name, "kind": getattr(p, "kind", ""), "dx": dx, "dy": dy,
+                    "affordances": list(getattr(p, "affordances", []) or []), "go": "идти в " + p.name,
+                    "status": getattr(p, "status", "open")})
+    return out
+
+
+def profile_for(world, seed: int) -> dict:
+    """Профиль города по миру+seed (детерминированно)."""
+    cg = _citygen()
+    m = cg.build_city(int(seed), 980, 700, buildings=_blds(_town_nodes(world)), key_houses=[])
+    return city_profile(m)
 
 
 class CityGraph:

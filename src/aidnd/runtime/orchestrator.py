@@ -3641,10 +3641,30 @@ class GameSession:
             ctx += f"\nО месте (антураж, держись его): {place.description}"
             if getattr(place, "rooms", None):                 # части места (кухня/погреб/…) — для отсылок
                 ctx += "\nЧасти места: " + "; ".join(r.get("name", "") for r in place.rooms if r.get("name"))
+        if self._in_city() and getattr(self.world, "city_profile", None):  # масштаб города (нарратор+NPC)
+            from ..gen.citymap import city_brief
+            ctx += (f"\nГород (факты — держись масштаба, это не деревня): "
+                    f"{city_brief(self.world.city_profile)} Городская стража — около "
+                    f"{getattr(self.world, 'watch_garrison', 0)} человек.")
         recent = self._recent_context(3)
         if recent:
             ctx += f"\nЧто было только что:\n{recent}"
         return ctx
+
+    def _in_city(self) -> bool:
+        """Игрок внутри городской черты (а не в дикоземье/подземелье) — для контекста масштаба города."""
+        sp = self.world.spatial
+        pid = self.current_place()
+        for _ in range(4):                                # вверх по родителям до поселения
+            p = sp.places.get(pid)
+            if not p:
+                return False
+            if pid == "settlement:phandalin" or getattr(p, "parent", "") == "settlement:phandalin":
+                return True
+            pid = getattr(p, "parent", "")
+            if not pid:
+                return False
+        return False
 
     # ===================================================================== #
     #  Информационное представление связности локаций (вместо карты)        #

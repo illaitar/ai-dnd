@@ -184,17 +184,7 @@ class GameSession:
         if self.combat and self.combat.state.mode == "active":
             return {"kind": "combat", "text": "Идёт бой — используй боевые действия.",
                     "view": self.view()}
-        if self._is_item_followup(text):                  # «а на нём что написано?» → про последний предмет
-            return self._post(self._answer_query("look", text), "query")
-        svc = self._inn_service(text)                     # услуги двора (комната/еда/меню) — до роутера
-        if svc is not None:
-            return self._post(svc, "serve")
-        mv = self._movement_intent(text)                  # явное «идти/подойти к <место>» — детерминированно, до роутера
-        if mv is not None:                                # навигация не должна зависеть от настроения LLM-роутера
-            self.dialogue_partner = None
-            action = Action(actor=self.player, verb="move", target=None, tone="neutral")
-            return self._post(self._do_move(action, text), "move")
-        route = self._route(text)                         # LLM-роутер (онлайн) / детерминированный фоллбэк
+        route = self._route(text)                         # ВСЁ типизированное — через роутер (детерминированы только кнопки-панели)
         # продолжение разговора: при активном собеседнике рядом «расскажи о…/что слышно»
         # (freeform или общий look) — это реплика ему, а не бросок/мировой-запрос
         convertible = ((route["kind"] == "command" and (route.get("verb") or "freeform") == "freeform")
@@ -207,6 +197,12 @@ class GameSession:
             out, verb = self._answer_query(route.get("query") or "look", text), "query"
         else:
             verb = route.get("verb") or "freeform"
+            # услуги двора (аренда/еда/сон) — реальные транзакции по affordance места: резолвим ПОСЛЕ
+            # роутера (не в обход), если он не дал явного механического verb — иначе механика сломается
+            if verb in ("freeform", "talk", "drink", "wait", "buy"):
+                svc = self._inn_service(text)
+                if svc is not None:
+                    return self._post(svc, "serve")
             action = Action(actor=self.player, verb=verb, target=route.get("target"),
                             tone=route.get("tone", "neutral"))
             # действие (не разговор) завершает текущий диалог; покупка сведений/торговля

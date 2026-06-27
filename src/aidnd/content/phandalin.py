@@ -426,6 +426,8 @@ def build_world(seed: int = 1337, roster_size: int = 12, model=None,
     build_dungeon(world, default_warren_brief(), seed)   # 2d. процедурное подземелье (пилот)
     _p("Свожу фракции города")
     _build_factions(world)            # 5a. сюжетные фракции (LMoP)
+    from .watch import register_watch
+    register_watch(world)             # 5a'. городская стража: ростер + патрули
     from ..gen.faction_gen import generate_factions
     generate_factions(world, "phandalin", model=model)   # 5b. гражданские фракции (per-world)
     _build_fixed_loot(world)          # 4. fixed loot

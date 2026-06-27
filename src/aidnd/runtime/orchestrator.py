@@ -178,6 +178,14 @@ class GameSession:
         roads = self._roads_text()                         # куда ведут дороги (для ясности навигации)
         if roads:
             text += f"\n🧭 Отсюда можно пойти: {roads}."
+        from ..content.watch import (  # патруль стражи, что сейчас здесь (симуляция)
+            PATROLS,
+            patrol_place,
+        )
+        guards = [self._display(m) for pt in PATROLS if patrol_place(pt, self.world.clock.tick) == place
+                  for m in pt["members"] if self.world.is_alive(m)]
+        if guards:
+            text += f"\n🛡 Здесь патрулирует стража: {', '.join(guards)}."
         return {
             "kind": "look", "text": text,
             "place": place, "place_name": name, "scene": sc.to_dict(),
@@ -1637,6 +1645,29 @@ class GameSession:
                                     self._place_name(place), self._battle_features(place))
         return cache[place]
 
+    def _patrol_response(self, place: str) -> tuple[str, int]:
+        """Ближайший живой патруль и через сколько РАУНДОВ он подоспеет (по расстоянию города, не рандом)."""
+        from ..content.watch import PATROLS, patrol_place, patrol_size
+        g = self._city_graph()
+        best = None
+        for p in PATROLS:
+            if not patrol_size(p, self.world):                # патруль выбит — не отвечает
+                continue
+            ppl = patrol_place(p, self.world.clock.tick)
+            dist = None
+            if g:                                             # расстояние по перекрёсткам (точнее)
+                a, b = self._city_node_of(ppl), self._city_node_of(place)
+                if a and b:
+                    dist = g.path_steps(a, b)
+            if dist is None:                                  # фоллбэк — переходы графа локаций
+                h = self.world.spatial.hops_between(ppl, place)
+                dist = (h if h is not None else 6) * 4
+            if best is None or dist < best[1]:
+                best = (p, dist)
+        if not best:
+            return "городская стража", 8                      # патрулей нет/выбиты — медленнее
+        return best[0]["name"], max(2, round(best[1] / 2))    # ~2 перекрёстка в раунд (5с)
+
     def start_combat(self, enemy_ids: list[str]) -> dict:
         from ..combat import BattleGrid
         from ..content.maps import load_meta
@@ -1654,6 +1685,8 @@ class GameSession:
         cs.town = classify(getattr(p, "kind", "") if p else "",
                            getattr(p, "affordances", []) if p else [],
                            self._place_name(place)) not in ("cave", "wilds")
+        if cs.town:                                           # ближайший патруль и через сколько подоспеет
+            cs.guard_patrol, cs.guard_eta = self._patrol_response(place)
         self.dialogue_partner = None
         self._log_journal("Вступил в бой: " + ", ".join(self._display(e) for e in enemy_ids) + ".")
         return {"kind": "combat_start", "text": "Бой начинается! " + cs.log[-1],

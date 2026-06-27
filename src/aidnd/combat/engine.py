@@ -555,15 +555,14 @@ class CombatEngine:
         enemies = self.alive_enemies()
         if not enemies:
             return
-        r = cs.round                                         # раунд≈5с: чем дольше шумишь, тем вернее придёт стража
-        p_guard = max(0, min(60, (r - 2) * 12))              # ~раунд6-8 (30-40с) → почти наверняка
-        if p_guard and self.dice.roll_seeded("guard", "1d100", roller="watch").total <= p_guard:
+        r = cs.round                                         # раунд≈5с: приход стражи — по ETA ближайшего ПАТРУЛЯ
+        if r >= (cs.guard_eta or 6):                         # патруль подоспел (расстояние, не рандом)
             for e in list(enemies):
                 self._flee(e)
                 cs.combatants[e].fled = True
             cs.guard_intervened = True
-            cs.log.append("🛎 Свисток стражи! Городская стража спешит на шум — "
-                          "нападавшие бросаются врассыпную.")
+            who = cs.guard_patrol or "городская стража"
+            cs.log.append(f"🛎 Подоспел {who} — нападавшие бросаются врассыпную.")
             return
         p_flee = max(0, min(50, (r - 2) * 10))               # враги со временем охотнее бегут (боятся стражи)
         if p_flee:

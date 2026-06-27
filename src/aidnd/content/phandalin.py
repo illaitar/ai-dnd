@@ -82,6 +82,11 @@ def _build_places(world: World) -> None:
     sp.add_place(Place("building:notice_board", "building", "Доска объявлений",
                        parent="settlement:phandalin", district="market", affordances=["board"]))
     sp.link(sq, "к доске", "building:notice_board")     # внекомпасный портал (стоит у площади)
+    # дом гильдии приключенцев — отдельное здание на площади (ранг/контракты у мастера гильдии)
+    sp.add_place(Place("building:adventurers_guild", "building", "Дом гильдии приключенцев",
+                       parent="settlement:phandalin", district="market",
+                       affordances=["guild", "work"], hours=(8, 22)))
+    sp.link(sq, "к гильдии", "building:adventurers_guild")
 
     # --- региональный слой странствий ------------------------------------- #
     # Из города «наружу» в дикие земли, оттуда — к сайтам по СТОРОНАМ СВЕТА
@@ -190,6 +195,13 @@ def _build_named_npcs(world: World) -> None:
              aliases=["халия", "халия торнтон"],
              secrets=[{"fact": "I run the Zhentarim cell here",
                        "reveal_conditions": ["trust>0.6"], "consequence_tags": ["faction"]}])
+    _add_npc(world, "npc:guildmaster_yarra", "Ярра Камнехват", "guildmaster", "srd:veteran",
+             faction="faction:adventurers_guild", profession="adventurer",
+             works_at="building:adventurers_guild", lives_in="building:adventurers_guild",
+             place="building:adventurers_guild",
+             traits=["battle-scarred", "shrewd", "fair-minded"],
+             voice="низкий, с хрипотцой; коротко и по делу",
+             aliases=["ярра", "мастер гильдии", "гильдмастер", "камнехват"])
     sildar = _add_npc(world, "npc:sildar_hallwinter", "Sildar Hallwinter", "knight", "srd:veteran",
                       faction="faction:lords_alliance", traits=["noble", "weary"],
                       place="building:stonehill_inn", aliases=["сильдар", "сильдар холлвинтер"])

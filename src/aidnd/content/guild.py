@@ -13,7 +13,8 @@ from ..gen.provenance import Provenance
 from ..gen.quest_gen import Predicate, Quest, Rewards, Stage
 
 GUILD = "faction:adventurers_guild"
-GUILD_DESK = "building:townmaster_hall"            # стол контрактов гильдии (пока при ратуше)
+GUILD_DESK = "building:adventurers_guild"          # дом гильдии (мастер гильдии — npc:guildmaster_yarra)
+GUILD_MASTER = "npc:guildmaster_yarra"
 
 # ранги по стоянию (репутации 0..1)
 RANKS = [(0.0, "Новичок"), (0.15, "Подмастерье"), (0.35, "Ветеран"), (0.6, "Мастер"), (0.85, "Легенда")]

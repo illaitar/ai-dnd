@@ -118,6 +118,7 @@ class GameSession:
         "serve": "снять комнату", "shop": "посмотреть товар", "work": "оглядеть работу",
         "sleep": "лечь спать до утра",
         "shrine": "помолиться", "townhall": "справиться о делах города",
+        "guild": "контракты у мастера гильдии",
         "manor": "осмотреть поместье", "hideout": "искать тайный ход",
         "farm": "оглядеть хозяйство", "combat": "осмотреть поле боя",
     }
@@ -3981,6 +3982,10 @@ class GameSession:
         p = self.world.spatial.places.get(self.current_place())
         return bool(p and "board" in (p.affordances or []))
 
+    def _at_guild(self) -> bool:
+        p = self.world.spatial.places.get(self.current_place())
+        return bool(p and "guild" in (p.affordances or []))
+
     def _reward_text(self, r) -> str:
         parts = []
         if r.currency:
@@ -4212,6 +4217,9 @@ class GameSession:
         q = self.world.quests.get(G.contract_id(site_key))
         if not sp or not q:
             return {"kind": "system", "text": "Такого контракта нет.", "view": self.view()}
+        if not self._at_guild():
+            return {"kind": "system", "view": self.view(),
+                    "text": "Контракты берут в Доме гильдии приключенцев — загляни туда к мастеру гильдии."}
         if q.state in ("active", "completed"):
             return {"kind": "system", "text": "Этот контракт уже у тебя или выполнен.", "view": self.view()}
         idx, _ = G.rank_of(self.world.reputation.get(G.GUILD, 0.0))
@@ -4269,6 +4277,7 @@ class GameSession:
             "place": place, "place_name": self._place_name(place),
             "place_path": self._place_path(place),
             "map_recorded": sorted(self._recorded_places()),   # записанные места — фронт метит их на city-SVG
+            "guild_here": self._at_guild(),                     # игрок в Доме гильдии → доступен экран гильдии
             "journey": ({"dest_name": self._place_name(self._journey["dest"])}
                         if self._journey else None),           # путь прерван событием → индикатор «в пути»
             "seed": self.world.seed,

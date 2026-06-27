@@ -44,7 +44,7 @@ def classify(kind: str, affordances, name: str = "") -> str:
         return "shop"
     if {"serve", "drink"} & aff:
         return "tavern"
-    if "townhall" in aff:
+    if "townhall" in aff or "guild" in aff:
         return "hall"
     if "shrine" in aff:
         return "shrine"

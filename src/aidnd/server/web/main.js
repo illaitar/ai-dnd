@@ -384,7 +384,9 @@ function renderQuick() {
     + `<span class="chip" data-open="inv">🎒 инвентарь</span>`
     + `<span class="chip" data-open="mapview">🗺 карта</span>`
     + `<span class="chip" data-open="trade">🛒 лавка</span>`
-    + ((lastView && lastView.board) ? `<span class="chip" data-open="board">📜 доска</span>` : "");
+    + ((lastView && lastView.board) ? `<span class="chip" data-open="board">📜 доска</span>` : "")
+    + ((lastView && lastView.guild_here) ? `<span class="chip guild-chip" id="quick-guild">🛡 гильдия</span>` : "");
+  const gc = $("quick-guild"); if (gc) gc.onclick = () => send({ cmd: "guild" });   // экран гильдии (в Доме гильдии)
   bindChips();
 }
 function bindChips() {
@@ -1118,7 +1120,6 @@ $("map-cancel").onclick = clearSelection;
 window.__map = { hits: () => mapHits, mode: () => mapMode, pick: (i) => setSelection(mapHits[i]), go: goSelection };
 $("menu-btn").onclick = () => showLobby();
 $("journal-btn").onclick = openJournal;
-$("guild-btn").onclick = () => send({ cmd: "guild" });
 $("lb-new").onclick = () => { $("lobby").classList.add("hidden"); openOverlay("newgame"); ensureNgOptions(); };
 $("lb-continue").onclick = () => $("lobby").classList.add("hidden");
 $("lb-save").onclick = doSave;

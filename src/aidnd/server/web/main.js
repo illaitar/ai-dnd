@@ -94,10 +94,13 @@ function renderGuild(g) {
       : t.status === "active" ? `<span class="note gt-cur">▸ в работе</span>`
       : t.status === "cleared" ? `<span class="note jr-ok">✓ зачищено</span>`
       : `<span class="note">нужен ранг «${esc(t.need_rank)}»</span>`;
+    const tcol = (t.threat || 0) >= 0.8 ? "#e2604a" : (t.threat || 0) >= 0.5 ? "#e0a64d" : "#969db0";
+    const thr = (t.status === "available" || t.status === "active") && t.threat_label
+      ? ` · <span style="color:${tcol}">угроза: ${esc(t.threat_label)}</span>` : "";
     return `<div class="guild-threat${t.status === 'locked' ? ' gt-locked' : ''}">
       <div class="gt-head"><b>${esc(t.label)}</b>`
       + `<span class="gt-danger" style="color:${col};border-color:${col}">${esc(t.danger)}</span></div>`
-      + `<div class="gt-meta">${t.direction ? "🧭 " + esc(t.direction) + " · " : ""}${esc(t.contents)}</div>`
+      + `<div class="gt-meta">${t.direction ? "🧭 " + esc(t.direction) + " · " : ""}${esc(t.contents)}${thr}</div>`
       + `<div class="gt-foot"><span class="gt-reward">${esc(t.reward || "")}</span>${act}</div></div>`;
   }).join("");
   box.innerHTML =

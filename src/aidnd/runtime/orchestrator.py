@@ -1926,6 +1926,21 @@ class GameSession:
         per_day = (24 * 60) // config.SIM_MINUTES_PER_TICK
         if per_day and self.world.clock.tick // per_day > before // per_day:
             self._restock_shops()
+            self._threat_notices()                        # рост угрозы незачищенных логов → вести в журнал
+
+    def _threat_notices(self) -> None:
+        """Рост угрозы: высокоугрожающие незачищенные логова всё чаще беспокоят округу (вести в журнал)."""
+        import random
+
+        from ..content import guild as G
+        from ..content.region import REGION_SITES
+        from ..gen.seeds import subseed
+        for sk, sp in REGION_SITES.items():
+            threat = G.threat_level(self.world, sp["place"])
+            if threat < 0.4:
+                continue
+            if random.Random(subseed(self.world.seed, "raid", sk, self.world.clock.tick)).random() < threat * 0.5:
+                self._log_journal(f"🔺 Из «{sp['label']}» всё чаще выходят твари — в округе неспокойно.")
 
     def _restock_shops(self) -> None:
         import random
@@ -4207,10 +4222,16 @@ class GameSession:
             need = G.MIN_RANK.get(danger, 1)
             status = ("cleared" if cleared else "active" if (q and q.state == "active")
                       else "available" if idx >= need else "locked")
+            threat = G.threat_level(self.world, place)     # угроза растёт со временем → награда вверх
+            base_gp = (q.rewards.currency or {}).get("gp", 0) if q else 0
+            esc_gp = G.escalated_gold(base_gp, threat) if base_gp else 0
+            reward = self._reward_text(q.rewards) if q else ""
+            if esc_gp and esc_gp != base_gp and status in ("available", "active"):
+                reward = reward.replace(f"{base_gp} gp", f"{esc_gp} gp")
             threats.append({
                 "site": sk, "label": sp["label"], "direction": sp.get("direction", ""),
-                "danger": danger, "contents": sp.get("contents", ""),
-                "reward": self._reward_text(q.rewards) if q else "",
+                "danger": danger, "contents": sp.get("contents", ""), "reward": reward,
+                "threat": round(threat, 2), "threat_label": G.threat_label(threat),
                 "status": status, "need_rank": G.RANKS[need][1], "can_take": status == "available"})
         return {"member": True, "rep": round(rep, 3), "rank": name, "rank_idx": idx,
                 "next_at": nth, "next_name": nnm, "perks": G.perks_at(idx),
@@ -4234,6 +4255,10 @@ class GameSession:
         if idx < need:
             return {"kind": "system", "view": self.view(),
                     "text": f"Гильдия не доверит тебе этот контракт — нужен ранг «{G.RANKS[need][1]}»."}
+        base_gp = (q.rewards.currency or {}).get("gp", 0)   # награда зафиксирована с учётом текущей угрозы
+        esc_gp = G.escalated_gold(base_gp, G.threat_level(self.world, sp["place"]))
+        if esc_gp and esc_gp != base_gp:
+            self.world.commit("set_flag", self.player, payload={"flag": f"qrew:{q.quest_id}:{esc_gp}"})
         first = q.stages[0].stage_id if q.stages else None
         self.world.commit("quest_state", self.player, target=q.quest_id,
                           payload={"state": "active", "current_stages": [first] if first else []})

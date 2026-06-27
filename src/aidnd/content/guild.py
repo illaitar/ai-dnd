@@ -57,6 +57,25 @@ def shop_discount(rank_idx: int) -> float:
     return 0.15 if rank_idx >= 3 else 0.10 if rank_idx >= 2 else 0.0
 
 
+def threat_level(world, site_place: str) -> float:
+    """Угроза подземелья 0..1: РАСТЁТ со временем, пока логово не зачищено (нарастание давления
+    на округу). Зачищено → 0. Чем выше угроза — тем дороже контракт и тревожнее вести."""
+    if f"cleared:{site_place}" in world.flags:
+        return 0.0
+    from ..world.environment import day_number
+    return min(1.0, day_number(world.clock.tick) / 14.0)   # к ~2 неделям — пик угрозы
+
+
+def escalated_gold(base_gp: int, threat: float) -> int:
+    """Награда контракта растёт с угрозой (до +80% при пике) — город платит за нарастающую опасность."""
+    return int(round(base_gp * (1.0 + threat * 0.8)))
+
+
+def threat_label(threat: float) -> str:
+    return ("спокойно" if threat < 0.2 else "тревожно" if threat < 0.5
+            else "опасно" if threat < 0.8 else "критично")
+
+
 def contract_standing(quest) -> float:
     """Прирост стояния гильдии за выполненный контракт/задание (0 — не контракт)."""
     if getattr(quest, "kind", "") not in ("board", "guild", "side", "emergent"):
@@ -78,7 +97,7 @@ def register_guild_contracts(world, quest_system) -> None:
         if qid in world.quests:
             continue
         reward = Rewards(currency={"gp": _DANGER_GOLD.get(danger, 80)},
-                         xp=_DANGER_XP.get(danger, 200), faction_rep={GUILD: 0.0})
+                         xp=_DANGER_XP.get(danger, 200))   # стояние гильдии даёт complete-хук (не reward)
         q = Quest(
             quest_id=qid, kind="guild", title=f"Контракт: {sp['label']}", giver_ref=GUILD_DESK,
             state="not_offered",

@@ -230,8 +230,8 @@ class GameSession:
             if verb in ("freeform", "talk", "drink", "wait", "buy"):
                 affs = {a["affordance"] for a in self.affordances_here()}
                 low = text.lower()
-                if "sleep" in affs and any(k in low for k in self._SLEEP_KW):
-                    return self._post(self._sleep_until_morning(), "serve")
+                if any(k in low for k in self._SLEEP_KW):     # ночёвка везде двигает день; вне кровати — привал (неполный)
+                    return self._post(self._sleep_until_morning(rough="sleep" not in affs), "serve")
                 if (affs & {"inn", "serve", "eat"}) and any(k in low for k in self._INN_MENU_KW):
                     return self._post(self._inn_menu(), "serve")
             action = Action(actor=self.player, verb=verb, target=route.get("target"),
@@ -2065,18 +2065,27 @@ class GameSession:
                         "поднимись туда (выход наверх) и ложись спать, когда устанешь.",
                 "view": self.view()}
 
-    def _sleep_until_morning(self) -> dict:
+    def _sleep_until_morning(self, rough: bool = False) -> dict:
+        """Ночёвка до 08:00 (двигает день). В кровати — полное восстановление; на привале под
+        открытым небом (rough) — лишь частичное (нарратив честно отражает механику)."""
         h, m = (int(x) for x in self.world.clock.hhmm().split(":"))
         to_morning = (8 * 60 - (h * 60 + m)) % (24 * 60) or 24 * 60   # до ближайших 08:00
         self._tick(max(1, to_morning // config.SIM_MINUTES_PER_TICK))
         st = self.world.get_stats(self.player)
-        if st and st.hp < st.max_hp:                      # сон = полное восстановление HP
-            self.world.commit("heal", self.player, target=self.player,
-                              payload={"amount": st.max_hp - st.hp})
-        self._log_journal("Выспался до утра.")
-        return {"kind": "narration",
-                "text": f"Ты заваливаешься на лежанку и спишь до утра ({self.world.clock.hhmm()}). "
-                        f"Силы полностью восстановлены.", "view": self.view()}
+        if st and st.hp < st.max_hp:
+            target = st.hp + (st.max_hp - st.hp) // 2 if rough else st.max_hp   # привал — половина недостающего
+            if target > st.hp:
+                self.world.commit("heal", self.player, target=self.player,
+                                  payload={"amount": target - st.hp})
+        self._log_journal("Переночевал под открытым небом." if rough else "Выспался до утра.")
+        if rough:
+            text = (f"Ты устраиваешься на ночлег прямо здесь, спишь вполглаза. К утру "
+                    f"({self.world.clock.hhmm()}) ты затёкший и отдохнул лишь отчасти — "
+                    f"переночевать в комнате на постоялом дворе было бы куда лучше.")
+        else:
+            text = (f"Ты заваливаешься на лежанку и спишь до утра ({self.world.clock.hhmm()}). "
+                    f"Силы полностью восстановлены.")
+        return {"kind": "narration", "text": text, "view": self.view()}
 
     def _eat_meal(self, price_cp: int | None = None) -> dict:
         from ..inventory.container import _pay, transfer_currency

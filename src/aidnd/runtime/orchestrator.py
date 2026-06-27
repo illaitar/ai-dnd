@@ -69,6 +69,7 @@ class GameSession:
         self._last_item: str | None = None        # последний осмотренный предмет (для «на нём…»)
         self._haggle: dict | None = None          # активный торг: оффер + цены (см. _do_trade)
         self._sign_offer: list = []               # увиденные вывески, ждущие записи на карту (живут 1 ход)
+        self._citygraph = False                    # CityGraph (перекрёстки+дома) — лениво, см. _city_graph()
         self._history: list[dict] = []            # последние ходы (ввод/ответ) — контекст для роутера
         self.journal: list[str] = []              # журнал событий игрока (read-model)
         self._quest_log_seen = 0                  # сколько строк журнала квестов уже втянуто
@@ -153,7 +154,7 @@ class GameSession:
         Офлайн / сбой нарратора → детерминированный текст как есть."""
         base = self.look()
         if self.model is None:
-            return base
+            return self._offer_signs(base)                # офлайн: без нарратора, но вывески видны
         from ..inference.agents import render_scene
         summary = ("Игрок осматривается по сторонам — опиши обстановку живо, во 2-м лице, СТРОГО по "
                    "фактам, никого и ничего не выдумывая. Факты сцены: " + (base.get("text") or ""))
@@ -518,6 +519,14 @@ class GameSession:
         debunked = self._verify_map_here(dest)        # сверка купленных наводок с реальностью
         self._tick(ticks)
         look = self.look()
+        # CityGraph: проход по улицам — сколько перекрёстков и какие вывески встретились по пути
+        route_ids, steps = [], 0
+        g = self._city_graph()
+        if g and not region_travel:
+            a_node, b_node = self._city_node_of(cur), self._city_node_of(dest)
+            if a_node and b_node and a_node != b_node:
+                route_ids = g.buildings_along(a_node, b_node)
+                steps = g.path_steps(a_node, b_node)
         if lead is None:
             if region_travel:
                 lead = (f"Путь к «{self._place_name(dest)}» ведёт дикими землями и "
@@ -527,10 +536,12 @@ class GameSession:
                     lead += " " + incident
             else:
                 lead = f"Ты направляешься в «{self._place_name(dest)}»."
+                if steps > 1:                             # «много шагов от точки до точки» по улицам
+                    lead += f" Минуешь {steps} перекрёстков узкими улицами Фэндалина."
         look["text"] = lead + " " + look["text"]
         if debunked:
             look["text"] += "\n⚠ Сведения об этом месте оказались ложными!"
-        return self._offer_signs(look)                    # на новой улице — видны вывески соседних зданий
+        return self._offer_signs(look, extra=route_ids)   # вывески по пути + ближайшие вокруг
 
     # стоимость пути: шаг по городу дёшев, дикие земли — часы и риск (док §3.4)
     _DANGER_FACTOR = {"высокая": 1.4, "смертельная": 1.8}
@@ -2574,23 +2585,68 @@ class GameSession:
         """Места, уже отмеченные на карте игрока (визит/запись/слух) — их не предлагаем записать."""
         return {b["place"] for b in self.world.player_maps.get(self.player, {}).values() if b.get("place")}
 
-    def _visible_signs(self) -> list[dict]:
-        """Вывески/здания, видимые с текущей улицы: примыкающие публичные места (лавка/таверна/
-        ратуша/святилище), ещё не записанные на карту. Детерминированно, без LLM."""
+    def _city_buildings(self) -> list:
+        """Здания города (id/name/kind/dx/dy/affordances/go/status) — для сборки CityGraph."""
+        sp = self.world.spatial
+        town = next((lvl for lvl in self.map_levels()["levels"] if lvl["id"] == "town"), {"nodes": []})
+        out = []
+        for n in town["nodes"]:
+            p = sp.places.get(n["id"])
+            out.append({"id": n["id"], "name": n["name"], "kind": n.get("kind", ""),
+                        "dx": n["dx"], "dy": n["dy"], "go": n.get("go"),
+                        "affordances": list(p.affordances) if p else [],
+                        "status": getattr(p, "status", "open") if p else "open"})
+        return out
+
+    def _city_graph(self):
+        """CityGraph для текущего seed (перекрёстки+дома). Лениво, кэш; None при сбое → старая логика."""
+        if self._citygraph is False:
+            try:
+                from ..gen import citymap
+                self._citygraph = citymap.build_graph(self.world.seed, self._city_buildings())
+            except Exception:
+                self._citygraph = None
+        return self._citygraph
+
+    def _city_node_of(self, place: str) -> str | None:
+        """Какому зданию CityGraph соответствует место (само здание или родитель-здание комнаты)."""
+        g = self._city_graph()
+        if not g:
+            return None
+        if place in g.door:
+            return place
+        p = self.world.spatial.places.get(place)
+        par = getattr(p, "parent", None) if p else None
+        return par if par in g.door else None
+
+    def _visible_signs(self, extra_ids: list[str] | None = None) -> list[dict]:
+        """Вывески, видимые «вокруг»: БЛИЖАЙШИЕ по улицам здания (CityGraph) + переданные (по пути),
+        ещё не записанные на карту. Детерминированно, без LLM. Фоллбэк — примыкающие места."""
         recorded = self._recorded_places()
+        g = self._city_graph()
+        node = self._city_node_of(self.current_place())
+        ids: list[str] = []
+        if g and node:
+            ids = list(extra_ids or [])
+            for bid in g.near(node, k=6):                 # ближайшие по улицам — что реально видно (с запасом под фильтр)
+                if bid not in ids:
+                    ids.append(bid)
+        else:                                             # старый путь: примыкающие публичные места
+            ids = list(extra_ids or []) + list(self.world.spatial.connections(self.current_place()))
         out, seen = [], set()
-        for pid in self.world.spatial.connections(self.current_place()):
+        for pid in ids:
             p = self.world.spatial.places.get(pid)
             if not p or pid in recorded or pid in seen:
                 continue
-            if set(p.affordances or []) & self._PUBLIC_AFF:
+            if set(p.affordances or []) & self._PUBLIC_AFF:   # только публичные здания = вывески (не дикие земли/тайный манор)
                 out.append({"place": pid, "label": p.name})
                 seen.add(pid)
         return out
 
-    def _offer_signs(self, result: dict) -> dict:
-        """Доклеить к ответу замеченные вывески + предложить записать (живёт 1 ход: не отреагировал → забыл)."""
-        signs = self._visible_signs()
+    def _offer_signs(self, result: dict, extra: list[str] | None = None) -> dict:
+        """Доклеить к ответу замеченные вывески + предложить записать (живёт 1 ход: не отреагировал → забыл).
+        extra — здания, замеченные по пути (маршрут CityGraph), помимо ближайших вокруг."""
+        signs = self._visible_signs(extra)
         self._sign_offer = signs
         if signs and isinstance(result, dict):
             names = ", ".join(f"«{s['label']}»" for s in signs)

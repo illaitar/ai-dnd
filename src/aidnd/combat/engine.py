@@ -518,6 +518,7 @@ class CombatEngine:
                 cs.round += 1
                 self._tick_durations()
                 surfaces.tick(cs)
+                self._town_pressure()                        # город: давление времени (стража/бегство)
             cb = cs.combatants.get(cs.current())
             if cb and not cb.fled and self.world.is_alive(cs.current()):
                 break
@@ -544,6 +545,33 @@ class CombatEngine:
                     cond.rounds_left -= 1
                     if cond.rounds_left <= 0:
                         conds.remove(cond)
+
+    def _town_pressure(self) -> None:
+        """Городской бой и течение времени (раунд = 5с): со временем растёт шанс прихода городской
+        стражи (разнимает драку — нападавшие врассыпную) и шанс, что враги сами уносят ноги."""
+        cs = self.state
+        if not cs.town or cs.mode != "active":
+            return
+        enemies = self.alive_enemies()
+        if not enemies:
+            return
+        r = cs.round                                         # раунд≈5с: чем дольше шумишь, тем вернее придёт стража
+        p_guard = max(0, min(60, (r - 2) * 12))              # ~раунд6-8 (30-40с) → почти наверняка
+        if p_guard and self.dice.roll_seeded("guard", "1d100", roller="watch").total <= p_guard:
+            for e in list(enemies):
+                self._flee(e)
+                cs.combatants[e].fled = True
+            cs.guard_intervened = True
+            cs.log.append("🛎 Свисток стражи! Городская стража спешит на шум — "
+                          "нападавшие бросаются врассыпную.")
+            return
+        p_flee = max(0, min(50, (r - 2) * 10))               # враги со временем охотнее бегут (боятся стражи)
+        if p_flee:
+            for e in list(enemies):
+                if self.dice.roll_seeded("townflee", "1d100", roller=e).total <= p_flee:
+                    self._flee(e)
+                    cs.combatants[e].fled = True
+                    cs.log.append(f"{self._name(e)} не выдерживает и бежит прочь.")
 
     def check_end(self) -> bool:
         cs = self.state

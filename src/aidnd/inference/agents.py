@@ -283,6 +283,8 @@ PROMPTS = {
         "  ambient — игрок лишь ВИДИТ это со стороны, вмешательство не требуется;\n"
         "  involves — это ВОВЛЕКАЕТ игрока: к нему обращаются, преграждают путь, просят, цепляют, "
         "предлагают.\n"
+        "Иногда (РЕДКО) involves-сценка — это нападение/грабёж/засада: тогда hostile=true (перерастёт "
+        "в драку). Обычные сценки — hostile=false.\n"
         "Напиши ОДНУ живую строку (2-е лицо ед. ч., на «ты», по-русски, 1-2 коротких предложения), быт фронтира — "
         "без высокого фэнтези, без боя, без сюжетных персонажей. Заголовок — 2-4 слова. "
         "Call street_event."
@@ -523,6 +525,7 @@ SCHEMAS = {
         "name": "street_event",
         "parameters": {"type": "object", "properties": {
             "kind": {"type": "string", "enum": ["ambient", "involves"]},   # затрагивает игрока?
+            "hostile": {"type": "boolean"},  # сценка — нападение/грабёж/засада → перерастёт в драку
             "title": {"type": "string"},
             "line": {"type": "string"}},     # строка нарратора (2-е лицо, рус.)
             "required": ["kind", "line"]},
@@ -1018,7 +1021,8 @@ def street_event(manager, settlement: str, frm: str, to: str, time_of_day: str =
     if not line:
         return None
     kind = out.get("kind") if out.get("kind") in ("ambient", "involves") else "ambient"
-    return {"kind": kind, "title": out.get("title") or "", "line": line}
+    return {"kind": kind, "title": out.get("title") or "", "line": line,
+            "hostile": bool(out.get("hostile"))}
 
 
 def map_features(manager, description: str):

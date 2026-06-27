@@ -60,6 +60,8 @@ class CombatState:
     turn_budget: TurnBudget = field(default_factory=TurnBudget.fresh)
     mode: str = "active"            # active | ended
     outcome: str | None = None      # victory | flee | tpk
+    town: bool = False              # бой в городе → давление времени: стража + бегство (раунд=5с)
+    guard_intervened: bool = False  # драку разняла городская стража (нападавшие бежали)
     log: list[str] = field(default_factory=list)
 
     def current(self) -> str | None:

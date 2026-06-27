@@ -544,7 +544,13 @@ class GameSession:
         # СЛУЧАЙНОЕ СОБЫТИЕ на перекрёстках (только город): бросок по шагам, ≤1 на маршрут
         if not region_travel and steps >= 2:
             ev = self._roll_street_event(cur, dest, steps)
-            if ev and ev.get("kind") == "involves":       # вовлекает игрока → пауза ДО прихода
+            if ev and ev.get("kind") == "involves":       # вовлекает игрока
+                if ev.get("hostile"):                     # враждебная сценка → драка прямо на улице
+                    self._journey = None
+                    thug = self._spawn_street_thug(cur)
+                    res = self.start_combat([thug])
+                    res["text"] = ev["line"] + "\n" + (res.get("text") or "")
+                    return res
                 self._journey = {"dest": dest, "route_ids": route_ids, "event": ev, "reacted": False}
                 return self._present_street_event(ev, dest)
             if ev:                                        # ambient — вплести в проход; реже мог стать зацепкой
@@ -618,13 +624,30 @@ class GameSession:
                                   self.scene_descriptor(), nonce=str(self._street_seq))
                 if ev and (ev.get("line") or "").strip():
                     kind = ev.get("kind") if ev.get("kind") in ("ambient", "involves") else "ambient"
-                    return {"kind": kind, "title": ev.get("title") or "", "line": ev["line"].strip()}
+                    hostile = bool(ev.get("hostile")) and kind == "involves"
+                    if kind == "involves" and not hostile and rng.random() < 0.18:  # иногда обостряется
+                        hostile = True
+                    return {"kind": kind, "title": ev.get("title") or "", "line": ev["line"].strip(),
+                            "hostile": hostile}
             except Exception:
                 pass
         involve = rng.random() < 0.4                       # фоллбэк: вид по броску
+        if involve and rng.random() < 0.25:               # иногда — грабитель (перерастёт в драку)
+            return {"kind": "involves", "title": "Грабитель", "hostile": True,
+                    "line": "Из подворотни наперерез бросается громила с дубинкой: «Кошелёк, живо!»"}
         table = self._STREET_INVOLVE if involve else self._STREET_AMBIENT
         title, line = table[rng.randrange(len(table))]
-        return {"kind": "involves" if involve else "ambient", "title": title, "line": line}
+        return {"kind": "involves" if involve else "ambient", "title": title, "line": line,
+                "hostile": False}
+
+    def _spawn_street_thug(self, place: str) -> str:
+        """Уличный громила для драки из враждебной сценки (помечен враждебным к игроку)."""
+        from ..content.dungeons import _spawn_mob
+        tid = f"npc:street_thug_{self.world.clock.tick}_{self._street_seq}"
+        _spawn_mob(self.world, tid, "Уличный громила", "srd:thug", place,
+                   faction="faction:redbrand", weapon="tmpl:mace")
+        self.world.commit("set_flag", self.player, payload={"flag": f"hostile:{tid}"})
+        return tid
 
     def _present_street_event(self, ev: dict, dest: str) -> dict:
         """Событие-вовлечение: нарратив + приглашение отреагировать или продолжить путь («дальше»)."""
@@ -1572,6 +1595,11 @@ class GameSession:
                   if (pos := self.world.position(c)) and pos.place_id == place]
         cs = self.combat.start([self.player, *allies], enemy_ids, grid=grid,
                                init_surfaces=(meta or {}).get("surfaces"))
+        from ..gen.battlemap import classify  # городской бой → давление времени (стража/бегство)
+        p = self.world.spatial.places.get(place)
+        cs.town = classify(getattr(p, "kind", "") if p else "",
+                           getattr(p, "affordances", []) if p else [],
+                           self._place_name(place)) not in ("cave", "wilds")
         self.dialogue_partner = None
         self._log_journal("Вступил в бой: " + ", ".join(self._display(e) for e in enemy_ids) + ".")
         return {"kind": "combat_start", "text": "Бой начинается! " + cs.log[-1],
@@ -1656,7 +1684,7 @@ class GameSession:
 
     def _on_combat_end(self) -> str:
         cs = self.combat.state
-        if cs.outcome == "victory":                       # зачистка локации (для LairCleared/замков)
+        if cs.outcome == "victory" and not cs.guard_intervened:   # зачистка только при реальной победе
             self.world.commit("set_flag", self.player,
                               payload={"flag": f"cleared:{self.current_place()}"})
         for q in list(self.world.quests.values()):
@@ -1664,9 +1692,12 @@ class GameSession:
                 self.quests.advance(q)
         if "cragmaw_cleared" in self.world.flags:
             self.director.pacing_check()
-        msg = {"victory": "Победа! Враги повержены.",
-               "tpk": "Партия пала...", "flee": "Враги бежали.",
-               "defeat": "💀 Герой пал. Игра окончена."}.get(cs.outcome, "Бой окончен.")
+        if cs.guard_intervened:                           # драку разняла стража — не победа и не зачистка
+            msg = "🛎 Городская стража разняла драку — нападавшие разбежались. Шум улёгся."
+        else:
+            msg = {"victory": "Победа! Враги повержены.",
+                   "tpk": "Партия пала...", "flee": "Враги бежали.",
+                   "defeat": "💀 Герой пал. Игра окончена."}.get(cs.outcome, "Бой окончен.")
         self._log_journal(msg)
         return f"\n=== {msg} ==="
 

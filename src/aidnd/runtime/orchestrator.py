@@ -4028,7 +4028,7 @@ class GameSession:
                 return {"status": "gone"}
             if fate < 0.55:
                 return {"status": "done_elsewhere",
-                        "note": "Пока тебя не было, задание выполнил кто-то другой — объявление сняли."}
+                        "note": "Пока тебя не было, задание выполнила партия гильдии — объявление сняли."}
             return {"status": "withdrawn", "note": "Надобность отпала — объявление сняли."}
         if days >= bump_day:
             base = (q.rewards.currency or {}).get("gp", 0)
@@ -4175,6 +4175,76 @@ class GameSession:
         res = self.look()
         res["text"] = f"✅ Задание «{q.title}» сдано. Награда: {self._reward_text(q.rewards)}."
         return res
+
+    # ===================================================================== #
+    #  Гильдия приключенцев: стояние/ранг, контракты на угрозы, перки       #
+    # ===================================================================== #
+    def guild_view(self) -> dict:
+        """Экран гильдии: ранг/стояние, перки, угрозы региона (контракты) со статусом по рангу."""
+        from ..content import guild as G
+        from ..content.region import REGION_SITES
+        rep = self.world.reputation.get(G.GUILD, 0.0)
+        idx, name = G.rank_of(rep)
+        nth, nnm = G.next_rank(rep)
+        threats = []
+        for sk, sp in REGION_SITES.items():
+            place = sp["place"]
+            q = self.world.quests.get(G.contract_id(sk))
+            cleared = f"cleared:{place}" in self.world.flags
+            danger = sp.get("danger", "средняя")
+            need = G.MIN_RANK.get(danger, 1)
+            status = ("cleared" if cleared else "active" if (q and q.state == "active")
+                      else "available" if idx >= need else "locked")
+            threats.append({
+                "site": sk, "label": sp["label"], "direction": sp.get("direction", ""),
+                "danger": danger, "contents": sp.get("contents", ""),
+                "reward": self._reward_text(q.rewards) if q else "",
+                "status": status, "need_rank": G.RANKS[need][1], "can_take": status == "available"})
+        return {"member": True, "rep": round(rep, 3), "rank": name, "rank_idx": idx,
+                "next_at": nth, "next_name": nnm, "perks": G.perks_at(idx),
+                "desk": self._place_name(G.GUILD_DESK), "threats": threats}
+
+    def take_contract(self, site_key: str) -> dict:
+        """Взять контракт гильдии на угрозу: гейт по рангу → открыть путь к логову (наводка) + активировать."""
+        from ..content import guild as G
+        from ..content.region import REGION_SITES
+        sp = REGION_SITES.get(site_key)
+        q = self.world.quests.get(G.contract_id(site_key))
+        if not sp or not q:
+            return {"kind": "system", "text": "Такого контракта нет.", "view": self.view()}
+        if q.state in ("active", "completed"):
+            return {"kind": "system", "text": "Этот контракт уже у тебя или выполнен.", "view": self.view()}
+        idx, _ = G.rank_of(self.world.reputation.get(G.GUILD, 0.0))
+        need = G.MIN_RANK.get(sp.get("danger", "средняя"), 1)
+        if idx < need:
+            return {"kind": "system", "view": self.view(),
+                    "text": f"Гильдия не доверит тебе этот контракт — нужен ранг «{G.RANKS[need][1]}»."}
+        first = q.stages[0].stage_id if q.stages else None
+        self.world.commit("quest_state", self.player, target=q.quest_id,
+                          payload={"state": "active", "current_stages": [first] if first else []})
+        self._reveal_threat(site_key)                     # перк-наводка: путь к логову открыт
+        self.quests.note(q.quest_id, f"{q.quest_id}:accept",
+                         f"Взят контракт гильдии: «{q.title}». Указан путь к логову ({sp.get('direction','')}).")
+        self._log_journal(f"Взят контракт гильдии: «{q.title}».")
+        res = self.look()
+        res["text"] = (f"🛡 Контракт принят: «{sp['label']}» — {sp.get('direction', '')}. "
+                       f"Гильдия указала дорогу: теперь до логова можно дойти по карте.")
+        return res
+
+    def _reveal_threat(self, site_key: str) -> None:
+        """Наводка гильдии: внести логово в карту игрока → travel_to к нему разрешён."""
+        from ..content.region import REGION_SITES
+        sp = REGION_SITES.get(site_key)
+        if not sp:
+            return
+        place = sp["place"]
+        if f"belief:seen:{place}" in self.world.player_maps.get(self.player, {}):
+            return
+        self.world.commit("map_update", self.player, payload={"player": self.player, "belief": {
+            "id": f"belief:seen:{place}", "site": site_key, "place": place, "source": "guild",
+            "label": sp["label"], "terrain": sp.get("terrain", ""), "direction": sp.get("direction", ""),
+            "contents": sp.get("contents", ""), "danger": sp.get("danger", ""),
+            "reliability": "guild", "true": True, "verified": False}})
 
     def view(self) -> dict:
         st = self.world.get_stats(self.player)

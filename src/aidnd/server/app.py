@@ -575,6 +575,10 @@ async def ws(sock: WebSocket) -> None:
                 result = session.accept_quest(msg.get("quest", ""))
             elif cmd == "quest_turnin":
                 result = session.turn_in_quest(msg.get("quest", ""))
+            elif cmd == "guild":                          # экран гильдии (ранг/контракты)
+                result = {"kind": "guild", "guild": session.guild_view(), "view": session.view()}
+            elif cmd == "take_contract":                  # взять контракт гильдии на угрозу
+                result = session.take_contract(msg.get("site", ""))
             elif cmd == "equip":
                 result = session.equip_item(msg.get("item", ""))
             elif cmd == "unequip":

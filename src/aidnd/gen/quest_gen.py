@@ -195,6 +195,11 @@ class QuestSystem:
         for faction, delta in r.faction_rep.items():           # числовое стояние (событийно)
             self.world.commit("faction_rep", self.world.player_id or "dm",
                               payload={"faction": faction, "delta": delta})
+        from ..content.guild import GUILD, contract_standing  # контракт/задание → стояние гильдии
+        gpts = contract_standing(quest)
+        if gpts and self.world.player_id:
+            self.world.commit("faction_rep", self.world.player_id,
+                              payload={"faction": GUILD, "delta": gpts})
         if r.xp and self.world.player_id:
             self.world.commit("gain_xp", self.world.player_id,
                               payload={"xp": r.xp, "source": "quest"})

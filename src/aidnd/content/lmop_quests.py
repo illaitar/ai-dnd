@@ -92,6 +92,8 @@ def register_quests(world, quest_system: QuestSystem) -> None:
         quest_system.register(q)
     from .board import register_board_quests
     register_board_quests(world, quest_system)          # простые задания с доски объявлений
+    from .guild import register_guild_contracts
+    register_guild_contracts(world, quest_system)       # контракты гильдии на региональные угрозы
 
 
 def classic_main_plot() -> Quest:

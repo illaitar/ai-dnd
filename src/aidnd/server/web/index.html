@@ -16,6 +16,7 @@
         <input type="checkbox" id="dbg-routing"> 🔀 роутинг
       </label>
       <button id="journal-btn" class="cbtn">📜 Журнал</button>
+      <button id="guild-btn" class="cbtn">🛡 Гильдия</button>
       <button id="menu-btn" class="cbtn">☰ Меню</button>
       <button id="settings-btn" class="cbtn">⚙ Настройки</button>
       <span id="usage-hud" class="badge hidden" title="Бесплатный тариф: запросы / миры"></span>
@@ -149,6 +150,14 @@
       <div id="set-msg" class="state"></div>
       <hr>
       <button class="mbtn" id="set-logout">Выйти из аккаунта</button>
+    </div>
+  </div>
+
+  <!-- гильдия приключенцев: ранг + контракты на угрозы -->
+  <div id="guild-ov" class="overlay hidden">
+    <div class="ui-box">
+      <h2>🛡 Гильдия приключенцев <button class="x" data-close="guild-ov">✕</button></h2>
+      <div id="guild-body"></div>
     </div>
   </div>
 

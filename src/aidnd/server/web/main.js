@@ -83,6 +83,35 @@ function openJournal() {
   $("jr-list").innerHTML = "<div class='state'>Загрузка…</div>";
   send({ cmd: "journal" });
 }
+const DANGER_COL = { "низкая": "#5fb87f", "средняя": "#e0a64d", "высокая": "#e2604a", "смертельная": "#b5379a" };
+function renderGuild(g) {
+  const box = $("guild-body");
+  if (!g) { box.innerHTML = "<div class='state'>Гильдия недоступна.</div>"; return; }
+  const pct = g.next_at ? Math.min(100, Math.round(100 * g.rep / g.next_at)) : 100;
+  const threats = (g.threats || []).map(t => {
+    const col = DANGER_COL[t.danger] || "#969db0";
+    const act = t.can_take ? `<button data-take="${esc(t.site)}">Взять контракт</button>`
+      : t.status === "active" ? `<span class="note gt-cur">▸ в работе</span>`
+      : t.status === "cleared" ? `<span class="note jr-ok">✓ зачищено</span>`
+      : `<span class="note">нужен ранг «${esc(t.need_rank)}»</span>`;
+    return `<div class="guild-threat${t.status === 'locked' ? ' gt-locked' : ''}">
+      <div class="gt-head"><b>${esc(t.label)}</b>`
+      + `<span class="gt-danger" style="color:${col};border-color:${col}">${esc(t.danger)}</span></div>`
+      + `<div class="gt-meta">${t.direction ? "🧭 " + esc(t.direction) + " · " : ""}${esc(t.contents)}</div>`
+      + `<div class="gt-foot"><span class="gt-reward">${esc(t.reward || "")}</span>${act}</div></div>`;
+  }).join("");
+  box.innerHTML =
+    `<div class="guild-rank"><div class="gr-name">⚜ ${esc(g.rank)}</div>`
+    + `<div class="gr-bar"><div class="gr-fill" style="width:${pct}%"></div></div>`
+    + `<div class="gr-next">${g.next_name ? "До «" + esc(g.next_name) + "»" : "высший ранг"}</div></div>`
+    + ((g.perks || []).length ? `<ul class="guild-perks">${g.perks.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : "")
+    + `<h3 class="guild-h3">Контракты на угрозы региона</h3>`
+    + `<div class="guild-threats">${threats || "<div class='state'>Угроз нет.</div>"}</div>`;
+  box.querySelectorAll("[data-take]").forEach(b => b.onclick = () => {
+    logEntry(`<span class="you">→ взять контракт</span>`, "you");
+    send({ cmd: "take_contract", site: b.dataset.take }); closeOverlay("guild-ov");
+  });
+}
 function renderJournal(entries) {
   const box = $("jr-list");
   if (!entries || !entries.length) { box.innerHTML = "<div class='state'>Активных квестов пока нет.</div>"; return; }
@@ -137,6 +166,7 @@ function render(r) {
     showLobby();
   }
   if (r.kind === "journal") renderJournal(r.journal);             // подробный журнал квестов
+  if (r.kind === "guild") { renderGuild(r.guild); openOverlay("guild-ov"); }   // экран гильдии
   if (r.text) {
     const cls = r.kind === "system" ? "system"
       : r.kind === "narration" ? "narration"
@@ -1088,6 +1118,7 @@ $("map-cancel").onclick = clearSelection;
 window.__map = { hits: () => mapHits, mode: () => mapMode, pick: (i) => setSelection(mapHits[i]), go: goSelection };
 $("menu-btn").onclick = () => showLobby();
 $("journal-btn").onclick = openJournal;
+$("guild-btn").onclick = () => send({ cmd: "guild" });
 $("lb-new").onclick = () => { $("lobby").classList.add("hidden"); openOverlay("newgame"); ensureNgOptions(); };
 $("lb-continue").onclick = () => $("lobby").classList.add("hidden");
 $("lb-save").onclick = doSave;

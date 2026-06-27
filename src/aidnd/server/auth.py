@@ -10,7 +10,7 @@ from typing import Annotated
 import httpx
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from fastapi import Header, HTTPException
+from fastapi import Cookie, Header, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,17 @@ from .db import DbSession
 from .models import AuthSession, User
 
 _ph = PasswordHasher()
+COOKIE = "aidnd_session"                                  # имя cookie сессии
+
+
+def set_session_cookie(response: Response, token: str) -> None:
+    """HttpOnly-cookie сессии: авто-отправляется на HTTP и на WS-хендшейк (тот же origin)."""
+    response.set_cookie(COOKIE, token, httponly=True, samesite="lax",
+                        max_age=config.SESSION_TTL_DAYS * 86400, path="/")
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(COOKIE, path="/")
 
 
 def hash_pw(pw: str) -> str:
@@ -119,9 +130,10 @@ async def revoke(db: AsyncSession, token: str) -> None:
 
 
 async def current_user(db: DbSession,
-                       authorization: Annotated[str, Header()] = "") -> User:
-    """Зависимость FastAPI: требует валидный Bearer-токен, иначе 401."""
-    user = await user_for_token(db, _bearer(authorization))
+                       authorization: Annotated[str, Header()] = "",
+                       aidnd_session: Annotated[str, Cookie()] = "") -> User:
+    """Зависимость FastAPI: токен из cookie сессии ИЛИ Bearer-заголовка, иначе 401."""
+    user = await user_for_token(db, _bearer(authorization) or aidnd_session)
     if not user:
         raise HTTPException(401, "требуется вход")
     return user

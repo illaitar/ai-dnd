@@ -8,6 +8,7 @@
 </head>
 <body>
   <div id="toasts" class="toasts" aria-live="polite"></div>   <!-- всплывающие «ачивки» -->
+  <div id="usage-bar" class="hidden" title="Использование бесплатного тарифа"></div>  <!-- шкала лимитов слева -->
   <header>
     <h1>⚔️ AI-DnD</h1>
     <div class="hdr-right">
@@ -16,6 +17,8 @@
       </label>
       <button id="journal-btn" class="cbtn">📜 Журнал</button>
       <button id="menu-btn" class="cbtn">☰ Меню</button>
+      <button id="settings-btn" class="cbtn">⚙ Настройки</button>
+      <button id="account-btn" class="cbtn">👤 Войти</button>
       <div id="server-badge" class="badge">…</div>
     </div>
   </header>
@@ -135,6 +138,19 @@
   </div>
 
   <!-- главное меню -->
+  <div id="settings-ov" class="overlay hidden">
+    <div class="ui-box">
+      <h2>⚙ Настройки <button class="x" data-close="settings-ov">✕</button></h2>
+      <div id="set-usage" class="state">—</div>
+      <p>Код разблокировки безлимита:</p>
+      <input id="set-code" type="text" placeholder="код" class="auth-input">
+      <button class="mbtn" id="set-redeem">Активировать</button>
+      <div id="set-msg" class="state"></div>
+      <hr>
+      <button class="mbtn" id="set-logout">Выйти из аккаунта</button>
+    </div>
+  </div>
+
   <div id="menu" class="overlay hidden">
     <div class="ui-box menu-box">
       <h2>☰ Меню <button class="x" data-close="menu">✕</button></h2>

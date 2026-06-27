@@ -60,6 +60,12 @@ def index() -> HTMLResponse:
         return HTMLResponse(f.read())
 
 
+@app.get("/login")
+def login_page() -> HTMLResponse:
+    with open(os.path.join(WEB_DIR, "login.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
 if os.path.isdir(WEB_DIR):
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
@@ -410,8 +416,8 @@ async def ws(sock: WebSocket) -> None:
     salt = {"n": 1}
     holds = {"slot": False}                               # слот гейтит ГЕНЕРАЦИЮ (GPU), не коннект
 
-    me = {"user": None}                                   # авторизация по ?token= (иначе анонимный демо)
-    _tok = sock.query_params.get("token", "")
+    me = {"user": None}                                   # авторизация по cookie сессии (или ?token=)
+    _tok = sock.cookies.get("aidnd_session", "") or sock.query_params.get("token", "")
     if _tok:
         try:
             async with SessionLocal() as _db:

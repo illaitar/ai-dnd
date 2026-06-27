@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Cookie, Depends, Header, Response
 from pydantic import BaseModel
 
 from . import auth
@@ -34,26 +34,32 @@ def _user_out(user: User) -> dict:
 
 
 @router.post("/register")
-async def register(body: Credentials, db: DbSession) -> dict:
+async def register(body: Credentials, response: Response, db: DbSession) -> dict:
     user, token = await auth.register(db, body.email, body.password)
+    auth.set_session_cookie(response, token)
     return {"token": token, "user": _user_out(user)}
 
 
 @router.post("/login")
-async def login(body: Credentials, db: DbSession) -> dict:
+async def login(body: Credentials, response: Response, db: DbSession) -> dict:
     user, token = await auth.login(db, body.email, body.password)
+    auth.set_session_cookie(response, token)
     return {"token": token, "user": _user_out(user)}
 
 
 @router.post("/google")
-async def google(body: GoogleToken, db: DbSession) -> dict:
+async def google(body: GoogleToken, response: Response, db: DbSession) -> dict:
     user, token = await auth.login_google(db, body.id_token)
+    auth.set_session_cookie(response, token)
     return {"token": token, "user": _user_out(user)}
 
 
 @router.post("/logout")
-async def logout(db: DbSession, authorization: Annotated[str, Header()] = "") -> dict:
-    await auth.revoke(db, auth._bearer(authorization))
+async def logout(response: Response, db: DbSession,
+                 authorization: Annotated[str, Header()] = "",
+                 aidnd_session: Annotated[str, Cookie()] = "") -> dict:
+    await auth.revoke(db, auth._bearer(authorization) or aidnd_session)
+    auth.clear_session_cookie(response)
     return {"ok": True}
 
 

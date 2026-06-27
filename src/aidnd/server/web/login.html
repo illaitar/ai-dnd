@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход — AI-DnD</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="ui-box login-box">
+      <h1>⚔️ AI-DnD</h1>
+      <p class="state">Войдите или зарегистрируйтесь, чтобы играть.</p>
+      <input id="email" type="email" placeholder="email" autocomplete="username" class="auth-input">
+      <input id="pass" type="password" placeholder="пароль (минимум 6)" autocomplete="current-password" class="auth-input">
+      <div class="menu-actions">
+        <button class="mbtn" id="login">Войти</button>
+        <button class="mbtn" id="register">Регистрация</button>
+      </div>
+      <div id="msg" class="state"></div>
+    </div>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    async function go(path) {
+      $("msg").textContent = "…";
+      const r = await fetch(path, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: $("email").value.trim(), password: $("pass").value })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.token) { location.href = "/"; }     // cookie сессии поставлена сервером
+      else { $("msg").textContent = d.detail || "Ошибка"; }
+    }
+    $("login").onclick = () => go("/auth/login");
+    $("register").onclick = () => go("/auth/register");
+    $("pass").addEventListener("keydown", (e) => { if (e.key === "Enter") go("/auth/login"); });
+  </script>
+</body>
+</html>

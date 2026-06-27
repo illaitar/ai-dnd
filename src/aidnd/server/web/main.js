@@ -3,14 +3,41 @@
 
 const $ = (id) => document.getElementById(id);
 let ws, lastView = null;
+let ME = null;
 
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = new WebSocket(`${proto}://${location.host}/ws`);   // cookie сессии уходит на хендшейк автоматически
   ws.onmessage = (e) => render(JSON.parse(e.data));
   ws.onclose = () => logSystem("Соединение закрыто. Обнови страницу.");
 }
 function send(obj) { ws.send(JSON.stringify(obj)); }
+
+// ---------------------------------------------------------------- auth ----
+async function logout() {
+  await fetch("/auth/logout", { method: "POST" }).catch(() => {});
+  location.href = "/login";
+}
+function updateAccountBtn() {
+  const b = $("account-btn"); if (b) b.textContent = ME ? ("👤 " + (ME.email || "вы")) : "👤 Войти";
+}
+function renderUsage(u) {                                   // шкала лимитов слева + текст в настройках
+  if (!u) return;
+  const bar = $("usage-bar"); if (!bar) return;
+  bar.classList.remove("hidden");
+  if (u.unlimited) {
+    bar.innerHTML = `<div class="ub-cap">∞</div><div class="ub-lbl">безлимит</div>`;
+    if ($("set-usage")) $("set-usage").textContent = "Тариф: безлимит ∞";
+    return;
+  }
+  const rq = u.requests, en = u.enrich;
+  const left = Math.max(0, Math.min(100, Math.round(100 * (rq.free - rq.used) / Math.max(1, rq.free))));
+  bar.innerHTML =
+    `<div class="ub-lbl">${rq.used}/${rq.free}</div>` +
+    `<div class="ub-track"><div class="ub-fill" style="height:${left}%"></div></div>` +
+    `<div class="ub-lbl">миры ${en.used}/${en.free}</div>`;
+  if ($("set-usage")) $("set-usage").textContent = `Запросы ${rq.used}/${rq.free} · миры ${en.used}/${en.free}`;
+}
 
 // ----------------------------------------------------------------- log ----
 function logEntry(html, cls) {
@@ -87,6 +114,11 @@ function renderJournal(entries) {
 
 // --------------------------------------------------------------- render ----
 function render(r) {
+  if (r.user) { ME = r.user; updateAccountBtn(); }                  // авторизованы → имя в кнопке
+  if (r.usage) renderUsage(r.usage);                                // шкала лимитов
+  if (r.kind === "auth_required") { location.href = "/login"; return; }
+  if (r.kind === "limit") { logSystem(r.text || "Лимит исчерпан."); openOverlay("settings-ov"); return; }
+  if (r.kind === "redeem") { logSystem(r.text || ""); if ($("set-msg")) $("set-msg").textContent = r.text || ""; return; }
   if (r.server_online !== undefined) {
     const b = $("server-badge");
     b.textContent = r.server_online ? "● модель ONLINE" : "○ модель OFFLINE (фоллбэки)";
@@ -933,4 +965,9 @@ $("m-save").onclick = doSave;
 $("ng-start").onclick = startNewGame;
 $("lvl-apply").onclick = applyLevelup;
 $("fac-open").onclick = () => openFactions();
+$("account-btn").onclick = () => { if (ME) openOverlay("settings-ov"); else location.href = "/login"; };
+$("settings-btn").onclick = () => openOverlay("settings-ov");
+$("set-redeem").onclick = () => { const c = $("set-code").value.trim(); if (c) send({ cmd: "redeem", code: c }); };
+$("set-logout").onclick = logout;
+updateAccountBtn();
 connect();

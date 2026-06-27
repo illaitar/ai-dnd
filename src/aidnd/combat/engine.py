@@ -521,6 +521,9 @@ class CombatEngine:
                 self._town_pressure()                        # город: давление времени (стража/бегство)
             cb = cs.combatants.get(cs.current())
             if cb and not cb.fled and self.world.is_alive(cs.current()):
+                if cs.current() in cs.surprised:             # застигнут врасплох — пропускает свой первый ход
+                    cs.surprised.discard(cs.current())
+                    continue
                 break
         cur = cs.current()
         cb = cs.combatants.get(cur)
@@ -651,6 +654,18 @@ class CombatEngine:
                 if g.is_passable(x, y) and (x, y) not in used:
                     return (x, y)
         return (0, 0)
+
+    def place_adjacent(self, a: str, b: str) -> None:
+        """Поставить бойца a вплотную к b (подкрался из тени) — свободная проходимая клетка рядом."""
+        cs = self.state
+        if a not in cs.combatants or b not in cs.combatants:
+            return
+        bx, by = cs.combatants[b].pos
+        occ = cs.occupied(exclude=a)
+        for nx, ny in cs.grid.neighbors(bx, by):
+            if (nx, ny) not in occ:
+                cs.combatants[a].pos = (nx, ny)
+                return
 
     def _party_level(self) -> int:
         st = self.world.ecs.get(self.world.player_id, Stats5e) if self.world.player_id else None

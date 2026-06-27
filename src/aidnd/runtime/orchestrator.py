@@ -369,6 +369,11 @@ class GameSession:
             return self._post(self._dismiss_followers(text), "freeform")  # отпустить ведомого
         if self._is_follow_request(low):                     # «пойдём со мной» → проверка убеждения
             return self._post(self._ask_follow(text), "freeform")
+        if any(k in low for k in ("спрятат", "затаит", "укрыт", "слиться с тен", "прячусь", "крадусь",
+                                  "подкрад", "затаюсь", "в тень")) \
+           and not any(k in low for k in ("напад", "напас", "удар", "бей", "бью", "убей", "убить",
+                                          "заколоть", "протк", "зарежь", "зарез", "руб")):
+            return self._post(self._do_hide(text), "freeform")  # спрятаться → следующий удар из засады
         route = self._route(text)                         # ВСЁ типизированное — через роутер (детерминированы только кнопки-панели)
         # продолжение разговора: при активном собеседнике рядом «расскажи о…/что слышно»
         # (freeform или общий look) — это реплика ему, а не бросок/мировой-запрос
@@ -1724,12 +1729,19 @@ class GameSession:
             parts.append(crowd)
         return {"kind": "narration", "text": "\n\n".join(parts), "view": self.view()}
 
+    _STEALTH_CUES = ("скрытно", "из тени", "из-за спины", "в спину", "незаметно", "исподтишка",
+                     "подкрад", "тайком", "крадучись", "тихо подойд")
+
     def _do_attack(self, action: Action, text: str) -> dict:
         target = action.target or self._match_npc(text)
         here = self.npcs_here()
         enemies = [n for n in here if self._is_hostile(n)]
         if target and target not in enemies and self._is_hostile(target):
             enemies = [target] + [e for e in enemies if e != target]
+        low = text.lower()
+        stealthy = getattr(self, "_hidden", False) or any(k in low for k in self._STEALTH_CUES)
+        if stealthy and target and target in here and not self._is_hostile(target):
+            return self._stealth_strike(target)           # удар из тени по неготовой цели → сюрприз-раунд
         if enemies:
             r = self.start_combat(enemies)
             self._note_town_deed(enemies, innocent=False)  # драка (мог и защищаться) — стража отметит
@@ -1741,6 +1753,42 @@ class GameSession:
         # ни враждебных, ни названной присутствующей цели → НЕ бить случайного соседа/спутника
         return {"kind": "narration", "view": self.view(),
                 "text": "Нападать не на кого — врага рядом нет."}
+
+    def _stealth_strike(self, target: str) -> dict:
+        """Удар из тени: проверка Скрытности vs пассивного Восприятия цели. Успех → застигнут врасплох
+        (пропускает 1-й ход, не убегает) — успеваешь нанести решающий удар."""
+        from ..rules.checks import skill_modifier
+        self._hidden = False
+        stealth = skill_modifier(self.world, self.player, "stealth")
+        passive = 10 + skill_modifier(self.world, target, "perception")
+        roll = self.dice.roll_seeded("skill", "1d20", modifier=stealth, roller=self.player)
+        ok = roll.total >= passive
+        r = dict(self.start_combat([target], surprise=ok))
+        self._note_town_deed([target], innocent=True)
+        if ok:
+            pref = (f"🗡 Ты крадёшься из тени (Скрытность {roll.total} против {passive}) — "
+                    f"{self._display(target)} застигнут врасплох и не успевает среагировать! ")
+        else:
+            pref = (f"⚠ {self._display(target)} замечает тебя в последний миг "
+                    f"(Скрытность {roll.total} против {passive}). ")
+        r["text"] = pref + (r.get("text") or "")
+        return r
+
+    def _do_hide(self, text: str) -> dict:
+        """Спрятаться/подкрасться: проверка Скрытности — успех делает следующий удар ударом из тени."""
+        from ..rules.checks import skill_modifier
+        watchers = [n for n in self.npcs_here() if n != self.player and self.world.is_alive(n)]
+        passive = max((10 + skill_modifier(self.world, n, "perception") for n in watchers), default=10)
+        roll = self.dice.roll_seeded("skill", "1d20", modifier=skill_modifier(self.world, self.player, "stealth"),
+                                     roller=self.player)
+        self._hidden = roll.total >= passive
+        self._tick()
+        if self._hidden:
+            return {"kind": "narration", "view": self.view(),
+                    "text": f"🥷 Ты сливаешься с тенями (Скрытность {roll.total} против {passive}). "
+                            "Следующий удар по неготовому будет из засады."}
+        return {"kind": "narration", "view": self.view(),
+                "text": f"Спрятаться не вышло (Скрытность {roll.total} против {passive}) — ты на виду."}
 
     def _note_town_deed(self, targets: list, innocent: bool) -> None:
         """Заметный поступок в городе → подозрение (если бой городской и есть свидетели-патрули)."""
@@ -1875,7 +1923,7 @@ class GameSession:
             return "городская стража", 8                      # патрулей нет/выбиты — медленнее
         return best[0]["name"], max(2, round(best[1] / 2))    # ~2 перекрёстка в раунд (5с)
 
-    def start_combat(self, enemy_ids: list[str]) -> dict:
+    def start_combat(self, enemy_ids: list[str], surprise: bool = False) -> dict:
         from ..combat import BattleGrid
         from ..content.maps import load_meta
         place = self.current_place()
@@ -1887,6 +1935,9 @@ class GameSession:
                   if (pos := self.world.position(c)) and pos.place_id == place]
         cs = self.combat.start([self.player, *allies], enemy_ids, grid=grid,
                                init_surfaces=(meta or {}).get("surfaces"))
+        if surprise:                                          # удар из тени: враги застигнуты — пропустят 1-й ход
+            cs.surprised = set(enemy_ids)
+            self.combat.place_adjacent(self.player, enemy_ids[0])   # подкрался вплотную
         from ..gen.battlemap import classify  # городской бой → давление времени (стража/бегство)
         p = self.world.spatial.places.get(place)
         cs.town = classify(getattr(p, "kind", "") if p else "",

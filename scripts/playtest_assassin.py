@@ -40,17 +40,44 @@ def roll_out(s):
             break
 
 
-def surprise_stab(s, victim):
-    """Стелс-удар в упор. NB: мирные паникуют и убегают, а у плута офлайн слабый урон — поэтому бьём
-    контрольным наверняка (находка: внятного механизма стелс-убийства/внезапного раунда пока нет)."""
-    cs = s.combat.state
-    s.world.get_stats(victim).hp = 0                          # клинок под рёбра — наверняка
-    cs.combatants[victim].fled = False
-    cs.outcome, cs.mode = "victory", "ended"
-    s._on_combat_end()                                       # → дело об убийстве (kill_*; по факту свидетелей)
+def auto_roll(s):
+    import re
+    g = 0
+    while s.pending_roll and g < 8:
+        g += 1
+        req = s.pending_roll["request"]
+        m = re.match(r"(\d+)d(\d+)", str(getattr(req, "dice", "1d20")).replace(" ", ""))
+        n, sides = (int(m.group(1)), int(m.group(2))) if m else (1, 20)
+        faces = [sides] * (n + (1 if getattr(req, "advantage", False) and sides == 20 else 0))
+        s.submit_roll(faces)
+
+
+def stealth_kill(s, victim):
+    """Реальное убийство: удар из тени → сюрприз-раунд → добиваем в бою (auto-roll)."""
+    s._stealth_strike(victim)                               # стелс → застигнут врасплох (не убегает)
+    for _ in range(6):
+        cs = s.combat.state
+        if cs.mode != "active" or not s.world.is_alive(victim):
+            break
+        if not s.combat.is_pc_turn():
+            s.combat_end_turn()
+            continue
+        cv = s.combat_view()
+        if victim in (cv.get("targets") or []):
+            s.combat_attack(victim)
+            auto_roll(s)
+        elif cv.get("reachable"):
+            vp = [c for c in cv["combatants"] if c["id"] == victim][0]["pos"]
+            s.combat_move(min(cv["reachable"], key=lambda c: abs(c[0] - vp[0]) + abs(c[1] - vp[1])))
+        else:
+            s.combat_end_turn()
+    if s.combat and s.combat.state.mode == "active":        # бой не закрылся сам — засчитать убийство (kill_*)
+        s.combat.state.outcome, s.combat.state.mode = "victory", "ended"
+        s._on_combat_end()
     dead = not s.world.is_alive(victim)
+    out = s.combat.state.outcome if s.combat else "victory"
     s.combat = None
-    return "victory", dead
+    return out, dead
 
 
 def heat(s, tag):
@@ -76,10 +103,11 @@ def a_commoner(s, place, exclude=()):
 def run():
     s = new_session(seed=7, roster_size=16, use_model=False)
     st = s.world.get_stats(s.player)
-    st.cha = 18
-    if "persuasion" not in st.proficient_skills:
-        st.proficient_skills.append("persuasion")
-    print(f"Плут-убийца: CHA {st.cha}, Убеждение проф. | темперамент стражи: {s.world.watch_temperament['label']}")
+    st.cha, st.dex, st.proficiency = 28, 18, 6              # харизматичный смертоносный плут (для плейтеста)
+    for sk in ("persuasion", "stealth"):
+        if sk not in st.proficient_skills:
+            st.proficient_skills.append(sk)
+    print(f"Плут-убийца: CHA {st.cha} (Убеждение проф.+эксперт), Скрытность проф. | стража: {s.world.watch_temperament['label']}")
 
     # выбрать жертву из людей в таверне вечером
     goto_hour(s, 19)
@@ -102,24 +130,22 @@ def run():
     put(s, s.player, spot)
     put(s, victim, spot)
     r = s.handle(f"идём со мной в тёмный угол, {s._display(victim).split()[0]}")
-    roll_out(s)
+    auto_roll(s)                                            # докинуть проверку Убеждения (бустнутый плут)
     per = s.world.ecs.get(victim, Persona)
-    print(f"уговор: {(r.get('text') or '')[:60]}… → следует={per.following}")
+    print(f"уговор: {(r.get('text') or '')[:55]} → следует={per.following}")
     if not per.following:
         per.following = True
-        print("  (убеждение чужака в тёмный угол — DC высокий; для сценария ведём силой)")
+        print("  (не уговорил — для сценария ведём силой)")
 
     # 2) наедине — проверка свидетелей
     put(s, victim, spot)
     others = [n for n in s.npcs_here() if n not in (s.player, victim)]
     print(f"\n[{hh(s)}] «{s._place_name(spot)}» наедине — посторонних: {others or 'нет'} | свидетели(движок)={s._deed_witnessed([victim])}")
 
-    # 3) ПРОТКНУТЬ
-    r = s.handle(f"напасть на {s._display(victim).split()[0]}")
-    print(f"удар: {(r.get('text') or '')[:60]}")
-    if s.combat:
-        out, dead = surprise_stab(s, victim); print(f"  внезапный удар: исход={out} | жертва мертва={dead}")
-    heat(s, "приватное убийство")
+    # 3) ПРОТКНУТЬ из тени (один чистый удар)
+    out, dead = stealth_kill(s, victim)
+    print(f"стелс-удар из тени: исход={out} | жертва мертва={dead}")
+    heat(s, "приватное убийство (NB: тело пока «находят» сразу — это чиним симуляцией ниже)")
 
     # 4) УХОДИТ И БРОДИТ — стража видит подозрительного
     print("\n— уходит, бродит по городу (ставим к стражникам/ратуше) —")
@@ -142,9 +168,7 @@ def run():
     v2 = a_commoner(s, SQUARE)
     wits = [x for x in s.npcs_here() if x not in (s.player, v2)]
     print(f"[{hh(s)}] площадь людно: жертва {s._display(v2)}, зеваки {[s._display(n) for n in wits[:4]]} | свидетели(движок)={s._deed_witnessed([v2])}")
-    s.start_combat([v2])
-    s._note_town_deed([v2], innocent=True)                  # нападение (при свидетелях)
-    out, dead = surprise_stab(s, v2)                         # убийство (при свидетелях)
+    out, dead = stealth_kill(s, v2)                          # убийство при свидетелях (толпа всё видит)
     print(f"  удар при свидетелях: жертва мертва={dead}")
     heat(s, "людное убийство")
     put(s, s.player, "building:townmaster_hall")            # пришёл туда, где стража

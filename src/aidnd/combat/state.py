@@ -60,6 +60,7 @@ class CombatState:
     turn_budget: TurnBudget = field(default_factory=TurnBudget.fresh)
     mode: str = "active"            # active | ended
     outcome: str | None = None      # victory | flee | tpk
+    surprised: set = field(default_factory=set)   # застигнутые врасплох (скрытность) — пропускают 1-й ход
     town: bool = False              # бой в городе → давление времени: стража + бегство (раунд=5с)
     guard_eta: int = 0              # раунд прибытия ближайшего патруля (по расстоянию, не рандом)
     guard_patrol: str = ""          # какой патруль отвечает (имя)

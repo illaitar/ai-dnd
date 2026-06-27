@@ -196,9 +196,10 @@ class GameSession:
                 if p2:
                     p2.following = True
                 self._log_journal(f"{self._display(npc)} согласился пойти с тобой.")
-                line = f"{self._display(npc)}: «Ладно, веди — я за тобой»."
-            else:
-                line = f"{self._display(npc)} мотает головой: «Нет уж, сам ходи»."
+            ctx2 = self.cognition.retrieve(npc, text, self.player)   # реплика в характере (LLM + офлайн-фоллбэк)
+            line = self._strip_leading_name(self._npc_reply(
+                npc, {"action": "agree" if outcome.success else "refuse"}, text,
+                ctx2.rel, not ctx2.memories, self.director.surface_hooks_near(npc)), npc)
             self._tick()
             return {"kind": "narration", "text": f"{outcome.summary} {line}", "npc": npc, "view": self.view()}
 
@@ -738,6 +739,14 @@ class GameSession:
         for comp in movers:                           # спутники И ведомые (уговорённые) идут с игроком
             self.world.commit("set_position", comp, target=comp,
                               payload={"region": "region:phandalin", "place": dest})
+        if self._followers():                         # ведёшь кого-то — стража косится, если патруль рядом (особ. ночью)
+            from ..content.watch import patrol_place, patrols_of
+            hh = int(self.world.clock.hhmm().split(":")[0])
+            if any(patrol_place(p, self.world.clock.tick) == dest for p in patrols_of(self.world)):
+                from ..content.cases import note_deed
+                note_deed(self.world, self.player, "loitering", dest, witnessed=True)
+                lead = (lead + " 🛡 Патруль провожает тебя со спутником долгим взглядом.").strip() \
+                    if hh >= 19 or hh < 6 else lead + " 🛡 Стражники косятся на вас."
         hours = ticks * config.SIM_MINUTES_PER_TICK // 60
         self._log_journal(f"Перешёл в «{self._place_name(dest)}»"
                           + (f" (путь ~{hours} ч)" if region_travel and hours else "") + ".")
@@ -1743,7 +1752,26 @@ class GameSession:
                        for t in targets)
         kind = "attack_townsperson" if innocent else ("assault_guard" if is_guard else "brawl")
         from ..content.cases import note_deed
-        note_deed(self.world, self.player, kind, self.current_place(), witnessed=True)
+        note_deed(self.world, self.player, kind, self.current_place(),
+                  witnessed=self._deed_witnessed(targets))
+
+    def _deed_witnessed(self, targets: list) -> bool:
+        """Кто-нибудь видел дело: патруль на этом месте ИЛИ живой посторонний рядом (не жертва/не игрок).
+
+        Прямой обход позиций (без npcs_here → без побочного применения распорядка во время боя)."""
+        place = self.current_place()
+        from ..content.watch import patrol_place, patrols_of
+        tick = self.world.clock.tick
+        if any(patrol_place(p, tick) == place for p in patrols_of(self.world)):
+            return True
+        tset = set(targets)
+        for n in self.world.npcs():
+            if n == self.player or n in tset or not self.world.is_alive(n):
+                continue
+            pos = self.world.position(n)
+            if pos and pos.place_id == place:
+                return True
+        return False
 
     def _watch_reaction_note(self) -> str:
         """Реакция стражи на подозрение/розыск игрока (жёсткость задаёт характер стражи)."""
@@ -1950,6 +1978,17 @@ class GameSession:
 
     def _on_combat_end(self) -> str:
         cs = self.combat.state
+        if cs.town:                                       # убийство мирного/стражника в городе → дело дознавателей
+            killed = [eid for eid, c in cs.combatants.items()
+                      if c.side == "enemy" and not c.fled and not self.world.is_alive(eid)]
+            for victim in killed:
+                fac = getattr(self.world.ecs.get(victim, Persona), "faction", None)
+                if fac in ("faction:cragmaw", "faction:redbrands"):
+                    continue                              # прикончить бандита — не преступление
+                from ..content.cases import note_deed
+                note_deed(self.world, self.player,
+                          "kill_guard" if fac == "faction:watch" else "kill_townsperson",
+                          self.current_place(), witnessed=self._deed_witnessed([victim]))
         if cs.outcome == "victory" and not cs.guard_intervened:   # зачистка только при реальной победе
             place = self.current_place()
             self.world.commit("set_flag", self.player, payload={"flag": f"cleared:{place}"})
@@ -2735,6 +2774,7 @@ class GameSession:
             "call_guards": f"{name} кричит: «Стража!»",
             "yield": f"{name} поднимает руки: «Не трогай меня!»",
             "refuse": f"{name}: «Нет. И разговор окончен».",
+            "agree": f"{name} кивает: «Ладно, веди — я за тобой».",
             "respond": f"{name} сдержанно кивает: «И тебе не хворать. Чего хотел?»",
         }
         return self._maybe_hook(templates.get(action, templates["respond"]), hooks)

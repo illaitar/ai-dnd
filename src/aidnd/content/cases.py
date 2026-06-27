@@ -27,12 +27,12 @@ TEMPERAMENTS = [
 # тяжесть поступка → прирост подозрения (на свидетелях × 1.4, без — × 0.6)
 DEED_SEV = {
     "attack_townsperson": 0.25, "kill_townsperson": 0.7, "brawl": 0.15,
-    "theft": 0.3, "assault_guard": 0.5, "kill_guard": 0.9,
+    "theft": 0.3, "assault_guard": 0.5, "kill_guard": 0.9, "loitering": 0.08,
 }
 DEED_RU = {
     "attack_townsperson": "нападение на горожанина", "kill_townsperson": "убийство в городе",
     "brawl": "драка на улице", "theft": "кража", "assault_guard": "нападение на стражу",
-    "kill_guard": "убийство стражника",
+    "kill_guard": "убийство стражника", "loitering": "подозрительное поведение",
 }
 
 

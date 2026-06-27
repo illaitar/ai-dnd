@@ -133,6 +133,33 @@ class GameSession:
                 seen.add(lbl)
         return out
 
+    def _roads_text(self) -> str:
+        """Дороги отсюда: записанные/разведанные места — по имени с направлением; неразведанные —
+        просто направление (куда ведёт дорога). Помогает игроку понять, куда можно идти."""
+        from ..world.spatial import DIR_RU
+        sp = self.world.spatial
+        place = self.current_place()
+        recorded = self._recorded_places() | {place}
+        sett = self._settlement_of(place)
+        named, dirs = [], []
+        for d, dest in sp.exits_of(place).items():
+            dr = DIR_RU.get(d, "")
+            if dest in recorded or dest == sett:
+                named.append((f"{dr} — " if dr else "") + f"к «{self._place_name(dest)}»")
+            elif dr:
+                dirs.append(dr)
+        if dirs:
+            named.append("дорог" + ("а" if len(dirs) == 1 else "и") + " — на " + ", ".join(dirs))
+        return "; ".join(named)
+
+    def _parse_direction(self, low: str) -> str | None:
+        """Сторона света из ввода игрока («на восток», «север») → каноническая. None — нет/относительная."""
+        from ..world.spatial import DIR_ALIASES
+        for word, canon in DIR_ALIASES.items():
+            if word in low:
+                return canon
+        return None
+
     def look(self) -> dict:
         place = self.current_place()
         p = self.world.spatial.places.get(place)
@@ -146,6 +173,9 @@ class GameSession:
             text += " Следы: " + "; ".join(p.alterations) + "."
         if actions:
             text += " Можно: " + ", ".join(a["label"] for a in actions) + "."
+        roads = self._roads_text()                         # куда ведут дороги (для ясности навигации)
+        if roads:
+            text += f"\n🧭 Отсюда можно пойти: {roads}."
         return {
             "kind": "look", "text": text,
             "place": place, "place_name": name, "scene": sc.to_dict(),
@@ -473,9 +503,18 @@ class GameSession:
                                                "зайти", "направ", "шага", "топай", "перейти", "go "))
             if not move_verb or any(k in low for k in self._FREEFORM_KW):
                 return self._resolve_freeform(text)        # роутер ошибся / физическое действие → freeform
-            return {"kind": "system", "text": "Куда идти? Доступные выходы: "
-                    + ", ".join(self._place_name(e) for e in self.exits()),
-                    "view": self.view()}
+            d = self._parse_direction(low)                 # «на восток/север» → конкретный выход
+            if d:
+                ex = self.world.spatial.exits_of(self.current_place())
+                dest = ex.get(d)
+            if not dest:                                   # относительное («налево») / неясно → варианты
+                opts = [{"id": e, "name": self._place_name(e)} for e in self.exits()
+                        if e in (self._recorded_places() | {self._settlement_of(self.current_place())})]
+                roads = self._roads_text()
+                return {"kind": "system", "view": self.view(),
+                        "clarify_places": opts or None,
+                        "text": ("Куда пойти? " + roads + "." if roads
+                                 else "Отсюда пока некуда идти — сначала разведай окрестности.")}
         # НЕОДНОЗНАЧНОСТЬ: модель локаций дала 2+ известных места с высокой долей вероятности —
         # не угадываем, а просим уточнить (напр. две таверны). Фронт покажет варианты кнопками.
         opts = self._movement_options(text)
@@ -941,8 +980,19 @@ class GameSession:
 
         return self._suspend(req, resume, f"Проверка {skill} против DC {dc}.")
 
+    _LOOK_CUES = ("осмотрет", "осмотрюсь", "оглядет", "огляж", "оглян", "вокруг", "по сторонам",
+                  "что тут", "что здесь", "что вокруг", "озир")
+    _SEARCH_CUES = ("обыск", "обша", "перер", "пошар", "поша", "искать", "ищу", "поищ", "поиск",
+                    "тайник", "спрятан", "скрыт", "прятал", "потайн", "secret", "hidden", "клад")
+
     def _do_search(self, action: Action, text: str) -> dict:
         place = self.current_place()
+        low = text.lower()
+        # роутер иногда шлёт сюда общий «осмотреться/оглядеться» — это осмотр (нарратор, БЕЗ броска),
+        # а не активный обыск тайников. Реальный поиск — только с поисковым намерением/целью-комнатой.
+        if (any(k in low for k in self._LOOK_CUES) and not any(k in low for k in self._SEARCH_CUES)
+                and self._match_room(place, text) is None):
+            return self._narrate_look()
         room = self._match_room(place, text)          # «обыскать погреб/кабинет» → конкретная комната
         if room is not None:
             return self._search_room(action, text, place, room)

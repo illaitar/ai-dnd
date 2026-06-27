@@ -92,7 +92,11 @@ def drive_combat(s, why):
 
 def go(s, place):
     COVER["moves"] += 1
-    return act(s, f"→ {s._place_name(place)[:16]}", lambda: s.travel_to(place))
+    r = act(s, f"→ {s._place_name(place)[:16]}", lambda: s.travel_to(place))
+    if "не разведал" in (r.get("text") or "") and place != SQUARE:   # площадь смежна со всеми → через неё
+        act(s, "→ площадь (хаб)", lambda: s.travel_to(SQUARE))
+        r = act(s, f"→ {s._place_name(place)[:16]}", lambda: s.travel_to(place))
+    return r
 
 
 def talk(s, line):

@@ -154,6 +154,7 @@ class ModelManager:
         "street_event": (config.BASE_MODEL, "lore"),     # случайное уличное событие в пути (контент)
         "quest_merge": (config.BASE_MODEL, "lore"),       # судья слияния близких объявлений
         "event_quest": (config.BASE_MODEL, "lore"),       # уличная сценка → зацепка-объявление
+        "map_features": (config.BASE_MODEL, "lore"),      # описание локации → фичи боевой карты
         "faction_gen": (config.BASE_MODEL, "lore"),
     }
 

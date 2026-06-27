@@ -1526,12 +1526,46 @@ class GameSession:
     # ===================================================================== #
     #  Бой (мост к CombatEngine)                                            #
     # ===================================================================== #
+    def _battle_desc(self, place: str) -> str:
+        """Текст для извлечения фич карты: имя + проза описания + тип/аффордансы места."""
+        p = self.world.spatial.places.get(place)
+        prose = (getattr(p, "description", "") if p else "") or ""
+        aff = ", ".join(getattr(p, "affordances", []) or []) if p else ""
+        kind = getattr(p, "kind", "") if p else ""
+        return f"{self._place_name(place)}. {prose} (тип: {kind}; аффордансы: {aff})".strip()
+
+    def _battle_features(self, place: str):
+        """Фичи карты из описания (LLM, кэш на сессию). None → дефолты архетипа в генераторе."""
+        cache = self.__dict__.setdefault("_battle_feat_cache", {})
+        if place not in cache:
+            feats = None
+            if self.model is not None:
+                try:
+                    from ..inference.agents import map_features
+                    feats = map_features(self.model, self._battle_desc(place))
+                except Exception:
+                    feats = None
+            cache[place] = feats
+        return cache[place]
+
+    def _battle_grid(self, place: str):
+        """Сгенерировать боевую сетку под место (детерминированно по seed+place; кэш на сессию)."""
+        cache = self.__dict__.setdefault("_battle_grid_cache", {})
+        if place not in cache:
+            from ..gen.battlemap import generate
+            p = self.world.spatial.places.get(place)
+            cache[place] = generate(self.world.seed, place,
+                                    getattr(p, "kind", "") if p else "",
+                                    getattr(p, "affordances", []) if p else [],
+                                    self._place_name(place), self._battle_features(place))
+        return cache[place]
+
     def start_combat(self, enemy_ids: list[str]) -> dict:
         from ..combat import BattleGrid
         from ..content.maps import load_meta
         place = self.current_place()
         meta = load_meta(place)
-        grid = BattleGrid.from_meta(meta) if meta else BattleGrid.empty()
+        grid = BattleGrid.from_meta(meta) if meta else self._battle_grid(place)
         self.combat = CombatEngine(self.world, self.dice, self.model, self.cognition, self.lod)
         # спутники, оказавшиеся рядом, вступают в бой на стороне игрока (не соло против группы)
         allies = [c for c in self._companions()
@@ -1674,7 +1708,8 @@ class GameSession:
         return {
             "round": cs.round, "mode": cs.mode, "outcome": cs.outcome, "turn": cur,
             "is_pc_turn": self.combat.is_pc_turn(),
-            "grid": {"cols": g.cols, "rows": g.rows, "cell": g.cell, "terrain": g.terrain},
+            "grid": {"cols": g.cols, "rows": g.rows, "cell": g.cell, "terrain": g.terrain,
+                     "archetype": getattr(g, "archetype", None)},
             "battlemap": f"/static/maps/{p.battlemap}" if (p and p.battlemap) else None,
             "surfaces": [{"pos": list(cell), "kind": s.kind} for cell, s in cs.surfaces.items()],
             "combatants": combatants, "enemies": self.combat.alive_enemies(),

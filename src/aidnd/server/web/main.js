@@ -916,6 +916,39 @@ function onCombatAction(act) {
     b.classList.toggle("active", b.dataset.act === combatMode));
 }
 
+const TERRAIN_PAL = {                                          // палитра тайлов по архетипу
+  _default: { bg: "#2b2720", wall: "#473d33", edge: "#574a3c", water: "#2d5a78", rubble: "#3a322a",
+              dot: "#5e4f3c", cover: "#7a5a36", cedge: "#a07a4a", high: "#5a5246" },
+  cave:     { bg: "#201d19", wall: "#322a23", edge: "#42382e", water: "#23506e", rubble: "#2e2720",
+              dot: "#4a3f30", cover: "#6a4f2f", cedge: "#8a6a40", high: "#4e463a" },
+  wilds:    { bg: "#262b20", wall: "#36402c", edge: "#46502e", water: "#2d5a78", rubble: "#3a342a",
+              dot: "#5a5030", cover: "#5d6e3a", cedge: "#7a8a48", high: "#4e5240" },
+};
+function drawTerrain(ctx, grid, cell, W, H) {
+  if (!grid || !grid.terrain) { ctx.fillStyle = "#11141a"; ctx.fillRect(0, 0, W, H); return; }
+  const p = TERRAIN_PAL[grid.archetype] || TERRAIN_PAL._default;
+  ctx.fillStyle = p.bg; ctx.fillRect(0, 0, W, H);             // пол — фон
+  for (let y = 0; y < grid.rows; y++) {
+    const row = grid.terrain[y] || "";
+    for (let x = 0; x < grid.cols; x++) {
+      const c = row[x] || ".", px = x * cell, py = y * cell;
+      if (c === "#") { ctx.fillStyle = p.wall; ctx.fillRect(px, py, cell, cell);
+        ctx.strokeStyle = p.edge; ctx.lineWidth = 1; ctx.strokeRect(px + 0.5, py + 0.5, cell - 1, cell - 1); }
+      else if (c === "~") { ctx.fillStyle = p.water; ctx.fillRect(px, py, cell, cell); }
+      else if (c === "^") { ctx.fillStyle = p.rubble; ctx.fillRect(px, py, cell, cell);
+        ctx.fillStyle = p.dot; for (let i = 0; i < 4; i++)
+          ctx.fillRect(px + ((0.2 + 0.22 * i) * cell | 0), py + ((0.25 + 0.18 * (i % 2)) * cell | 0), 2, 2); }
+      else if (c === "o") { const m = cell * 0.17; ctx.fillStyle = p.cover;
+        ctx.fillRect(px + m, py + m, cell - 2 * m, cell - 2 * m);
+        ctx.strokeStyle = p.cedge; ctx.lineWidth = 1.5; ctx.strokeRect(px + m, py + m, cell - 2 * m, cell - 2 * m); }
+      else if (c === "H") { ctx.fillStyle = p.high; ctx.fillRect(px, py, cell, cell);
+        ctx.fillStyle = "rgba(0,0,0,.28)"; ctx.fillRect(px, py + cell - 3, cell, 3); }
+    }
+  }
+  ctx.strokeStyle = "rgba(255,255,255,.045)"; ctx.lineWidth = 1;   // сетка
+  for (let x = 0; x <= grid.cols; x++) { ctx.beginPath(); ctx.moveTo(x * cell, 0); ctx.lineTo(x * cell, H); ctx.stroke(); }
+  for (let y = 0; y <= grid.rows; y++) { ctx.beginPath(); ctx.moveTo(0, y * cell); ctx.lineTo(W, y * cell); ctx.stroke(); }
+}
 function drawBattle(cv) {
   const cv2 = $("battle-canvas");
   if (!cv.grid) { cv2.style.display = "none"; return; }
@@ -930,7 +963,7 @@ function drawBattle(cv) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);                             // рисуем в логических координатах
     ctx.clearRect(0, 0, Wb, Hb);
     if (battleImg && battleImg.complete) ctx.drawImage(battleImg, 0, 0, Wb, Hb);
-    else { ctx.fillStyle = "#11141a"; ctx.fillRect(0, 0, Wb, Hb); }
+    else drawTerrain(ctx, cv.grid, cell, Wb, Hb);                       // нет PNG → рисуем тайлы сгенерированной карты
     // достижимость (ход PC)
     if (cv.is_pc_turn && (combatMode === "move" || combatMode === "select")) {
       ctx.fillStyle = "rgba(95,143,201,.32)";

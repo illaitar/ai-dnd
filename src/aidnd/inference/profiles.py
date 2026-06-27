@@ -22,7 +22,7 @@ _LOCAL_TUNED = {
 _DS_ROLES = ("cognition", "character_gen", "persona_gen", "faction_gen", "lore_keeper",
              "loremaster", "campaign_architect", "campaign_director", "event_director",
              "plausibility", "reflection", "director", "tactician", "merchant", "street_event",
-             "quest_merge", "event_quest")
+             "quest_merge", "event_quest", "map_features")
 
 PROFILES: dict[str, dict] = {
     "deepseek": {"default": _DS},

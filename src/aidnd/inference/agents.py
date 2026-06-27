@@ -287,6 +287,15 @@ PROMPTS = {
         "без высокого фэнтези, без боя, без сюжетных персонажей. Заголовок — 2-4 слова. "
         "Call street_event."
     ),
+    "map_features": (
+        "Из описания локации выпиши предметы/детали, которые станут тактическими элементами боевой "
+        "карты. Для каждого: краткое имя, РОЛЬ и примерное количество. Роли:\n"
+        "  cover — укрытие (мебель, прилавки, лотки, бочки, ящики, телеги, низкие колонны, надгробия);\n"
+        "  water — вода (колодец, фонтан, лужа, корыто, ручей);\n"
+        "  high — возвышение (помост, балкон, алтарь, груда, валун);\n"
+        "  rubble — завалы/щебень/грязь/обломки.\n"
+        "Бери ТОЛЬКО то, что есть в описании; 2-5 элементов. Call map_features."
+    ),
     "event_quest": (
         "Из мимолётной уличной сценки, которую путник видел, сделай маленькую ЗАЦЕПКУ — объявление "
         "для городской доски. Тебе дают сценку и список горожан (id — имя), к кому можно обратиться. "
@@ -525,6 +534,15 @@ SCHEMAS = {
             "title": {"type": "string"},     # общее название подряда
             "framing": {"type": "string"}},  # одна строка-подводка
             "required": ["merge"]},
+    },
+    "map_features": {
+        "name": "map_features",
+        "parameters": {"type": "object", "properties": {
+            "features": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "role": {"type": "string", "enum": ["cover", "water", "high", "rubble"]},
+                "n": {"type": "integer"}}}}},
+            "required": ["features"]},
     },
     "make_lead": {
         "name": "make_lead",
@@ -1001,6 +1019,39 @@ def street_event(manager, settlement: str, frm: str, to: str, time_of_day: str =
         return None
     kind = out.get("kind") if out.get("kind") in ("ambient", "involves") else "ambient"
     return {"kind": kind, "title": out.get("title") or "", "line": line}
+
+
+def map_features(manager, description: str):
+    """Из описания локации → тактические фичи карты [{name, role, n}]. None — нет сервера (дефолты)."""
+    if is_offline(manager):
+        return None
+    sch = SCHEMAS["map_features"]
+    user = (f"Описание локации: {description}\n"
+            f"Выпиши тактические элементы карты (роль cover/water/high/rubble + сколько). Call map_features.")
+    resp = manager.call("map_features",
+                        [{"role": "system", "content": prompt_for("map_features", manager)},
+                         {"role": "user", "content": user}],
+                        schema=sch, options={"temperature": 0})
+    if resp is None:
+        return None
+    raw = extract(resp, sch["name"]) or {}
+    feats = (raw.get("features") or raw.get("items") or raw.get("elements")
+             or raw.get("map_features"))             # база порой кладёт массив под именем функции
+    if not isinstance(feats, list):
+        feats = next((v for v in raw.values() if isinstance(v, list)), [])
+    out = []
+    for f in feats if isinstance(feats, list) else []:
+        if not isinstance(f, dict):
+            continue
+        role = (f.get("role") or f.get("kind") or "").strip().lower()
+        if role not in ("cover", "water", "high", "rubble"):
+            continue
+        try:
+            n = max(1, min(9, int(f.get("n") or f.get("count") or 2)))
+        except (TypeError, ValueError):
+            n = 2
+        out.append({"name": (f.get("name") or "").strip(), "role": role, "n": n})
+    return out or None
 
 
 def event_quest(manager, event_line: str, candidates: list[dict]):

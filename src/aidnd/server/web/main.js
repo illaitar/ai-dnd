@@ -220,6 +220,7 @@ function updateView(v) {
   lastView = v;
   $("place-name").textContent = v.journey ? ("🚶 В пути → " + v.journey.dest_name)   // путь прерван событием
     : (v.place_path || v.place_name || "—");                          // хлебные крошки: Здание → Комната
+  if (v.journey && !$("mapview").classList.contains("hidden")) closeOverlay("mapview");  // событие в пути → из карты
   $("clock").textContent = "🕑 " + (v.time || "—");
   const p = v.player, pr = v.progression;
   const xppct = p.xp_next ? Math.min(100, 100 * p.xp / p.xp_next) : 100;
@@ -252,6 +253,7 @@ function updateView(v) {
     `<div class="jentry">${esc(e)}</div>`).join("") || "<span class='state'>пусто</span>";
   renderConnectivity(v.connectivity);
   renderFactionsPanel(v.factions);
+  if (hasGame) renderQuick();                                          // обновить быстрые кнопки (вкл. «▶ Идти дальше»)
   if (!$("trade").classList.contains("hidden")) renderTrade(v.shop);   // живое обновление при открытом окне
   if (!$("mapview").classList.contains("hidden")) renderMap(v.map_levels);
   if (!$("factionview").classList.contains("hidden")) renderFactionsOverlay(v.factions);
@@ -727,12 +729,15 @@ function clearSelection() { citySel = null; const a = $("map-actions"); if (a) a
 function computeCityOverlay() {                          // записанные места → нумерованные бейджи; текущее → стрелка
   const recorded = new Set((lastView && lastView.map_recorded) || []);
   const cur = lastView && lastView.place;
+  const curName = lastView && lastView.place_name;
   cityBadges = mapHits.filter(h => h.landmark && recorded.has(h.id))
     .map((h, i) => ({ x: h.x, y: h.y, n: i + 1, name: h.name, id: h.id }));
-  const ch = mapHits.find(h => h.id === cur);
-  cityArrow = ch ? { x: ch.x, y: ch.y }
-    : (cityState && cityState.streets.nodes[cityCur]
-      ? { x: cityState.streets.nodes[cityCur][0], y: cityState.streets.nodes[cityCur][1] } : null);
+  const norm = s => String(s || "").replace(/^(building:|place:|room:)/, "");   // гибкий матч места к хиту
+  const ch = mapHits.find(h => h.id === cur)
+    || mapHits.find(h => norm(h.id) === norm(cur))
+    || (curName && mapHits.find(h => h.name === curName));
+  if (ch) cityArrow = { x: ch.x, y: ch.y };               // нашли место → стрелка точно над ним
+  // нет хита (площадь/интерьер/регион) → НЕ прыгаем на фикс-точку старта: сохраняем прошлую позицию
 }
 function drawFx() {
   const fx = $("map-fx"); if (!fx) return; const c = fx.getContext("2d"); c.clearRect(0, 0, fx.width, fx.height);

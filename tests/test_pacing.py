@@ -16,11 +16,14 @@ def _at(s, place):
 
 # --- вероятность темпа (чистая функция режиссёра) -------------------------- #
 def test_pacing_probability_gate_and_ramp():
+    from aidnd.runtime.director import PACING_CAP, QUIET_GATE
     d = _sess().director
-    assert d.pacing_probability("dungeon", 0) == 0.0          # затишья ещё нет
-    assert d.pacing_probability("dungeon", 1) == 0.0          # порог = 2
-    p2, p4, p8 = (d.pacing_probability("dungeon", q) for q in (2, 4, 8))
-    assert 0 < p2 < p4 < p8 <= 0.6                            # растёт и под потолком
+    for q in range(QUIET_GATE):                               # до порога затишья — тишина
+        assert d.pacing_probability("dungeon", q) == 0.0
+    p_lo, p_mid, p_hi = (d.pacing_probability("dungeon", q)
+                         for q in (QUIET_GATE, QUIET_GATE + 1, QUIET_GATE + 5))
+    assert 0 < p_lo < p_mid                                   # после порога растёт
+    assert p_mid <= p_hi <= PACING_CAP                        # дальше упирается в потолок
 
 
 def test_pacing_location_permissiveness_ordering():

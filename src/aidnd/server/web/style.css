@@ -306,9 +306,9 @@ main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }
 .map-tabs .tab { cursor: pointer; padding: 5px 12px; border-radius: 9px; border: 1px solid var(--line2);
   background: var(--panel2); color: var(--ink); font-weight: 500; }
 .map-tabs .tab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-#mapview .ui-box { width: min(860px, 95vw); }
+#mapview .ui-box { width: min(1200px, 96vw); }
 .map-layout { display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch; margin: 12px 0 4px; }
-.map-stage { position: relative; flex: 1 1 440px; min-width: 0; }
+.map-stage { position: relative; flex: 1 1 640px; min-width: 0; }
 .map-stage canvas { position: absolute; top: 0; left: 0; width: 100%; height: auto; border-radius: var(--r); }
 #map-canvas { position: relative; background: #11141a; border: 1px solid var(--line2); }
 /* SVG-город как база карты: лежит над canvas, под FX-оверлеем. pointer-events:auto, чтобы
@@ -325,7 +325,7 @@ main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }
 .inc-desc { color: var(--ink3, #8b94a3); }
 .inc-rumor { color: #b08a3e; }
 .inc-react { color: #c66; }
-.map-legend { flex: 0 0 200px; max-height: 420px; overflow-y: auto;
+.map-legend { flex: 0 0 220px; max-height: 78vh; overflow-y: auto;
   background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
 .map-legend:empty { display: none; }
 .map-legend h4 { margin: 0 0 10px; color: var(--faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; }

@@ -289,6 +289,21 @@ PROMPTS = {
         "без высокого фэнтези, без боя, без сюжетных персонажей. Заголовок — 2-4 слова. "
         "Call street_event."
     ),
+    "event_batch": (
+        "Ты генерируешь ПАЧКУ из множества РАЗНЫХ маленьких событий-моментов для текстовой RPG "
+        "(фронтирный городок Фэндалин и его округа). Тебе дают ВИД события и ОБСТАНОВКУ. Сочини СПИСОК "
+        "непохожих друг на друга вариантов. Каждый пункт: title (2-4 слова), line (2-е лицо ед. ч., "
+        "на «ты», по-русски, 1-2 коротких предложения, заземлённый быт фронтира — без высокого фэнтези, "
+        "без сюжетных/именованных персонажей, без боя и магии; псы/куры/телеги — да, монстры — нет), "
+        "involves (true — момент ВОВЛЕКАЕТ игрока: к нему обращаются/преграждают/просят/цепляют; "
+        "false — он лишь видит со стороны), hostile (РЕДКО true — нападение/грабёж/засада). Виды:\n"
+        "  threat — гнетущий намёк на опасность в логове/глуши (тревога, БЕЗ боя);\n"
+        "  find — намёк, что рядом есть что обыскать/найти;\n"
+        "  company — кто-то в городе подходит к тебе или проходит мимо;\n"
+        "  ambient — атмосфера: погода, время суток, звуки, запах, настроение места;\n"
+        "  street — уличный момент городка, когда идёшь пешком.\n"
+        "Делай варианты РАЗНООБРАЗНЫМИ — не повторяй мотивы. Call event_batch."
+    ),
     "agenda": (
         "Тебе дают ВАЖНОГО жителя фронтирного города (имя, профессия, фракция, черты) и список МЕСТ "
         "города. Придумай его ТАЙНЫЙ ЗАМЫСЕЛ: одна ясная корыстная/амбициозная ЦЕЛЬ (goal, 3-7 слов), "
@@ -365,6 +380,10 @@ _DS_REINFORCE = {
         "именованных персонажей. БЕЗ магии и диковинных тварей (псы, лошади, куры, козы — да; "
         "грифоны/драконы/монстры — нет). ambient — просто видишь со стороны; involves — к тебе "
         "обращаются/преграждают/просят. Большинство — ambient, involves пореже."),
+    "event_batch": (
+        "\n\n[СТРОГО] Верни events — массив из ≥10 РАЗНЫХ пунктов. Каждый line: на русском, во 2-м лице "
+        "ЕД. числа («ты», НЕ «вы»), 1-2 коротких предложения, обыденный фронтир — без пафоса/боя/магии/"
+        "именованных лиц. НЕ повторяй мотивы между пунктами; hostile=true — большая редкость."),
     "npc_ref": (
         "\n\n[СТРОГО] Ответ — только JSON {\"index\": N}, где N — номер из данного списка ПРИСУТСТВУЮЩИХ "
         "или -1. Никаких людей вне списка. Если обращение общее («эй, кто-нибудь», «зал») — -1."),
@@ -551,6 +570,17 @@ SCHEMAS = {
             "title": {"type": "string"},
             "line": {"type": "string"}},     # строка нарратора (2-е лицо, рус.)
             "required": ["kind", "line"]},
+    },
+    "event_batch": {
+        "name": "event_batch",
+        "parameters": {"type": "object", "properties": {
+            "events": {"type": "array", "items": {"type": "object", "properties": {
+                "title": {"type": "string"},
+                "line": {"type": "string"},        # строка нарратора (2-е лицо, рус.)
+                "involves": {"type": "boolean"},   # вовлекает игрока?
+                "hostile": {"type": "boolean"}},   # редко: нападение/грабёж
+                "required": ["line"]}}},
+            "required": ["events"]},
     },
     "npc_ref": {
         "name": "npc_ref",
@@ -1064,6 +1094,30 @@ def street_event(manager, settlement: str, frm: str, to: str, time_of_day: str =
     kind = out.get("kind") if out.get("kind") in ("ambient", "involves") else "ambient"
     return {"kind": kind, "title": out.get("title") or "", "line": line,
             "hostile": bool(out.get("hostile"))}
+
+
+def generate_event_batch(manager, kind: str, setting: str, n: int = 12) -> list:
+    """Пачка РАЗНЫХ событий-моментов одного вида/обстановки за ОДИН вызов — для пред-генерации пула
+    (чтобы в игре не дёргать LLM на каждое событие). Возвращает [{title,line,involves,hostile}]."""
+    if is_offline(manager):
+        return []
+    sch = SCHEMAS["event_batch"]
+    user = (f"Вид события: {kind}. Обстановка: {setting}. "
+            f"Сгенерь {n} РАЗНЫХ непохожих вариантов. Call event_batch.")
+    resp = manager.call("event_batch",
+                        [{"role": "system", "content": prompt_for("event_batch", manager)},
+                         {"role": "user", "content": user}],
+                        schema=sch, options={"temperature": 1.0})
+    if resp is None:
+        return []
+    out = conform_to_schema(extract(resp, sch["name"]), sch["parameters"]) or {}
+    items = []
+    for e in (out.get("events") or []):
+        ln = (e.get("line") or "").strip()
+        if ln:
+            items.append({"title": (e.get("title") or "").strip(), "line": ln,
+                          "involves": bool(e.get("involves")), "hostile": bool(e.get("hostile"))})
+    return items
 
 
 def resolve_npc_ref(manager, player_text: str, candidates: list) -> int:

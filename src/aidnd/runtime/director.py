@@ -19,13 +19,13 @@ MAX_ACTIVE_SIDE = 3
 # длиной затишья (ramp) и режется контекстом — событие лишь там, где обстановка
 # позволяет (вне боя/диалога; гейт quiet<2 = «ещё не застой»).
 AMBIENT_BASE = {
-    "dungeon": 0.16, "site": 0.16, "wilderness": 0.16, "wilds": 0.16,
-    "manor": 0.08, "market": 0.07, "frontier_town": 0.07, "shrine": 0.05,
+    "dungeon": 0.11, "site": 0.11, "wilderness": 0.11, "wilds": 0.11,
+    "manor": 0.05, "market": 0.045, "frontier_town": 0.045, "shrine": 0.03,
 }
 DANGEROUS = {"dungeon", "site", "wilderness", "wilds"}
 SOCIAL = {"market", "frontier_town"}
-QUIET_GATE = 2          # сколько «пустых» битов нужно, прежде чем темп оживает
-PACING_CAP = 0.6        # потолок вероятности за один бит
+QUIET_GATE = 3          # сколько «пустых» битов нужно, прежде чем темп оживает (выше = реже дёргает)
+PACING_CAP = 0.32       # потолок вероятности за один бит
 
 _THREAT = ["Где-то во тьме скрежетнул потревоженный камень — ты здесь не один.",
            "Сквозняк доносит чужой запах: зверь, а может, и кое-что похуже.",
@@ -105,8 +105,8 @@ class Director:
         локация. Безопасные людные места дают мягкие события, опасная глушь — острые."""
         if quiet < QUIET_GATE:
             return 0.0
-        base = AMBIENT_BASE.get(location_type, 0.04)
-        ramp = min(3.0, 1.0 + 0.5 * (quiet - 1))
+        base = AMBIENT_BASE.get(location_type, 0.03)
+        ramp = min(2.0, 1.0 + 0.3 * (quiet - 1))           # медленнее нарастает → реже спам
         return min(PACING_CAP, base * ramp)
 
     def ambient_beat(self, seed: int, tick: int, place_id: str, location_type: str,
@@ -123,9 +123,12 @@ class Director:
         if rng.random() > p:
             return None
         event = self._pick_event(location_type, has_company, rng)
+        pool = getattr(self.world, "event_pool", None)         # пред-генерированный LLM-пул → РАЗНЫЕ строки
+        pooled = pool.draw(event, location_type) if pool else None
         return {"kind": "ambient_event", "event": event, "p": round(p, 3),
                 "location_type": location_type,
-                "text": self._beat_text(event, scene, rng)}
+                "title": (pooled.get("title") if pooled else ""),
+                "text": pooled["line"] if pooled else self._beat_text(event, scene, rng)}
 
     def _pick_event(self, loc: str, has_company: bool, rng: random.Random) -> str:
         if loc in DANGEROUS:

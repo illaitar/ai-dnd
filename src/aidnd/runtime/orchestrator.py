@@ -62,6 +62,11 @@ class GameSession:
         self.discovery = DiscoveryService(world, self.dice, self.charts)
         self.quests = quest_system or QuestSystem(world)
         self.director = Director(world, self.quests, model)
+        from ..content.event_pool import (
+            EventPool,  # пул случайных событий, пред-генерируемый LLM (фон)
+        )
+        world.event_pool = EventPool(model)
+        world.event_pool.prime()                      # завести пред-генерацию пачками (no-op без модели)
         self.combat: CombatEngine | None = None
         self.pending_roll: dict | None = None     # приостановленный ход на бросок
         self.player = world.player_id or "pc:hero"
@@ -389,18 +394,13 @@ class GameSession:
         if self.combat and self.combat.state.mode == "active":
             return {"kind": "combat", "text": "Идёт бой — используй боевые действия.",
                     "view": self.view()}
-        if self._journey:                                 # путь прерван уличным событием — ждём реакции/продолжения
+        if self._journey:                                 # путь прерван уличным событием — «дальше» или свернул
             if self._is_continue(text):
                 return self._post(self._finish_journey(), "move")
-            self._journey["reacted"] = True               # вмешался в событие → мимо не прошёл (зацепки не будет)
+            self._journey = None                          # любое иное действие = свернул с пути → МАРШРУТ СБРОШЕН
             npc = self._match_npc(text)                   # окликнул встречного/присутствующего → разговор
             react = (self._do_talk(Action(actor=self.player, verb="talk", target=npc), text)
                      if npc and npc in self.npcs_here() else self._resolve_freeform(text))
-            if isinstance(react, dict):
-                react = dict(react)
-                react["text"] = ((react.get("text") or "").rstrip()
-                                 + f"\n(Скажи «дальше», чтобы продолжить путь к "
-                                   f"«{self._place_name(self._journey['dest'])}».)")
             return self._post(react, "freeform")
         if self._sign_offer and self._is_record_yes(text):   # «да»/«запиши» на увиденные вывески → на карту
             return self._post(self._record_signs(), "map")
@@ -762,25 +762,19 @@ class GameSession:
         # СЛУЧАЙНОЕ СОБЫТИЕ на перекрёстках (только город): бросок по шагам, ≤1 на маршрут
         if not region_travel and steps >= 2:
             ev = self._roll_street_event(cur, dest, steps)
-            if ev and ev.get("kind") == "involves":       # вовлекает игрока
-                if ev.get("hostile"):                     # враждебная сценка → драка прямо на улице
-                    self._journey = None
-                    thug = self._spawn_street_thug(cur)
-                    res = self.start_combat([thug])
-                    res["text"] = ev["line"] + "\n" + (res.get("text") or "")
-                    return res
+            if ev and ev.get("kind") == "involves" and ev.get("hostile"):   # враждебная сценка → драка на улице
+                self._journey = None
+                thug = self._spawn_street_thug(cur)
+                res = self.start_combat([thug])
+                res["text"] = ev["line"] + "\n" + (res.get("text") or "")
+                return res
+            if ev:                                        # ЛЮБОЕ событие (и ambient) ПРЕРЫВАЕТ путь — выкидывает
                 self._journey = {"dest": dest, "route_ids": route_ids, "event": ev, "reacted": False}
-                return self._present_street_event(ev, dest)
-            if ev:                                        # ambient — вплести в проход; реже мог стать зацепкой
-                lead += " " + ev["line"]
-                lead_title = self._maybe_event_lead(ev, passed=False)
-                if lead_title:
-                    lead += f" (Кажется, за этим что-то кроется — на доске объявлений появилась зацепка «{lead_title}».)"
-            else:                                         # нет уличного события — может встретиться идущий NPC
-                pb = self._roll_passerby(cur)
-                if pb:
-                    self._journey = {"dest": dest, "route_ids": route_ids, "event": pb, "reacted": False}
-                    return {"kind": "narration", "text": pb["line"], "view": self.view()}
+                return self._present_street_event(ev, dest)   # из карты, кнопка «дальше» (иначе маршрут сбросится)
+            pb = self._roll_passerby(cur)                 # нет события — может встретиться идущий NPC
+            if pb:
+                self._journey = {"dest": dest, "route_ids": route_ids, "event": pb, "reacted": False}
+                return {"kind": "narration", "text": pb["line"], "view": self.view()}
         return self._arrive(dest, cur, path, region_travel, ticks, lead, route_ids)
 
     def _arrive(self, dest: str, cur: str, path: list[str], region_travel: bool,
@@ -841,30 +835,23 @@ class GameSession:
         rng = random.Random(subseed(self.world.seed, "street", frm, to, self._street_seq))
         self._street_seq += 1
         from ..content.citypop import crowd_at, event_pressure
-        p = 0.05 * event_pressure(crowd_at(self.world, to))   # людность U-образно: пусто/битком → чаще прерывают
+        p = 0.028 * event_pressure(crowd_at(self.world, to))  # людность U-образно: пусто/битком → чаще прерывают
         fired = any(rng.random() < p for _ in range(max(1, steps - 1)))
         if not fired:
             return None
         return self._gen_street_event(frm, to, rng)
 
     def _gen_street_event(self, frm: str, to: str, rng) -> dict:
-        """Контент события: отдельной LLM-ролью street_event (вид + строка), иначе детерм. таблица."""
-        fname, tname = self._place_name(frm), self._place_name(to)
-        if self.model is not None:
-            try:
-                from ..inference.agents import street_event
-                ev = street_event(self.model, "Фэндалин", fname, tname,
-                                  self.scene_descriptor(), nonce=str(self._street_seq))
-                if ev and (ev.get("line") or "").strip():
-                    kind = ev.get("kind") if ev.get("kind") in ("ambient", "involves") else "ambient"
-                    hostile = bool(ev.get("hostile")) and kind == "involves"
-                    if kind == "involves" and not hostile and rng.random() < 0.18:  # иногда обостряется
-                        hostile = True
-                    return {"kind": kind, "title": ev.get("title") or "", "line": ev["line"].strip(),
-                            "hostile": hostile}
-            except Exception:
-                pass
-        involve = rng.random() < 0.4                       # фоллбэк: вид по броску
+        """Контент события: готовое из ПРЕД-генерированного LLM-пула (без задержки на ход), иначе таблица."""
+        pool = getattr(self.world, "event_pool", None)
+        ev = pool.draw("street", "town") if pool else None
+        if ev:
+            kind = "involves" if ev.get("involves") else "ambient"
+            hostile = bool(ev.get("hostile")) and kind == "involves"
+            if kind == "involves" and not hostile and rng.random() < 0.18:   # иногда обостряется до драки
+                hostile = True
+            return {"kind": kind, "title": ev.get("title") or "", "line": ev["line"], "hostile": hostile}
+        involve = rng.random() < 0.4                       # фоллбэк (пул не прогрет / нет модели): вид по броску
         if involve and rng.random() < 0.25:               # иногда — грабитель (перерастёт в драку)
             return {"kind": "involves", "title": "Грабитель", "hostile": True,
                     "line": "Из подворотни наперерез бросается громила с дубинкой: «Кошелёк, живо!»"}
@@ -883,10 +870,12 @@ class GameSession:
         return tid
 
     def _present_street_event(self, ev: dict, dest: str) -> dict:
-        """Событие-вовлечение: нарратив + приглашение отреагировать или продолжить путь («дальше»)."""
-        text = ev["line"] + (f"\n(Реши, что делать — или скажи «дальше», и продолжишь путь "
-                             f"к «{self._place_name(dest)}».)")
-        return {"kind": "narration", "text": text, "view": self.view()}
+        """Уличное событие прерывает путь: нарратив + кнопка «дальше» (involves — можно и вмешаться)."""
+        dn = self._place_name(dest)
+        tail = (f"\n(Реши, что делать — или скажи «дальше», и продолжишь путь к «{dn}».)"
+                if ev.get("kind") == "involves"
+                else f"\n(Скажи «дальше», чтобы продолжить путь к «{dn}».)")
+        return {"kind": "narration", "text": ev["line"] + tail, "view": self.view()}
 
     def _roll_passerby(self, cur: str) -> dict | None:
         """Встречный на улице: с шансом ~числу идущих кто-то из «в пути» попадается навстречу. Притормаживаем

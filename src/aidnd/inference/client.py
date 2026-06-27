@@ -152,6 +152,7 @@ class ModelManager:
         "plausibility": (config.BASE_MODEL, "validator"),
         "merchant": (config.BASE_MODEL, "lore"),         # торговец: социальный исход торга (числа — движок)
         "street_event": (config.BASE_MODEL, "lore"),     # случайное уличное событие в пути (контент)
+        "event_batch": (config.BASE_MODEL, "lore"),      # пред-генерация пула событий пачками (контент)
         "quest_merge": (config.BASE_MODEL, "lore"),       # судья слияния близких объявлений
         "event_quest": (config.BASE_MODEL, "lore"),       # уличная сценка → зацепка-объявление
         "map_features": (config.BASE_MODEL, "lore"),      # описание локации → фичи боевой карты

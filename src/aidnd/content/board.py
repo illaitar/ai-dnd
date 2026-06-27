@@ -96,6 +96,30 @@ def build_merged_quest(qid: str, a: Quest, b: Quest, title: str, framing: str,
     return q
 
 
+def build_lead_quest(lead: dict, state: str = "offered",
+                     current_stages: list | None = None) -> Quest:
+    """Объявление-зацепка из уличного события: цель — разузнать у выбранного горожанина (TalkedTo)."""
+    qid = lead["id"]
+    obj = lead.get("objective") or "разузнать у горожанина"
+    q = Quest(
+        quest_id=qid, kind="board", title=lead["title"], giver_ref=BOARD_PLACE, state=state,
+        stages=[
+            Stage("do", obj, completion_conditions=[Predicate("TalkedTo", [lead["ask_npc"]])],
+                  next_stages=["turnin"]),
+            Stage("turnin", "вернуться к доске и доложить",
+                  completion_conditions=[Predicate("Flag", [f"turnin:{qid}"])],
+                  on_complete=[{"effect": "complete"}]),
+        ],
+        current_stages=list(current_stages or []),
+        rewards=Rewards(currency={"gp": lead.get("reward_gp", 20)}, xp=80),
+        framing=lead.get("framing", ""), world_bindings=[BOARD_PLACE, lead["ask_npc"]],
+        provenance=Provenance(source="street_lead", generator="board@1.0"))
+    q.req_kind = "lead"
+    q.req_ref = lead["ask_npc"]
+    q.ttl_days = 0
+    return q
+
+
 def register_board_quests(world, quest_system) -> None:
     for q in board_quests():
         quest_system.register(q)

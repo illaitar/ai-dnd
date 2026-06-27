@@ -73,6 +73,9 @@ def serialize_session(session: GameSession, name: str) -> dict:
         "merges": [{**m, "state": session.world.quests[m["id"]].state,    # слияния (+живое состояние подряда)
                     "current_stages": session.world.quests[m["id"]].current_stages}
                    for m in session.merges if m.get("id") in session.world.quests],
+        "event_leads": [{**ld, "state": session.world.quests[ld["id"]].state,   # зацепки из уличных событий
+                         "current_stages": session.world.quests[ld["id"]].current_stages}
+                        for ld in session.event_leads if ld.get("id") in session.world.quests],
         "events": tail, "meta": meta, "main_quest": boot.get("main_quest"),
         "state": capture(session),                       # снапшот обогащения: предметы/персоны/память
     }
@@ -134,6 +137,11 @@ def deserialize_session(d: dict, use_model: bool = True) -> GameSession:
             mq.current_stages = list(m.get("current_stages", []))
             quests.register(mq)
             a.state = b.state = "superseded"
+    for ld in d.get("event_leads", []):                  # зацепки из уличных событий — пересоздать с состоянием
+        if ld.get("id") and ld["id"] not in world.quests:
+            from ..content.board import build_lead_quest
+            quests.register(build_lead_quest(ld, ld.get("state", "offered"),
+                                             ld.get("current_stages", [])))
     for _ in range(20):                                  # догнать стадии квестов: advance НЕ событийный,
         progressed = False                               # реплей флагов сам по себе не двигает current_stages
         for q in list(world.quests.values()):
@@ -151,6 +159,7 @@ def deserialize_session(d: dict, use_model: bool = True) -> GameSession:
     session._quest_entries_seen = len(quests.entries)     # хронику не пересобираем реплеем — берём из сейва
     session.quest_timeline = {k: list(v) for k, v in (d.get("quest_timeline") or {}).items()}
     session.merges = [dict(m) for m in (d.get("merges") or [])]   # слияния уже пересозданы выше
+    session.event_leads = [dict(ld) for ld in (d.get("event_leads") or [])]   # зацепки уже пересозданы выше
     session.boot = {"seed": d["seed"], "roster_size": d["roster_size"],
                     "scenario": d.get("scenario") or default_scenario(),
                     "pc_spec": resolve_pc_spec(d.get("pc_spec")), "baseline": d["baseline"],

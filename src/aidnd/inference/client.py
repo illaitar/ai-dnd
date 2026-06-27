@@ -153,6 +153,7 @@ class ModelManager:
         "merchant": (config.BASE_MODEL, "lore"),         # торговец: социальный исход торга (числа — движок)
         "street_event": (config.BASE_MODEL, "lore"),     # случайное уличное событие в пути (контент)
         "quest_merge": (config.BASE_MODEL, "lore"),       # судья слияния близких объявлений
+        "event_quest": (config.BASE_MODEL, "lore"),       # уличная сценка → зацепка-объявление
         "faction_gen": (config.BASE_MODEL, "lore"),
     }
 

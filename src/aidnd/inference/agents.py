@@ -287,6 +287,13 @@ PROMPTS = {
         "без высокого фэнтези, без боя, без сюжетных персонажей. Заголовок — 2-4 слова. "
         "Call street_event."
     ),
+    "event_quest": (
+        "Из мимолётной уличной сценки, которую путник видел, сделай маленькую ЗАЦЕПКУ — объявление "
+        "для городской доски. Тебе дают сценку и список горожан (id — имя), к кому можно обратиться. "
+        "Придумай: короткое название (3-6 слов), одну строку-подводку (что зацепило), цель (что "
+        "предстоит — разузнать/найти/проверить) и выбери ОДНОГО горожанина из списка, к кому идти за "
+        "сведениями — верни ровно его id. По-русски, быт фронтира, без высокого фэнтези. Call make_lead."
+    ),
     "quest_merge": (
         "Ты решаешь, можно ли ДВА простых городских объявления-задания естественно объединить в "
         "ОДИН подряд. Тебе дают два задания (название + цель + место). Объединяй ТОЛЬКО если это "
@@ -518,6 +525,15 @@ SCHEMAS = {
             "title": {"type": "string"},     # общее название подряда
             "framing": {"type": "string"}},  # одна строка-подводка
             "required": ["merge"]},
+    },
+    "make_lead": {
+        "name": "make_lead",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string"},     # название зацепки
+            "framing": {"type": "string"},   # подводка (что зацепило)
+            "objective": {"type": "string"}, # что сделать
+            "ask_npc": {"type": "string"}},  # id горожанина из списка — к кому идти
+            "required": ["title"]},
     },
     "forge_item": {
         "name": "forge_item",
@@ -985,6 +1001,30 @@ def street_event(manager, settlement: str, frm: str, to: str, time_of_day: str =
         return None
     kind = out.get("kind") if out.get("kind") in ("ambient", "involves") else "ambient"
     return {"kind": kind, "title": out.get("title") or "", "line": line}
+
+
+def event_quest(manager, event_line: str, candidates: list[dict]):
+    """Уличная сценка → зацепка-объявление. {title, framing, objective, ask_npc} или None (офлайн)."""
+    if is_offline(manager):
+        return None
+    sch = SCHEMAS["make_lead"]
+    who = "; ".join(f"{c['id']} — {c['name']}" for c in candidates) or "—"
+    user = (f"Сценка: {event_line}\nГорожане (id — имя): {who}\n"
+            f"Сделай зацепку-объявление и выбери, к кому идти разузнать (его id). Call make_lead.")
+    resp = manager.call("event_quest",
+                        [{"role": "system", "content": prompt_for("event_quest", manager)},
+                         {"role": "user", "content": user}],
+                        schema=sch, options={"temperature": 0.7})
+    if resp is None:
+        return None
+    raw = extract(resp, sch["name"]) or {}                # читаем СЫРО (лояльно): база дрейфит ключи
+    title = (raw.get("title") or raw.get("name") or "").strip()
+    if not title:
+        return None
+    framing = (raw.get("framing") or raw.get("hook") or raw.get("blurb") or "").strip()
+    objective = (raw.get("objective") or raw.get("goal") or raw.get("task") or "").strip()
+    ask = (raw.get("ask_npc") or raw.get("contact") or raw.get("npc") or raw.get("who") or "").strip()
+    return {"title": title, "framing": framing, "objective": objective, "ask_npc": ask}
 
 
 def merge_quests(manager, a_desc: str, b_desc: str):

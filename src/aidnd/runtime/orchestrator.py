@@ -79,6 +79,7 @@ class GameSession:
         self._quest_entries_seen = 0              # сколько структурных событий квестов уже проштамповано
         self.merges: list[dict] = []              # совершённые слияния объявлений (персист; пересоздаём на load)
         self._merge_seen: set = set()             # пары, уже опрошенные на слияние в этой сессии (транзиент)
+        self.event_leads: list[dict] = []         # зацепки из уличных событий → объявления (персист)
         self._toast_log_seen = 0                  # сколько строк журнала квестов уже превращено в тосты
         self._toasts: list[dict] = []             # накопленные тосты-«ачивки» текущего хода (сливаются в send)
         self._main_act: str | None = None         # текущий акт основного сюжета (для детекта перехода)
@@ -196,6 +197,7 @@ class GameSession:
         if self._journey:                                 # путь прерван уличным событием — ждём реакции/продолжения
             if self._is_continue(text):
                 return self._post(self._finish_journey(), "move")
+            self._journey["reacted"] = True               # вмешался в событие → мимо не прошёл (зацепки не будет)
             react = self._resolve_freeform(text)          # отреагировал на событие → нарратор (путь не закрыт)
             if isinstance(react, dict):
                 react = dict(react)
@@ -543,10 +545,13 @@ class GameSession:
         if not region_travel and steps >= 2:
             ev = self._roll_street_event(cur, dest, steps)
             if ev and ev.get("kind") == "involves":       # вовлекает игрока → пауза ДО прихода
-                self._journey = {"dest": dest, "route_ids": route_ids}
+                self._journey = {"dest": dest, "route_ids": route_ids, "event": ev, "reacted": False}
                 return self._present_street_event(ev, dest)
-            if ev:                                        # ambient — вплести в проход
+            if ev:                                        # ambient — вплести в проход; реже мог стать зацепкой
                 lead += " " + ev["line"]
+                lead_title = self._maybe_event_lead(ev, passed=False)
+                if lead_title:
+                    lead += f" (Кажется, за этим что-то кроется — на доске объявлений появилась зацепка «{lead_title}».)"
         return self._arrive(dest, cur, path, region_travel, ticks, lead, route_ids)
 
     def _arrive(self, dest: str, cur: str, path: list[str], region_travel: bool,
@@ -637,6 +642,10 @@ class GameSession:
             return self.look()
         ticks, region_travel = self._travel_cost(path)
         lead = f"Ты продолжаешь путь и доходишь до «{self._place_name(dest)}»."
+        if not j.get("reacted"):                          # прошёл мимо события → могло стать зацепкой
+            lt = self._maybe_event_lead(j.get("event"), passed=True)
+            if lt:
+                lead += f" (Ты так и не вмешался — но на доске объявлений уже висит зацепка «{lt}».)"
         return self._arrive(dest, cur, path, region_travel, ticks, lead, j.get("route_ids") or [])
 
     _CONTINUE_KW = ("дальше", "идти дальше", "иду дальше", "идём дальше", "идем дальше",
@@ -645,6 +654,55 @@ class GameSession:
     def _is_continue(self, text: str) -> bool:
         low = text.strip().lower().rstrip(".!")
         return any(low == k or low.startswith(k + " ") for k in self._CONTINUE_KW)
+
+    # --- уличное событие → зацепка-объявление (особенно то, мимо чего прошёл) -------------- #
+    def _lead_candidates(self, k: int = 4) -> list[dict]:
+        """Несколько живых горожан с именами — к кому можно пойти разузнать по зацепке."""
+        out = []
+        for npc in self.world.npcs():
+            if not self.world.is_alive(npc):
+                continue
+            p = self.world.ecs.get(npc, Persona)
+            if p and getattr(p, "name", "") and not getattr(p, "companion", False):
+                out.append({"id": npc, "name": p.name})
+            if len(out) >= k:
+                break
+        return out
+
+    def _register_event_lead(self, lead: dict) -> None:
+        """Зарегистрировать объявление-зацепку (цель: разузнать у выбранного горожанина)."""
+        if not lead.get("objective"):
+            lead["objective"] = f"разузнать у {self._display(lead['ask_npc'])}"
+        from ..content.board import build_lead_quest
+        self.quests.register(build_lead_quest(lead))
+
+    def _maybe_event_lead(self, ev: dict | None, passed: bool) -> str | None:
+        """Уличная сценка с некоторой вероятностью становится зацепкой-объявлением (LLM придумывает,
+        к кому идти). Выше шанс у событий, мимо которых игрок прошёл (passed)."""
+        if self.model is None or not ev:
+            return None
+        import random
+
+        from ..gen.seeds import subseed
+        rng = random.Random(subseed(self.world.seed, "lead", str(ev.get("title", "")), self._street_seq))
+        if rng.random() >= (0.30 if passed else 0.12):
+            return None
+        cands = self._lead_candidates()
+        if not cands:
+            return None
+        from ..inference.agents import event_quest
+        out = event_quest(self.model, ev.get("line") or ev.get("title") or "", cands)
+        if not out or not out.get("title"):
+            return None
+        ask = out.get("ask_npc") or ""
+        if ask not in {c["id"] for c in cands}:           # невалидный id → первый кандидат
+            ask = cands[0]["id"]
+        qid = f"quest:lead_{self.world.clock.tick}_{self._street_seq}"
+        lead = {"id": qid, "title": out["title"], "framing": out.get("framing", ""),
+                "objective": out.get("objective", ""), "ask_npc": ask, "reward_gp": 20}
+        self._register_event_lead(lead)
+        self.event_leads.append(lead)
+        return out["title"]
 
     # стоимость пути: шаг по городу дёшев, дикие земли — часы и риск (док §3.4)
     _DANGER_FACTOR = {"высокая": 1.4, "смертельная": 1.8}

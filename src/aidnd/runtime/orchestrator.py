@@ -97,12 +97,19 @@ class GameSession:
     def npcs_here(self) -> list[str]:
         self._apply_schedules()                           # расставить NPC по времени суток перед опросом присутствия
         place = self.current_place()
+        transits = getattr(self.world, "transits", None) or {}   # «в пути» — на улице, не на месте
         out = []
         for npc in self.world.npcs():
             pos = self.world.position(npc)
-            if pos and pos.place_id == place and self.world.is_alive(npc):
+            if pos and pos.place_id == place and self.world.is_alive(npc) and npc not in transits:
                 out.append(npc)
         return out
+
+    def _transit_ticks(self, frm: str | None, to: str | None) -> int:
+        """Сколько тиков идти между местами по улицам (1-4 — короткие городские переходы)."""
+        if not frm or not to or frm == to:
+            return 1
+        return max(1, min(4, (self.world.spatial.hops_between(frm, to) or 1) * 2))
 
     def _apply_schedules(self) -> None:
         """Расставить NPC по их распорядку на текущее время суток (детерминированно, раз на тик).
@@ -118,23 +125,39 @@ class GameSession:
         from ..content.agency import active_place
         from ..lod.smart_objects import block_at
         from ..world.components import Schedule
+        if not hasattr(self.world, "transits") or self.world.transits is None:
+            self.world.transits = {}
         hhmm = self.world.clock.hhmm()
         for npc in self.world.npcs():
             if npc == self.player or npc == self.dialogue_partner or not self.world.is_alive(npc):
                 continue
             per = self.world.ecs.get(npc, Persona)
             if per and (per.companion or getattr(per, "following", False)):
-                continue                                  # идут с игроком — не по расписанию
-            target = active_place(self.world, npc)        # важный деятель — по СВОЕМУ плану, не по рутине
+                self.world.transits.pop(npc, None)        # идут с игроком — не по расписанию
+                continue
+            target = active_place(self.world, npc)        # важный деятель — по СВОЕМУ плану
+            if not target and getattr(self.world, "citypop", None):
+                target = self.world.citypop.target_of(npc)   # рядовой горожанин — по нуждам ABM (а не по блокам)
             if not target:
-                blk = block_at(self.world.ecs.get(npc, Schedule), hhmm)
+                blk = block_at(self.world.ecs.get(npc, Schedule), hhmm)   # стража и пр. без ABM — фолбэк-расписание
                 if not blk:
                     continue
                 target = blk.place
             pos = self.world.position(npc)
-            if not pos or pos.place_id != target:
-                self.world.commit("set_position", "schedule", target=npc,
-                                  payload={"region": "region:phandalin", "place": target})
+            cur_pl = pos.place_id if pos else None
+            tr = self.world.transits.get(npc)
+            if tr:                                        # уже В ПУТИ
+                if tick >= tr["arrive"]:                  # дошёл до места
+                    self.world.commit("set_position", "schedule", target=npc,
+                                      payload={"region": "region:phandalin", "place": tr["to"]})
+                    self.world.transits.pop(npc, None)
+                elif tr["to"] != target:                  # цель сменилась в пути → перенаправить
+                    tr["to"] = target
+                    tr["arrive"] = tick + self._transit_ticks(cur_pl, target)
+                continue
+            if cur_pl != target:                          # пора идти → ОТПРАВИТЬ В ПУТЬ (не телепорт)
+                self.world.transits[npc] = {"to": target, "from": cur_pl,
+                                            "arrive": tick + self._transit_ticks(cur_pl, target)}
         from ..content.cases import discover_corpses  # тела находят, когда кто-то проходит мимо
         for c in discover_corpses(self.world):
             who = "Патруль" if c.get("by_patrol") else "Прохожий"
@@ -370,7 +393,9 @@ class GameSession:
             if self._is_continue(text):
                 return self._post(self._finish_journey(), "move")
             self._journey["reacted"] = True               # вмешался в событие → мимо не прошёл (зацепки не будет)
-            react = self._resolve_freeform(text)          # отреагировал на событие → нарратор (путь не закрыт)
+            npc = self._match_npc(text)                   # окликнул встречного/присутствующего → разговор
+            react = (self._do_talk(Action(actor=self.player, verb="talk", target=npc), text)
+                     if npc and npc in self.npcs_here() else self._resolve_freeform(text))
             if isinstance(react, dict):
                 react = dict(react)
                 react["text"] = ((react.get("text") or "").rstrip()
@@ -751,6 +776,11 @@ class GameSession:
                 lead_title = self._maybe_event_lead(ev, passed=False)
                 if lead_title:
                     lead += f" (Кажется, за этим что-то кроется — на доске объявлений появилась зацепка «{lead_title}».)"
+            else:                                         # нет уличного события — может встретиться идущий NPC
+                pb = self._roll_passerby(cur)
+                if pb:
+                    self._journey = {"dest": dest, "route_ids": route_ids, "event": pb, "reacted": False}
+                    return {"kind": "narration", "text": pb["line"], "view": self.view()}
         return self._arrive(dest, cur, path, region_travel, ticks, lead, route_ids)
 
     def _arrive(self, dest: str, cur: str, path: list[str], region_travel: bool,
@@ -857,6 +887,29 @@ class GameSession:
         text = ev["line"] + (f"\n(Реши, что делать — или скажи «дальше», и продолжишь путь "
                              f"к «{self._place_name(dest)}».)")
         return {"kind": "narration", "text": text, "view": self.view()}
+
+    def _roll_passerby(self, cur: str) -> dict | None:
+        """Встречный на улице: с шансом ~числу идущих кто-то из «в пути» попадается навстречу. Притормаживаем
+        его транзит и ставим к игроку (на cur), чтобы можно было окликнуть и заговорить."""
+        import random
+        transits = getattr(self.world, "transits", None) or {}
+        out = sorted(n for n in transits if self.world.is_alive(n))
+        if not out:
+            return None
+        from ..gen.seeds import subseed
+        rng = random.Random(subseed(self.world.seed, "passerby", cur, self._street_seq))
+        self._street_seq += 1
+        if rng.random() > min(0.6, 0.12 * len(out)):       # экстремумы людности уже учтены в самих транзитах
+            return None
+        npc = rng.choice(out)
+        to = transits[npc].get("to")
+        self.world.transits.pop(npc, None)                 # притормозил поболтать
+        self.world.commit("set_position", "passerby", target=npc,
+                          payload={"region": "region:phandalin", "place": cur})
+        where = self._place_name(to) if to else "по своим делам"
+        return {"kind": "passerby", "npc": npc,
+                "line": f"Навстречу по улице спешит {self._display(npc)}, держа путь к «{where}». "
+                        "Окликнуть (назови по имени) — или скажи «дальше», и пойдёшь своей дорогой."}
 
     def _finish_journey(self) -> dict:
         """Продолжить прерванный событием путь — дойти до цели."""

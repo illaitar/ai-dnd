@@ -53,6 +53,12 @@ DEEPSEEK_MODEL: str = os.environ.get("AIDND_DEEPSEEK_MODEL", "deepseek-chat")
 # параллельность enrich: облако (network-bound) параллелим, локальная Ollama — нет (своп на 1 GPU)
 DEEPSEEK_CONCURRENCY: int = int(os.environ.get("AIDND_DEEPSEEK_CONCURRENCY", "8"))
 
+# --- сервис: БД пользователей/сессий/игр (Postgres, async) + auth ---
+DATABASE_URL: str = os.environ.get("AIDND_DATABASE_URL", "postgresql+asyncpg://localhost/aidnd_dev")
+SESSION_TTL_DAYS: int = int(os.environ.get("AIDND_SESSION_TTL_DAYS", "30"))
+GOOGLE_CLIENT_ID: str = os.environ.get("AIDND_GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET: str = os.environ.get("AIDND_GOOGLE_CLIENT_SECRET", "")
+
 KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
 HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))
 

@@ -151,6 +151,7 @@ class ModelManager:
         "quest_writer": (config.QUEST_MODEL, "quest"),   # дообученная модель (см. training/)
         "plausibility": (config.BASE_MODEL, "validator"),
         "merchant": (config.BASE_MODEL, "lore"),         # торговец: социальный исход торга (числа — движок)
+        "street_event": (config.BASE_MODEL, "lore"),     # случайное уличное событие в пути (контент)
         "faction_gen": (config.BASE_MODEL, "lore"),
     }
 

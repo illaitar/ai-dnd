@@ -183,7 +183,8 @@ function render(r) {
 
 function updateView(v) {
   lastView = v;
-  $("place-name").textContent = v.place_path || v.place_name || "—";   // хлебные крошки: Здание → Комната
+  $("place-name").textContent = v.journey ? ("🚶 В пути → " + v.journey.dest_name)   // путь прерван событием
+    : (v.place_path || v.place_name || "—");                          // хлебные крошки: Здание → Комната
   $("clock").textContent = "🕑 " + (v.time || "—");
   const p = v.player, pr = v.progression;
   const xppct = p.xp_next ? Math.min(100, 100 * p.xp / p.xp_next) : 100;
@@ -336,8 +337,10 @@ function renderNpcs(npcs) {
   bindChips();
 }
 function renderQuick() {
+  const jr = (lastView && lastView.journey)                          // путь прерван событием → продолжить
+    ? `<span class="chip cont" data-cmd="дальше">▶ Идти дальше</span>` : "";
   const cmds = [["осмотреться", "осмотреться"], ["обыскать", "обыскать комнату"], ["ждать", "ждать"]];
-  $("quick").innerHTML = cmds.map(([l, c]) => `<span class="chip" data-cmd="${c}">${l}</span>`).join("")
+  $("quick").innerHTML = jr + cmds.map(([l, c]) => `<span class="chip" data-cmd="${c}">${l}</span>`).join("")
     + `<span class="chip" data-open="inv">🎒 инвентарь</span>`
     + `<span class="chip" data-open="mapview">🗺 карта</span>`
     + `<span class="chip" data-open="trade">🛒 лавка</span>`

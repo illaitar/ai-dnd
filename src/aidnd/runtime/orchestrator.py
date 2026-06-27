@@ -70,6 +70,8 @@ class GameSession:
         self._haggle: dict | None = None          # активный торг: оффер + цены (см. _do_trade)
         self._sign_offer: list = []               # увиденные вывески, ждущие записи на карту (живут 1 ход)
         self._citygraph = False                    # CityGraph (перекрёстки+дома) — лениво, см. _city_graph()
+        self._journey: dict | None = None          # путь по городу прерван событием-вовлечением (пауза до прихода)
+        self._street_seq = 0                       # счётчик ходьбы — энтропия бросков уличных событий
         self._history: list[dict] = []            # последние ходы (ввод/ответ) — контекст для роутера
         self.journal: list[str] = []              # журнал событий игрока (read-model)
         self._quest_log_seen = 0                  # сколько строк журнала квестов уже втянуто
@@ -187,6 +189,16 @@ class GameSession:
         if self.combat and self.combat.state.mode == "active":
             return {"kind": "combat", "text": "Идёт бой — используй боевые действия.",
                     "view": self.view()}
+        if self._journey:                                 # путь прерван уличным событием — ждём реакции/продолжения
+            if self._is_continue(text):
+                return self._post(self._finish_journey(), "move")
+            react = self._resolve_freeform(text)          # отреагировал на событие → нарратор (путь не закрыт)
+            if isinstance(react, dict):
+                react = dict(react)
+                react["text"] = ((react.get("text") or "").rstrip()
+                                 + f"\n(Скажи «дальше», чтобы продолжить путь к "
+                                   f"«{self._place_name(self._journey['dest'])}».)")
+            return self._post(react, "freeform")
         if self._sign_offer and self._is_record_yes(text):   # «да»/«запиши» на увиденные вывески → на карту
             return self._post(self._record_signs(), "map")
         self._sign_offer = []                             # не отреагировал на прошлые вывески → забыл
@@ -447,6 +459,7 @@ class GameSession:
     # ===================================================================== #
     def _do_move(self, action: Action, text: str) -> dict:
         self._haggle = None                               # уход прерывает торг
+        self._journey = None                              # новый ход отменяет прерванный путь
         dest = self._match_place(text)
         if not dest:
             low = text.lower()                            # локация не распознана
@@ -503,23 +516,7 @@ class GameSession:
                         "text": f"Дальше путь к «{self._place_name(dest)}» преграждает запертая "
                                 f"дверь — её откроет лишь зачистка «{self._place_name(guard)}»."}
         ticks, region_travel = self._travel_cost(path)
-        self.world.commit("set_position", self.player, target=self.player,
-                          payload={"region": "region:phandalin", "place": dest})
-        for comp in self._companions():               # спутники идут с игроком
-            self.world.commit("set_position", comp, target=comp,
-                              payload={"region": "region:phandalin", "place": dest})
-        hours = ticks * config.SIM_MINUTES_PER_TICK // 60
-        self._log_journal(f"Перешёл в «{self._place_name(dest)}»"
-                          + (f" (путь ~{hours} ч)" if region_travel and hours else "") + ".")
-        self._record_explored(dest)
-        for pid in path:                                  # туман подземелья: открыть пройденные комнаты
-            if self._dungeon_of(pid):
-                self.world.commit("set_flag", self.player, payload={"flag": f"dseen:{pid}"})
-        self.world.commit("interest", self.player, payload={"place": dest, "amount": 1})  # частые визиты ↑ важность
-        debunked = self._verify_map_here(dest)        # сверка купленных наводок с реальностью
-        self._tick(ticks)
-        look = self.look()
-        # CityGraph: проход по улицам — сколько перекрёстков и какие вывески встретились по пути
+        # CityGraph: маршрут улицами — перекрёстки + вывески по пути (до фактического прихода)
         route_ids, steps = [], 0
         g = self._city_graph()
         if g and not region_travel:
@@ -538,10 +535,112 @@ class GameSession:
                 lead = f"Ты направляешься в «{self._place_name(dest)}»."
                 if steps > 1:                             # «много шагов от точки до точки» по улицам
                     lead += f" Минуешь {steps} перекрёстков узкими улицами Фэндалина."
+        # СЛУЧАЙНОЕ СОБЫТИЕ на перекрёстках (только город): бросок по шагам, ≤1 на маршрут
+        if not region_travel and steps >= 2:
+            ev = self._roll_street_event(cur, dest, steps)
+            if ev and ev.get("kind") == "involves":       # вовлекает игрока → пауза ДО прихода
+                self._journey = {"dest": dest, "route_ids": route_ids}
+                return self._present_street_event(ev, dest)
+            if ev:                                        # ambient — вплести в проход
+                lead += " " + ev["line"]
+        return self._arrive(dest, cur, path, region_travel, ticks, lead, route_ids)
+
+    def _arrive(self, dest: str, cur: str, path: list[str], region_travel: bool,
+                ticks: int, lead: str, route_ids: list[str]) -> dict:
+        """Фактический приход в dest: позиция, спутники, журнал, разведка, туман, тик, нарратив, вывески."""
+        self.world.commit("set_position", self.player, target=self.player,
+                          payload={"region": "region:phandalin", "place": dest})
+        for comp in self._companions():               # спутники идут с игроком
+            self.world.commit("set_position", comp, target=comp,
+                              payload={"region": "region:phandalin", "place": dest})
+        hours = ticks * config.SIM_MINUTES_PER_TICK // 60
+        self._log_journal(f"Перешёл в «{self._place_name(dest)}»"
+                          + (f" (путь ~{hours} ч)" if region_travel and hours else "") + ".")
+        self._record_explored(dest)
+        for pid in path:                                  # туман подземелья: открыть пройденные комнаты
+            if self._dungeon_of(pid):
+                self.world.commit("set_flag", self.player, payload={"flag": f"dseen:{pid}"})
+        self.world.commit("interest", self.player, payload={"place": dest, "amount": 1})  # частые визиты ↑ важность
+        debunked = self._verify_map_here(dest)        # сверка купленных наводок с реальностью
+        self._tick(ticks)
+        look = self.look()
         look["text"] = lead + " " + look["text"]
         if debunked:
             look["text"] += "\n⚠ Сведения об этом месте оказались ложными!"
         return self._offer_signs(look, extra=route_ids)   # вывески по пути + ближайшие вокруг
+
+    # --- случайные события на перекрёстках (в пути по городу) ---------------------------- #
+    _STREET_AMBIENT = [
+        ("Перебранка", "Двое горожан бранятся из-за мешка зерна — ты обходишь их стороной."),
+        ("Бродячий пёс", "Тощий пёс трусит за тобой пару шагов и сворачивает в проулок."),
+        ("Лоток с пирогами", "Торговка зазывает горячими пирогами, но ты идёшь дальше."),
+        ("Пьянчуга", "У стены клюёт носом пьянчуга, бормоча себе под нос."),
+        ("Детвора", "Стайка ребятни с хохотом гоняет обруч через дорогу."),
+        ("Скрип телеги", "Гружёная телега кренится в колее, возница бранит лошадь."),
+    ]
+    _STREET_INVOLVE = [
+        ("Попрошайка", "Оборванный попрошайка цепляет тебя за рукав: «Медяк, господин? Хоть медяк…»"),
+        ("Зазывала", "Дорогу заступает зазывала: «Эй, новенький? Загляни к нам — не пожалеешь!»"),
+        ("Стражник", "Стражник меряет тебя взглядом: «Лицо новое. По делу в городе?»"),
+        ("Записка", "Чумазый мальчишка суёт тебе смятую записку и тут же ныряет в толпу."),
+    ]
+
+    def _roll_street_event(self, frm: str, to: str, steps: int) -> dict | None:
+        """Бросок уличного события: КАЖДЫЙ шаг (перекрёсток) — свой шанс; берём первое сработавшее.
+        Триггер детерминирован (seed+маршрут+счётчик ходьбы); события чисто нарративные, мир не мутируют."""
+        import random
+
+        from ..gen.seeds import subseed
+        rng = random.Random(subseed(self.world.seed, "street", frm, to, self._street_seq))
+        self._street_seq += 1
+        p = 0.05                                          # шанс события на один перекрёсток
+        fired = any(rng.random() < p for _ in range(max(1, steps - 1)))
+        if not fired:
+            return None
+        return self._gen_street_event(frm, to, rng)
+
+    def _gen_street_event(self, frm: str, to: str, rng) -> dict:
+        """Контент события: отдельной LLM-ролью street_event (вид + строка), иначе детерм. таблица."""
+        fname, tname = self._place_name(frm), self._place_name(to)
+        if self.model is not None:
+            try:
+                from ..inference.agents import street_event
+                ev = street_event(self.model, "Фэндалин", fname, tname,
+                                  self.scene_descriptor(), nonce=str(self._street_seq))
+                if ev and (ev.get("line") or "").strip():
+                    kind = ev.get("kind") if ev.get("kind") in ("ambient", "involves") else "ambient"
+                    return {"kind": kind, "title": ev.get("title") or "", "line": ev["line"].strip()}
+            except Exception:
+                pass
+        involve = rng.random() < 0.4                       # фоллбэк: вид по броску
+        table = self._STREET_INVOLVE if involve else self._STREET_AMBIENT
+        title, line = table[rng.randrange(len(table))]
+        return {"kind": "involves" if involve else "ambient", "title": title, "line": line}
+
+    def _present_street_event(self, ev: dict, dest: str) -> dict:
+        """Событие-вовлечение: нарратив + приглашение отреагировать или продолжить путь («дальше»)."""
+        text = ev["line"] + (f"\n(Реши, что делать — или скажи «дальше», и продолжишь путь "
+                             f"к «{self._place_name(dest)}».)")
+        return {"kind": "narration", "text": text, "view": self.view()}
+
+    def _finish_journey(self) -> dict:
+        """Продолжить прерванный событием путь — дойти до цели."""
+        j, self._journey = self._journey, None
+        dest = j["dest"]
+        cur = self.current_place()
+        path = self.world.spatial.path_between(cur, dest)
+        if not path:
+            return self.look()
+        ticks, region_travel = self._travel_cost(path)
+        lead = f"Ты продолжаешь путь и доходишь до «{self._place_name(dest)}»."
+        return self._arrive(dest, cur, path, region_travel, ticks, lead, j.get("route_ids") or [])
+
+    _CONTINUE_KW = ("дальше", "идти дальше", "иду дальше", "идём дальше", "идем дальше",
+                    "продолжить", "продолжай", "продолжаю", "далее", "go on", "continue")
+
+    def _is_continue(self, text: str) -> bool:
+        low = text.strip().lower().rstrip(".!")
+        return any(low == k or low.startswith(k + " ") for k in self._CONTINUE_KW)
 
     # стоимость пути: шаг по городу дёшев, дикие земли — часы и риск (док §3.4)
     _DANGER_FACTOR = {"высокая": 1.4, "смертельная": 1.8}
@@ -3773,6 +3872,8 @@ class GameSession:
             "place": place, "place_name": self._place_name(place),
             "place_path": self._place_path(place),
             "map_recorded": sorted(self._recorded_places()),   # записанные места — фронт метит их на city-SVG
+            "journey": ({"dest_name": self._place_name(self._journey["dest"])}
+                        if self._journey else None),           # путь прерван событием → индикатор «в пути»
             "seed": self.world.seed,
             "time": self.world.clock.hhmm(),
             "game_over": self.is_game_over(),

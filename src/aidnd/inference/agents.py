@@ -274,6 +274,19 @@ PROMPTS = {
         "актов тот же: objective + ctype+ref ('kill'/'clear'/'talk'/'item') + опц. twist. Только "
         "РЕАЛЬНЫЕ id из состояния — ничего не выдумывай. Output ONLY JSON via forge_campaign."
     ),
+    "street_event": (
+        "Ты придумываешь ОДНО маленькое случайное уличное событие, которое встречает путник, идя "
+        "пешком между зданиями фронтирного городка (Фэндалин). Тебе дают город, откуда и куда идёт "
+        "игрок и время суток. Сочини короткий ЗАЗЕМЛЁННЫЙ уличный момент — перебранка, зазывала, "
+        "бродячий пёс, пьянчуга, детвора, телега, попрошайка, патруль, карманник, дурная примета. "
+        "Классифицируй вид события:\n"
+        "  ambient — игрок лишь ВИДИТ это со стороны, вмешательство не требуется;\n"
+        "  involves — это ВОВЛЕКАЕТ игрока: к нему обращаются, преграждают путь, просят, цепляют, "
+        "предлагают.\n"
+        "Напиши ОДНУ живую строку (2-е лицо ед. ч., на «ты», по-русски, 1-2 коротких предложения), быт фронтира — "
+        "без высокого фэнтези, без боя, без сюжетных персонажей. Заголовок — 2-4 слова. "
+        "Call street_event."
+    ),
 }
 
 # --- бэкенд-специфичные промпты: база + усиление под конкретный провайдер -------------- #
@@ -301,6 +314,12 @@ _DS_REINFORCE = {
         "\n\n[СТРОГО] Реплика — на русском, в голосе торговца, 1-2 коротких фразы, БЕЗ точных чисел "
         "(их подставит движок). Жадный/расчётливый — почти не уступает или refuse; добродушный — "
         "охотнее. Наглый лоу-болл/грубость/затянутый торг → refuse."),
+    "street_event": (
+        "\n\n[СТРОГО] На русском, во 2-м лице ЕД. числа (на «ты», НЕ «вы»), 1-2 коротких "
+        "предложения, обыденный фронтирный городок — без пафоса, без боя, без сюжетных/"
+        "именованных персонажей. БЕЗ магии и диковинных тварей (псы, лошади, куры, козы — да; "
+        "грифоны/драконы/монстры — нет). ambient — просто видишь со стороны; involves — к тебе "
+        "обращаются/преграждают/просят. Большинство — ambient, involves пореже."),
     "router": (
         "\n\n[СТРОГО ДЛЯ ТЕБЯ] Действие игрока над ОБЪЕКТОМ/МЕСТОМ/мебелью/телом — это kind=command, "
         "НЕ dialogue, даже если рядом есть NPC. Примеры: «обыскать погреб/кладовую/стол/сундук» → "
@@ -473,6 +492,14 @@ SCHEMAS = {
             "give": {"type": ["string", "null"], "enum": ["none", "small", "fair", "max", None]},
             "line": {"type": "string"}},     # реплика торговца в его голосе
             "required": ["stance", "line"]},
+    },
+    "street_event": {
+        "name": "street_event",
+        "parameters": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["ambient", "involves"]},   # затрагивает игрока?
+            "title": {"type": "string"},
+            "line": {"type": "string"}},     # строка нарратора (2-е лицо, рус.)
+            "required": ["kind", "line"]},
     },
     "forge_item": {
         "name": "forge_item",
@@ -914,6 +941,32 @@ def negotiate(manager, persona, offer: str, ask: str, floor_hint: str, rel: str,
             f"Отношение к покупателю: {rel}. Раунд торга: {rounds}.\n"
             f"Покупатель говорит: «{player_line}»\nВыбери stance/give и реплику. Call negotiate.")
     return _call(manager, "merchant", "negotiate", user, ["stance"])
+
+
+def street_event(manager, settlement: str, frm: str, to: str, time_of_day: str = "", nonce: str = ""):
+    """Случайное уличное событие в пути между зданиями: вид (ambient/involves) + строка нарратора.
+    Темп>0 + nonce — для разнообразия (события чисто нарративные, мир не мутируют). None — нет сервера."""
+    if is_offline(manager):
+        return None
+    sch = SCHEMAS["street_event"]
+    user = (f"Город: {settlement}. Идёшь пешком улицами от «{frm}» к «{to}»."
+            + (f" Время: {time_of_day}." if time_of_day else "")
+            + (f" (вариация {nonce})" if nonce else "")
+            + "\nПридумай ОДНО уличное событие. Call street_event.")
+    resp = manager.call("street_event",
+                        [{"role": "system", "content": prompt_for("street_event", manager)},
+                         {"role": "user", "content": user}],
+                        schema=sch, options={"temperature": 0.9})
+    if resp is None:
+        return None
+    out = conform_to_schema(extract(resp, sch["name"]), sch["parameters"]) or {}
+    # лояльно: база порой кладёт текст под description/text/narration вместо line (schema-drift)
+    line = (out.get("line") or out.get("description") or out.get("text")
+            or out.get("narration") or "").strip()
+    if not line:
+        return None
+    kind = out.get("kind") if out.get("kind") in ("ambient", "involves") else "ambient"
+    return {"kind": kind, "title": out.get("title") or "", "line": line}
 
 
 def _lenient_plausibility(raw: dict):

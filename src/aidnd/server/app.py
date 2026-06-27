@@ -118,6 +118,13 @@ def new_game_options() -> dict:
     return options()
 
 
+@app.get("/patchnotes")
+def patchnotes() -> dict:
+    """Версия игры + новостной раздел (патчноут) для верхней панели."""
+    from ..content.patchnotes import feed
+    return feed()
+
+
 @app.get("/saves")
 def saves_list() -> dict:
     from ..runtime.persistence import list_saves

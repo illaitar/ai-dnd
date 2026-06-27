@@ -56,6 +56,23 @@ header .sub { font-size: 12px; color: var(--faint); font-weight: 400; letter-spa
   background: var(--panel2); color: var(--muted); border: 1px solid var(--line); }
 .badge.online { background: rgba(95,184,127,.12); color: #8fe0aa; border-color: rgba(95,184,127,.3); }
 .badge.offline { background: rgba(224,166,77,.12); color: var(--accent); border-color: rgba(224,166,77,.3); }
+/* версия игры в шапке (клик → «Что нового») */
+.ver-badge { margin: 0 auto 0 10px; font-size: 11.5px; font-weight: 600; padding: 3px 10px;
+  border-radius: 999px; background: var(--panel2); color: var(--gold); border: 1px solid var(--line);
+  cursor: pointer; font-family: inherit; line-height: 1.4; }
+.ver-badge:hover { border-color: var(--accent); color: var(--accent); }
+/* новостной раздел (патчноут) — отдельный раздел на экране лобби */
+.lobby-news { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+.lobby-news h2 { font-size: 15px; color: var(--ink); margin: 0 0 14px; display: flex; align-items: baseline; gap: 10px; }
+.news-ver { font-size: 12px; font-weight: 600; color: var(--gold); }
+.news-list { display: flex; flex-direction: column; gap: 16px; }
+.news-item { border-left: 2px solid var(--accent); padding-left: 12px; }
+.news-head { display: flex; align-items: baseline; gap: 10px; }
+.news-head b { color: var(--gold); font-size: 15px; }
+.news-date { color: var(--faint); font-size: 11.5px; }
+.news-title { color: var(--ink); font-weight: 600; margin: 2px 0 6px; }
+.news-item ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.news-item li { margin: 3px 0; }
 
 /* ── layout ─────────────────────────────────────────────────────────────── */
 main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }

@@ -1014,6 +1014,28 @@ $("input-form").onsubmit = (e) => {
   $("input").value = "";
 };
 
+let PATCH = null;
+async function loadPatchnotes() {                            // версия в шапку/лобби + раздел новостей лобби
+  try {
+    const r = await fetch("/patchnotes"); if (!r.ok) return;
+    PATCH = await r.json();
+    const v = PATCH.version ? "v" + PATCH.version : "";
+    const vb = $("version-btn"); if (vb && v) vb.textContent = v;
+    const lv = $("lobby-ver"); if (lv) lv.textContent = v;
+    renderNews();
+  } catch (e) {}
+}
+function renderNews() {                                      // «Что нового»: патчноут по версиям (раздел лобби)
+  const box = $("news-list"); if (!box) return;
+  const notes = (PATCH && PATCH.notes) || [];
+  box.innerHTML = notes.length ? notes.map(n =>
+    `<div class="news-item"><div class="news-head"><b>v${esc(n.v)}</b>` +
+    `<span class="news-date">${esc(n.date || "")}</span></div>` +
+    (n.title ? `<div class="news-title">${esc(n.title)}</div>` : "") +
+    `<ul>${(n.items || []).map(i => `<li>${esc(i)}</li>`).join("")}</ul></div>`).join("")
+    : "<p>Пока новостей нет.</p>";
+}
+
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closeOverlay(b.dataset.close));
 $("map-go").onclick = goSelection;
 $("map-cancel").onclick = clearSelection;
@@ -1032,5 +1054,7 @@ $("account-btn").onclick = () => { if (ME) openOverlay("settings-ov"); else loca
 $("settings-btn").onclick = () => openOverlay("settings-ov");
 $("set-redeem").onclick = () => { const c = $("set-code").value.trim(); if (c) send({ cmd: "redeem", code: c }); };
 $("set-logout").onclick = logout;
+$("version-btn").onclick = () => showLobby();               // версия в шапке → лобби (там раздел новостей)
 updateAccountBtn();
+loadPatchnotes();
 connect();

@@ -10,6 +10,7 @@
   <div id="toasts" class="toasts" aria-live="polite"></div>   <!-- всплывающие «ачивки» -->
   <header>
     <h1>⚔️ AI-DnD</h1>
+    <button id="version-btn" class="ver-badge" title="Что нового — патчноут">v0.4</button>
     <div class="hdr-right">
       <label class="dbg-toggle" title="Дебаг: показывать, в какие модели ушёл ввод (router→intent→…)">
         <input type="checkbox" id="dbg-routing"> 🔀 роутинг
@@ -163,6 +164,10 @@
         </div>
       </header>
       <div id="lobby-list" class="lobby-list"></div>
+      <section class="lobby-news">
+        <h2>📰 Что нового <span id="lobby-ver" class="news-ver"></span></h2>
+        <div id="news-list" class="news-list"></div>
+      </section>
     </div>
   </div>
 

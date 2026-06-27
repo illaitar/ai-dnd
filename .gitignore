@@ -25,3 +25,7 @@ docs/_build/
 
 # Runtime / local
 *.log
+
+# секреты (API-ключи) — НЕ коммитить
+.secrets/
+*.key

@@ -14,8 +14,8 @@ plays end-to-end **with no model server**, and the same seed + inputs reproduce 
 
 ## Highlights
 
-- **Deterministic world** — procedural, seeded maps (Watabou-style towns; multi-level tile
-  dungeons with lock-and-key progression and hidden rooms). The model adds flavor, never
+- **Deterministic world** — procedural, seeded town maps (Watabou-style: Voronoi wards,
+  walls, a river, key buildings). The model adds flavor (names, descriptions), never the
   layout. → [Maps](docs/maps.md)
 - **Event-sourced state** — `world.commit(verb, …)` appends an `Event` applied through
   `_h_*` handlers; read-models are derived, never authoritative. Auditable history + golden
@@ -34,12 +34,12 @@ pipeline: → [Models & training](docs/models.md).
 
 | Adapter | Role | Base | Hugging Face |
 |---|---|---|---|
-| `aidnd-router` | parse player intent → verb / target / tone | Qwen3.5-9B | [nikalutis/aidnd-router](https://huggingface.co/nikalutis/aidnd-router) |
-| `aidnd-arbiter` | adjudicate free-form actions | Qwen3.5-9B | [nikalutis/aidnd-arbiter](https://huggingface.co/nikalutis/aidnd-arbiter) |
-| `aidnd-consequence` | world effects of a resolved action | Qwen3.5-9B | [nikalutis/aidnd-consequence](https://huggingface.co/nikalutis/aidnd-consequence) |
-| `aidnd-narrator` | render outcomes + dialogue as prose | Qwen3.5-9B | [nikalutis/aidnd-narrator](https://huggingface.co/nikalutis/aidnd-narrator) |
-| `aidnd-quest` | side-quest framing + giver lines | Qwen3.5-9B | [nikalutis/aidnd-quest](https://huggingface.co/nikalutis/aidnd-quest) |
-| `aidnd-location` | location descriptions (parameters → prose, with sub-locations) | Qwen3-14B | [nikalutis/aidnd-location](https://huggingface.co/nikalutis/aidnd-location) |
+| `aidnd-router` | parse player intent → verb / target / tone | Qwen3.5-9B | [Illaitar/aidnd-router](https://huggingface.co/Illaitar/aidnd-router) |
+| `aidnd-arbiter` | adjudicate free-form actions | Qwen3.5-9B | [Illaitar/aidnd-arbiter](https://huggingface.co/Illaitar/aidnd-arbiter) |
+| `aidnd-consequence` | world effects of a resolved action | Qwen3.5-9B | [Illaitar/aidnd-consequence](https://huggingface.co/Illaitar/aidnd-consequence) |
+| `aidnd-narrator` | render outcomes + dialogue as prose | Qwen3.5-9B | [Illaitar/aidnd-narrator](https://huggingface.co/Illaitar/aidnd-narrator) |
+| `aidnd-quest` | side-quest framing + giver lines | Qwen3.5-9B | [Illaitar/aidnd-quest](https://huggingface.co/Illaitar/aidnd-quest) |
+| `aidnd-location` | location descriptions (parameters → prose, with sub-locations) | Qwen3-14B | [Illaitar/aidnd-location](https://huggingface.co/Illaitar/aidnd-location) |
 
 Base models in Ollama: `qwen3.5:9b` (most roles) · `qwen3:14b` (location) · `qwen3.5:2b`
 (fast intent classifier).

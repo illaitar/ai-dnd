@@ -10,12 +10,12 @@ without any of them (see [Agent roles](agents.md)).
 
 | Adapter | Role | Base | Dataset | Before → after | Hugging Face |
 |---|---|---|---|---|---|
-| `aidnd-router` | intent → verb/target/tone | Qwen3.5-9B | `datasets/freeform/router.jsonl` | held-out `kind` 75→92%, full 50→71% | [nikalutis/aidnd-router](https://huggingface.co/nikalutis/aidnd-router) |
-| `aidnd-arbiter` | adjudicate free-form actions | Qwen3.5-9B | `datasets/freeform/arbiter.jsonl` | resolution 10→83%, dc±2 100% | [nikalutis/aidnd-arbiter](https://huggingface.co/nikalutis/aidnd-arbiter) |
-| `aidnd-consequence` | world effects of an action | Qwen3.5-9B | `datasets/freeform/consequence.jsonl` | valid schema 47→100%, full 43→83% | [nikalutis/aidnd-consequence](https://huggingface.co/nikalutis/aidnd-consequence) |
-| `aidnd-narrator` | render outcomes + dialogue (prose) | Qwen3.5-9B | `datasets/narrator/narrator.jsonl` (626 ex.) | keeps canon names, terse live voice | [nikalutis/aidnd-narrator](https://huggingface.co/nikalutis/aidnd-narrator) |
-| `aidnd-quest` | side-quest framing + giver lines | Qwen3.5-9B | `datasets/quests/quests.jsonl` | valid quests 0→85% | [nikalutis/aidnd-quest](https://huggingface.co/nikalutis/aidnd-quest) |
-| `aidnd-location` | location descriptions (parameters → prose) | Qwen3-14B | `datasets/location/location.jsonl` (534 nodes) | — | [nikalutis/aidnd-location](https://huggingface.co/nikalutis/aidnd-location) |
+| `aidnd-router` | intent → verb/target/tone | Qwen3.5-9B | `datasets/freeform/router.jsonl` | held-out `kind` 75→92%, full 50→71% | [Illaitar/aidnd-router](https://huggingface.co/Illaitar/aidnd-router) |
+| `aidnd-arbiter` | adjudicate free-form actions | Qwen3.5-9B | `datasets/freeform/arbiter.jsonl` | resolution 10→83%, dc±2 100% | [Illaitar/aidnd-arbiter](https://huggingface.co/Illaitar/aidnd-arbiter) |
+| `aidnd-consequence` | world effects of an action | Qwen3.5-9B | `datasets/freeform/consequence.jsonl` | valid schema 47→100%, full 43→83% | [Illaitar/aidnd-consequence](https://huggingface.co/Illaitar/aidnd-consequence) |
+| `aidnd-narrator` | render outcomes + dialogue (prose) | Qwen3.5-9B | `datasets/narrator/narrator.jsonl` (626 ex.) | keeps canon names, terse live voice | [Illaitar/aidnd-narrator](https://huggingface.co/Illaitar/aidnd-narrator) |
+| `aidnd-quest` | side-quest framing + giver lines | Qwen3.5-9B | `datasets/quests/quests.jsonl` | valid quests 0→85% | [Illaitar/aidnd-quest](https://huggingface.co/Illaitar/aidnd-quest) |
+| `aidnd-location` | location descriptions (parameters → prose) | Qwen3-14B | `datasets/location/location.jsonl` (534 nodes) | — | [Illaitar/aidnd-location](https://huggingface.co/Illaitar/aidnd-location) |
 
 Bases (Ollama tags): `qwen3.5:9b` for most roles, `qwen3:14b` for `location` (14B is
 markedly better at descriptive prose), `qwen3.5:2b` for the fast intent classifier.
@@ -61,7 +61,7 @@ model**, or the LoRA will not apply.
 
 ```bash
 hf auth login                               # one-time
-HF_REPO=nikalutis/aidnd-location ./hf/upload.sh location
+HF_REPO=Illaitar/aidnd-location ./hf/upload.sh location
 ```
 
 Uploads the quantized GGUF (`q4_k_m`), a `Modelfile`, and the model card from

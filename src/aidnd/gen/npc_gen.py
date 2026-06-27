@@ -180,16 +180,24 @@ class CharacterGenerator:
                 rels.edges[b] = RelEdge(affinity=0.6, trust=0.7, respect=0.4, tags=["family"])
 
     # ------------------------------------------ lazy enrichment ------------
+    def enrich_fetch(self, npc_id: str) -> dict | None:
+        """Только МОДЕЛЬ-вызов персона-генератора (для параллельного enrich). None — пропуск/нет модели."""
+        persona = self.world.ecs.get(npc_id, Persona)
+        if not persona or persona.enriched or self.model is None:
+            return None
+        from ..inference.agents import enrich_persona
+        return enrich_persona(self.model, persona, self.world)
+
     def enrich(self, npc_id: str) -> None:
-        """Первое L3: обогатить voice/traits моделью под схемой emit_persona,
-        с детерминированным фоллбэком, если модель недоступна (док 02 §10)."""
+        """Ленивый single-NPC путь: fetch + apply (док 02 §10)."""
+        self.enrich_apply(npc_id, self.enrich_fetch(npc_id))
+
+    def enrich_apply(self, npc_id: str, result: dict | None) -> None:
+        """Применить результат генератора (или детерминированный фоллбэк) к персоне.
+        Вызывается ПОСЛЕДОВАТЕЛЬНО (после параллельного fetch) → детерминизм/replay."""
         persona = self.world.ecs.get(npc_id, Persona)
         if not persona or persona.enriched:
             return
-        result = None
-        if self.model is not None:
-            from ..inference.agents import enrich_persona
-            result = enrich_persona(self.model, persona, self.world)
         if not result:
             # детерминированный фоллбэк
             result = {

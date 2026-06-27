@@ -141,8 +141,11 @@ def enrich_all(world, charts, model, progress=None) -> int:
         done += 1
         if progress:
             progress(done, total, f"Фракция: {world.factions[fid].name}")
-    for nid in npcs:
-        charts.enrich(nid)
+    conc = model.enrich_concurrency() if model is not None and hasattr(model, "enrich_concurrency") else 1
+    from .parallel import pmap
+    fetched = pmap(npcs, charts.enrich_fetch, conc)      # модель-вызовы параллельно (облако), =1 локально
+    for nid, res in zip(npcs, fetched):                  # apply ПОСЛЕДОВАТЕЛЬНО → детерминизм/replay
+        charts.enrich_apply(nid, res)
         done += 1
         if progress:
             per = world.ecs.get(nid, Persona)

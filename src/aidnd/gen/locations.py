@@ -51,17 +51,17 @@ def enrich_locations(world, model, progress=None) -> None:
     if model is None or not getattr(model, "available", lambda: False)():
         return
     from ..inference.agents import forge_location
-    for _pid, p in list(world.spatial.places.items()):
-        if not _notable(p) or p.description:
-            continue
-        if progress:
-            progress(0, 0, f"Описываю место: {p.name}")
-        try:
-            out = forge_location(model, p.name, **place_facts(world, p))
-        except Exception:
-            out = None
+    from .parallel import pmap
+    from .room_loot import classify_room
+    places = [p for _pid, p in world.spatial.places.items() if _notable(p) and not p.description]
+    if not places:
+        return
+    conc = model.enrich_concurrency() if hasattr(model, "enrich_concurrency") else 1
+    total = len(places)
+    outs = pmap(places, lambda p: forge_location(model, p.name, **place_facts(world, p)), conc,
+                (lambda done, p: progress(done, total, f"Описываю место: {p.name}")) if progress else None)
+    for p, out in zip(places, outs):                     # apply последовательно → детерминизм/replay
         if out and out.get("description"):
-            from .room_loot import classify_room
             p.description = str(out["description"]).strip()[:600]
             rooms = []
             for r in (out.get("rooms") or []):

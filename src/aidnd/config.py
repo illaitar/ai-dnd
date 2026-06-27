@@ -50,6 +50,8 @@ LLM_PROFILE: str = os.environ.get("AIDND_PROFILE", "local")
 DEEPSEEK_API_KEY: str = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE: str = os.environ.get("DEEPSEEK_BASE", "https://api.deepseek.com")
 DEEPSEEK_MODEL: str = os.environ.get("AIDND_DEEPSEEK_MODEL", "deepseek-chat")
+# параллельность enrich: облако (network-bound) параллелим, локальная Ollama — нет (своп на 1 GPU)
+DEEPSEEK_CONCURRENCY: int = int(os.environ.get("AIDND_DEEPSEEK_CONCURRENCY", "8"))
 
 KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
 HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))

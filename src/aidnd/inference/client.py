@@ -186,6 +186,15 @@ class ModelManager:
         b = self._route(role)[0]
         return b.name if b else None
 
+    def enrich_concurrency(self) -> int:
+        """Сколько ген-вызовов enrich гнать параллельно. Облако (network-bound) — параллелим;
+        локальная Ollama (своп моделей на 1 GPU) — последовательно. Берём минимум по бэкендам
+        ключевых ген-ролей (чтобы не зашлюзовать локальный путь)."""
+        roles = ("persona_gen", "location_writer", "faction_gen", "item_smith")
+        caps = [getattr(b, "parallel_enrich", 1)
+                for b in (self._route(r)[0] for r in roles) if b is not None]
+        return max(1, min(caps)) if caps else 1
+
     def call(self, role: str, messages: list, *, schema=None, options=None,
              on_token=None, think: bool = False) -> dict | None:
         """ЕДИНАЯ точка вызова модели по роли: профиль → (backend, model) → backend.chat.

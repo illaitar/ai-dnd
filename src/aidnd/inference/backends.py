@@ -21,6 +21,7 @@ except ImportError:                                  # pragma: no cover
 class OllamaBackend:
     """Локальная Ollama (наш текущий путь): тюненые адаптеры, грамматико-строгий JSON."""
     name = "ollama"
+    parallel_enrich = 1          # своп LoRA/моделей на одной GPU → параллель вредна (последовательно)
 
     def __init__(self, client: OllamaClient | None = None) -> None:
         self.client = client or OllamaClient()
@@ -64,6 +65,7 @@ class OpenAICompatBackend:
         self.base = base.rstrip("/")
         self.key = key
         self.default_model = default_model
+        self.parallel_enrich = max(1, config.DEEPSEEK_CONCURRENCY)   # облако: network-bound → параллелим enrich
 
     def available(self) -> bool:
         return bool(self.key) and _HAS_HTTPX

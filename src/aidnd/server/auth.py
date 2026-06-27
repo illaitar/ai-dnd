@@ -23,8 +23,9 @@ COOKIE = "aidnd_session"                                  # имя cookie сес
 
 
 def set_session_cookie(response: Response, token: str) -> None:
-    """HttpOnly-cookie сессии: авто-отправляется на HTTP и на WS-хендшейк (тот же origin)."""
-    response.set_cookie(COOKIE, token, httponly=True, samesite="lax",
+    """HttpOnly-cookie сессии: авто-отправляется на HTTP и на WS-хендшейк (тот же origin).
+    secure=True за TLS (AIDND_COOKIE_SECURE=1) — кука уходит только по HTTPS."""
+    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", secure=config.COOKIE_SECURE,
                         max_age=config.SESSION_TTL_DAYS * 86400, path="/")
 
 

@@ -8,9 +8,11 @@
 
 from __future__ import annotations
 
+import re
+
 from .. import config
 from .client import is_offline
-from .structured import coerce, conform_to_schema, extract, sanitize_for_ollama
+from .structured import coerce, conform_to_schema, extract
 
 LANG = {"ru": "Russian", "en": "English"}.get(config.NARRATIVE_LANGUAGE, "Russian")
 
@@ -180,11 +182,29 @@ PROMPTS = {
         "горожанина или общее знание края. Не противоречь известному. Output ONLY the JSON."
     ),
     "location_writer": (
-        "Ты — мастер описаний мест фэнтези-фронтира (D&D, городок Фэндалин и окрестности). По "
-        "названию и типу места пишешь УСТОЙЧИВОЕ описание для рассказчика: облик и планировка, что "
-        "видно, слышно и чем пахнет, чем место живёт. 3-5 предложений, живой язык без пафоса и "
-        "клише. Только антураж: НЕ упоминай сиюминутные события, погоду, время суток и конкретных "
-        "NPC по именам. Пиши ТОЛЬКО сам текст описания, без преамбул и заголовков."
+        "Ты — мастер описаний мест фэнтези-фронтира (D&D, городок Фэндалин и окрестности). По КРАТКИМ "
+        "фактам места (имя, тип, функции, состояние, округа) ты САМ ПРИДУМЫВАЕШЬ его облик: материалы, "
+        "что видно/слышно/чем пахнет, освещение, чем место живёт. Сначала — описание на 3-5 предложений: "
+        "живой простой стиль, короткие фразы, прямые глаголы, без пафоса/клише/олицетворений. Затем "
+        "предложи 2-4 уместные комнаты/части этого места и опиши каждую одним-двумя предложениями. "
+        "Формат СТРОГО такой:\n<описание места>\n\nКОМНАТЫ:\n— <Название>: <короткое описание>\n"
+        "— <Название>: <короткое описание>\n\nЗаземляйся в фактах (разрушенное — в руинах, лесное — без "
+        "брусчатки) и НЕ противоречь им. Строго фэнтези-фронтир: без анахронизмов и современных "
+        "слов/механизмов (никаких «мэр», «бюджет», громоотводов); власть — городничий/совет. Без NPC по "
+        "именам, без сиюминутных событий, погоды, времени суток и без чисел. Только описание и КОМНАТЫ."
+    ),
+    "persona_gen": (
+        "Ты — мастер персонажей фэнтези-фронтира (D&D, городок Фэндалин, Мечовой Берег). По КРАТКИМ "
+        "фактам (роль, архетип, раса, пол, возраст, фракция, достаток, сюжетная роль) ты ПРИДУМЫВАЕШЬ "
+        "глубокую личность NPC и выдаёшь СТРОГО в формате полей:\n"
+        "Имя: <под расу/сеттинг; канон-имена не переводи>\nГолос: <манера речи, 1 фраза>\n"
+        "Черты: <2-3 через запятую>\nВнешность: <1-2 приметы через ;>\nИдеал: <во что верит>\n"
+        "Привязанность: <к кому/чему>\nИзъян: <слабость/порок>\nПрозвище: <меткое или ->\n"
+        "Секреты:\n— <реальная скрытая правда>\nЗнания:\n— <заземлённый слух/факт о крае, что NPC может рассказать>\n\n"
+        "Стиль живой, простой, характерный; без пафоса/архаики/клише/анахронизмов. Голос/Черты/Внешность — "
+        "КОНКРЕТНЫ. Секреты — НАСТОЯЩИЕ тайны (долги, преступления, страхи, двойная игра), под гейт "
+        "доверия; не пустышки. Знания — заземлённые слухи о местах/людях/событиях края. Сюжетная роль и "
+        "фракция отражаются в мотиве/секретах. Пиши ТОЛЬКО поля, без преамбул."
     ),
     "event_director": (
         "Ты — режиссёр живого города (D&D-фронтир, Фэндалин). По СОСТОЯНИЮ МИРА — фракции "
@@ -222,6 +242,37 @@ PROMPTS = {
         "РЕАЛЬНЫЕ id из состояния — ничего не выдумывай. Output ONLY JSON via forge_campaign."
     ),
 }
+
+# --- бэкенд-специфичные промпты: база + усиление под конкретный провайдер -------------- #
+# DeepSeek (сильная, но не дообучена под наш стиль) — жёстко напоминаем стиль/формат/JSON.
+_DS_REINFORCE = {
+    "narrator": (
+        "\n\n[СТРОГО ДЛЯ ТЕБЯ] Ты сильная модель — соблюди стиль ТОЧНО. ЗАПРЕЩЕНЫ обращения "
+        "«путник», «странник» и «добро пожаловать»; никакой литературщины, пафоса и многословия "
+        "(не «сизый табачный дым», а просто «дым»). Реплика NPC — реакция + ОДНА живая фраза в его "
+        "голосе, 1-2 коротких предложения; исход/бой — 1-2 предложения. НЕ начинай с имени NPC."),
+    "location_writer": (
+        "\n\n[СТРОГО] Соблюди ФОРМАТ (описание, затем строка «КОМНАТЫ:» и список «— Имя: …»), "
+        "3-5 коротких предложений, без пафоса и анахронизмов. Только описание и КОМНАТЫ."),
+    "persona_gen": (
+        "\n\n[СТРОГО] Соблюди field-формат (Имя:/Голос:/Черты:/Внешность:/Идеал:/Привязанность:/"
+        "Изъян:/Прозвище:/Секреты:/Знания:), без преамбул. Секреты — настоящие тайны, не пустышки."),
+    "cognition": (
+        "\n\n[СТРОГО] Верни ОДИН валидный JSON-объект полей action/target/info_disclosed/"
+        "rationale_tags и НИЧЕГО больше."),
+}
+PROMPTS_BACKEND = {"deepseek": {r: PROMPTS[r] + s for r, s in _DS_REINFORCE.items()}}
+
+
+def prompt_for(role: str, manager=None) -> str:
+    """Системный промпт роли с учётом бэкенда: для не-Ollama берём тюненый вариант, если задан."""
+    base = PROMPTS[role]
+    if manager is not None:
+        bn = manager.backend_name(role)
+        if bn and bn != "ollama":
+            return PROMPTS_BACKEND.get(bn, {}).get(role, base)
+    return base
+
 
 # --------------------------------------------------------------------------- #
 #  Тулсхемы (main §12)                                                         #
@@ -439,26 +490,13 @@ def _call(manager, role: str, schema_name: str, user: str, required: list[str]):
     """Общий путь вызова агента под схемой. None, если сервер недоступен/невалидно."""
     if is_offline(manager):
         return None
-    from .client import OllamaError
     schema = SCHEMAS[schema_name]
-    messages = [{"role": "system", "content": PROMPTS[role]},
+    messages = [{"role": "system", "content": prompt_for(role, manager)},
                 {"role": "user", "content": user}]
-    # структурные решения детерминируем (temp 0) — классификация/выбор не должны
-    # «плавать» от запуска к запуску; качество и стабильность важнее разнообразия
-    opts = {"temperature": 0}
-    try:
-        if config.USE_NATIVE_TOOLS:
-            resp = manager.client.chat(manager.model_for(role), messages,
-                                       tools=[{"type": "function", "function": schema}],
-                                       options=opts)
-        else:
-            # structured output: грамматико-ограниченный декодинг по JSON Schema
-            # (Ollama format = guided_json/XGrammar, main §6.3) — гарантирует
-            # валидный JSON и соблюдение enum, снимает retry-циклы.
-            resp = manager.client.chat(manager.model_for(role), messages,
-                                       fmt=sanitize_for_ollama(schema["parameters"]),
-                                       options=opts)
-    except OllamaError:
+    # структурные решения детерминируем (temp 0); бэкенд САМ переводит схему (Ollama
+    # format/tools, OpenAI response_format). Недоступен/ошибся → None → детерм. фоллбэк.
+    resp = manager.call(role, messages, schema=schema, options={"temperature": 0})
+    if resp is None:
         return None
     out = conform_to_schema(extract(resp, schema["name"]), schema["parameters"])
     return coerce(out, required)
@@ -541,21 +579,33 @@ _MODE_WRITE = {
 def narrator_user(mode: str, *, name: str = "", kind: str = "", race: str = "", voice: str = "",
                   traits: str = "", epithet: str = "", rel: str = "", scene: str = "",
                   situation: str = "", player_line: str = "", intent: str = "", tone: str = "",
-                  outcome: str = "", facts=None, topic: str = "") -> str:
+                  outcome: str = "", facts=None, topic: str = "", pc: str = "", gear: str = "",
+                  memory=None, history: str = "") -> str:
     """ЕДИНЫЙ user-промпт нарратора — общий для рантайма и датасета (train == inference).
-    Печатает только заданные поля; `mode` (вид реплики) задаёт форму вывода."""
+    Печатает только заданные поля; `mode` (вид реплики) задаёт форму вывода.
+    pc/gear — кто игрок и его снаряжение (для отсылок в прозе); memory — что NPC помнит об
+    игроке (личные реплики); history — недавний обмен с этим NPC (преемственность диалога)."""
     L = [f"Mode: {mode} — {MODE_HINTS.get(mode, MODE_HINTS['outcome'])}"]
     if name:
         meta = ", ".join(x for x in (kind, race, f"voice: {voice}" if voice else "",
                                      f"черты: {traits}" if traits else "",
                                      f"эпитет: {epithet}" if epithet else "") if x)
         L.append(f"NPC: {name}" + (f" — {meta}" if meta else ""))
+    if pc:
+        L.append(f"Player character: {pc}" + (f"; снаряжение: {gear}" if gear else ""))
+    elif gear:
+        L.append(f"Player's gear (reference it in the prose): {gear}")
     if rel:
         L.append(f"Relationship to the player: {rel}")
+    if memory:
+        L.append("NPC remembers about the player (reference if relevant, invent nothing else):\n"
+                 + "\n".join(f"- {m}" for m in memory))
     if scene:
         L.append(f"Scene (ground in this; do NOT contradict time/weather/season/place): {scene}")
     if situation:
         L.append(f"Situation: {situation}")
+    if history:
+        L.append(f"Recent exchange with this NPC (continue it, don't repeat):\n{history}")
     if mode in ("dialogue", "greeting"):
         L.append(f"The player says: «{player_line}»." if player_line
                  else "The player approached without saying anything specific.")
@@ -587,21 +637,20 @@ def _persona_fields(persona) -> dict:
 
 
 def render_scene(manager, outcome_summary: str, persona, dialogue_topic: str = "", scene: str = "",
-                 mode: str = "outcome"):
+                 mode: str = "outcome", pc: str = "", gear: str = ""):
     """Нарратор отрисовывает прозой. Это свободный текст, а не структура —
     constrained JSON ломает качество и грамматику Ollama (вложенный массив), поэтому
-    берём контент как narration напрямую (формат гарантируется prompt'ом, main §12.3)."""
+    берём контент как narration напрямую (формат гарантируется prompt'ом, main §12.3).
+    pc/gear — кто игрок и его снаряжение (для отсылок в исходе/бою)."""
     if is_offline(manager):
         return None
-    from .client import OllamaError
     # для исхода/обстановки говорящего NPC нет (повествование от 2-го лица)
     pf = _persona_fields(persona) if mode in ("dialogue", "greeting", "combat") else {}
-    user = narrator_user(mode, scene=scene, outcome=outcome_summary, topic=dialogue_topic, **pf)
-    try:
-        resp = manager.client.chat(manager.model_for("narrator"),
-                                   [{"role": "system", "content": PROMPTS["narrator"]},
-                                    {"role": "user", "content": user}])
-    except OllamaError:
+    user = narrator_user(mode, scene=scene, outcome=outcome_summary, topic=dialogue_topic,
+                         pc=pc, gear=gear, **pf)
+    resp = manager.call("narrator", [{"role": "system", "content": prompt_for("narrator", manager)},
+                                     {"role": "user", "content": user}])
+    if resp is None:
         return None
     text = (resp.get("content") or "").replace("**", "").strip()
     return {"narration": text} if text else None
@@ -609,24 +658,23 @@ def render_scene(manager, outcome_summary: str, persona, dialogue_topic: str = "
 
 def render_dialogue(manager, persona, rel_summary: str, situation: str,
                     player_line: str, intent: str, scene: str = "", facts=None,
-                    mode: str = "dialogue", tone: str = ""):
+                    mode: str = "dialogue", tone: str = "", pc: str = "", memory=None,
+                    history: str = ""):
     """Заземлённый диалоговый нарратор: проза, без выдуманной истории/реплик игрока.
 
     mode — вид реплики (dialogue/greeting). scene — физический контекст (сезон/время/
     погода/место). tone — тон игрока. facts — что NPC реально знает и МОЖЕТ раскрыть при
     текущем доверии; мировую информацию давать ТОЛЬКО из них, иначе не выдумывать.
+    pc — кто игрок; memory — что NPC помнит об игроке; history — недавний обмен с этим NPC.
     """
     if is_offline(manager):
         return None
-    from .client import OllamaError
     user = narrator_user(mode, rel=rel_summary, scene=scene, situation=situation,
                          player_line=player_line, intent=intent, tone=tone, facts=facts,
-                         **_persona_fields(persona))
-    try:
-        resp = manager.client.chat(manager.model_for("narrator"),
-                                   [{"role": "system", "content": PROMPTS["narrator"]},
-                                    {"role": "user", "content": user}])
-    except OllamaError:
+                         pc=pc, memory=memory, history=history, **_persona_fields(persona))
+    resp = manager.call("narrator", [{"role": "system", "content": prompt_for("narrator", manager)},
+                                     {"role": "user", "content": user}])
+    if resp is None:
         return None
     return (resp.get("content") or "").replace("**", "").strip() or None
 
@@ -647,11 +695,20 @@ def propose_action(manager, npc_id: str, player_verb: str, tone: str, ctx, world
     return _call(manager, "cognition", "propose_action", user, ["action"])
 
 
-def enrich_persona(manager, persona, world):
-    user = (f"Skeleton persona: name={persona.name}, archetype={persona.archetype}, "
-            f"race={persona.race}, traits={persona.traits}. Enrich voice and traits "
-            f"consistently. Call emit_persona.")
-    return _call(manager, "character_gen", "emit_persona", user, ["voice"])
+def enrich_persona(manager, persona, world=None):
+    """Богатая личность по краткому скелету (persona_gen): голос/черты/внешность/идеал/
+    привязанность/изъян/прозвище/секреты/знания. Сохраняет имя NPC. None — нет сервера."""
+    if is_offline(manager):
+        return None
+    facts = {"role": persona.profession or persona.archetype, "archetype": persona.archetype,
+             "race": persona.race, "faction": persona.faction or "",
+             "gender": ("" if persona.gender in ("", "unknown") else persona.gender)}
+    resp = manager.call("persona_gen",
+                        [{"role": "system", "content": prompt_for("persona_gen", manager)},
+                         {"role": "user", "content": persona_user(name=persona.name, **facts)}])
+    if resp is None:
+        return None
+    return parse_persona(resp.get("content") or "")
 
 
 def choose_tactic(manager, state_digest: str, monster_id: str):
@@ -708,16 +765,13 @@ def forge_campaign(manager, digest: str):
     нет сервера/ошибка."""
     if is_offline(manager):
         return None
-    from .client import OllamaError
     sch = SCHEMAS["forge_campaign"]
     user = (f"Состояние мира:\n{digest}\n\nСочини основной сюжет (4-6 актов) и интро-крючок, "
             f"заземлённый СТРОГО в этих сущностях. Call forge_campaign.")
-    messages = [{"role": "system", "content": PROMPTS["campaign_architect"]},
+    messages = [{"role": "system", "content": prompt_for("campaign_architect", manager)},
                 {"role": "user", "content": user}]
-    try:
-        resp = manager.client.chat(manager.model_for("campaign_architect"), messages,
-                                   fmt=sanitize_for_ollama(sch["parameters"]), options={"temperature": 0})
-    except OllamaError:
+    resp = manager.call("campaign_architect", messages, schema=sch, options={"temperature": 0})
+    if resp is None:
         return None
     return extract(resp, sch["name"])                # сырой dict с любыми ключами модели
 
@@ -728,19 +782,16 @@ def reforge_acts(manager, title: str, premise: str, completed: list[str], curren
     gen.campaign) или None. Чуть выше temperature — нужен творческий поворот, не повтор."""
     if is_offline(manager):
         return None
-    from .client import OllamaError
     sch = SCHEMAS["forge_campaign"]
     done = "; ".join(completed) or "—"
     user = (f"Кампания «{title}». Премиса: {premise}\nУЖЕ ПРОЙДЕНО (фиксировано): {done}\n"
             f"ТЕКУЩИЙ акт игрока: {current_obj}\nЧТО ИЗМЕНИЛОСЬ В МИРЕ: {delta}\n\n"
             f"Состояние мира сейчас:\n{digest}\n\nПерепиши оставшиеся ~{n} актов так, чтобы они "
             f"реагировали на изменения (новые твисты/цели/враги). Call forge_campaign.")
-    messages = [{"role": "system", "content": PROMPTS["campaign_director"]},
+    messages = [{"role": "system", "content": prompt_for("campaign_director", manager)},
                 {"role": "user", "content": user}]
-    try:
-        resp = manager.client.chat(manager.model_for("campaign_director"), messages,
-                                   fmt=sanitize_for_ollama(sch["parameters"]), options={"temperature": 0.3})
-    except OllamaError:
+    resp = manager.call("campaign_director", messages, schema=sch, options={"temperature": 0.3})
+    if resp is None:
         return None
     return extract(resp, sch["name"])
 
@@ -814,20 +865,17 @@ def assess_feasibility(manager, action_text: str, context_digest: str):
     строгий coerce ронял валидную оценку, т.к. база кладёт число под именем функции."""
     if is_offline(manager):
         return None
-    from .client import OllamaError
     sch = SCHEMAS["estimate_plausibility"]
     user = (f"Proposed PLAYER action: «{action_text}»\nScene/context: {context_digest}\n"
             f"How physically possible is this action HERE AND NOW? 0 = impossible/"
             f"contradiction or a feat beyond a mortal adventurer; 1 = trivially possible. "
             f"Score creativity-but-possible high; score the impossible low. "
             f"Call estimate_plausibility.")
-    try:
-        resp = manager.client.chat(
-            manager.model_for("plausibility"),
-            [{"role": "system", "content": PROMPTS["plausibility"]},
-             {"role": "user", "content": user}],
-            fmt=sanitize_for_ollama(sch["parameters"]), options={"temperature": 0})
-    except OllamaError:
+    resp = manager.call("plausibility",
+                        [{"role": "system", "content": prompt_for("plausibility", manager)},
+                         {"role": "user", "content": user}],
+                        schema=sch, options={"temperature": 0})
+    if resp is None:
         return None
     raw = conform_to_schema(extract(resp, sch["name"]), sch["parameters"]) or {}
     p = _lenient_plausibility(raw)
@@ -847,49 +895,92 @@ def forge_item(manager, template_name: str, category: str, rarity: str, context:
     return _call(manager, "item_smith", "forge_item", user, ["name"])
 
 
-# параметры локации → русская подпись (порядок = как печатается в промпте); см. datasets/location
-_LOC_FIELDS = (
-    ("type", "тип"), ("function", "назначение"), ("size", "размер"), ("material", "материал"),
-    ("condition", "состояние"), ("enclosure", "крытость"), ("ambiance", "атмосфера"),
-    ("smell", "запах"), ("sound", "звук"), ("light", "свет"), ("air", "воздух"), ("mood", "настроение"),
-    ("frequented_by", "бывают"), ("notable", "приметы"), ("affordances", "функции"),
-    ("danger", "опасность"), ("region", "округа"), ("wealth", "достаток"),
-)
+# МИНИМАЛЬНЫЙ фактический вход локации (то, что мир знает) → русская подпись. Сенсорику/материалы/
+# настроение/комнаты модель ПРИДУМЫВАЕТ сама (см. PROMPTS['location_writer'] и datasets/location).
+_LOC_FACTS = (("type", "тип"), ("affordances", "функции"), ("condition", "состояние"), ("region", "округа"))
 
 
 def _loc_fmt(v) -> str:
     return ", ".join(str(x) for x in v) if isinstance(v, (list, tuple)) else str(v)
 
 
-def location_user(name: str = "", kind: str = "", within: str = "", **params) -> str:
+def location_user(name: str = "", **facts) -> str:
     """ЕДИНЫЙ user-промпт описания локации — общий для рантайма (forge_location) и датасета
-    (datasets/location) → train==inference. params — поля схемы (тип/размер/запах/свет/настроение…);
-    within — имя родителя для суб-локации (дерево). Печатаются только заданные поля."""
-    head = f"Локация «{name}»" + (f" (класс: {kind})" if kind else "") + ". Мир: фронтир Фэндалина (D&D)."
-    if within:
-        head += f" Это часть места «{within}»."
-    spec = "; ".join(f"{ru}: {_loc_fmt(params[k])}" for k, ru in _LOC_FIELDS if params.get(k))
-    return (head + (f"\nПараметры — {spec}." if spec else "") +
-            "\nОпиши это место для рассказчика: облик и планировка, что видно/слышно/пахнет, чем "
-            "место живёт. 3-5 предложений, устойчивый антураж (без сиюминутных событий и без имён "
-            "конкретных NPC).")
+    (datasets/location) → train==inference. На входе только КРАТКИЕ факты (тип/функции/состояние/
+    округа); облик и комнаты модель придумывает. Печатаются только заданные факты."""
+    spec = "; ".join(f"{ru}: {_loc_fmt(facts[k])}" for k, ru in _LOC_FACTS if facts.get(k))
+    return f"Локация «{name}»" + (f" — {spec}" if spec else "") + ". Мир: фронтир Фэндалина (D&D)."
 
 
-def forge_location(manager, name: str, kind: str, affordances: str, ambiance: str, context: str = ""):
-    """Полное описание локации для нарратора — СВОБОДНАЯ ПРОЗА (как нарратор; guided JSON ломает
-    грамматику Ollama). Возвращает {'description': текст} или None."""
+_ROOMS_SPLIT = re.compile(r"\n\s*комнаты\s*[:：]\s*\n?", re.IGNORECASE)
+_ROOM_LINE = re.compile(r"^\s*[—\-•*]\s*(.+?)\s*[:：]\s*(.+)$")
+
+
+def parse_location(text: str) -> dict:
+    """Разобрать выход модели «<описание>\\n\\nКОМНАТЫ:\\n— Имя: текст…» → {description, rooms}."""
+    parts = _ROOMS_SPLIT.split(text, maxsplit=1)
+    description = re.sub(r"^\s*<[^>]*>\s*", "", parts[0].replace("**", "")).strip()  # срезать эхо-плейсхолдер
+    rooms = []
+    if len(parts) > 1:
+        for line in parts[1].splitlines():
+            m = _ROOM_LINE.match(line.replace("**", ""))
+            if m:
+                rooms.append({"name": m.group(1).strip(), "desc": m.group(2).strip()})
+    return {"description": description, "rooms": rooms}
+
+
+# --- генератор персон: краткие факты → глубокая личность (datasets/persona) ----------- #
+_PERSONA_FACTS = (("role", "роль"), ("archetype", "архетип"), ("race", "раса"), ("gender", "пол"),
+                  ("age", "возраст"), ("faction", "фракция"), ("standing", "достаток"),
+                  ("story_role", "сюжетная роль"))
+_PERSONA_FIELDS = (("name", "Имя"), ("voice", "Голос"), ("traits", "Черты"), ("appearance", "Внешность"),
+                   ("ideal", "Идеал"), ("bond", "Привязанность"), ("flaw", "Изъян"), ("epithet", "Прозвище"))
+_P_LIST = re.compile(r"^\s*[—\-•*]\s*(.+)$")
+
+
+def persona_user(name: str = "", settlement: str = "Фэндалин", **facts) -> str:
+    """ЕДИНЫЙ user-промпт генератора персон — общий для рантайма (enrich_persona) и датасета
+    (datasets/persona) → train==inference. Краткие факты; личность модель придумывает. name —
+    обогащение СУЩЕСТВУЮЩЕГО NPC (сохрани имя); пусто — спавн нового."""
+    spec = "; ".join(f"{ru}: {facts[k]}" for k, ru in _PERSONA_FACTS if facts.get(k))
+    head = f"NPC «{name}»" if name else "Новый NPC"
+    return f"{head} ({settlement}, фронтир D&D)" + (f". Факты — {spec}." if spec else ".")
+
+
+def parse_persona(text: str) -> dict:
+    """field-формат персоны → {name, voice, traits[], appearance[], ideal, bond, flaw, epithet,
+    secrets[], knowledge[]}. traits/appearance — списки; secrets/knowledge — пункты «— …»."""
+    def _section(label):
+        m = re.search(rf"{label}\s*:\s*\n((?:\s*[—\-•*].*\n?)+)", text)
+        if not m:
+            return []
+        return [g.group(1).strip() for g in (_P_LIST.match(ln) for ln in m.group(1).splitlines()) if g]
+
+    out = {"secrets": _section("Секреты"), "knowledge": _section("Знания")}
+    for key, ru in _PERSONA_FIELDS:
+        m = re.search(rf"^{ru}\s*:\s*(.+)$", text, re.M)
+        val = (m.group(1).strip() if m else "")
+        if key in ("traits", "appearance"):
+            out[key] = [v.strip() for v in re.split(r"[;,]", val) if v.strip()]
+        else:
+            out[key] = "" if val in ("-", "—") else val
+    return out
+
+
+def forge_location(manager, name: str, **facts):
+    """Описание локации + предложенные комнаты — СВОБОДНАЯ ПРОЗА (guided JSON ломает грамматику).
+    facts: краткие факты места (type/affordances/condition/region). Возвращает
+    {'description': текст, 'rooms': [{name, desc}…]} или None."""
     if is_offline(manager):
         return None
-    from .client import OllamaError
-    user = location_user(name, kind=kind, affordances=affordances, ambiance=ambiance, within=context)
-    try:
-        resp = manager.client.chat(manager.model_for("location_writer"),
-                                   [{"role": "system", "content": PROMPTS["location_writer"]},
-                                    {"role": "user", "content": user}])
-    except OllamaError:
+    user = location_user(name, **facts)
+    resp = manager.call("location_writer",
+                        [{"role": "system", "content": prompt_for("location_writer", manager)},
+                         {"role": "user", "content": user}])
+    if resp is None:
         return None
-    text = (resp.get("content") or "").replace("**", "").strip()
-    return {"description": text} if text else None
+    text = (resp.get("content") or "").strip()
+    return parse_location(text) if text else None
 
 
 def forge_quest_brief(manager, title: str, objective: str, giver: str, framing: str):

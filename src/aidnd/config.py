@@ -44,6 +44,13 @@ NARRATOR_MODEL: str = os.environ.get("AIDND_NARRATOR_MODEL", "aidnd-narrator")
 # в описаниях, см. training/). До тренировки откат на голую qwen3:14b (тоже лучшая база описаний).
 LOCATION_MODEL: str = os.environ.get("AIDND_LOCATION_MODEL", "qwen3:14b")
 
+# --- профиль запуска: какой бэкенд/модель за какой ролью (см. inference/profiles.py) ---
+# local (по умолчанию, тюненое в Ollama) | deepseek (всё в DeepSeek) | hybrid (мозги в DeepSeek)
+LLM_PROFILE: str = os.environ.get("AIDND_PROFILE", "local")
+DEEPSEEK_API_KEY: str = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE: str = os.environ.get("DEEPSEEK_BASE", "https://api.deepseek.com")
+DEEPSEEK_MODEL: str = os.environ.get("AIDND_DEEPSEEK_MODEL", "deepseek-chat")
+
 KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
 HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))
 

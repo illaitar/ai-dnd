@@ -144,6 +144,7 @@ class ModelManager:
         "cognition": (config.BASE_MODEL, "lore"),
         "lore_keeper": (config.BASE_MODEL, "lore"),
         "character_gen": (config.BASE_MODEL, "lore"),
+        "persona_gen": (config.BASE_MODEL, "lore"),  # генератор богатых персон (datasets/persona)
         "tactician": (config.BASE_MODEL, "combat"),
         "reflection": (config.BASE_MODEL, "reflect"),
         "director": (config.BASE_MODEL, None),
@@ -153,43 +154,58 @@ class ModelManager:
     }
 
     def __init__(self, client: OllamaClient | None = None) -> None:
-        self.client = client or OllamaClient()
+        from . import profiles
+        self.routing = profiles.routing_for(config.LLM_PROFILE, self.ROLE_MODELS)  # role→(backend,model)
+        self.backends = profiles.make_backends(self.routing, client)
+        ob = self.backends.get("ollama")
+        self.client = ob.client if ob else None          # compat (тесты/стрим могут дернуть)
         self._available: bool | None = None
-        self._models: set[str] = set()
         self._trace: list[dict] = []        # дебаг-трейс роутинга: какие роли→модели дёргались за ход
         self.on_call = None                 # колбэк(role, model) на каждый LLM-вызов (для ползунка генерации)
 
     def available(self, recheck: bool = False) -> bool:
-        """Проверяет доступность сервера (кешируется). False, если httpx не
-        установлен либо сервер недоступен — тогда движок идёт по фоллбэкам."""
-        if not _HAS_HTTPX:
+        """Доступен ли хоть один бэкенд активного профиля (кешируется). Иначе — фоллбэки.
+        ВАЖНО: чек всех бэкендов (не short-circuit) — иначе Ollama не наполнит список моделей."""
+        if not _HAS_HTTPX or not self.backends:
             return False
         if self._available is None or recheck:
-            try:
-                self._models = set(self.client.list_models())
-                self._available = True
-            except OllamaError:
-                self._available = False
+            self._available = any([b.available() for b in self.backends.values()])
         return self._available
 
+    def _route(self, role: str):
+        backend_name, model = self.routing.get(role) or self.routing["default"]
+        backend = self.backends.get(backend_name)
+        return backend, (backend.resolve(model) if backend else model)
+
     def model_for(self, role: str) -> str:
-        base = self.ROLE_MODELS.get(role, (config.BASE_MODEL, None))[0]
-        # self._models заполняется в available(); если ещё не проверяли — отдаём как есть.
-        if not self._models or base in self._models:
-            resolved = base
-        elif f"{base}:latest" in self._models:           # Ollama хранит имена с тегом — матчим терпимо
-            resolved = f"{base}:latest"
-        else:                                            # дообученной модели нет на сервере — откат на базовую
-            resolved = config.BASE_MODEL
-        self._trace.append({"role": role, "model": resolved, "t": _perf_counter()})
-        if len(self._trace) > 200:                       # safety: ограничить, если слив не зовут
+        """Имя модели для роли в активном профиле (compat-хелпер; трейс/on_call — в call())."""
+        return self._route(role)[1]
+
+    def backend_name(self, role: str) -> str | None:
+        """Имя бэкенда роли в активном профиле (для выбора бэкенд-специфичного промпта)."""
+        b = self._route(role)[0]
+        return b.name if b else None
+
+    def call(self, role: str, messages: list, *, schema=None, options=None,
+             on_token=None, think: bool = False) -> dict | None:
+        """ЕДИНАЯ точка вызова модели по роли: профиль → (backend, model) → backend.chat.
+        Возвращает {'content', 'tool_calls'} или None (бэкенд недоступен/ошибся → фоллбэк)."""
+        backend, model = self._route(role)
+        if backend is None:
+            return None
+        self._trace.append({"role": role, "model": model, "t": _perf_counter()})
+        if len(self._trace) > 200:
             self._trace = self._trace[-100:]
-        if self.on_call is not None:                     # двигаем ползунок генерации на каждый вызов модели
+        if self.on_call is not None:                     # двигаем ползунок генерации на каждый вызов
             try:
-                self.on_call(role, resolved)
+                self.on_call(role, model)
             except Exception:
                 pass
-        return resolved
+        try:
+            return backend.chat(model, messages, schema=schema, options=options,
+                                 on_token=on_token, think=think)
+        except Exception:                                # сеть/сервер/таймаут → фоллбэк
+            return None
 
     def trace_take(self) -> list[dict]:
         """Снять накопленный трейс роутинга (роль→модель + прибл. длительность мс) и очистить.

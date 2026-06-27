@@ -42,15 +42,41 @@ def agenda_of(world, npc: str) -> dict | None:
     return (getattr(world, "agendas", None) or {}).get(npc)
 
 
+_STEP_ACTIONS = ["rumor", "economic", "recruit", "threaten"]
+
+
+def _public(world) -> list:
+    from .citypop import CityPopulation
+    return CityPopulation._public_places(world)
+
+
 def _gen_agenda(world, npc, model=None) -> dict:
-    """Замысел важного NPC: цель + мотив + план-шаги по местам. TODO(LLM): заменить шаблон ролью 'agenda'
-    (богатые цели/враги/ставки из персоны, фракции, отношений и текущих событий мира)."""
+    """Замысел важного NPC: цель + мотив + план-шаги с ДЕЙСТВИЯМИ. LLM (роль agenda) с фоллбэком на шаблон."""
     from ..world.components import Persona
     p = world.ecs.get(npc, Persona)
+    pubs = [(pid, world.spatial.places[pid].name) for pid in _public(world)
+            if pid in world.spatial.places]
+    if model is not None and pubs:                          # LLM-замысел
+        from ..inference.agents import forge_agenda
+        brief = (f"{p.name}, {getattr(p, 'profession', None) or p.archetype}, фракция "
+                 f"{p.faction or 'нет'}, черты {', '.join((p.traits or [])[:3])}")
+        out = forge_agenda(model, brief, [nm for _, nm in pubs])
+        if out and out.get("plan"):
+            name2id = {nm: pid for pid, nm in pubs}
+            plan = []
+            for st in out["plan"][:4]:
+                pid = name2id.get(st.get("place", "")) or pubs[0][0]
+                plan.append({"place": pid, "action": st.get("action", "rumor"),
+                             "summary": (st.get("summary") or "").strip(), "done": False})
+            if plan:
+                return {"goal": out.get("goal", ""), "motive": out.get("motive", ""), "plan": plan,
+                        "step": 0, "since_day": day_number(world.clock.tick), "active": True}
+    # шаблон-фоллбэк (офлайн/сбой): архетип по профессии + действия по кругу
     key = (getattr(p, "profession", None) or getattr(p, "archetype", "") or "").lower()
     goal, motive, places = _ARCHETYPES.get(key, _DEFAULT)
-    # с моделью — здесь будет LLM-замысел; пока богатим шаблон именем/фракцией
-    plan = [{"place": pl, "intent": f"шаг к цели «{goal}»", "done": False} for pl in places]
+    nm = p.name if p else "Некто"
+    plan = [{"place": pl, "action": _STEP_ACTIONS[i % len(_STEP_ACTIONS)],
+             "summary": f"{nm} тянет своё: {goal}", "done": False} for i, pl in enumerate(places)]
     return {"goal": goal, "motive": motive, "plan": plan, "step": 0,
             "since_day": day_number(world.clock.tick), "active": True}
 
@@ -82,15 +108,55 @@ def active_place(world, npc: str) -> str | None:
     return ag["plan"][step]["place"]
 
 
-def advance_agendas(world) -> None:
-    """Продвинуть планы важных NPC (раз в день): отметить текущий шаг сделанным, перейти к следующему.
-    TODO: реальные эффекты шага (слух/сделка/угроза/вербовка) + ветвление плана от исхода и мира."""
-    for ag in (getattr(world, "agendas", None) or {}).values():
+def advance_agendas(world) -> list:
+    """Продвинуть планы важных NPC (раз в день): применить ЭФФЕКТ текущего шага (молва/удар по торговле)
+    и перейти к следующему. Возвращает события для журнала/вестей."""
+    events = []
+    for npc, ag in (getattr(world, "agendas", None) or {}).items():
         if not ag.get("active") or not ag.get("plan"):
             continue
-        ag["plan"][min(ag["step"], len(ag["plan"]) - 1)]["done"] = True
+        step = ag["plan"][min(ag["step"], len(ag["plan"]) - 1)]
+        note = _apply_step(world, npc, step)
+        step["done"] = True
+        if note:
+            events.append({"npc": npc, "note": note})
         ag["step"] += 1
         if ag["step"] >= len(ag["plan"]):                  # план пройден — цикл (или завершение/новый замысел)
             ag["step"] = 0
             for st in ag["plan"]:
                 st["done"] = False
+    return events
+
+
+def _apply_step(world, npc, step) -> str | None:
+    """РЕАЛЬНЫЙ эффект шага на мир: молва (всегда) + удар по снабжению для economic/sabotage (цены прыгают)."""
+    from ..world.components import Persona
+    p = world.ecs.get(npc, Persona)
+    name = p.name if p else "Некто"
+    summ = step.get("summary") or f"{name} что-то затевает"
+    from .facts import register_rumor
+    register_rumor(world, summ, ["слух", "замысел"], npc)
+    if step.get("action") in ("economic", "sabotage"):
+        from .. import config
+        per_day = (24 * 60) // max(1, config.SIM_MINUTES_PER_TICK)
+        until = world.clock.tick + 3 * per_day
+        world.commit("set_flag", "agency", payload={"flag": f"disrupt:goods:{until}"})
+    return summ
+
+
+def maybe_promote(world, model=None, cap: int = 6, per_day: int = 2) -> list:
+    """Авто-промоушн (режиссёр): главы фракций становятся важными деятелями со своими планами — по
+    несколько в день, пока не наберётся cap. Стражу не трогаем (у неё свой институт). → имена новых.
+    Точка расширения: + повторное вовлечение игрока (talk≥N) и роль в квесте."""
+    agendas = getattr(world, "agendas", None) or {}
+    if len(agendas) >= cap:
+        return []
+    promoted = []
+    for fac in world.factions.values():
+        if len(promoted) >= per_day or len(getattr(world, "agendas", {})) >= cap:
+            break
+        leader = getattr(fac, "leader", None)
+        if leader and leader not in (getattr(world, "agendas", None) or {}) \
+           and getattr(fac, "kind", "") != "watch" and promote_to_active(world, leader, model):
+            promoted.append(leader)
+    return promoted

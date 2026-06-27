@@ -243,6 +243,17 @@ def teach_personal_fact(world, npc_id: str, item: dict) -> str:
     return fid
 
 
+def register_rumor(world, text: str, tags=None, source_npc: str | None = None) -> str:
+    """Рантайм-слух (city-scope) — расходится по горожанам через diffuse_rumors, игрок услышит в разговорах.
+    Используется деятельными NPC: их шаги-замыслы порождают молву в городе."""
+    n = sum(1 for k in world.facts if str(k).startswith("fact:rumor:")) + 1
+    fid = f"fact:rumor:{n}"
+    world.facts[fid] = Fact(fid, text, "rumors", "city", 0.1, list(tags or ["слух"]))
+    if source_npc:                                          # источник уже знает свою молву
+        world.commit("kg_add", "agency", payload={"s": source_npc, "r": "knows", "o": fid})
+    return fid
+
+
 def knowers_of(world, fact_id: str) -> list[str]:
     """Обход графа: кто знает факт (ноды-сущности с ребром knows → fact_id)."""
     return world.kg.subjects_of("knows", fact_id)

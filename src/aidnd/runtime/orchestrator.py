@@ -2257,8 +2257,10 @@ class GameSession:
             self._dungeon_cycle()                         # переоккупация зачищенных логов со временем
             from ..content.cases import decay_cases
             decay_cases(self.world)                        # подозрение к игроку стихает со временем
-            from ..content.agency import advance_agendas
-            advance_agendas(self.world)                    # важные NPC продвигают свои планы (шаг в день)
+            from ..content.agency import advance_agendas, maybe_promote
+            maybe_promote(self.world, self.model)          # режиссёр: главы фракций → важные деятели со своими планами
+            for ev in advance_agendas(self.world):         # их шаги дают РЕАЛЬНЫЕ эффекты (молва/удар по торговле)
+                self._log_journal(f"📣 По городу: {ev['note']}")
 
     def _threat_notices(self) -> None:
         """Рост угрозы: высокоугрожающие незачищенные логова всё чаще беспокоят округу (вести в журнал)."""

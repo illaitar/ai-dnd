@@ -157,6 +157,7 @@ class ModelManager:
         "map_features": (config.BASE_MODEL, "lore"),      # описание локации → фичи боевой карты
         "faction_gen": (config.BASE_MODEL, "lore"),
         "npc_ref": (config.INTENT_MODEL, None),           # лёгкая резолюция ссылки на присутствующего NPC
+        "agenda": (config.BASE_MODEL, "lore"),            # тайный замысел/план важного деятельного NPC
     }
 
     def __init__(self, client: OllamaClient | None = None) -> None:

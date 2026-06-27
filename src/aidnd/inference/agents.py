@@ -289,6 +289,15 @@ PROMPTS = {
         "без высокого фэнтези, без боя, без сюжетных персонажей. Заголовок — 2-4 слова. "
         "Call street_event."
     ),
+    "agenda": (
+        "Тебе дают ВАЖНОГО жителя фронтирного города (имя, профессия, фракция, черты) и список МЕСТ "
+        "города. Придумай его ТАЙНЫЙ ЗАМЫСЕЛ: одна ясная корыстная/амбициозная ЦЕЛЬ (goal, 3-7 слов), "
+        "МОТИВ (motive, 2-4 слова) и ПЛАН из 3-4 шагов, раскрывающих цель. Каждый шаг: place (РОВНО из "
+        "списка мест), action (rumor=пустить молву, economic=ударить по торговле/поставкам, recruit="
+        "вербовать сторонников, threaten=надавить/запугать, sabotage=подгадить сопернику) и summary — "
+        "одна конкретная заземлённая строка по-русски, ЧТО он делает на этом шаге (без магии и пафоса). "
+        "Call agenda."
+    ),
     "npc_ref": (
         "Игрок в людном месте обращается к кому-то — по имени, прозвищу, роли или описанию "
         "(«тот кузнец у стойки», «сплетник», «стражница», «рыжая девка»). Тебе дают реплику игрока "
@@ -548,6 +557,19 @@ SCHEMAS = {
         "parameters": {"type": "object", "properties": {
             "index": {"type": "integer"}},   # индекс выбранного присутствующего из списка, или -1
             "required": ["index"]},
+    },
+    "agenda": {
+        "name": "agenda",
+        "parameters": {"type": "object", "properties": {
+            "goal": {"type": "string"},      # тайная цель важного NPC
+            "motive": {"type": "string"},    # мотив
+            "plan": {"type": "array", "items": {"type": "object", "properties": {
+                "place": {"type": "string"},   # ровно из данного списка мест
+                "action": {"type": "string",
+                           "enum": ["rumor", "economic", "recruit", "threaten", "sabotage"]},
+                "summary": {"type": "string"}},   # что делает на шаге (одна строка)
+                "required": ["place", "action", "summary"]}}},
+            "required": ["goal", "plan"]},
     },
     "merge_quests": {
         "name": "merge_quests",
@@ -1055,6 +1077,15 @@ def resolve_npc_ref(manager, player_text: str, candidates: list) -> int:
     out = _call(manager, "npc_ref", "npc_ref", user, ["index"])
     idx = out.get("index", -1) if out else -1
     return idx if isinstance(idx, int) and 0 <= idx < len(candidates) else -1
+
+
+def forge_agenda(manager, brief: str, places: list):
+    """LLM-замысел важного NPC: цель/мотив/план с действиями по местам. None — нет сервера → шаблон."""
+    if is_offline(manager) or not places:
+        return None
+    user = (f"Важный житель: {brief}.\nМеста города: {', '.join(places)}.\n"
+            "Придумай его тайный замысел и план шагов. Call agenda.")
+    return _call(manager, "agenda", "agenda", user, ["goal", "plan"])
 
 
 def map_features(manager, description: str):

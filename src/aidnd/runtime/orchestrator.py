@@ -71,6 +71,7 @@ class GameSession:
         self.pending_roll: dict | None = None     # приостановленный ход на бросок
         self.player = world.player_id or "pc:hero"
         self.dialogue_partner: str | None = None  # с кем сейчас идёт разговор
+        self._road: int | None = None             # позиция НА ДОРОГЕ (узел CityGraph) — None = внутри здания
         self._last_item: str | None = None        # последний осмотренный предмет (для «на нём…»)
         self._haggle: dict | None = None          # активный торг: оффер + цены (см. _do_trade)
         self._sign_offer: list = []               # увиденные вывески, ждущие записи на карту (живут 1 ход)
@@ -96,10 +97,19 @@ class GameSession:
     #  Восприятие сцены                                                     #
     # ===================================================================== #
     def current_place(self) -> str:
+        if self._road is not None:                        # игрок НА ДОРОГЕ (узел CityGraph) — не в здании
+            return "place:streets"
         pos = self.world.position(self.player)
         return pos.place_id if pos else "place:phandalin_square"
 
+    def _anchor_building(self) -> str | None:
+        """Здание, у которого игрок стоит на улице (мировая позиция-якорь при ходьбе по дорогам)."""
+        pos = self.world.position(self.player)
+        return pos.place_id if pos else None
+
     def npcs_here(self) -> list[str]:
+        if self._road is not None:                        # на дороге зданий-NPC рядом нет (встречных даёт passerby)
+            return []
         self._apply_schedules()                           # расставить NPC по времени суток перед опросом присутствия
         place = self.current_place()
         transits = getattr(self.world, "transits", None) or {}   # «в пути» — на улице, не на месте
@@ -109,6 +119,106 @@ class GameSession:
             if pos and pos.place_id == place and self.world.is_alive(npc) and npc not in transits:
                 out.append(npc)
         return out
+
+    # ===================================================================== #
+    #  Ходьба ПО ДОРОГАМ: позиция игрока = здание ИЛИ узел CityGraph         #
+    # ===================================================================== #
+    def _is_public(self, pid: str) -> bool:
+        p = self.world.spatial.places.get(pid)
+        return bool(p and (set(getattr(p, "affordances", []) or []) & self._PUBLIC_AFF))
+
+    def _road_xy(self) -> dict | None:
+        """Позиция игрока на точке дороги (координаты CityGraph 980×700) — для стрелки на карте."""
+        if self._road is None:
+            return None
+        g = self._city_graph()
+        xy = g.xy(self._road) if g else None
+        return {"x": xy[0], "y": xy[1]} if xy else None
+
+    def _road_buildings(self):
+        """(сюда-зайти, куда-ведут) с текущей дорожной точки."""
+        g = self._city_graph()
+        nd, anchor = self._road, self._anchor_building()
+        here = list(dict.fromkeys([b for b in ([anchor] + (g.around.get(nd, []) if g else [])) if b]))
+        leads = [b for b in (g.nearest_from(nd, 7) if g else []) if b not in here]
+        return here, leads
+
+    def _step_outside(self) -> dict:
+        """Выйти из здания на ближайшую точку дороги (улицу у двери)."""
+        g = self._city_graph()
+        b = self._anchor_building()
+        nd = g.door.get(b) if (g and b) else None
+        if nd is None:
+            return {"kind": "system", "text": "Отсюда не выйти на улицу.", "view": self.view()}
+        self._road = nd
+        self.dialogue_partner = None
+        self._tick()
+        self._log_journal(f"Вышел на улицу{(' у «' + self._place_name(b) + '»') if b else ''}.")
+        return self._road_look()
+
+    def _road_look(self) -> dict:
+        here, leads = self._road_buildings()
+        recorded = self._recorded_places()
+        self._sign_offer = [{"place": b, "label": self._place_name(b)} for b in here + leads
+                            if b not in recorded and self._is_public(b)]
+        anchor = self._anchor_building()
+        sc = self.scene_context()
+        t = f"{sc.descriptor}\nТы на улице"
+        if anchor:
+            t += f" у «{self._place_name(anchor)}»"
+        t += ". "
+        if here:
+            t += "Зайти можно: " + ", ".join(f"«{self._place_name(b)}»" for b in here) + ". "
+        if leads:
+            t += "Улицы ведут к: " + ", ".join(f"«{self._place_name(b)}»" for b in leads[:5]) + ". "
+        t += "Скажи, куда идти, или «зайти» в здание."
+        return {"kind": "look", "text": t, "place": "place:streets", "place_name": "на улице",
+                "npcs": [], "exits": [{"id": b, "name": self._place_name(b)} for b in here + leads],
+                "actions": [], "scene": sc.to_dict(), "view": self.view()}
+
+    def _step_inside(self, text: str = "") -> dict:
+        """Зайти в здание с улицы (названное, иначе якорное/ближайшее)."""
+        here, leads = self._road_buildings()
+        cand = here + leads
+        target = self._match_place(text) if text else None
+        if target not in cand:
+            anchor = self._anchor_building()
+            target = anchor if anchor in cand else (cand[0] if cand else None)
+        if not target:
+            return {"kind": "system", "text": "Сюда некуда зайти.", "view": self.view()}
+        self._road = None
+        self.world.commit("set_position", self.player, target=self.player,
+                          payload={"region": "region:phandalin", "place": target})
+        self._record_explored(target)
+        self._tick()
+        look = self.look()
+        look["text"] = f"Ты заходишь в «{self._place_name(target)}». " + look["text"]
+        return self._offer_signs(look)
+
+    _EXIT_CUES = ("выйти на улиц", "на улицу", "выйду", "выхожу", "наружу", "выйти из", "выйти", "из здания")
+    _ENTER_CUES = ("зайти", "войти", "внутрь", "зайду", "захожу", "войду", "в здание", "зайд")
+
+    def _road_move(self, text: str) -> dict:
+        """Идти по дорогам с улицы к названному месту (дороги связывают всё, разведка ногами) → дойти и зайти."""
+        here, leads = self._road_buildings()
+        low = text.lower()
+        g = self._city_graph()
+        cands = list(dict.fromkeys(here + leads + (list(g.door) if g else [])))  # видимые + ВСЕ дома графа
+        dest = self._match_place(text)
+        if dest not in cands:
+            dest = None
+            for b in cands:                               # по названию (можно идти к любому, что назвал)
+                nm = self._place_name(b).lower()
+                if nm in low or any(len(w) > 3 and w in low for w in nm.split()):
+                    dest = b
+                    break
+        if dest is None:
+            return {"kind": "system", "view": self.view(),
+                    "text": "Не вижу отсюда такого места. Улицы ведут к: "
+                            + ", ".join(f"«{self._place_name(b)}»" for b in (here + leads)[:6]) + "."}
+        if dest == self._anchor_building():               # назад в своё здание
+            return self._step_inside(text)
+        return self._commit_move(dest)                    # идти по дорогам → зайти на месте
 
     def _transit_ticks(self, frm: str | None, to: str | None) -> int:
         """Сколько тиков идти между местами по улицам (1-4 — короткие городские переходы)."""
@@ -306,6 +416,8 @@ class GameSession:
         return None
 
     def look(self) -> dict:
+        if self._road is not None:                        # игрок на улице → осмотр дороги, а не здания
+            return self._road_look()
         place = self.current_place()
         p = self.world.spatial.places.get(place)
         name = p.name if p else place
@@ -404,6 +516,12 @@ class GameSession:
             return self._post(self._record_signs(), "map")
         self._sign_offer = []                             # не отреагировал на прошлые вывески → забыл
         low = text.lower()
+        if self._road is not None and any(k in low for k in self._ENTER_CUES):  # с улицы → зайти в здание
+            return self._post(self._step_inside(text), "move")
+        if self._road is None and self._anchor_building() and (   # из здания → на улицу (про улицу, не к месту)
+                any(k in low for k in ("на улиц", "наружу", "из здания", "выйти из", "выйду на"))
+                or low.strip().rstrip(".!") in ("выйти", "выхожу", "выйду", "выйди", "выйти на улицу")):
+            return self._post(self._step_outside(), "move")
         if "штраф" in low and any(k in low for k in ("заплат", "уплат", "оплат", "плачу")):
             return self._post(self.pay_fine(), "freeform")   # уладить дело со стражей
         if self._followers() and any(k in low for k in self._UNFOLLOW_CUES):
@@ -837,6 +955,8 @@ class GameSession:
     def _do_move(self, action: Action, text: str) -> dict:
         self._haggle = None                               # уход прерывает торг
         self._journey = None                              # новый ход отменяет прерванный путь
+        if self._road is not None:                        # идём ПО ДОРОГЕ (игрок на улице)
+            return self._road_move(text)
         dest = self._match_place(text)
         if not dest:
             low = text.lower()                            # локация не распознана
@@ -890,7 +1010,7 @@ class GameSession:
         gate = self._entry_blocked(dest)                  # ратуша/святилище закрыты ночью — внутрь не пускаем
         if gate:
             return gate
-        cur = self.current_place()
+        cur = self._anchor_building() if self._road is not None else self.current_place()  # с улицы — от якоря
         path = self.world.spatial.path_between(cur, dest)
         if not path:
             return {"kind": "system", "text": f"Ты не знаешь, как добраться до "
@@ -906,10 +1026,15 @@ class GameSession:
         route_ids, steps = [], 0
         g = self._city_graph()
         if g and not region_travel:
-            a_node, b_node = self._city_node_of(cur), self._city_node_of(dest)
-            if a_node and b_node and a_node != b_node:
-                route_ids = g.seen_along(a_node, b_node)   # дома у перекрёстков, мимо которых реально проходишь
-                steps = g.path_steps(a_node, b_node)
+            b_node = self._city_node_of(dest)
+            if self._road is not None and b_node:          # идём С ДОРОГИ (от текущей дорожной точки)
+                route_ids = g.seen_from(self._road, dest)
+                steps = g.steps_from(self._road, dest)
+            else:
+                a_node = self._city_node_of(cur)
+                if a_node and b_node and a_node != b_node:
+                    route_ids = g.seen_along(a_node, b_node)   # дома у перекрёстков, мимо которых проходишь
+                    steps = g.path_steps(a_node, b_node)
         if lead is None:
             if region_travel:
                 lead = (f"Путь к «{self._place_name(dest)}» ведёт дикими землями и "
@@ -956,6 +1081,7 @@ class GameSession:
     def _arrive(self, dest: str, cur: str, path: list[str], region_travel: bool,
                 ticks: int, lead: str, route_ids: list[str]) -> dict:
         """Фактический приход в dest: позиция, спутники, журнал, разведка, туман, тик, нарратив, вывески."""
+        self._road = None                                 # дошёл до места = сошёл с дороги (внутри здания/локации)
         self.world.commit("set_position", self.player, target=self.player,
                           payload={"region": "region:phandalin", "place": dest})
         movers = self._companions() + [f for f in self._followers() if f not in self._companions()]
@@ -1080,9 +1206,10 @@ class GameSession:
         """Продолжить прерванный событием путь — дойти до цели."""
         j, self._journey = self._journey, None
         dest = j["dest"]
-        cur = self.current_place()
+        cur = self._anchor_building() if self._road is not None else self.current_place()  # с улицы — от якоря
         path = self.world.spatial.path_between(cur, dest)
         if not path:
+            self._road = None
             return self.look()
         ticks, region_travel = self._travel_cost(path)
         lead = f"Ты продолжаешь путь и доходишь до «{self._place_name(dest)}»."
@@ -4988,6 +5115,10 @@ class GameSession:
             "place": place, "place_name": self._place_name(place),
             "place_path": self._place_path(place),
             "map_recorded": sorted(self._recorded_places()),   # записанные места — фронт метит их на city-SVG
+            "streets": self._road is not None,                  # игрок НА ДОРОГЕ (улица), не в здании
+            "street_at": (self._place_name(self._anchor_building())
+                          if self._road is not None and self._anchor_building() else None),
+            "road_xy": self._road_xy(),                         # позиция на точке дороги (для стрелки на карте)
             "guild_here": self._at_guild(),                     # игрок в Доме гильдии → доступен экран гильдии
             "watch": self._watch_view(),                        # статус розыска/штрафа у городской стражи
             "journey": ({"dest_name": self._place_name(self._journey["dest"]),

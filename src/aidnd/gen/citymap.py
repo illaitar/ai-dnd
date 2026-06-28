@@ -113,30 +113,56 @@ class CityGraph:
         self.edges = g["edges"]
         self.buildings = g["buildings"]
         self.start = g.get("start", 0)
-        self._adj: dict[int, list[int]] = {}
-        for a, b in self.edges:
-            self._adj.setdefault(a, []).append(b)
-            self._adj.setdefault(b, []).append(a)
-        self.door = {b["id"]: b["door"] for b in self.buildings if b.get("door") is not None}
         self.bld = {b["id"]: b for b in self.buildings}
-        self.at_node: dict[int, list[str]] = {}            # перекрёсток → здания с дверью здесь
+        self._pos: dict[int, tuple] = {it["i"]: (it["x"], it["y"]) for it in self.intersections}
+        self._inter = set(self._pos)                       # настоящие перекрёстки (для подсчёта «N перекрёстков»)
+        self._subdivide_roads()                            # дороги → точки ~равной длины (дома стоят вдоль дорог)
+        # дверь = ближайшая ТОЧКА ДОРОГИ к реальной позиции здания (не только перекрёсток!)
+        self.door = {bid: self._nearest_point(b["x"], b["y"])
+                     for bid, b in self.bld.items() if "x" in b and "y" in b}
+        self.at_node: dict[int, list[str]] = {}            # точка дороги → здания с дверью здесь
         for bid, nd in self.door.items():
             self.at_node.setdefault(nd, []).append(bid)
         self._build_proximity()                            # честная геометрическая близость (раз при сборке)
 
+    def _subdivide_roads(self) -> None:
+        """Разбить улицы на точки ПРИМЕРНО РАВНОЙ длины (≈медианный сегмент). Дома прилегают к дорогам, а не
+        только к перекрёсткам — поэтому считаем близость по плотным точкам дороги, а не по редким узлам."""
+        pos = self._pos
+        seg = sorted(((pos[a][0] - pos[b][0]) ** 2 + (pos[a][1] - pos[b][1]) ** 2) ** 0.5
+                     for a, b in self.edges if a in pos and b in pos)
+        self._interval = max(18.0, min(36.0, seg[len(seg) // 2])) if seg else 28.0   # шаг точки дороги
+        self._adj: dict[int, list[int]] = {}
+        nid = (max(pos) if pos else 0) + 1
+        for a, b in self.edges:
+            if a not in pos or b not in pos:
+                continue
+            ax, ay = pos[a]
+            bx, by = pos[b]
+            length = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+            n = max(1, round(length / self._interval))     # на сколько кусков ~равной длины
+            prev = a
+            for k in range(1, n):
+                t = k / n
+                pos[nid] = (ax + (bx - ax) * t, ay + (by - ay) * t)
+                self._adj.setdefault(prev, []).append(nid)
+                self._adj.setdefault(nid, []).append(prev)
+                prev, nid = nid, nid + 1
+            self._adj.setdefault(prev, []).append(b)
+            self._adj.setdefault(b, []).append(prev)
+
+    def _nearest_point(self, x: float, y: float) -> int:
+        """Ближайшая точка дороги (перекрёсток или точка-разбиение) к координате."""
+        return min(self._pos, key=lambda i: (self._pos[i][0] - x) ** 2 + (self._pos[i][1] - y) ** 2)
+
     def _build_proximity(self) -> None:
-        """ЧЕСТНО (по геометрии, раз при сборке): для каждого перекрёстка — дома в физическом радиусе вокруг
-        него (что видно, стоя на этом перекрёстке). Радиус ~2 длины уличного сегмента — соседние строения,
-        а не весь город. Используется для вывесок: на перекрёстке/в пути видишь только прилегающие дома."""
-        pos = {it["i"]: (it["x"], it["y"]) for it in self.intersections}
-        segs = sorted((pos[a][0] - pos[b][0]) ** 2 + (pos[a][1] - pos[b][1]) ** 2
-                      for a, b in self.edges if a in pos and b in pos)
-        seg = (segs[len(segs) // 2] ** 0.5) if segs else 32.0   # медианный сегмент улицы
-        r2 = (seg * 2.2) ** 2                                    # радиус «видно вокруг» (≈2 перекрёстка)
-        bpos = {bid: pos[nd] for bid, nd in self.door.items() if nd in pos}
-        self.around: dict[int, list[str]] = {}             # перекрёсток → дома в радиусе (соседние)
-        for i, (x, y) in pos.items():
-            blds = [bid for bid, (bx, by) in bpos.items() if (bx - x) ** 2 + (by - y) ** 2 <= r2]
+        """Для каждой точки дороги — дома, чьи двери в пределах ~1.4 шага точки (реально прилегающие к этому
+        отрезку улицы). Радиус мал → соседние дома, не «через квартал». Это и есть честные вывески вокруг."""
+        r2 = (self._interval * 1.4) ** 2
+        dpos = {bid: self._pos[nd] for bid, nd in self.door.items() if nd in self._pos}
+        self.around: dict[int, list[str]] = {}             # точка дороги → дома рядом (прилегающие)
+        for i, (x, y) in self._pos.items():
+            blds = [bid for bid, (bx, by) in dpos.items() if (bx - x) ** 2 + (by - y) ** 2 <= r2]
             if blds:
                 self.around[i] = blds
 
@@ -156,6 +182,50 @@ class CityGraph:
                     seen.add(bid)
                     out.append(bid)
         return out
+
+    # --- ходьба ПО ДОРОГАМ (позиция игрока = узел графа) ------------------- #
+    def xy(self, node: int) -> tuple | None:
+        return self._pos.get(node)
+
+    def is_crossroad(self, node: int) -> bool:
+        return node in self._inter
+
+    def nearest_from(self, node: int, k: int = 5) -> list[str]:
+        """Ближайшие по дорогам здания от УЗЛА (куда ведут улицы / что рядом), по возрастанию пути."""
+        if node is None or (node not in self._pos):
+            return []
+        dist = {node: 0}
+        q = deque([node])
+        found: list[str] = []
+        while q and len(found) < k:
+            n = q.popleft()
+            for bid in self.at_node.get(n, []):
+                if bid not in found:
+                    found.append(bid)
+            for m in self._adj.get(n, []):
+                if m not in dist:
+                    dist[m] = dist[n] + 1
+                    q.append(m)
+        return found[:k]
+
+    def seen_from(self, node: int, b_bld: str) -> list[str]:
+        """Дома у точек маршрута от УЗЛА до здания b (вывески при ходьбе с дороги)."""
+        if node is None or b_bld not in self.door:
+            return []
+        out, seen = [], set()
+        for nd in self._bfs_nodes(node, self.door[b_bld]):
+            for bid in self.around.get(nd, []):
+                if bid not in seen:
+                    seen.add(bid)
+                    out.append(bid)
+        return out
+
+    def steps_from(self, node: int, b_bld: str) -> int:
+        """Сколько ПЕРЕКРЁСТКОВ пройти от узла до здания b."""
+        if node is None or b_bld not in self.door:
+            return 0
+        p = self._bfs_nodes(node, self.door[b_bld])
+        return max(0, sum(1 for n in p if n in self._inter) - 1)
 
     def _bfs_nodes(self, src: int, dst: int) -> list[int]:
         """Кратчайший путь по перекрёсткам (список узлов), [] если недостижимо."""
@@ -180,11 +250,11 @@ class CityGraph:
         return out[::-1]
 
     def path_steps(self, a_bld: str, b_bld: str) -> int:
-        """Сколько перекрёстков пройти от здания a до здания b (0 если неизвестно/то же)."""
+        """Сколько ПЕРЕКРЁСТКОВ пройти от a до b (точки-разбиения дороги не в счёт). 0 если неизвестно/то же."""
         if a_bld not in self.door or b_bld not in self.door:
             return 0
         p = self._bfs_nodes(self.door[a_bld], self.door[b_bld])
-        return max(0, len(p) - 1)
+        return max(0, sum(1 for n in p if n in self._inter) - 1)
 
     def buildings_along(self, a_bld: str, b_bld: str) -> list[str]:
         """Здания, чьи двери стоят на маршруте a→b (вывески, что видишь по пути). Без a и b."""

@@ -218,7 +218,8 @@ function render(r) {
 
 function updateView(v) {
   lastView = v;
-  $("place-name").textContent = v.journey ? ("🚶 В пути → " + v.journey.dest_name)   // путь прерван событием
+  $("place-name").textContent = v.streets ? ("🚶 На улице" + (v.street_at ? " у «" + v.street_at + "»" : ""))  // на дороге
+    : v.journey ? ("🚶 В пути → " + v.journey.dest_name)              // путь прерван событием
     : (v.place_path || v.place_name || "—");                          // хлебные крошки: Здание → Комната
   if (v.journey && !$("mapview").classList.contains("hidden")) closeOverlay("mapview");  // событие в пути → из карты
   $("clock").textContent = "🕑 " + (v.time || "—");
@@ -385,8 +386,12 @@ function renderQuick() {
   const jr = (lastView && lastView.journey)                          // путь прерван → продолжить (вывески → ещё «нанести»)
     ? ((lastView.journey.kind === "signs" ? `<span class="chip cont" data-cmd="да">📍 Нанести на карту</span>` : "")
        + `<span class="chip cont" data-cmd="дальше">▶ Идти дальше</span>`) : "";
+  const street = (lastView && lastView.streets)                      // на улице → «зайти»; в здании → «на улицу»
+    ? `<span class="chip cont" data-cmd="зайти">🚪 Зайти</span>`
+    : ((lastView && !lastView.streets && lastView.place && String(lastView.place).startsWith("building:"))
+        ? `<span class="chip" data-cmd="выйти на улицу">🚶 На улицу</span>` : "");
   const cmds = [["осмотреться", "осмотреться"], ["обыскать", "обыскать комнату"], ["ждать", "ждать"]];
-  $("quick").innerHTML = jr + cmds.map(([l, c]) => `<span class="chip" data-cmd="${c}">${l}</span>`).join("")
+  $("quick").innerHTML = jr + street + cmds.map(([l, c]) => `<span class="chip" data-cmd="${c}">${l}</span>`).join("")
     + `<span class="chip" data-open="inv">🎒 инвентарь</span>`
     + `<span class="chip" data-open="mapview">🗺 карта</span>`
     + `<span class="chip" data-open="trade">🛒 лавка</span>`
@@ -608,7 +613,7 @@ async function ensureTown(seed) {
   catch (e) { townBuildings = []; }
 }
 let mapMode = "region", citySel = null, cityState = null, cityCur = 0, cityStep = 0, cityQuiet = 2, cityMarks = [];
-let cityBadges = [], cityArrow = null;                 // записанные места (номера) + стрелка игрока поверх city-SVG
+let cityBadges = [], cityArrow = null, cityScale = 1;  // записанные места (номера) + стрелка игрока поверх city-SVG
 // HiDPI: рисуем во внутренний бэк-стор ~2× (CSS ужимает обратно) → резкие карты/подписи.
 // Геометрия карт строится от W/H, поэтому больший бэк-стор просто увеличивает чёткость;
 // citygen/worldgen масштабируют шрифты фактором s=W/560, чтобы подписи остались крупными.
@@ -662,7 +667,7 @@ async function drawCityLevel(tick = -1) {
   }
   host.innerHTML = data.svg; host.classList.remove("hidden");  // SVG-город как база карты
   cv.getContext("2d").clearRect(0, 0, cv.width, cv.height);    // canvas-базу для города гасим
-  const k = cv.width / CW;                                     // SVG(980×700) → координаты FX-бэкстора (аспект совпадает)
+  const k = cv.width / CW; cityScale = k;                      // SVG(980×700) → координаты FX-бэкстора (аспект совпадает)
   mapHits = data.hits.map(h => ({ ...h, x: h.x * k, y: h.y * k, r: (h.r || 14) * k }));
   cityState = { seed, streets: { start: data.streets.start, adj: data.streets.adj,
                                  nodes: data.streets.nodes.map(n => [n[0] * k, n[1] * k]) } };
@@ -732,7 +737,11 @@ function computeCityOverlay() {                          // записанные
   const cur = lastView && lastView.place;
   const curName = lastView && lastView.place_name;
   cityBadges = mapHits.filter(h => h.landmark && recorded.has(h.id))
-    .map((h, i) => ({ x: h.x, y: h.y, n: i + 1, name: h.name, id: h.id }));
+    .map((h, i) => ({ x: h.x, y: h.y, r: h.r || 14, n: i + 1, name: h.name, id: h.id }));
+  if (lastView && lastView.streets && lastView.road_xy) {   // игрок НА ДОРОГЕ → стрелка на точке дороги
+    cityArrow = { x: lastView.road_xy.x * cityScale, y: lastView.road_xy.y * cityScale };
+    return;
+  }
   const norm = s => String(s || "").replace(/^(building:|place:|room:)/, "");   // гибкий матч места к хиту
   const ch = mapHits.find(h => h.id === cur)
     || mapHits.find(h => norm(h.id) === norm(cur))
@@ -745,11 +754,14 @@ function drawFx() {
   const s = fx.width / 560;
   for (const m of cityMarks) { c.fillStyle = "#e2604a"; c.font = `bold ${Math.round(16 * s)}px Inter`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10 * s); }
   if (mapMode === "city") {                              // записанные места — красные нумерованные бейджи
-    for (const b of cityBadges) {
-      c.beginPath(); c.arc(b.x, b.y, 11 * s, 0, 7); c.fillStyle = "#e2453a"; c.fill();
-      c.lineWidth = 1.5 * s; c.strokeStyle = "#fff"; c.stroke();
-      c.fillStyle = "#fff"; c.font = `bold ${Math.round(12 * s)}px Inter`; c.textAlign = "center"; c.textBaseline = "middle";
-      c.fillText(String(b.n), b.x, b.y);
+    for (const b of cityBadges) {                        // мельче, полупрозрачные, вписаны в полигон дома
+      const rad = Math.max(4 * s, Math.min(7 * s, (b.r || 14) * 0.5));
+      c.globalAlpha = 0.55;
+      c.beginPath(); c.arc(b.x, b.y, rad, 0, 7); c.fillStyle = "#d23a30"; c.fill();
+      c.globalAlpha = 0.8; c.lineWidth = 0.8 * s; c.strokeStyle = "#fff"; c.stroke();
+      c.globalAlpha = 0.95; c.fillStyle = "#fff"; c.font = `bold ${Math.round(Math.max(7, rad * 1.25))}px Inter`;
+      c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(String(b.n), b.x, b.y);
+      c.globalAlpha = 1;
     }
     if (cityArrow) {                                     // ИГРОК — красная стрелка над реальной точкой
       const x = cityArrow.x, ay = cityArrow.y - 20 * s;

@@ -378,8 +378,9 @@ function renderExits(exits) {
   bindChips();
 }
 function renderNpcs(npcs) {
-  $("npcs").innerHTML = (npcs && npcs.length ? "<span class='state'>рядом:</span> " : "")
-    + (npcs || []).map(n => `<span class="chip npc${n.known === false ? " stranger" : ""}" data-talk="${n.id}" data-name="${esc(n.name)}"${n.known === false ? ' title="незнакомец — заговори, чтобы узнать имя"' : ""}>${n.known === false ? "👤 " : ""}${esc(n.name)}</span>`).join("");
+  const known = (npcs || []).filter(n => n.known !== false);   // незнакомцы живут в тексте сцены, не отдельными чипами
+  $("npcs").innerHTML = (known.length ? "<span class='state'>рядом:</span> " : "")
+    + known.map(n => `<span class="chip npc" data-talk="${n.id}" data-name="${esc(n.name)}">${esc(n.name)}</span>`).join("");
   bindChips();
 }
 function renderQuick() {
@@ -402,7 +403,7 @@ function renderQuick() {
 }
 function bindChips() {
   document.querySelectorAll("[data-go]").forEach(c => c.onclick = () =>
-    send({ cmd: "input", text: "идти в " + c.textContent }));
+    send({ cmd: "input", text: c.dataset.go === "__street__" ? "выйти на улицу" : "идти в " + c.textContent }));
   document.querySelectorAll("[data-talk]").forEach(c => c.onclick = () => {
     logEntry(`<span class="you">→ заговорить с ${esc(c.dataset.name)}</span>`, "you");
     send({ cmd: "input", text: "поговорить с " + c.dataset.name });

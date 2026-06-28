@@ -502,9 +502,14 @@ class GameSession:
             text += " Следы: " + "; ".join(p.alterations) + "."
         if actions:
             text += " Можно: " + ", ".join(a["label"] for a in actions) + "."
-        roads = self._roads_text()                         # куда ведут дороги (для ясности навигации)
-        if roads:
-            text += f"\n🧭 Отсюда можно пойти: {roads}."
+        g = self._city_graph()
+        in_city = bool(g and place in g.door)              # городское здание/место → выход один: на улицу
+        if in_city:
+            text += "\n🚪 Выйти на улицу — оттуда идёшь по городу."
+        else:                                              # вне города (дикие земли/подземелье) — связи как есть
+            roads = self._roads_text()
+            if roads:
+                text += f"\n🧭 Отсюда можно пойти: {roads}."
         from ..content.watch import (  # патруль стражи, что сейчас здесь (симуляция)
             patrol_place,
             patrols_of,
@@ -528,7 +533,8 @@ class GameSession:
             # (их описывает _crowd_line), к ним обращаются словами, а не отдельным чипом.
             "npcs": [{"id": n, "name": self._display_pc(n), "known": True}
                      for n in self.npcs_here() if n != self.player and self._knows(n)],
-            "exits": [{"id": e, "name": self._place_name(e)} for e in self.exits()],
+            "exits": ([{"id": "__street__", "name": "выйти на улицу"}] if in_city
+                      else [{"id": e, "name": self._place_name(e)} for e in self.exits()]),
             "actions": actions,
             "view": self.view(),
         }

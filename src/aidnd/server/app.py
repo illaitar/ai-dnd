@@ -531,8 +531,10 @@ async def ws(sock: WebSocket) -> None:
                 house = session.discovery.materialize_interior(msg.get("place", ""),
                                                                kind_hint=msg.get("kind"))
                 result = {"kind": "house", "house": house, "view": session.view()}
-            elif cmd == "travel":                          # переход «через карту»: многоходовый путь, гейт по знанию
+            elif cmd == "travel":                          # переход «через карту» — свободно по дорогам до места
                 result = session.travel_to(msg.get("place", ""))
+            elif cmd == "walk_node":                       # свободная ходьба к точке дороги/перекрёстку на карте
+                result = session.walk_to_xy(msg.get("x", 0), msg.get("y", 0))
             elif cmd == "roll_manual":
                 result = session.submit_roll(msg.get("faces", []))
             elif cmd == "new_game":

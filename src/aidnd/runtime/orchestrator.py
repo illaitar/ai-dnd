@@ -135,6 +135,26 @@ class GameSession:
         xy = g.xy(self._road) if g else None
         return {"x": xy[0], "y": xy[1]} if xy else None
 
+    def _current_node(self) -> int | None:
+        """Текущий узел CityGraph: дорожная точка (на улице) или дверь здания (в помещении)."""
+        g = self._city_graph()
+        if not g:
+            return None
+        return self._road if self._road is not None else g.door.get(self.current_place())
+
+    def _route_xy(self, dst_node: int | None) -> list[dict]:
+        """Путь по узлам дорог от текущей позиции до dst_node (координаты CityGraph) — для отрисовки маршрута."""
+        g = self._city_graph()
+        src = self._current_node()
+        if not (g and src is not None and dst_node is not None):
+            return []
+        out = []
+        for n in g._bfs_nodes(src, dst_node):
+            xy = g.xy(n)
+            if xy:
+                out.append({"x": xy[0], "y": xy[1]})
+        return out
+
     def _road_buildings(self):
         """Что игрок видит с дорожной точки: РЯДОМ — прилегающие дома (их вывески видно вплотную); ПО ДОРОГАМ —
         только ИЗВЕСТНЫЕ (записанные) места. Неоткрытое и дикие земли не показываем."""
@@ -543,19 +563,19 @@ class GameSession:
         if self.model is None:
             return self._offer_signs(base)                # офлайн: без нарратора, но вывески видны
         from ..inference.agents import render_scene
+        # ВАЖНО: игроку текст лаконичен, но НАРРАТОРА заземляем фактами о толпе (_crowd_line с гейтом знакомства),
+        # иначе он галлюцинирует и выдумывает имена тем, кого игрок не встречал.
         summary = ("Игрок осматривается по сторонам — опиши обстановку живо, во 2-м лице, СТРОГО по "
                    "фактам, никого и ничего не выдумывая. ЗНАКОМЫХ называй по имени; НЕЗНАКОМЦЕВ — только "
-                   "обезличенно (пол/раса/роль, как в фактах), имён им НЕ придумывай. Передай, сколько "
-                   "народу и есть ли знакомые. Факты сцены: " + (base.get("text") or ""))
+                   "обезличенно (пол/раса/роль, как в фактах), имён им НЕ придумывай и НЕ бери из общих знаний. "
+                   "Факты сцены: " + (base.get("text") or "") + " " + self._crowd_line())
         out = render_scene(self.model, summary, self.world.ecs.get(self.player, Persona),
                            scene=self._narrator_context(), mode="ambient",
                            pc=self._pc_brief(), gear=self._pc_gear())
         narr = (out or {}).get("narration")
-        if narr:
-            affs = base.get("actions") or []
-            tail = (" Можно: " + ", ".join(a["label"] for a in affs) + ".") if affs else ""
+        if narr:                                          # действия — чипами (actions), в прозу «Можно:» не дописываем
             base = dict(base)
-            base["text"] = narr.strip() + tail
+            base["text"] = narr.strip()
         return self._offer_signs(base)                    # при осмотре тоже видны вывески/знаки вокруг
 
     # ===================================================================== #
@@ -3862,22 +3882,43 @@ class GameSession:
         return place_id in self._known_places()
 
     def travel_to(self, place_id: str) -> dict:
-        """Санкционированное перемещение «через карту»: многоходовый путь допустим,
-        гейт только по знанию (карта — обзор города/региона). Текстовый гейт расстояния
-        здесь НЕ применяется — карта и есть способ дойти до далёкого известного места."""
+        """Переход «через карту» — СВОБОДНО по дорогам, без гейта знания (карта показывает город, идём куда видим;
+        дойдя, место открываем). Текстовый гейт «иду к незнакомому имени» применяется отдельно в _do_move."""
         sp = self.world.spatial
         if place_id not in sp.places:
             return {"kind": "system", "text": "Такого места нет.", "view": self.view()}
-        cur = self.current_place()
-        if place_id == cur:
+        if place_id == self.current_place() or (self._road is None and self._anchor_building() == place_id):
             look = self.look()
             look["text"] = "Ты уже здесь. " + look["text"]
             return self._post(look, "look")
-        if not self._knows_place(place_id):
-            return {"kind": "narration", "view": self.view(),
-                    "text": f"Ты ещё не разведал «{self._place_name(place_id)}» — "
-                            f"сначала узнай, где это (на месте или со слов)."}
-        return self._post(self._commit_move(place_id), "move")
+        g = self._city_graph()
+        route = self._route_xy(g.door.get(place_id)) if g else []   # маршрут по дорогам до двери — фронт рисует
+        res = self._post(self._commit_move(place_id), "move")
+        if route:
+            res["route_xy"] = route
+        return res
+
+    def walk_to_xy(self, x: float, y: float) -> dict:
+        """Свободная ходьба по дорогам к точке на карте (перекрёстку): встаём на ближайший узел, рисуем маршрут."""
+        g = self._city_graph()
+        if not g:
+            return {"kind": "system", "text": "Карта города недоступна.", "view": self.view()}
+        node = g._nearest_point(float(x), float(y))
+        if node is None or g.xy(node) is None:
+            return {"kind": "system", "text": "Туда не пройти.", "view": self.view()}
+        route = self._route_xy(node)                     # маршрут от текущей позиции до точки (до перемещения)
+        near = g.nearest_from(node, 1)                   # якорь = ближайшее к точке здание (для «у «X»» и «зайти»)
+        if near:
+            self.world.commit("set_position", self.player, target=self.player,
+                              payload={"region": "region:phandalin", "place": near[0]})
+        self._road = node                                # встаём на дорожную точку
+        self.dialogue_partner = None
+        self._tick()
+        self._log_journal("Прошёл улицами к перекрёстку.")
+        res = self._road_look()
+        if route:
+            res["route_xy"] = route
+        return self._post(res, "move")
 
     def _containers_here(self) -> list[str]:
         place = self.current_place()

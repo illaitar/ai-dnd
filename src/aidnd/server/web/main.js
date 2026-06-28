@@ -200,6 +200,7 @@ function render(r) {
   if (r.kind === "house" && r.house) renderHouse(r.house);
   if (r.kind === "saved") { logSystem(`💾 Сохранено: «${r.card ? (r.card.title || r.card.name || "") : ""}»`); if (r.games) { lobbyGames = r.games; if (!$("lobby").classList.contains("hidden")) renderLobby(); } }
   if (r.kind === "saves") { if (r.games) lobbyGames = r.games; if (!$("lobby").classList.contains("hidden")) renderLobby(); }
+  if (r.route_xy) cityRoute = r.route_xy;               // маршрут последней ходьбы по карте → пунктир поверх города
   if (r.view) updateView(r.view);
   if (r.travel_far) openOverlay("mapview");           // «далеко — открой карту»: сразу показываем карту для маршрута
   if (r.kind === "error" && !$("levelup").classList.contains("hidden")) $("lvl-msg").textContent = r.text;
@@ -613,7 +614,7 @@ async function ensureTown(seed) {
   try { const r = await fetch("/town_layout?seed=" + seed); if (r.ok) { townBuildings = (await r.json()).buildings || []; townSeed = seed; } }
   catch (e) { townBuildings = []; }
 }
-let mapMode = "region", citySel = null, cityState = null, cityMarks = [];
+let mapMode = "region", citySel = null, cityState = null, cityMarks = [], cityRoute = null;
 let cityBadges = [], cityArrow = null, cityScale = 1;  // записанные места (номера) + стрелка игрока поверх city-SVG
 // HiDPI: рисуем во внутренний бэк-стор ~2× (CSS ужимает обратно) → резкие карты/подписи.
 // Геометрия карт строится от W/H, поэтому больший бэк-стор просто увеличивает чёткость;
@@ -723,7 +724,7 @@ function bindFx() {
   };
 }
 function setSelection(hit) {
-  citySel = hit;
+  citySel = hit; cityRoute = null;                       // новый выбор — старый маршрут-пунктир убираем
   $("map-sel").textContent = hit.crossroad ? "Выбрано: перекрёсток" : "Выбрано: «" + (hit.name || "дом") + "»";
   $("map-go").textContent = hit.crossroad ? "🚶 Идти сюда"
     : (mapMode === "city" && !hit.go) ? "🚶 Подойти и осмотреть" : "🚶 Отправиться";
@@ -754,6 +755,11 @@ function drawFx() {
   const s = fx.width / 560;
   for (const m of cityMarks) { c.fillStyle = "#e2604a"; c.font = `bold ${Math.round(16 * s)}px Inter`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10 * s); }
   if (mapMode === "city") {                              // записанные места — красные нумерованные бейджи
+    if (cityRoute && cityRoute.length > 1) {             // маршрут последней ходьбы по дорогам — пунктир
+      c.strokeStyle = "#e0a64d"; c.lineWidth = 2.4 * s; c.setLineDash([6 * s, 4 * s]); c.beginPath();
+      cityRoute.forEach((p, i) => { const x = p.x * cityScale, y = p.y * cityScale; i ? c.lineTo(x, y) : c.moveTo(x, y); });
+      c.stroke(); c.setLineDash([]);
+    }
     for (const b of cityBadges) {                        // мельче, полупрозрачные, вписаны в полигон дома
       const rad = Math.max(4 * s, Math.min(7 * s, (b.r || 14) * 0.5));
       c.globalAlpha = 0.55;
@@ -834,15 +840,19 @@ function ensureIncidentControls() {
 }
 function nearestNode(s, x, y) { let bi = 0, bd = 1e9; s.nodes.forEach((n, i) => { const d = Math.hypot(n[0] - x, n[1] - y); if (d < bd) { bd = d; bi = i; } }); return bi; }
 function goSelection() {
-  const hit = citySel; if (!hit) return;                 // переход делает СЕРВЕР по дорогам от реальной позиции —
-  if (mapMode === "city") {                              // без клиентской ходьбы из центра (старую выпилили)
-    if (hit.go) {                                        // записанный лендмарк → серверный переход «через карту» (по улицам, с событиями)
+  const hit = citySel; if (!hit) return;                 // в городе ходим СВОБОДНО по дорогам: сервер двигает маркер
+  if (mapMode === "city") {                              // и возвращает маршрут (route_xy) → рисуем пунктир, карту НЕ закрываем
+    if (hit.crossroad) {                                 // перекрёсток/точка дороги → просто дойти туда
+      send({ cmd: "walk_node", x: hit.x / cityScale, y: hit.y / cityScale });
+    } else if (hit.go) {                                 // именованное место → дойти по улицам и войти (откроется по приходу)
       logEntry(`<span class="you">→ ${esc(hit.name || hit.go)}</span>`, "you");
-      send({ cmd: "travel", place: hit.id }); closeOverlay("mapview");
-    } else if (!hit.crossroad) {                         // дом → наполнить и показать (перекрёсток — не цель перехода)
+      send({ cmd: "travel", place: hit.id });
+    } else {                                             // дом → подойти (маркер едет) и заглянуть внутрь
+      logEntry(`<span class="you">→ ${esc(hit.name || "к дому")}</span>`, "you");
+      send({ cmd: "walk_node", x: hit.x / cityScale, y: hit.y / cityScale });
       send({ cmd: "materialize", place: hit.id, kind: hit.kind });
     }
-  } else if (hit.go) {
+  } else if (hit.go) {                                   // регион → переход к сайту (карту закрываем)
     logEntry(`<span class="you">→ ${esc(hit.name || hit.go)}</span>`, "you");
     send({ cmd: "travel", place: hit.id }); closeOverlay("mapview");
   }

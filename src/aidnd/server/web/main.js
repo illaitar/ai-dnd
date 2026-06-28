@@ -378,7 +378,7 @@ function renderExits(exits) {
 }
 function renderNpcs(npcs) {
   $("npcs").innerHTML = (npcs && npcs.length ? "<span class='state'>рядом:</span> " : "")
-    + (npcs || []).map(n => `<span class="chip npc" data-talk="${n.id}" data-name="${esc(n.name)}">${esc(n.name)}</span>`).join("");
+    + (npcs || []).map(n => `<span class="chip npc${n.known === false ? " stranger" : ""}" data-talk="${n.id}" data-name="${esc(n.name)}"${n.known === false ? ' title="незнакомец — заговори, чтобы узнать имя"' : ""}>${n.known === false ? "👤 " : ""}${esc(n.name)}</span>`).join("");
   bindChips();
 }
 function renderQuick() {

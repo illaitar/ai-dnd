@@ -106,6 +106,7 @@ main { flex: 1; display: flex; gap: 18px; padding: 18px; overflow: hidden; }
 .chip:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); transform: translateY(-1px); }
 .chip.exit { border-color: rgba(95,184,127,.35); }
 .chip.npc { border-color: var(--line2); }
+.chip.npc.stranger { color: var(--muted); font-style: italic; border-style: dashed; opacity: .9; }
 .chip.enemy { border-color: rgba(226,96,74,.45); }
 .chip.cont { background: rgba(224,166,77,.14); border-color: rgba(224,166,77,.5); color: var(--gold); font-weight: 600; }
 .state { font-size: 12px; color: var(--faint); }

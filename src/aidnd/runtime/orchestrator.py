@@ -309,11 +309,9 @@ class GameSession:
         place = self.current_place()
         p = self.world.spatial.places.get(place)
         name = p.name if p else place
-        npcs = [self._display(n) for n in self.npcs_here()]
         sc = self.scene_context()
         actions = self.affordances_here()
-        text = f"{sc.descriptor}\nТы в локации «{name}». " + (
-            f"Здесь: {', '.join(npcs)}." if npcs else "Здесь пусто.")
+        text = f"{sc.descriptor}\nТы в локации «{name}». " + self._crowd_line()
         if p and p.alterations:                           # стойкие следы действий в локации
             text += " Следы: " + "; ".join(p.alterations) + "."
         if actions:
@@ -325,31 +323,24 @@ class GameSession:
             patrol_place,
             patrols_of,
         )
-        guards = [self._display(m) for pt in patrols_of(self.world) if patrol_place(pt, self.world.clock.tick) == place
-                  for m in pt["members"] if self.world.is_alive(m)]
+        guards = [pt for pt in patrols_of(self.world) if patrol_place(pt, self.world.clock.tick) == place]
+        gmembers = [m for pt in guards for m in pt["members"] if self.world.is_alive(m)]
         at_hq = bool(self.npcs_here()) and place == "building:townmaster_hall"
-        if guards:
-            text += f"\n🛡 Здесь патрулирует стража: {', '.join(guards)}."
-        asleep = [self._display(n) for n in self.npcs_here() if self._asleep(n)]
+        if gmembers:                                       # стража: знакомых по имени, прочих — «стражник»
+            text += f"\n🛡 Здесь патрулирует стража: {', '.join(self._display_pc(m) for m in gmembers)}."
+        asleep = [self._display_pc(n) for n in self.npcs_here() if self._asleep(n)]
         if asleep:                                         # по распорядку ночью NPC спят (видно в осмотре)
             text += f"\n💤 Спит: {', '.join(asleep)}."
-        if guards or at_hq:                               # стража рядом — реагирует на розыск/подозрение
+        if gmembers or at_hq:                              # стража рядом — реагирует на розыск/подозрение
             wnote = self._watch_reaction_note()
             if wnote:
                 text += "\n" + wnote
-        pop = getattr(self.world, "citypop", None)        # именованные горожане, что сейчас тут (заглушки)
-        if pop:
-            from ..content.citypop import _minute, crowd_at, density_label
-            present = pop.present_at(place, _minute(self.world))
-            if present:
-                names = ", ".join(pop.name_of(a) for a in present[:6])
-                more = f" и ещё {len(present) - 6}" if len(present) > 6 else ""
-                text += (f"\n👥 {density_label(crowd_at(self.world, place)).capitalize()}. Среди прочих: "
-                         f"{names}{more}. Заговори с любым по имени — он станет живым собеседником.")
         return {
             "kind": "look", "text": text,
             "place": place, "place_name": name, "scene": sc.to_dict(),
-            "npcs": [{"id": n, "name": self._display(n)} for n in self.npcs_here()],
+            # знакомых — по имени, незнакомцев — описанием; known даёт фронту разный стиль чипа
+            "npcs": [{"id": n, "name": self._display_pc(n), "known": self._knows(n)}
+                     for n in self.npcs_here() if n != self.player],
             "exits": [{"id": e, "name": self._place_name(e)} for e in self.exits()],
             "actions": actions,
             "view": self.view(),
@@ -364,7 +355,9 @@ class GameSession:
             return self._offer_signs(base)                # офлайн: без нарратора, но вывески видны
         from ..inference.agents import render_scene
         summary = ("Игрок осматривается по сторонам — опиши обстановку живо, во 2-м лице, СТРОГО по "
-                   "фактам, никого и ничего не выдумывая. Факты сцены: " + (base.get("text") or ""))
+                   "фактам, никого и ничего не выдумывая. ЗНАКОМЫХ называй по имени; НЕЗНАКОМЦЕВ — только "
+                   "обезличенно (пол/раса/роль, как в фактах), имён им НЕ придумывай. Передай, сколько "
+                   "народу и есть ли знакомые. Факты сцены: " + (base.get("text") or ""))
         out = render_scene(self.model, summary, self.world.ecs.get(self.player, Persona),
                            scene=self._narrator_context(), mode="ambient",
                            pc=self._pc_brief(), gear=self._pc_gear())
@@ -597,6 +590,170 @@ class GameSession:
         races = {"dwarf": "дворф", "halfling": "полурослик", "elf": "эльф", "half-elf": "полуэльф",
                  "half-orc": "полуорк", "gnome": "гном", "tiefling": "тифлинг"}
         return g if race in ("human", "") else f"{g}-{races.get(race, race)}"
+
+    # профессии ростера (англ.) → русский ярлык для описания незнакомца
+    _PROF_RU = {"innkeeper": "трактирщик", "merchant": "торговец", "guard": "стражник",
+                "guardsman": "стражник", "farmhand": "батрак", "adventurer": "наёмник",
+                "priest": "жрец", "knight": "рыцарь", "blacksmith": "кузнец", "captain": "капитан",
+                "guildmaster": "глава гильдии", "miner": "рудокоп", "scribe": "писарь",
+                "official": "чиновник", "townmaster": "градоправитель", "cleric": "жрец",
+                "noble": "дворянин", "soldier": "солдат", "bartender": "трактирщик", "farmer": "фермер",
+                "hunter": "охотник", "thug": "громила", "commoner": "", "barkeep": "трактирщик"}
+
+    @staticmethod
+    def _ru_tag(s: str) -> str:
+        """Только русский ярлык (англ. черты/эпитеты из данных отбрасываем, чтоб не текли в текст)."""
+        s = (s or "").strip()
+        return s if any("а" <= c.lower() <= "я" or c.lower() == "ё" for c in s) else ""
+
+    def _knows(self, npc: str) -> bool:
+        """Игрок ЗНАЕТ имя NPC, только если уже разговаривал с ним (или это спутник/ведомый)."""
+        if f"talked:{npc}" in self.world.flags:
+            return True
+        per = self.world.ecs.get(npc, Persona)
+        return bool(per and (per.companion or getattr(per, "following", False)))
+
+    def _display_pc(self, npc: str) -> str:
+        """Как игрок ВИДИТ NPC: по имени, если знаком; иначе обезличенным описанием."""
+        return self._display(npc) if self._knows(npc) else self._anon_desc(npc)
+
+    def _anon_desc(self, npc: str) -> str:
+        """Незнакомый ECS-NPC — описанием: пол/раса + роль или приметная черта (без имени)."""
+        per = self.world.ecs.get(npc, Persona)
+        if not per:
+            return "незнакомец"
+        base = self._anon_one(per)
+        prof = (per.profession or "").strip()
+        tag = self._PROF_RU.get(prof.lower()) or self._ru_tag(prof) or self._ru_tag(per.epithet) \
+            or self._ru_tag(per.traits[0] if per.traits else "")
+        return f"{base}, {tag}" if tag else base
+
+    def _stub_desc(self, aid: str) -> str:
+        """Фоновый житель-заглушка — описанием (пол/раса + профессия места работы)."""
+        pop = getattr(self.world, "citypop", None)
+        ag = (pop.agents.get(aid, {}) if pop else {})
+        races = {"dwarf": "дворф", "halfling": "полурослик", "elf": "эльф", "half-elf": "полуэльф",
+                 "half-orc": "полуорк", "gnome": "гном", "tiefling": "тифлинг"}
+        g = {"male": "мужчина", "female": "женщина"}.get(ag.get("gender", ""), "горожанин")
+        race = ag.get("race", "human") or "human"
+        base = g if race in ("human", "") else f"{g}-{races.get(race, race)}"
+        from ..content.citypop import PROF_BY_AFF
+        work = ag.get("work")
+        prof = PROF_BY_AFF.get(pop._aff(self.world, work), "") if (pop and work) else ""
+        return f"{base}, {prof}" if prof else base
+
+    def _present_summary(self) -> dict:
+        """Сводка присутствующих для осмотра/нарратора: сколько всего, кто ЗНАКОМ (по имени),
+        сколько незнакомцев и пара их описаний. Знакомый/незнакомый — это и передаём нарратору."""
+        place = self.current_place()
+        from ..content.watch import patrol_place, patrols_of
+        guards = {m for pt in patrols_of(self.world) if patrol_place(pt, self.world.clock.tick) == place
+                  for m in pt["members"]}
+        here = [n for n in self.npcs_here()
+                if n != self.player and not self._asleep(n) and n not in guards]
+        known = [self._display(n) for n in here if self._knows(n)]
+        descs = [self._anon_desc(n) for n in here if not self._knows(n)][:3]
+        pop = getattr(self.world, "citypop", None)
+        if pop and len(descs) < 4:                          # добрать описаний фоновыми жителями
+            for aid in pop.present_at(place)[:4 - len(descs)]:
+                descs.append(self._stub_desc(aid))
+        from ..content.citypop import crowd_at
+        total = crowd_at(self.world, place)
+        return {"total": total, "known": known, "unknown_n": max(0, total - len(known)), "descs": descs}
+
+    def _crowd_line(self) -> str:
+        """Строка осмотра про присутствующих: счёт + знакомые по имени + незнакомцы описанием."""
+        s = self._present_summary()
+        if not s["total"]:
+            return "Здесь пусто."
+        n = s["total"]
+        ppl = "человек" if n % 10 == 1 and n % 100 != 11 else "человека" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "человек"
+        out = f"Здесь {n} {ppl}. "
+        out += (f"Знакомые: {', '.join(s['known'])}." if s["known"] else "Никого знакомого.")
+        if s["descs"]:
+            out += f" Среди прочих — незнакомцы: {', '.join(s['descs'])} (обратись по описанию, чтобы заговорить)."
+        return out
+
+    # --- «кто заметный/выделяющийся?» — выбор по значимости, нарратор озвучивает --- #
+    def _salience(self, npc: str) -> float:
+        """Насколько NPC ВЫДЕЛЯЕТСЯ в толпе: важность/агентность/приметность (прозвище/черты/роль)."""
+        p = self.world.ecs.get(npc, Persona)
+        if not p:
+            return 0.0
+        s = 0.0
+        try:
+            from ..content.agency import is_active
+            if is_active(self.world, npc):
+                s += 3.0                                    # важный деятель при своих делах — заметнее всех
+        except Exception:
+            pass
+        if p.epithet:
+            s += 1.5
+        if getattr(p, "faction", None):
+            s += 0.8
+        s += 0.35 * len((p.traits or [])[:3])
+        if (p.profession or "").lower() in ("guard", "knight", "merchant", "priest", "guildmaster",
+                                            "captain", "townmaster", "cleric", "blacksmith", "official"):
+            s += 0.7
+        if f"talked:{npc}" in self.world.flags:
+            s += 0.4
+        return s
+
+    def _notable_reason(self, npc: str) -> str:
+        """Чем человек приметен (для озвучки)."""
+        p = self.world.ecs.get(npc, Persona)
+        if not p:
+            return ""
+        try:
+            from ..content.agency import is_active
+            if is_active(self.world, npc):
+                return "держится так, будто у него тут свои дела"
+        except Exception:
+            pass
+        return (self._ru_tag(p.epithet) or self._ru_tag(p.traits[0] if p.traits else "")
+                or self._PROF_RU.get((p.profession or "").lower(), ""))
+
+    def _scan_notable(self) -> dict:
+        """Выбрать выделяющихся из присутствующих по принципу значимости и дать нарратору озвучить.
+        Знакомых — по имени, незнакомцев — описанием. Никого яркого → честно «обычная публика»."""
+        cands = [n for n in self.npcs_here() if n != self.player and self.world.is_alive(n)]
+        ranked = sorted(((self._salience(n), n) for n in cands), key=lambda x: -x[0])
+        notable = [n for sc, n in ranked if sc >= 1.0][:3]
+        self._tick()
+        place = self.current_place()
+        from ..content.citypop import crowd_at
+        total = crowd_at(self.world, place)
+        if not notable:                                    # никто из присутствующих не выделяется
+            pop = getattr(self.world, "citypop", None)      # разве что приметный незнакомец из фоновых (нелюдь)
+            odd = None
+            if pop:
+                for aid in pop.present_at(place):
+                    if (pop.agents.get(aid, {}) or {}).get("race", "human") not in ("human", ""):
+                        odd = self._stub_desc(aid)
+                        break
+            facts = ("Обычная публика — никто особо не выделяется"
+                     + (f"; разве что в стороне держится {odd}" if odd else "") + ".")
+        else:
+            lines = []
+            for n in notable:
+                who = self._display(n) if self._knows(n) else self._anon_desc(n)
+                why = self._notable_reason(n)
+                lines.append(f"{who}{(' — ' + why) if why and why not in who else ''}")
+            facts = "Взгляд цепляется за: " + "; ".join(lines) + "."
+        if total:
+            facts = f"(в зале около {total} человек) " + facts
+        if self.model is not None and self.model.available():
+            try:
+                from ..inference.agents import render_scene
+                out = render_scene(self.model, "Игрок ищет глазами, кто в помещении заметный/выделяющийся. "
+                                   "Озвучь ТОЛЬКО перечисленных, СТРОГО по фактам; незнакомцев без имён "
+                                   "(пол/раса/роль). Факты: " + facts, None,
+                                   scene=self._narrator_context(), mode="ambient")
+                if out and out.get("narration"):
+                    return {"kind": "narration", "text": out["narration"].strip(), "view": self.view()}
+            except Exception:
+                pass
+        return {"kind": "narration", "text": facts, "view": self.view()}
 
     def _crowd_names(self, npcs, cap: int = 4) -> str:
         """Известных игроку (talked:) — по имени; незнакомцев — обезличенно."""
@@ -3781,6 +3938,9 @@ class GameSession:
         if any(k in low for k in ("скрыва", "прячет", "прячут", "затаил", "в тени", "соглядат",
                                   "следит", "следят", "подсматр", "подслуш", "шпион", "слежк")):
             return self._do_scan(Action(actor=self.player, verb="scan"), text)  # «кто скрывается?» → проверка
+        if any(k in low for k in ("заметн", "выделя", "выделяющ", "примечательн", "приметн", "необычн",
+                                  "особенн", "значительн", "важн", "кто-то стоящ")):
+            return self._scan_notable()                    # «кто заметный/выделяющийся?» → выбор по значимости
         iid = self._item_in_carry(text)                   # назван предмет при себе?
         if not iid and any(p in low for p in ("на нём", "на нем", "на ней", "на это", "на том",
                                               "о нём", "о нем", "что там", "что на")):
@@ -3802,10 +3962,9 @@ class GameSession:
             return {"kind": "look", "text": self.map_text(), "view": self.view()}
         if qtype == "inventory":
             return {"kind": "inventory", "text": self._inventory_text(), "view": self.view()}
-        if qtype == "who":
-            who = [self._display(n) for n in self.npcs_here()]
-            txt = ("Рядом: " + ", ".join(who) + ".") if who else "Рядом никого нет."
-            return {"kind": "narration", "text": txt, "view": self.view()}
+        if qtype == "who":                                 # знакомых по имени, незнакомцев — счётом/описанием
+            return {"kind": "narration", "text": "Ты оглядываешь, кто рядом. " + self._crowd_line(),
+                    "view": self.view()}
         if qtype == "exits":
             ex = [self._place_name(e) for e in self.exits()]
             txt = ("Отсюда можно пройти: " + ", ".join(ex) + ".") if ex else "Явных выходов отсюда нет."

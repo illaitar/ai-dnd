@@ -27,7 +27,7 @@ def _run_fight(seed):
     s = new_session(seed=seed, roster_size=4, use_model=False)
     s.handle("идти в логово")
     s.handle("идти в пещеру")
-    s.handle("атаковать Klarg")
+    s.handle("атаковать Кларг")
     eng = s.combat
     guard = 0
     while eng.state.mode == "active" and guard < 150:

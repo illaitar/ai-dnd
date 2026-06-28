@@ -89,7 +89,7 @@ def test_region_map_flags_liar_even_after_exploration():
             s._verify_map_here("place:wyvern_tor")
             site = next(x for x in s.region_map()["sites"] if x["key"] == "wyvern_tor")
             assert site["display"] == "explored"
-            assert site["lied_by"] and "Halia" in site["lied_by"]
+            assert site["lied_by"] and "Халия" in site["lied_by"]
             return
     raise AssertionError("за 80 сидов жулик ни разу не соврал про Вайверн-Тор")
 

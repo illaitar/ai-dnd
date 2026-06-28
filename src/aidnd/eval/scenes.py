@@ -69,8 +69,8 @@ def _try(fn, *args, fallback=None):
 def scene_intent(session) -> Transcript:
     t = Transcript("intent_parse", "Парсинг свободного текста игрока в структурный интент")
     utterances = [
-        ("бью гоблина мечом", ["Klarg", "Гоблин-страж"]),
-        ("спрашиваю Toblen про Красных плащей", ["Toblen Stonehill"]),
+        ("бью гоблина мечом", ["Кларг", "Гоблин-страж"]),
+        ("спрашиваю Тоблена про Красных плащей", ["Тоблен Стоунхилл"]),
         ("крадусь к сундуку и обыскиваю его", []),
     ]
     for text, opts in utterances:
@@ -94,7 +94,7 @@ def _fallback_intent(session, text):
 # --------------------------------------------------------------------------- #
 def scene_tavern_dialogue(session) -> Transcript:
     t = Transcript("tavern_dialogue",
-                   "Игрок расспрашивает трактирщика Toblen о Красных плащах")
+                   "Игрок расспрашивает трактирщика Тоблена о Красных плащах")
     npc = "npc:toblen_stonehill"
     session.lod.ensure_tier(npc, in_dialogue=True)
 
@@ -140,14 +140,14 @@ def scene_tavern_dialogue(session) -> Transcript:
 #  Сцена 3. Боевой раунд: композиция + тактик + нарратор (док 09, §12.3, §12.6)#
 # --------------------------------------------------------------------------- #
 def scene_combat_round(session) -> Transcript:
-    t = Transcript("combat_round", "Атака игрока по Klarg + ход монстра + нарратив исхода")
+    t = Transcript("combat_round", "Атака игрока по Кларг + ход монстра + нарратив исхода")
     session.handle("идти в логово")
     session.handle("идти в пещеру")
     session.start_combat(["npc:klarg", "npc:goblin_1", "npc:goblin_2"])
     eng = session.combat
     if not eng.is_pc_turn():
         eng.advance_turn()
-    # поставим PC вплотную к Klarg (сцена про разрешение атаки, не про движение)
+    # поставим PC вплотную к Кларг (сцена про разрешение атаки, не про движение)
     kpos = eng.state.combatants["npc:klarg"].pos
     adj = next((n for n in eng.state.grid.neighbors(*kpos) if not eng.state.at(n)), None)
     if adj:
@@ -180,7 +180,7 @@ def scene_combat_round(session) -> Transcript:
     eng.advance_turn()
     cur = eng.state.current()
     if cur and cur != session.player:
-        digest = f"round {eng.state.round}; Klarg hp low; PC in melee"
+        digest = f"round {eng.state.round}; Кларг hp low; PC in melee"
         tac, tsrc = _try(agents.choose_tactic, session.model, digest, cur,
                          fallback={"intent": "attack", "target": session.player})
         t.add(Step("combat_tactician", digest, tac, tsrc))

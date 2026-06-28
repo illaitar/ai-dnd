@@ -43,7 +43,7 @@ def test_resolution_is_event_sourced():
 
 
 def test_fixed_occupants_mean_someone_is_present():
-    # в пещере есть Klarg и гоблины → «кто-то рядом» = да
+    # в пещере есть Кларг и гоблины → «кто-то рядом» = да
     s = new_session(seed=1337, roster_size=2, use_model=False)
     res = _disc(s).resolve_observers("place:cragmaw_klarg_cave", "pc:hero")
     assert res.present is True and res.npc is not None

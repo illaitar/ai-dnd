@@ -165,37 +165,37 @@ def _add_npc(world: World, npc_id: str, name: str, archetype: str, stat_ref: str
 
 
 def _build_named_npcs(world: World) -> None:
-    _add_npc(world, "npc:toblen_stonehill", "Toblen Stonehill", "innkeeper", "srd:commoner",
+    _add_npc(world, "npc:toblen_stonehill", "Тоблен Стоунхилл", "innkeeper", "srd:commoner",
              profession="innkeeper", works_at="building:stonehill_inn",
              lives_in="building:stonehill_inn", place="building:stonehill_inn",
              traits=["welcoming", "gossipy"], voice="говорит тепло, любит поболтать",
              aliases=["толбен", "толбен стоунхилл", "трактирщик"],
              knowledge=[{"fact": "Redbrands shake down merchants", "topic": "redbrands",
                          "disclosure_gate": {"trust": 0.2}}])
-    _add_npc(world, "npc:linene_graywind", "Linene Graywind", "merchant", "srd:commoner",
+    _add_npc(world, "npc:linene_graywind", "Линэн Грейвинд", "merchant", "srd:commoner",
              profession="merchant", works_at="building:lionshield_coster",
              lives_in="building:lionshield_coster", place="building:lionshield_coster",
              traits=["shrewd", "worried"], aliases=["линен", "линен грейвинд"],
              knowledge=[{"fact": "a wagon of Lionshield goods was stolen near the trail",
                          "topic": "lionshield", "disclosure_gate": {"trust": 0.1},
                          "unlocks_quest": "quest:lionshield_goods"}])
-    _add_npc(world, "npc:harbin_wester", "Harbin Wester", "townmaster", "srd:commoner",
+    _add_npc(world, "npc:harbin_wester", "Харбин Вестер", "townmaster", "srd:commoner",
              profession="guard", works_at="building:townmaster_hall",
              lives_in="building:townmaster_hall", place="building:townmaster_hall",
              traits=["timid", "bureaucratic"], aliases=["харбин", "харбин вестер", "градоправитель"],
              knowledge=[{"fact": "orcs raid from Wyvern Tor", "topic": "wyvern_tor",
                          "disclosure_gate": {"trust": 0.1}, "unlocks_quest": "quest:wyvern_tor_orcs"}])
-    _add_npc(world, "npc:sister_garaele", "Sister Garaele", "priest", "srd:acolyte",
+    _add_npc(world, "npc:sister_garaele", "Сестра Гараэль", "priest", "srd:acolyte",
              race="half-elf", faction="faction:harpers", profession="priest",
              works_at="building:shrine_of_luck", lives_in="building:shrine_of_luck",
              place="building:shrine_of_luck", traits=["earnest", "secretive"],
              aliases=["гарэле", "сестра гарэле", "жрица"])
-    _add_npc(world, "npc:daran_edermath", "Daran Edermath", "retired_adventurer", "srd:veteran",
+    _add_npc(world, "npc:daran_edermath", "Даран Эдермат", "retired_adventurer", "srd:veteran",
              profession="farmhand", works_at="building:edermath_orchard",
              lives_in="building:edermath_orchard", place="building:edermath_orchard",
              traits=["honest", "vigilant"], faction="faction:lords_alliance",
              aliases=["даран", "даран эдермат"])
-    _add_npc(world, "npc:halia_thornton", "Halia Thornton", "guildmaster", "srd:thug",
+    _add_npc(world, "npc:halia_thornton", "Халия Торнтон", "guildmaster", "srd:thug",
              faction="faction:zhentarim", profession="merchant",
              works_at="building:townmaster_hall", lives_in="building:townmaster_hall",
              place="building:townmaster_hall", traits=["ambitious", "manipulative"],
@@ -209,15 +209,15 @@ def _build_named_npcs(world: World) -> None:
              traits=["battle-scarred", "shrewd", "fair-minded"],
              voice="низкий, с хрипотцой; коротко и по делу",
              aliases=["ярра", "мастер гильдии", "гильдмастер", "камнехват"])
-    sildar = _add_npc(world, "npc:sildar_hallwinter", "Sildar Hallwinter", "knight", "srd:veteran",
+    sildar = _add_npc(world, "npc:sildar_hallwinter", "Сильдар Холлвинтер", "knight", "srd:veteran",
                       faction="faction:lords_alliance", traits=["noble", "weary"],
                       place="building:stonehill_inn", aliases=["сильдар", "сильдар холлвинтер"])
     world.ecs.get(sildar, Persona).companion = False  # напарник временно отключён (тест соло)
-    _add_npc(world, "npc:gundren_rockseeker", "Gundren Rockseeker", "prospector", "srd:commoner",
+    _add_npc(world, "npc:gundren_rockseeker", "Гундрен Рокссикер", "prospector", "srd:commoner",
              race="dwarf", traits=["excitable", "secretive"], place="place:cragmaw_klarg_cave",
              aliases=["гундрен", "гундрен рокскикер"])
     # антагонист — социальный босс Redbrand Hideout
-    _add_npc(world, "npc:iarno_glasstaff", "Iarno Albrek", "mage", "srd:mage",
+    _add_npc(world, "npc:iarno_glasstaff", "Иарно Албрек", "mage", "srd:mage",
              faction="faction:redbrands", epithet="Glasstaff",
              place="building:tresendar_manor", traits=["smug", "cowardly"],
              aliases=["иарно", "иарно албрек", "глассстаф", "стеклянный посох"],
@@ -227,7 +227,7 @@ def _build_named_npcs(world: World) -> None:
 
 def _build_encounter(world: World) -> list[str]:
     """Боевой энкаунтер Cragmaw Hideout: Klarg + 2 гоблина (main §1)."""
-    klarg = _add_npc(world, "npc:klarg", "Klarg", "bugbear_boss", "srd:bugbear",
+    klarg = _add_npc(world, "npc:klarg", "Кларг", "bugbear_boss", "srd:bugbear",
                      faction="faction:cragmaw", place="place:cragmaw_klarg_cave",
                      traits=["brutal", "proud"], aliases=["кларг", "багбир"])
     g1 = _add_npc(world, "npc:goblin_1", "Гоблин-страж", "goblin", "srd:goblin",

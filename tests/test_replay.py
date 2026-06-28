@@ -14,7 +14,7 @@ def _scripted_runtime(world):
     world.commit("set_position", "pc:hero", target="pc:hero",
                  payload={"region": "region:phandalin", "place": "place:cragmaw_klarg_cave",
                           "cell": [2, 2]})
-    # лутает сундук Klarg: переносит ящик и зелья в инвентарь, монеты в кошелёк
+    # лутает сундук Кларг: переносит ящик и зелья в инвентарь, монеты в кошелёк
     chest = world.containers["container:klarg_chest"]
     for iid in list(chest.items):
         inst = world.items[iid]

@@ -103,6 +103,23 @@ def fetch_monsters() -> list:
     return out
 
 
+def fetch_spells() -> list:
+    """Полный SRD-список заклинаний для справки (NPC-маги/жрецы знают их по домену; свитки/лор магии)."""
+    out = []
+    for s in _pages("spells", "document__slug=wotc-srd"):
+        out.append({
+            "id": _slug(s["name"], "spell"), "name": s["name"],
+            "level": s.get("level_int", 0), "school": (s.get("school") or ""),
+            "range": s.get("range") or "", "duration": s.get("duration") or "",
+            "casting_time": s.get("casting_time") or "", "components": s.get("components") or "",
+            "ritual": str(s.get("ritual")).lower() in ("yes", "true"),
+            "concentration": str(s.get("concentration")).lower() in ("yes", "true"),
+            "classes": s.get("dnd_class") or "", "desc": (s.get("desc") or "")[:500],
+        })
+    out.sort(key=lambda r: (r["level"], r["name"]))
+    return out
+
+
 def fetch_items() -> list:
     out = []
     for it in _pages("magicitems"):

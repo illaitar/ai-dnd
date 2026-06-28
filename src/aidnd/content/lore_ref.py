@@ -25,13 +25,18 @@ def _firstword(s: str) -> str:
 def lookup(query: str):
     """Найти мировую сущность по упоминанию в тексте. → (category, ref, entry) | None (предпочесть длинное совпадение)."""
     low = " " + (query or "").lower() + " "
-    best, best_len = None, 0
+    best, best_score = None, 0
     for cat, db in CATALOGS.items():
         for ref, e in db.items():
             for nm in (e.get("name_ru") or "", e.get("name") or ""):
-                core = _firstword(nm).rstrip("ьъ")[:6]    # корень слова: терпит склонения (тролль→тролля, гоблин→гоблинах)
-                if len(core) >= 3 and (" " + core) in low and len(core) > best_len:
-                    best, best_len = (cat, ref, e), len(core)
+                cores = [w.rstrip("ьъ")[:6] for w in nm.lower().split()]   # корни слов: терпят склонения
+                cores = [c for c in cores if len(c) >= 3]
+                matched = [c for c in cores if (" " + c) in low]
+                if not matched:
+                    continue
+                score = len(matched) * 10 + sum(len(c) for c in matched)   # больше совпавших слов → точнее (огн. шар > огн. элементаль)
+                if score > best_score:
+                    best, best_score = (cat, ref, e), score
     return best
 
 
@@ -104,6 +109,23 @@ def facts(category: str, entry: dict) -> str:
             parts.append("особенности: " + ", ".join(t for t in e["traits"][:3] if t))
         if e.get("attack"):
             parts.append(f"атака: {e['attack'].get('name')} ({e['attack'].get('dice')})")
+        if e.get("desc"):
+            parts.append(str(e["desc"])[:220])
+        return ". ".join(p for p in parts if p)
+    if category == "spells":
+        e = entry
+        nm = e.get("name_ru") or e.get("name")
+        sch = {"Evocation": "воплощение", "Conjuration": "вызов", "Abjuration": "ограждение",
+               "Transmutation": "преобразование", "Divination": "прорицание", "Enchantment": "очарование",
+               "Illusion": "иллюзия", "Necromancy": "некромантия"}.get(e.get("school", ""), e.get("school", ""))
+        lv = e.get("level", 0)
+        parts = [f"{nm} — {'заговор' if lv == 0 else str(lv) + '-го круга'}, школа {sch}"]
+        if e.get("classes"):
+            parts.append("у классов: " + str(e["classes"]))
+        if e.get("range"):
+            parts.append("дистанция " + str(e["range"]))
+        if e.get("duration"):
+            parts.append("длительность " + str(e["duration"]))
         if e.get("desc"):
             parts.append(str(e["desc"])[:220])
         return ". ".join(p for p in parts if p)

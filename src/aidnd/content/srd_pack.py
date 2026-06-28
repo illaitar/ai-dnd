@@ -49,6 +49,7 @@ def _load(fn: str) -> list:
 # полные записи бестиария (механика + ЛОР: тип/размер/среда/чувства/языки/иммунитеты/атака/описание) —
 # справочная база мира: NPC «подтягивают» её при разговоре, генераторы — при наполнении сцены
 BESTIARY: dict[str, dict] = {}
+SPELLS: dict[str, dict] = {}                              # справочный каталог заклинаний (имя/уровень/школа/описание)
 
 # ВАРИАЦИИ существ — набор атрибутов поверх базового стат-блока (имя/флейвор уточняет LLM при появлении)
 MONSTER_VARIANTS = {
@@ -114,6 +115,9 @@ def load_srd(world) -> tuple[int, int]:
             stackable=it.get("stackable", False), max_stack=it.get("max_stack", 1),
             tags=tuple(it.get("tags", [])))
         ni += 1
-    from . import lore_ref  # бестиарий — первая справочная категория реестра
+    for s in _load("spells.json"):                        # заклинания — вторая справочная категория
+        SPELLS[s.get("id") or _slug(s["name"], "spell")] = s
+    from . import lore_ref  # справочные базы → реестр lore_ref
     lore_ref.register("bestiary", BESTIARY)
+    lore_ref.register("spells", SPELLS)
     return nm, ni

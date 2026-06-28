@@ -628,6 +628,10 @@ class GameSession:
                 or (here[0] if len(here) == 1 else None)
             if npc:
                 return self._post(self._do_pickpocket(npc, text), "freeform")
+        if getattr(self, "_npc_leaving", None) and any(k in low for k in (   # П2: удержать засобиравшегося NPC
+                "останься", "останьтесь", "погоди", "погодите", "не уходи", "не уходите",
+                "задержись", "побудь", "постой", "удержать")):
+            return self._post(self._persuade_stay(self._npc_leaving), "freeform")
         if any(k in low for k in ("снять комнат", "снять номер", "снять койк", "комнату на",
                                   "переночев", "ночлег", "на постой", "снять угол")):
             here = [n for n in self.npcs_here() if n != self.player]    # услуга ночлега у трактирщика → сделка с торгом
@@ -1545,6 +1549,7 @@ class GameSession:
             self._log_journal(f"Заговорил с {self._display(npc)}.")
             line = self._strip_leading_name(self._npc_greeting(npc, rel, first_meeting), npc)
             line += self._reveal_note(self._reveal_from_dialogue(npc, rel, None))
+            self._talk_turns, self._npc_leaving = 0, None     # новый разговор — счётчик терпения с нуля
             self._tick()
             return {"kind": "narration", "text": line, "speaker": self._display(npc),
                     "npc": npc, "hint": "Спроси о чём-нибудь, предложи дело или скажи что-то.",
@@ -1561,10 +1566,62 @@ class GameSession:
         self._player_shares_with(npc, topic)          # реплика игрока может научить NPC (игрок — источник молвы)
         line = self._strip_leading_name(self._npc_reply(npc, decision, topic, rel, first_meeting, hooks), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
+        self._talk_turns = getattr(self, "_talk_turns", 0) + 1     # П2: терпение тает → NPC может засобираться
+        self._npc_leaving = npc if self._maybe_leaving(npc, rel) else None
+        if self._npc_leaving:
+            line += f"\n— {self._leave_line(npc)} (удержать — скажи «останься»)"
         self._log_journal(f"Поговорил с {self._display(npc)}.")
         self._tick()
         return {"kind": "narration", "text": line, "speaker": self._display(npc),
                 "npc": npc, "decision": decision, "hooks": hooks, "view": self.view()}
+
+    def _maybe_leaving(self, npc: str, rel) -> bool:
+        """П2: после нескольких реплик NPC может засобираться. Доверие держит дольше; деятель/занятой уходит быстрее."""
+        turns = getattr(self, "_talk_turns", 0)
+        if turns < 3 or npc not in self.npcs_here():
+            return False
+        import random
+
+        from ..content.agency import is_active
+        from ..gen.seeds import subseed
+        rng = random.Random(subseed(self.world.seed, "leave", npc, turns, self.world.clock.tick))
+        p = 0.18 * (turns - 2) - 0.15 * max(0.0, getattr(rel, "trust", 0.0))
+        if is_active(self.world, npc):
+            p += 0.15
+        return rng.random() < min(0.7, p)
+
+    def _leave_line(self, npc: str) -> str:
+        import random
+
+        from ..gen.seeds import subseed
+        rng = random.Random(subseed(self.world.seed, "leaveline", npc, self.world.clock.tick))
+        return rng.choice(["Ну, мне пора — дела ждут.", "Заболтался я с тобой, надо идти.",
+                           "Всё, недосуг мне, пойду.", "Прости, спешу — в другой раз договорим."])
+
+    def _persuade_stay(self, npc: str) -> dict:
+        """Уговорить уходящего NPC остаться — бросок Убеждения. Успех — остаётся; провал — уходит, разговор окончен."""
+        if not npc or npc not in self.npcs_here():
+            self._npc_leaving = None
+            return {"kind": "system", "text": "Уже ушёл.", "view": self.view()}
+        action = Action(actor=self.player, verb="persuade", target=npc)
+        req = self.rules.build_check_request(self.player, "persuasion", 13, target=npc, kind="skill")
+
+        def resume(result) -> dict:
+            outcome = self.rules.adjudicate(action, req, result)
+            self._npc_leaving = None
+            if outcome.success:
+                self._talk_turns = 0                      # уговорил — терпение освежилось
+                self.cognition.observe_and_appraise(npc, self.player, "persuade", "friendly", "уговорил задержаться")
+                self._tick()
+                return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                        "text": f"{outcome.summary} «Ну... ладно, ещё чуть-чуть.» — {self._display(npc)} остаётся."}
+            self.dialogue_partner = None
+            self.cognition.observe(npc, "ушёл, несмотря на уговоры игрока", importance=1)
+            self._tick()
+            return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                    "text": f"{outcome.summary} «Нет, правда пора.» — и {self._display(npc)} уходит по своим делам."}
+
+        return self._suspend(req, resume, "Уговорить остаться (Убеждение).")
 
     def _strip_leading_name(self, line: str, npc: str) -> str:
         """Реплику показывает поле speaker, поэтому имя в начале текста — лишнее (иначе

@@ -52,6 +52,7 @@ BESTIARY: dict[str, dict] = {}
 SPELLS: dict[str, dict] = {}                              # справочный каталог заклинаний (имя/уровень/школа/описание)
 MAGICITEMS: dict[str, dict] = {}                          # магпредметы (редкость/тип/настройка/эффект)
 EQUIPMENT: dict[str, dict] = {}                           # снаряжение: оружие+броня (урон/AC/свойства/цена)
+MATERIALS: dict[str, dict] = {}                           # материалы/ресурсы (тип/источник/ценность/применение)
 
 # ВАРИАЦИИ существ — набор атрибутов поверх базового стат-блока (имя/флейвор уточняет LLM при появлении)
 MONSTER_VARIANTS = {
@@ -123,9 +124,12 @@ def load_srd(world) -> tuple[int, int]:
         MAGICITEMS[it.get("id") or _slug(it["name"], "mitem")] = it
     for g in _load("equipment.json"):
         EQUIPMENT[g.get("id") or _slug(g["name"], "gear")] = g
+    for mt in _load("materials.json"):
+        MATERIALS[mt.get("id") or _slug(mt["name"], "mat")] = mt
     from . import lore_ref  # справочные базы → реестр lore_ref
     lore_ref.register("bestiary", BESTIARY)
     lore_ref.register("spells", SPELLS)
     lore_ref.register("magicitems", MAGICITEMS)
     lore_ref.register("equipment", EQUIPMENT)
+    lore_ref.register("materials", MATERIALS)
     return nm, ni

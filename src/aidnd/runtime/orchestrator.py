@@ -1718,7 +1718,7 @@ class GameSession:
         if not any(k in low for k in self._OPINE_KW):
             return None
         from ..content import lore_ref
-        hit = lore_ref.lookup(text)
+        hit = lore_ref.lookup(text, self.model)
         if not hit:
             return None
         cat, ref, entry = hit
@@ -1747,7 +1747,7 @@ class GameSession:
         if not any(k in low for k in self._TELL_KW):
             return None
         from ..content import lore_ref
-        hit = lore_ref.lookup(text)
+        hit = lore_ref.lookup(text, self.model)
         if not hit:
             return None
         cat, ref, entry = hit

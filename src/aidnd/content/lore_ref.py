@@ -22,22 +22,38 @@ def _firstword(s: str) -> str:
     return (s or "").lower().split()[0] if s else ""
 
 
-def lookup(query: str):
-    """Найти мировую сущность по упоминанию в тексте. → (category, ref, entry) | None (предпочесть длинное совпадение)."""
+def candidates(query: str, k: int = 12):
+    """Дешёвый префильтр по корням слов (4 буквы — терпит склонения) → топ-K кандидатов для LLM-резолюции."""
     low = " " + (query or "").lower() + " "
-    best, best_score = None, 0
+    scored = []
     for cat, db in CATALOGS.items():
         for ref, e in db.items():
+            best_e = 0.0
             for nm in (e.get("name_ru") or "", e.get("name") or ""):
-                cores = [w.rstrip("ьъ")[:5] for w in nm.lower().split()]   # корни слов (5 букв): терпят склонения (длинный/длинном)
-                cores = [c for c in cores if len(c) >= 3]
+                cores = [c for c in (w.rstrip("ьъ")[:4] for w in nm.lower().split()) if len(c) >= 3]
                 matched = [c for c in cores if (" " + c) in low]
-                if not matched:
-                    continue
-                score = len(matched) * 10 + sum(len(c) for c in matched)   # больше совпавших слов → точнее (огн. шар > огн. элементаль)
-                if score > best_score:
-                    best, best_score = (cat, ref, e), score
-    return best
+                if matched and cores:                     # покрытие имени важнее: полное «Адамантин» > частичное «…доспехи»
+                    best_e = max(best_e, (len(matched) / len(cores)) * 100 + len(matched) * 10 + sum(len(c) for c in matched))
+            if best_e > 0:
+                scored.append((best_e, cat, ref, e))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [(cat, ref, e) for _s, cat, ref, e in scored[:k]]
+
+
+def lookup(query: str, model=None):
+    """Найти мировую сущность по упоминанию. Стем-префильтр → LLM выбирает точную (терпит склонения/синонимы/
+    частичные имена); офлайн / один кандидат / сбой LLM → лучший по скорингу. → (category, ref, entry) | None."""
+    cands = candidates(query)
+    if not cands:
+        return None
+    if model is not None and len(cands) > 1:
+        from ..inference.agents import match_entity
+        idx = match_entity(model, query, [(e.get("name_ru") or e.get("name")) for _c, _r, e in cands])
+        if idx == -1:                                     # LLM: ни одна — это не вопрос о сущности
+            return None
+        if 0 <= idx < len(cands):
+            return cands[idx]
+    return cands[0]                                       # офлайн / один / сбой → лучший по скорингу
 
 
 def tier(category: str, entry: dict) -> float:
@@ -48,11 +64,17 @@ def tier(category: str, entry: dict) -> float:
         return float(entry.get("level", 0) or 0)
     if category in ("magicitems", "items"):
         return float(_RARITY.get((entry.get("rarity") or "").lower(), 2))
+    if category == "materials":
+        return float({"дёшево": 0, "средне": 1, "дорого": 2, "редко": 3}.get((entry.get("value") or "").lower(), 1))
     return 0.0
 
 
 def _etype(category: str, entry: dict):
-    return (entry.get("ctype") or "").lower() if category == "bestiary" else None
+    if category == "bestiary":
+        return (entry.get("ctype") or "").lower()
+    if category == "materials":
+        return (entry.get("category") or "").lower()     # подкатегория материала (металлы/травы/…) для домена
+    return None
 
 
 def domain_knows(persona, category: str, entry: dict) -> bool:
@@ -153,5 +175,14 @@ def facts(category: str, entry: dict) -> str:
             parts = [f"{nm} — броня ({e.get('category', '')})", f"КД {e.get('ac', '')}"]
         if e.get("cost"):
             parts.append("цена " + str(e["cost"]))
+        return ". ".join(p for p in parts if p)
+    if category == "materials":
+        e = entry
+        nm = e.get("name_ru") or e.get("name")
+        parts = [f"{nm} — {e.get('category', 'материал')} ({e.get('mtype', '')}, ценность: {e.get('value', '')})"]
+        if e.get("source"):
+            parts.append("добыча: " + str(e["source"]))
+        if e.get("uses"):
+            parts.append("применение: " + str(e["uses"]))
         return ". ".join(p for p in parts if p)
     return ""

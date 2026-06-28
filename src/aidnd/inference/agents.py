@@ -1133,6 +1133,21 @@ def resolve_npc_ref(manager, player_text: str, candidates: list) -> int:
     return idx if isinstance(idx, int) and 0 <= idx < len(candidates) else -1
 
 
+def match_entity(manager, query: str, names: list) -> int:
+    """ML-резолюция сущности СПРАВОЧНИКА мира (тварь/заклинание/предмет/материал), о которой говорит игрок.
+    Терпит склонения/синонимы/частичные имена. names: [имя]. → индекс выбранного или -1 (ни один / нет сервера)."""
+    if not names or is_offline(manager):
+        return -1
+    listing = "\n".join(f"{i}. {n}" for i, n in enumerate(names))
+    user = ("Это НЕ про присутствующих людей, а про СПРАВОЧНИК МИРА: игрок упомянул сущность "
+            "(существо, заклинание, предмет, материал). Учитывая склонения, синонимы и частичные названия, "
+            f"выбери из списка ту, о которой он говорит.\n\nРеплика игрока: «{query}»\n\nКандидаты:\n{listing}\n\n"
+            "Верни index точного кандидата (число), или -1, если ни один не подходит. Call npc_ref с полем index.")
+    out = _call(manager, "npc_ref", "npc_ref", user, ["index"])
+    idx = out.get("index", -1) if out else -1
+    return idx if isinstance(idx, int) and 0 <= idx < len(names) else -1
+
+
 def forge_agenda(manager, brief: str, places: list):
     """LLM-замысел важного NPC: цель/мотив/план с действиями по местам. None — нет сервера → шаблон."""
     if is_offline(manager) or not places:

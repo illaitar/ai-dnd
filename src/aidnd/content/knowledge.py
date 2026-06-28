@@ -133,11 +133,14 @@ def disclosable(persona, trust: float, topic: str | None = None) -> list[dict]:
 #  с доменным: знает = в домене ИЛИ выучил. Новая база подключается добавлением ветки сюда.
 # --------------------------------------------------------------------------- #
 KNOWLEDGE_DOMAINS: dict[str, dict] = {
-    "_everyone": {"bestiary": {"max_tier": 1}, "equipment": {"max_tier": 9}},   # слабых тварей и обычную снарягу — каждый
+    "_everyone": {"bestiary": {"max_tier": 1}, "equipment": {"max_tier": 9},
+                  "materials": {"max_tier": 0}},   # слабых тварей, обычную снарягу и дешёвые материалы — каждый
     "следопыт": {"bestiary": {"types": {"beast", "plant", "monstrosity", "fey"}, "max_tier": 9}},
     "ranger":   {"bestiary": {"types": {"beast", "plant", "monstrosity", "fey"}, "max_tier": 9}},
-    "охотник":  {"bestiary": {"types": {"beast", "monstrosity"}, "max_tier": 6}},
-    "зверолов": {"bestiary": {"types": {"beast", "monstrosity"}, "max_tier": 6}},
+    "охотник":  {"bestiary": {"types": {"beast", "monstrosity"}, "max_tier": 6},
+                 "materials": {"types": {"части тварей", "шкуры и кожа"}, "max_tier": 3}},
+    "зверолов": {"bestiary": {"types": {"beast", "monstrosity"}, "max_tier": 6},
+                 "materials": {"types": {"части тварей", "шкуры и кожа"}, "max_tier": 3}},
     "друид":    {"bestiary": {"types": {"beast", "plant", "fey", "elemental"}, "max_tier": 12}},
     "жрец":     {"bestiary": {"types": {"undead", "fiend", "celestial", "aberration"}, "max_tier": 30},
                  "spells": {"max_tier": 9}},
@@ -159,9 +162,16 @@ KNOWLEDGE_DOMAINS: dict[str, dict] = {
     "учёный":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}, "magicitems": {"max_tier": 6}},
     "гильдмастер": {"bestiary": {"max_tier": 12}, "magicitems": {"max_tier": 4}},
     "guildmaster": {"bestiary": {"max_tier": 12}, "magicitems": {"max_tier": 4}},
-    "кузнец":   {"bestiary": {"max_tier": 3}, "equipment": {"max_tier": 9}},
-    "blacksmith": {"bestiary": {"max_tier": 3}, "equipment": {"max_tier": 9}},
-    "merchant":  {"magicitems": {"max_tier": 3}, "equipment": {"max_tier": 9}},
-    "торговец":  {"magicitems": {"max_tier": 3}, "equipment": {"max_tier": 9}},
-    "лавочник":  {"magicitems": {"max_tier": 3}, "equipment": {"max_tier": 9}},
+    "кузнец":   {"bestiary": {"max_tier": 3}, "equipment": {"max_tier": 9},
+                 "materials": {"types": {"металлы и руды", "самоцветы и камень", "древесина"}, "max_tier": 3}},
+    "blacksmith": {"bestiary": {"max_tier": 3}, "equipment": {"max_tier": 9},
+                 "materials": {"types": {"металлы и руды", "самоцветы и камень", "древесина"}, "max_tier": 3}},
+    "merchant":  {"magicitems": {"max_tier": 3}, "equipment": {"max_tier": 9}, "materials": {"max_tier": 3}},
+    "торговец":  {"magicitems": {"max_tier": 3}, "equipment": {"max_tier": 9}, "materials": {"max_tier": 3}},
+    "лавочник":  {"magicitems": {"max_tier": 3}, "equipment": {"max_tier": 9}, "materials": {"max_tier": 3}},
+    "травник":  {"materials": {"types": {"травы и растения", "алхимические реагенты"}, "max_tier": 3},
+                 "bestiary": {"types": {"plant", "beast"}, "max_tier": 4}},
+    "алхимик":  {"materials": {"types": {"травы и растения", "алхимические реагенты", "самоцветы и камень"}, "max_tier": 3},
+                 "spells": {"max_tier": 5}},
+    "лекарь":   {"materials": {"types": {"травы и растения"}, "max_tier": 3}},
 }

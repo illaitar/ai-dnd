@@ -520,6 +520,9 @@ class GameSession:
         text = f"{sc.descriptor}\nТы в локации «{name}»."   # лаконично: толпа/действия — чипами и нарратором, не стеной
         if p and p.alterations:                           # стойкие следы действий в локации
             text += " Следы: " + "; ".join(p.alterations) + "."
+        ov = self._social_overheard()                     # живой город: обрывок взаимодействия NPC↔NPC вокруг
+        if ov:
+            text += f"\n🗣 {ov}"
         g = self._city_graph()
         in_city = bool(g and place in g.door)              # город → выход на улицу есть кнопкой (exits), текстом не дублируем
         if not in_city:                                    # вне города (дикие земли/подземелье) — связи как есть
@@ -909,6 +912,45 @@ class GameSession:
         if s["descs"]:
             out += f" Среди прочих — незнакомцы: {', '.join(s['descs'])} (обратись по описанию, чтобы заговорить)."
         return out
+
+    def _social_overheard(self) -> str | None:
+        """Живой город: раз в тик среди присутствующих NPC проходит ОДИН агентный обмен (с диффузией мнений),
+        обрывок долетает до игрока. Знакомых называет по имени, незнакомцев — обезличенно (как _display).
+        Кэш на тик (look может зваться несколько раз) — чтобы диффузия и текст были стабильны."""
+        tick = self.world.clock.tick
+        if getattr(self, "_overheard_tick", None) == tick:
+            return self._overheard_val
+        self._overheard_tick, self._overheard_val = tick, None
+        here = [n for n in self.npcs_here() if n != self.player and self.world.is_alive(n)]
+        if len(here) < 2:
+            return None
+        import random
+
+        from ..content import agent
+        from ..gen.seeds import subseed
+        rng = random.Random(subseed(self.world.seed, "overheard", tick))
+        if rng.random() > 0.5:                            # не в каждой сцене — иначе спам
+            return None
+        a = rng.choice(here)
+        pick = agent.choose(self.world, a, [n for n in here if n != a])
+        if not pick:
+            return None
+        key, b, ex = pick
+        da, db = self._display_pc(a), (self._display_pc(b) if b else "")   # гейт знакомства: незнакомцев обезличенно
+        if key == "gossip":
+            c, v = agent._strongest_opinion(self.world, a, b)
+            if c is None:
+                return None
+            ex(self.world, a, b)                          # выполнить → диффузия мнения о c по сети
+            self._overheard_val = (f"{da} вполголоса {'чернит' if v < 0 else 'нахваливает'} "
+                                   f"{self._display_pc(c)} — слушает {db}.")
+        elif key == "confront":
+            ex(self.world, a, b)
+            self._overheard_val = f"{da} сцепился с {db} — летят резкие слова."
+        elif key == "socialize":
+            ex(self.world, a, b)
+            self._overheard_val = f"{da} о чём-то вполголоса толкует с {db}."
+        return self._overheard_val
 
     # --- «кто заметный/выделяющийся?» — выбор по значимости, нарратор озвучивает --- #
     def _salience(self, npc: str) -> float:

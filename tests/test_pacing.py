@@ -82,7 +82,8 @@ def test_affordances_surface_in_look():
     assert "отдохнуть и перекусить" in labels and "выпить" in labels
     look = s.look()                                           # осмотр лаконичен: аффордансы — чипами (actions), не стеной текста
     assert {a["label"] for a in look["actions"]} >= {"отдохнуть и перекусить", "выпить"}
-    assert look["text"].rstrip().endswith("«Постоялый двор «Каменный Холм»».")  # только локация, без «Здесь N человек…/Можно:»
+    assert "«Постоялый двор «Каменный Холм»»" in look["text"]  # локация есть
+    assert "Можно:" not in look["text"] and "человек" not in look["text"]  # без списка действий и счёта толпы
 
 
 def test_affordances_change_with_place():

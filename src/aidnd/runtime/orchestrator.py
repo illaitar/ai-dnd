@@ -3355,7 +3355,31 @@ class GameSession:
         else:
             text = (f"Ты заваливаешься на лежанку и спишь до утра ({self.world.clock.hhmm()}). "
                     f"Силы полностью восстановлены.")
+        fnote = self._followers_on_sleep()                # №4: спутники решают, ждать или забить
+        if fnote:
+            text += "\n" + fnote
         return {"kind": "narration", "text": text, "view": self.view()}
+
+    def _followers_on_sleep(self) -> str:
+        """№4: пока игрок спит, ведомые-спутники решают по лояльности — дождаться (встреча утром) или уйти своей дорогой."""
+        out = []
+        where = self._place_name(self.current_place())
+        for f in list(self._followers()):
+            rel = self.cognition.retrieve(f, "", self.player).rel
+            import random
+
+            from ..gen.seeds import subseed
+            rng = random.Random(subseed(self.world.seed, "sleepfollow", f, self.world.clock.tick))
+            loyal = getattr(rel, "trust", 0.0) + rng.uniform(-0.2, 0.25)
+            if loyal >= 0.1:                              # верный → дождётся, забьёт стрелку на утро
+                out.append(f"{self._display(f)}: «Пока спишь, отлучусь по делам — утром жди меня у «{where}».»")
+            else:                                        # надоело таскаться → уходит
+                p = self.world.ecs.get(f, Persona)
+                if p:
+                    p.following = False
+                self.cognition.observe(f, "наскучило ходить за игроком — ушёл по своим делам", importance=1)
+                out.append(f"{self._display(f)} решает, что с него хватит, и к утру уходит своей дорогой.")
+        return "\n".join(out)
 
     def _eat_meal(self, price_cp: int | None = None) -> dict:
         from ..inventory.container import _pay, transfer_currency

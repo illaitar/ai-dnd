@@ -31,7 +31,7 @@ def _seed_opinion(world, a: str, b: str) -> float:
     except Exception:
         base = 0.0
     rng = random.Random(subseed(world.seed, "opinion", a, b))
-    return max(-1.0, min(1.0, base + rng.uniform(-0.45, 0.45)))  # разброс характеров: кто-то невзлюбит
+    return max(-1.0, min(1.0, base + rng.uniform(-0.5, 0.5)))  # разброс характеров: кто-то невзлюбит крепко
 
 
 def opinion(world, a: str, b: str) -> float:
@@ -97,11 +97,11 @@ def _gossip_x(world, a, b):
 
 
 def _confront_ap(world, a, b):
-    return opinion(world, a, b) <= -0.5
+    return opinion(world, a, b) <= -0.5              # только крепкая неприязнь (фракц./резкий характер)
 
 
 def _confront_u(world, a, b):
-    return 0.55 + abs(min(0.0, opinion(world, a, b)))
+    return 0.6 + 0.5 * (abs(opinion(world, a, b)) - 0.5)  # вспыхивает у недругов, ярче при сильной злости
 
 
 def _confront_x(world, a, b):

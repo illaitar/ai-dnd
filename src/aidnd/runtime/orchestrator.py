@@ -1569,6 +1569,11 @@ class GameSession:
             self._log_journal(f"Поговорил с {self._display(npc)}.")
             self._tick()
             return react
+        opine = self._opine_about(npc, text)                  # №7: мнение NPC о другом знакомом (граф мнений)
+        if opine:
+            self._log_journal(f"Расспросил {self._display(npc)} о знакомом.")
+            self._tick()
+            return opine
         line = self._strip_leading_name(self._npc_reply(npc, decision, topic, rel, first_meeting, hooks), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._talk_turns = getattr(self, "_talk_turns", 0) + 1     # П2: терпение тает → NPC может засобираться
@@ -1672,6 +1677,29 @@ class GameSession:
                            "холодно роняет: «Ты не того спрашиваешь. Я чист.»"])
         return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "lied": True, "view": self.view(),
                 "text": f"{self._display(npc)} {deny}"}
+
+    _OPINE_KW = ("что думаешь", "что скажешь", "что за человек", "расскажи про", "расскажи о",
+                 "знаешь ли", "знаком с", "каков он", "мнение о", "мнение про", "доверять ли",
+                 "как тебе", "что ты о", "что знаешь о")
+
+    def _opine_about(self, npc: str, text: str):
+        """№7: NPC высказывает мнение о ДРУГОМ знакомом (граф мнений world.opinions). Имя — через _display (гейт знакомства)."""
+        low = text.lower()
+        if not any(k in low for k in self._OPINE_KW):
+            return None
+        subject = self._match_npc(text)
+        if not subject or subject == npc or subject == self.player:
+            return None
+        from ..content import agent
+        aff = agent.opinion(self.world, npc, subject)
+        if aff > 0.3:
+            take = "Хороший человек, я ему доверяю."
+        elif aff < -0.3:
+            take = "Не по душе он мне — держись от него подальше."
+        else:
+            take = "Да обычный. Ничего особого про него не скажу."
+        return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                "text": f"О {self._display(subject)}: «{take}»"}
 
     def _strip_leading_name(self, line: str, npc: str) -> str:
         """Реплику показывает поле speaker, поэтому имя в начале текста — лишнее (иначе

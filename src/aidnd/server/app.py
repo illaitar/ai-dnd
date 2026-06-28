@@ -370,6 +370,16 @@ def city_event(seed: int = config.WORLD_SEED, step: int = 0, quiet: int = 2,
     return {"beat": beat}
 
 
+@app.get("/agentsim")
+def agent_sim(seed: int = config.WORLD_SEED, rounds: int = 6) -> dict:
+    """Наблюдение за агентами: NPC сами выбирают исходящие команды по утилите и взаимодействуют друг с другом
+    (общение / сплетни / стычки), мнения диффундируют по сети. Детерминирован по seed (свежая офлайн-сессия)."""
+    from ..content import agent
+    s = new_session(seed=int(seed), roster_size=12, use_model=False)
+    events = agent.step_social(s.world, rounds=int(rounds))
+    return {"seed": int(seed), "rounds": int(rounds), "count": len(events), "events": events}
+
+
 @app.get("/region_map")
 def region_map_dump(seed: int = config.WORLD_SEED, do: str = "", gold: int = 0) -> dict:
     """Генератор снимка карты: свежая сессия (seed), опц. список команд `do`

@@ -47,13 +47,14 @@ def lookup(query: str, model=None):
     if not cands:
         return None
     if model is not None and len(cands) > 1:
-        from ..inference.agents import match_entity
-        idx = match_entity(model, query, [(e.get("name_ru") or e.get("name")) for _c, _r, e in cands])
-        if idx == -1:                                     # LLM: ни одна — это не вопрос о сущности
+        from ..inference import agents
+        idx = agents.match_entity(model, query, [(e.get("name_ru") or e.get("name")) for _c, _r, e in cands])
+        if idx == -1:                                     # ИИ осознанно: ни одна — это не вопрос о сущности
             return None
-        if 0 <= idx < len(cands):
+        if 0 <= idx < len(cands):                         # ИИ выбрал кандидата
             return cands[idx]
-    return cands[0]                                       # офлайн / один / сбой → лучший по скорингу
+        # idx == -2: ИИ недоступен/сбой → фоллбэк на скоринг ниже
+    return cands[0]                                       # офлайн / один кандидат / сбой → лучший по скорингу
 
 
 def tier(category: str, entry: dict) -> float:
@@ -185,4 +186,18 @@ def facts(category: str, entry: dict) -> str:
         if e.get("uses"):
             parts.append("применение: " + str(e["uses"]))
         return ". ".join(p for p in parts if p)
-    return ""
+    if category == "flora":
+        e = entry
+        nm = e.get("name_ru") or e.get("name")
+        parts = [f"{nm} — {e.get('ftype', 'растение')}"]
+        if e.get("habitat"):
+            parts.append("растёт: " + str(e["habitat"]))
+        if e.get("uses"):
+            parts.append("применение: " + str(e["uses"]))
+        if e.get("danger") and str(e["danger"]).lower() not in ("", "нет", "none", "безопасно"):
+            parts.append("опасность: " + str(e["danger"]))
+        return ". ".join(p for p in parts if p)
+    # обобщённый запас для простых баз (состояния/классы/планы и т.п.): имя + описание
+    nm = entry.get("name_ru") or entry.get("name")
+    d = entry.get("desc") or entry.get("uses") or ""
+    return f"{nm} — {str(d)[:260]}" if d else (nm or "")

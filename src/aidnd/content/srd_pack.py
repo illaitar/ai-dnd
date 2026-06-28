@@ -53,6 +53,10 @@ SPELLS: dict[str, dict] = {}                              # справочный
 MAGICITEMS: dict[str, dict] = {}                          # магпредметы (редкость/тип/настройка/эффект)
 EQUIPMENT: dict[str, dict] = {}                           # снаряжение: оружие+броня (урон/AC/свойства/цена)
 MATERIALS: dict[str, dict] = {}                           # материалы/ресурсы (тип/источник/ценность/применение)
+FLORA: dict[str, dict] = {}                               # растения (тип/среда/применение/опасность)
+CONDITIONS: dict[str, dict] = {}                          # состояния (имя/описание)
+CLASSES: dict[str, dict] = {}                             # классы персонажей (имя/описание)
+PLANES: dict[str, dict] = {}                              # планы бытия (имя/описание)
 
 # ВАРИАЦИИ существ — набор атрибутов поверх базового стат-блока (имя/флейвор уточняет LLM при появлении)
 MONSTER_VARIANTS = {
@@ -126,10 +130,17 @@ def load_srd(world) -> tuple[int, int]:
         EQUIPMENT[g.get("id") or _slug(g["name"], "gear")] = g
     for mt in _load("materials.json"):
         MATERIALS[mt.get("id") or _slug(mt["name"], "mat")] = mt
+    for fl in _load("flora.json"):
+        FLORA[fl.get("id") or _slug(fl["name"], "flora")] = fl
+    for c in _load("conditions.json"):
+        CONDITIONS[c.get("id") or _slug(c["name"], "cond")] = c
+    for cl in _load("classes.json"):
+        CLASSES[cl.get("id") or _slug(cl["name"], "class")] = cl
+    for pl in _load("planes.json"):
+        PLANES[pl.get("id") or _slug(pl["name"], "plane")] = pl
     from . import lore_ref  # справочные базы → реестр lore_ref
-    lore_ref.register("bestiary", BESTIARY)
-    lore_ref.register("spells", SPELLS)
-    lore_ref.register("magicitems", MAGICITEMS)
-    lore_ref.register("equipment", EQUIPMENT)
-    lore_ref.register("materials", MATERIALS)
+    for _cat, _db in (("bestiary", BESTIARY), ("spells", SPELLS), ("magicitems", MAGICITEMS),
+                      ("equipment", EQUIPMENT), ("materials", MATERIALS), ("flora", FLORA),
+                      ("conditions", CONDITIONS), ("classes", CLASSES), ("planes", PLANES)):
+        lore_ref.register(_cat, _db)
     return nm, ni

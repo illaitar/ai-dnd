@@ -1,0 +1,74 @@
+[
+{
+"id": "class:barbarian",
+"name": "Barbarian",
+"desc": "### Rage \n \nIn battle, you fight with primal ferocity. On your turn, you can enter a rage as a bonus action. \n \nWhile raging, you gain the following benefits if you aren't wearing heavy armor: \n \n* You have advantage on Strength checks and Strength saving throws. \n* When you make a melee weapon attack using Strength, you gain a bonus to the damage roll that increases as you gain levels as a barbarian, as shown in the Rage Damage column of the Barbarian table. \n* You have resistance to bludgeonin",
+"name_ru": "Варвар"
+},
+{
+"id": "class:bard",
+"name": "Bard",
+"desc": "### Spellcasting \n \nYou have learned to untangle and reshape the fabric of reality in harmony with your wishes and music. \n \nYour spells are part of your vast repertoire, magic that you can tune to different situations. \n \n#### Cantrips \n \nYou know two cantrips of your choice from the bard spell list. You learn additional bard cantrips of your choice at higher levels, as shown in the Cantrips Known column of the Bard table. \n \n#### Spell Slots \n \nThe Bard table shows how many spell slots you hav",
+"name_ru": "Бард"
+},
+{
+"id": "class:cleric",
+"name": "Cleric",
+"desc": "### Spellcasting \n \nAs a conduit for divine power, you can cast cleric spells. \n \n#### Cantrips \n \nAt 1st level, you know three cantrips of your choice from the cleric spell list. You learn additional cleric cantrips of your choice at higher levels, as shown in the Cantrips Known column of the Cleric table. \n \n#### Preparing and Casting Spells \n \nThe Cleric table shows how many spell slots you have to cast your spells of 1st level and higher. To cast one of these spells, you must expend a slot o",
+"name_ru": "Жрец"
+},
+{
+"id": "class:druid",
+"name": "Druid",
+"desc": "### Druidic \n \nYou know Druidic, the secret language of druids. You can speak the language and use it to leave hidden messages. You and others who know this language automatically spot such a message. Others spot the message's presence with a successful DC 15 Wisdom (Perception) check but can't decipher it without magic. \n \n### Spellcasting \n \nDrawing on the divine essence of nature itself, you can cast spells to shape that essence to your will. \n \n#### Cantrips \n \nAt 1st level, you know two can",
+"name_ru": "Друид"
+},
+{
+"id": "class:fighter",
+"name": "Fighter",
+"desc": "### Fighting Style \n \nYou adopt a particular style of fighting as your specialty. Choose one of the following options. You can't take a Fighting Style option more than once, even if you later get to choose again. \n \n#### Archery \n \nYou gain a +2 bonus to attack rolls you make with ranged weapons. \n \n#### Defense \n \nWhile you are wearing armor, you gain a +1 bonus to AC. \n \n#### Dueling \n \nWhen you are wielding a melee weapon in one hand and no other weapons, you gain a +2 bonus to damage rolls w",
+"name_ru": "Воин"
+},
+{
+"id": "class:monk",
+"name": "Monk",
+"desc": "### Unarmored Defense \n \nBeginning at 1st level, while you are wearing no armor and not wielding a shield, your AC equals 10 + your Dexterity modifier + your Wisdom modifier. \n \n### Martial Arts \n \nAt 1st level, your practice of martial arts gives you mastery of combat styles that use unarmed strikes and monk weapons, which are shortswords and any simple melee weapons that don't have the two- handed or heavy property. \n \nYou gain the following benefits while you are unarmed or wielding only monk",
+"name_ru": "Монах"
+},
+{
+"id": "class:paladin",
+"name": "Paladin",
+"desc": "### Divine Sense \n \nThe presence of strong evil registers on your senses like a noxious odor, and powerful good rings like heavenly music in your ears. As an action, you can open your awareness to detect such forces. Until the end of your next turn, you know the location of any celestial, fiend, or undead within 60 feet of you that is not behind total cover. You know the type (celestial, fiend, or undead) of any being whose presence you sense, but not its identity (the vampire \n \nCount Strahd vo",
+"name_ru": "Паладин"
+},
+{
+"id": "class:ranger",
+"name": "Ranger",
+"desc": "### Favored Enemy \n \nBeginning at 1st level, you have significant experience studying, tracking, hunting, and even talking to a certain type of enemy. \n \nChoose a type of favored enemy: aberrations, beasts, celestials, constructs, dragons, elementals, fey, fiends, giants, monstrosities, oozes, plants, or undead. Alternatively, you can select two races of humanoid (such as gnolls and orcs) as favored enemies. \n \nYou have advantage on Wisdom (Survival) checks to track your favored enemies, as well",
+"name_ru": "Следопыт"
+},
+{
+"id": "class:rogue",
+"name": "Rogue",
+"desc": "### Expertise \n \nAt 1st level, choose two of your skill proficiencies, or one of your skill proficiencies and your proficiency with thieves' tools. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen proficiencies. \n \nAt 6th level, you can choose two more of your proficiencies (in skills or with thieves' tools) to gain this benefit. \n \n### Sneak Attack \n \nBeginning at 1st level, you know how to strike subtly and exploit a foe's distraction. Once per tu",
+"name_ru": "Плут"
+},
+{
+"id": "class:sorcerer",
+"name": "Sorcerer",
+"desc": "### Spellcasting \n \nAn event in your past, or in the life of a parent or ancestor, left an indelible mark on you, infusing you with arcane magic. This font of magic, whatever its origin, fuels your spells. \n \n#### Cantrips \n \nAt 1st level, you know four cantrips of your choice from the sorcerer spell list. You learn additional sorcerer cantrips of your choice at higher levels, as shown in the Cantrips Known column of the Sorcerer table. \n \n#### Spell Slots \n \nThe Sorcerer table shows how many sp",
+"name_ru": "Чародей"
+},
+{
+"id": "class:warlock",
+"name": "Warlock",
+"desc": "### Otherworldly Patron \n \nAt 1st level, you have struck a bargain with an otherworldly being of your choice: the Archfey, the Fiend, or the Great Old One, each of which is detailed at the end of the class description. Your choice grants you features at 1st level and again at 6th, 10th, and 14th level. \n \n### Pact Magic \n \nYour arcane research and the magic bestowed on you by your patron have given you facility with spells. \n \n#### Cantrips \n \nYou know two cantrips of your choice from the warloc",
+"name_ru": "Колдун"
+},
+{
+"id": "class:wizard",
+"name": "Wizard",
+"desc": "### Spellcasting \n \nAs a student of arcane magic, you have a spellbook containing spells that show the first glimmerings of your true power. \n \n#### Cantrips \n \nAt 1st level, you know three cantrips of your choice from the wizard spell list. You learn additional wizard cantrips of your choice at higher levels, as shown in the Cantrips Known column of the Wizard table. \n \n#### Spellbook \n \nAt 1st level, you have a spellbook containing six 1st- level wizard spells of your choice. Your spellbook is",
+"name_ru": "Волшебник"
+}
+]

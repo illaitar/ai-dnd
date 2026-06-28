@@ -1135,16 +1135,19 @@ def resolve_npc_ref(manager, player_text: str, candidates: list) -> int:
 
 def match_entity(manager, query: str, names: list) -> int:
     """ML-резолюция сущности СПРАВОЧНИКА мира (тварь/заклинание/предмет/материал), о которой говорит игрок.
-    Терпит склонения/синонимы/частичные имена. names: [имя]. → индекс выбранного или -1 (ни один / нет сервера)."""
+    Терпит склонения/синонимы/частичные имена. names: [имя]. → индекс выбранного; -1 (ИИ: ни один не подходит);
+    -2 (ИИ недоступен/сбой → вызывающий берёт детерм. фоллбэк, НЕ путать с осознанным «ни один»)."""
     if not names or is_offline(manager):
-        return -1
+        return -2
     listing = "\n".join(f"{i}. {n}" for i, n in enumerate(names))
     user = ("Это НЕ про присутствующих людей, а про СПРАВОЧНИК МИРА: игрок упомянул сущность "
             "(существо, заклинание, предмет, материал). Учитывая склонения, синонимы и частичные названия, "
             f"выбери из списка ту, о которой он говорит.\n\nРеплика игрока: «{query}»\n\nКандидаты:\n{listing}\n\n"
             "Верни index точного кандидата (число), или -1, если ни один не подходит. Call npc_ref с полем index.")
     out = _call(manager, "npc_ref", "npc_ref", user, ["index"])
-    idx = out.get("index", -1) if out else -1
+    if out is None:                                       # сбой вызова/нет ответа → фоллбэк, а не осознанное «ни один»
+        return -2
+    idx = out.get("index", -1)
     return idx if isinstance(idx, int) and 0 <= idx < len(names) else -1
 
 

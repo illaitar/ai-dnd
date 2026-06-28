@@ -490,22 +490,23 @@ class CombatEngine:
                 self.world.commit("faction_rep", pc, payload={"faction": ofid, "delta": 0.05})
 
     def _spawn_corpse(self, eid: str) -> None:
-        from ..gen.item_gen import generate_individual_treasure
+        from ..gen.item_gen import enrich_npc_inventory, generate_individual_treasure
         from ..inventory.container import Container
         cid = f"corpse:{ids.name_of(eid)}"
         if cid in self.world.containers:
             return
+        enrich_npc_inventory(self.world, eid, self.model)   # горожанин/именной → личный инвентарь под роль (LLM, раз)
         items = [iid for iid, inst in self.world.items.items() if inst.owner_ref == eid]
         self.world.containers[cid] = Container(container_id=cid, owner_ref=None,
                                                kind="corpse", items=list(items))
         for iid in items:
             inst = self.world.items[iid]
             inst.owner_ref, inst.location_ref, inst.equipped_slot = None, cid, None
-        if not items:
+        if not items:                                       # боевой моб без персоны → клад по CR (с LLM-флейвором)
             persona = self.world.ecs.get(eid, Persona)
             sb = get_stat_block(persona.stat_block_ref) if persona else None
             generate_individual_treasure(self.world, sb.cr if sb else 0.0,
-                                         self._party_level(), self.world.seed, cid)
+                                         self._party_level(), self.world.seed, cid, model=self.model)
 
     # ==================================================== ход/раунд =======
     def advance_turn(self) -> None:

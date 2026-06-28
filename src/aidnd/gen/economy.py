@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import random
 
-from ..world.components import Persona
 from .item_gen import (
     _smith_for,
     generate_item_template,
-    npc_loot_pool,
     spawn_item,
 )
 from .seeds import subseed
@@ -50,12 +48,5 @@ def enrich_economy(world, model, progress=None) -> None:
         if progress:
             progress(-1, -1, f"Лавка пополнена: {sid.split(':')[-1]}")
 
-    for nid in world.npcs():                              # 3) пулы лута ВСЕМ NPC
-        per = world.ecs.get(nid, Persona)
-        if not per:
-            continue
-        role = (getattr(per, "archetype", "") or getattr(per, "profession", "") or "").lower()
-        rich = role not in _GENERIC_ROLE                 # заметный → богатый пул + сген-предмет
-        npc_loot_pool(world, nid, role, rng, gen_tmpls if rich else [], rich)
-        if progress:
-            progress(-1, -1, f"Пожитки: {getattr(per, 'name', nid)}")
+    # 3) ИНВЕНТАРЬ NPC — НЕ раздаём заранее: насыщается ЛЕНИВО при первом доступе (труп/кража) с LLM-флейвором
+    #    под профессию/статус (item_gen.enrich_npc_inventory). Так у материализованных тоже есть осмысленные вещи.

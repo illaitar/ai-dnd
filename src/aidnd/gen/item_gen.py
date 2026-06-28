@@ -205,6 +205,54 @@ _ARCH_ITEMS = {
 }
 
 
+# профессия/архетип → база личных вещей (механика табличная; ИМЯ/ОПИСАНИЕ переименует LLM-смит под роль)
+_NPC_INV = {
+    "guard": ["tmpl:shortsword", "tmpl:leather"], "guardsman": ["tmpl:shortsword", "tmpl:leather"],
+    "captain": ["tmpl:longsword", "tmpl:chain_shirt"], "knight": ["tmpl:longsword", "tmpl:chain_shirt"],
+    "soldier": ["tmpl:shortsword", "tmpl:leather"], "thug": ["tmpl:mace", "tmpl:leather"],
+    "громила": ["tmpl:mace", "tmpl:leather"], "merchant": ["tmpl:rations", "tmpl:torch"],
+    "лавочник": ["tmpl:rations", "tmpl:torch"], "innkeeper": ["tmpl:rations", "tmpl:torch"],
+    "трактирщик": ["tmpl:rations", "tmpl:torch"], "слуга": ["tmpl:rations"], "разносчик": ["tmpl:rations"],
+    "priest": ["tmpl:potion_healing"], "cleric": ["tmpl:potion_healing"], "служка": ["tmpl:potion_healing"],
+    "blacksmith": ["tmpl:mace", "tmpl:dagger"], "кузнец": ["tmpl:mace", "tmpl:dagger"],
+    "ремесленник": ["tmpl:dagger", "tmpl:torch"], "farmhand": ["tmpl:dagger"], "фермер": ["tmpl:dagger"],
+    "батрак": ["tmpl:dagger"], "miner": ["tmpl:mace"], "рудокоп": ["tmpl:mace"],
+    "mage": ["tmpl:dagger"], "wizard": ["tmpl:dagger"], "scribe": ["tmpl:torch"], "писарь": ["tmpl:torch"],
+    "чиновник": ["tmpl:torch"], "noble": ["tmpl:dagger"], "дворянин": ["tmpl:dagger"],
+    "guildmaster": ["tmpl:dagger"], "adventurer": ["tmpl:shortsword", "tmpl:leather"],
+}
+_RICH_ROLE = {"noble", "дворянин", "merchant", "лавочник", "guildmaster", "captain", "knight",
+              "priest", "cleric", "townmaster", "градоправитель"}
+_POOR_ROLE = {"farmhand", "фермер", "батрак", "слуга", "servant", "commoner", "горожанин",
+              "beggar", "miner", "рудокоп", "разносчик"}
+
+
+def enrich_npc_inventory(world, npc: str, model=None) -> list[str]:
+    """ЛЕНИВО (раз) насытить инвентарь NPC осмысленными вещами под профессию/статус, с LLM-флейвором имён.
+    Срабатывает при ПЕРВОМ доступе (труп/кража). Идемпотентно (флаг). Без модели — голые шаблоны."""
+    flag = f"inv:{npc}"
+    if flag in world.flags:
+        return [iid for iid, i in world.items.items() if i.owner_ref == npc]
+    from ..world.components import Persona
+    per = world.ecs.get(npc, Persona)
+    prof = (((per.profession or "") or (per.archetype or "")).lower() if per else "") or "townsfolk"
+    if prof not in _NPC_INV and prof not in ("townsfolk", "горожанин", "commoner", ""):
+        return []                                      # боевой моб (гоблин/разбойник) → не личный инвентарь, а клад по CR
+    world.flags.add(flag)
+    rng = random.Random(subseed(world.seed, "npcinv", npc))
+    smith = _smith_for(model, f"личные вещи человека профессии «{prof}»")
+    out = []
+    base = 8 if prof in _RICH_ROLE else 1 if prof in _POOR_ROLE else 3   # достаток по роли
+    out.append(spawn_item(world, "tmpl:gp", None, qty=rng.randint(1, 6) * base, owner=npc, source="lazy"))
+    items = list(_NPC_INV.get(prof, ["tmpl:dagger"]))
+    if rng.random() < 0.5:
+        items.append("tmpl:rations")
+    for tid in items:                                  # каждая вещь — табличная механика + LLM-имя под роль
+        if tid in world.templates:
+            out.append(spawn_item(world, tid, None, owner=npc, source="lazy", smith=smith))
+    return out
+
+
 def npc_loot_pool(world, npc: str, archetype: str, rng: random.Random,
                   bonus_pool: list[str], rich: bool) -> list[str]:
     """Дать NPC owner_ref-предметы (на смерть авто-собираются в труп _spawn_corpse). rich → +предмет

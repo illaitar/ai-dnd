@@ -220,6 +220,63 @@ class GameSession:
             return self._step_inside(text)
         return self._commit_move(dest)                    # идти по дорогам → зайти на месте
 
+    def _do_pickpocket(self, npc: str, text: str = "") -> dict:
+        """Кража у ЖИВОГО NPC: ловкость рук vs его пассивное внимание. Успех — вытянуть вещь/монеты
+        (инвентарь насыщается лениво тут же). Провал — поймали → дело о краже у стражи."""
+        if not npc or npc not in self.npcs_here() or npc == self.player:
+            return {"kind": "system", "text": "Рядом некого обчистить — укажи кого.", "view": self.view()}
+        if self._is_hostile(npc):
+            return {"kind": "system", "view": self.view(),
+                    "text": f"{self._display(npc)} настороже к тебе — карман не вычистить."}
+        import random
+
+        from ..content.cases import note_deed
+        from ..gen.item_gen import enrich_npc_inventory
+        from ..gen.seeds import subseed
+        from ..rules.checks import passive_check, skill_modifier
+        enrich_npc_inventory(self.world, npc, self.model)    # насытить инвентарь под роль (раз), с LLM-флейвором
+        rng = random.Random(subseed(self.world.seed, "pickpocket", npc, self._street_seq))
+        self._street_seq += 1
+        roll = rng.randint(1, 20) + skill_modifier(self.world, self.player, "sleight_of_hand")
+        dc = passive_check(self.world, npc, "perception")
+        place = self.current_place()
+        if roll < dc:                                        # ПОЙМАЛИ
+            note_deed(self.world, self.player, "theft", place, witnessed=True)
+            self.cognition.observe_and_appraise(npc, self.player, "theft", "angry", "поймал тебя на краже")
+            self._tick()
+            self._log_journal(f"Попался на краже у {self._display(npc)}!")
+            return {"kind": "narration", "view": self.view(),
+                    "text": f"{self._display(npc)} перехватывает твою руку у самого кармана: «Вор!» — "
+                            f"и шум привлекает внимание. (бросок {roll} против {dc})"}
+        loot = sorted(iid for iid, i in self.world.items.items()
+                      if i.owner_ref == npc and i.template_id not in ("tmpl:cp", "tmpl:sp", "tmpl:gp"))
+        carry = f"carry:{ids.name_of(self.player)}"
+        if loot:                                             # вытянуть вещь
+            iid = rng.choice(loot)
+            self.world.items[iid].owner_ref = self.player
+            self.world.items[iid].location_ref = carry
+            self.world.containers[carry].items.append(iid)
+            took = self._item_name(iid)
+        else:                                                # вещей нет — забрать часть монет
+            gpid = next((iid for iid, i in self.world.items.items()
+                         if i.owner_ref == npc and i.template_id == "tmpl:gp"), None)
+            grab = max(1, (self.world.items[gpid].quantity // 2) if gpid else 0) if gpid else 0
+            if gpid and grab:
+                self.world.items[gpid].quantity -= grab
+                inv.transfer_currency(self.world, None, self.player, {"gp": grab}, actor=self.player)
+                took = f"{grab} золотых"
+            else:
+                self._tick()
+                return {"kind": "narration", "view": self.view(),
+                        "text": f"Ты ловко лезешь в карман {self._display(npc)} — но там пусто."}
+        self._tick()
+        self._log_journal(f"Обчистил {self._display(npc)} → {took}.")
+        return {"kind": "narration", "view": self.view(),
+                "text": f"Незаметным движением ты вытягиваешь у {self._display(npc)}: {took}."}
+
+    _PICKPOCKET_CUES = ("обчист", "карман", "стащить у", "стащу у", "стянуть у", "украсть у", "обворов",
+                        "залезть в карман", "вытянуть кошел", "срезать кошел", "обшарить карман")
+
     def _transit_ticks(self, frm: str | None, to: str | None) -> int:
         """Сколько тиков идти между местами по улицам (1-4 — короткие городские переходы)."""
         if not frm or not to or frm == to:
@@ -522,6 +579,12 @@ class GameSession:
                 any(k in low for k in ("на улиц", "наружу", "из здания", "выйти из", "выйду на"))
                 or low.strip().rstrip(".!") in ("выйти", "выхожу", "выйду", "выйди", "выйти на улицу")):
             return self._post(self._step_outside(), "move")
+        if any(k in low for k in self._PICKPOCKET_CUES):     # кража у живого NPC (карман)
+            here = [n for n in self.npcs_here() if n != self.player]
+            npc = self._match_npc(text) or (self.dialogue_partner if self.dialogue_partner in here else None) \
+                or (here[0] if len(here) == 1 else None)
+            if npc:
+                return self._post(self._do_pickpocket(npc, text), "freeform")
         if "штраф" in low and any(k in low for k in ("заплат", "уплат", "оплат", "плачу")):
             return self._post(self.pay_fine(), "freeform")   # уладить дело со стражей
         if self._followers() and any(k in low for k in self._UNFOLLOW_CUES):

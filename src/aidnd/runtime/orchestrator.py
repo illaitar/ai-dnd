@@ -1574,6 +1574,11 @@ class GameSession:
             self._log_journal(f"Расспросил {self._display(npc)} о знакомом.")
             self._tick()
             return opine
+        lore = self._do_lore_query(npc, text)                 # NPC «подтягивает» знание о мире (существа/… из баз)
+        if lore:
+            self._log_journal(f"Расспросил {self._display(npc)} о мире.")
+            self._tick()
+            return lore
         line = self._strip_leading_name(self._npc_reply(npc, decision, topic, rel, first_meeting, hooks), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._talk_turns = getattr(self, "_talk_turns", 0) + 1     # П2: терпение тает → NPC может засобираться
@@ -1700,6 +1705,33 @@ class GameSession:
             take = "Да обычный. Ничего особого про него не скажу."
         return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
                 "text": f"О {self._display(subject)}: «{take}»"}
+
+    def _do_lore_query(self, npc: str, text: str):
+        """Механизм «NPC подтягивает знание»: вопрос о мировой сущности (существо/…) → ответ из справочной базы,
+        ГЕЙТ по знанию NPC (домен/опасность). Знает — озвучивает по фактам (LLM/шаблон); нет — «не моё»."""
+        low = text.lower()
+        if not any(k in low for k in self._OPINE_KW):
+            return None
+        from ..content import lore_ref
+        hit = lore_ref.lookup(text)
+        if not hit:
+            return None
+        cat, _ref, entry = hit
+        p = self.world.ecs.get(npc, Persona)
+        nm = entry.get("name_ru") or entry.get("name")
+        if not lore_ref.knows(p, cat, entry):
+            return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                    "text": f"«{nm}? Не моё это — про такое не ведаю.»"}
+        f = lore_ref.facts(cat, entry)
+        line = f
+        if self.model:                                    # озвучить в голосе персоны поверх фактов
+            from ..inference.agents import render_scene
+            summary = ("Игрок спросил, что ты знаешь об этом существе. Перескажи СВОИМИ словами в голосе "
+                       "персонажа, коротко и по делу, СТРОГО по фактам (ничего не выдумывая сверх): " + f)
+            out = render_scene(self.model, summary, p, scene=self._narrator_context(), mode="ambient",
+                               pc=self._pc_brief(), gear=self._pc_gear())
+            line = self._strip_leading_name((out or {}).get("narration") or f, npc)
+        return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(), "text": line}
 
     def _strip_leading_name(self, line: str, npc: str) -> str:
         """Реплику показывает поле speaker, поэтому имя в начале текста — лишнее (иначе

@@ -95,7 +95,7 @@ def load_srd(world) -> tuple[int, int]:
             continue
         cr = float(m.get("cr", 0))
         STAT_BLOCKS[ref] = StatBlock(
-            ref=ref, name=m["name"], str_=m.get("str", 10), dex=m.get("dex", 10),
+            ref=ref, name=m.get("name_ru") or m["name"], str_=m.get("str", 10), dex=m.get("dex", 10),
             con=m.get("con", 10), int_=m.get("int", 10), wis=m.get("wis", 10),
             cha=m.get("cha", 10), ac=m.get("ac", 10), hp=m.get("hp", 4),
             speed=m.get("speed", 30), proficiency=_prof_by_cr(cr), cr=cr,

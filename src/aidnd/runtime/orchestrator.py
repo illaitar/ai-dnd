@@ -136,11 +136,16 @@ class GameSession:
         return {"x": xy[0], "y": xy[1]} if xy else None
 
     def _road_buildings(self):
-        """(сюда-зайти, куда-ведут) с текущей дорожной точки."""
+        """Что игрок видит с дорожной точки: РЯДОМ — прилегающие дома (их вывески видно вплотную); ПО ДОРОГАМ —
+        только ИЗВЕСТНЫЕ (записанные) места. Неоткрытое и дикие земли не показываем."""
         g = self._city_graph()
         nd, anchor = self._road, self._anchor_building()
-        here = list(dict.fromkeys([b for b in ([anchor] + (g.around.get(nd, []) if g else [])) if b]))
-        leads = [b for b in (g.nearest_from(nd, 7) if g else []) if b not in here]
+        recorded = self._recorded_places()
+        here = [b for b in ([anchor] + (g.around.get(nd, []) if g else []))   # вплотную — видно вывески
+                if b and self._is_public(b)]
+        here = list(dict.fromkeys(here))
+        leads = [b for b in (g.nearest_from(nd, 12) if g else [])             # по улицам — только знакомое
+                 if b not in here and self._is_public(b) and b in recorded]
         return here, leads
 
     def _step_outside(self) -> dict:
@@ -159,21 +164,28 @@ class GameSession:
     def _road_look(self) -> dict:
         here, leads = self._road_buildings()
         recorded = self._recorded_places()
-        self._sign_offer = [{"place": b, "label": self._place_name(b)} for b in here + leads
-                            if b not in recorded and self._is_public(b)]
         anchor = self._anchor_building()
+        near = [b for b in here if b != anchor]                 # прилегающие дома — их вывески видно отсюда
+        self._sign_offer = [{"place": b, "label": self._place_name(b)} for b in near
+                            if b not in recorded]               # незаписанные соседние → можно занести на карту
         sc = self.scene_context()
         t = f"{sc.descriptor}\nТы на улице"
         if anchor:
             t += f" у «{self._place_name(anchor)}»"
         t += ". "
-        if here:
-            t += "Зайти можно: " + ", ".join(f"«{self._place_name(b)}»" for b in here) + ". "
+        if anchor and self._is_public(anchor):
+            t += "Можно вернуться внутрь. "
+        if near:
+            t += "Рядом видишь вывески: " + ", ".join(f"«{self._place_name(b)}»" for b in near) + ". "
         if leads:
-            t += "Улицы ведут к: " + ", ".join(f"«{self._place_name(b)}»" for b in leads[:5]) + ". "
-        t += "Скажи, куда идти, или «зайти» в здание."
+            t += "По дорогам отсюда — знакомые места: " \
+                 + ", ".join(f"«{self._place_name(b)}»" for b in leads[:6]) + ". "
+        if not near and not leads:
+            t += "Кругом незнакомые улицы — иди наугад, разведаешь. "
+        t += "Куда идти? (или «зайти»)"
+        exits = ([anchor] if anchor else []) + near + leads     # кнопки — только видимое рядом + знакомое
         return {"kind": "look", "text": t, "place": "place:streets", "place_name": "на улице",
-                "npcs": [], "exits": [{"id": b, "name": self._place_name(b)} for b in here + leads],
+                "npcs": [], "exits": [{"id": b, "name": self._place_name(b)} for b in exits if b],
                 "actions": [], "scene": sc.to_dict(), "view": self.view()}
 
     def _step_inside(self, text: str = "") -> dict:
@@ -203,19 +215,24 @@ class GameSession:
         here, leads = self._road_buildings()
         low = text.lower()
         g = self._city_graph()
-        cands = list(dict.fromkeys(here + leads + (list(g.door) if g else [])))  # видимые + ВСЕ дома графа
+        recorded = self._recorded_places()
+        # идти можно лишь к тому, что ВИДНО рядом или ИЗВЕСТНО (записано) — не к произвольному дому
+        cands = list(dict.fromkeys(here + leads + [b for b in (g.door if g else []) if b in recorded]))
         dest = self._match_place(text)
-        if dest not in cands:
+        if dest is not None and dest not in cands:
             dest = None
-            for b in cands:                               # по названию (можно идти к любому, что назвал)
+        if dest is None:
+            for b in cands:                               # по названию среди видимого/знакомого
                 nm = self._place_name(b).lower()
                 if nm in low or any(len(w) > 3 and w in low for w in nm.split()):
                     dest = b
                     break
         if dest is None:
+            opts = [self._place_name(b) for b in (here + leads)[:6]]
             return {"kind": "system", "view": self.view(),
-                    "text": "Не вижу отсюда такого места. Улицы ведут к: "
-                            + ", ".join(f"«{self._place_name(b)}»" for b in (here + leads)[:6]) + "."}
+                    "text": "Туда отсюда не видно дороги. " + (
+                        "Рядом и знакомо: " + ", ".join(f"«{o}»" for o in opts) + "."
+                        if opts else "Иди наугад — разведаешь новые улицы.")}
         if dest == self._anchor_building():               # назад в своё здание
             return self._step_inside(text)
         return self._commit_move(dest)                    # идти по дорогам → зайти на месте
@@ -507,9 +524,10 @@ class GameSession:
         return {
             "kind": "look", "text": text,
             "place": place, "place_name": name, "scene": sc.to_dict(),
-            # знакомых — по имени, незнакомцев — описанием; known даёт фронту разный стиль чипа
-            "npcs": [{"id": n, "name": self._display_pc(n), "known": self._knows(n)}
-                     for n in self.npcs_here() if n != self.player],
+            # КНОПКИ-NPC — только знакомые (известные по имени). Незнакомцы живут в тексте осмотра
+            # (их описывает _crowd_line), к ним обращаются словами, а не отдельным чипом.
+            "npcs": [{"id": n, "name": self._display_pc(n), "known": True}
+                     for n in self.npcs_here() if n != self.player and self._knows(n)],
             "exits": [{"id": e, "name": self._place_name(e)} for e in self.exits()],
             "actions": actions,
             "view": self.view(),

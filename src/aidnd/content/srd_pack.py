@@ -50,6 +50,37 @@ def _load(fn: str) -> list:
 # справочная база мира: NPC «подтягивают» её при разговоре, генераторы — при наполнении сцены
 BESTIARY: dict[str, dict] = {}
 
+# ВАРИАЦИИ существ — набор атрибутов поверх базового стат-блока (имя/флейвор уточняет LLM при появлении)
+MONSTER_VARIANTS = {
+    "young":    {"ru": "молодой",    "cr": -1, "hp": 0.6, "ac": -1, "prof": -1},
+    "seasoned": {"ru": "бывалый",    "cr": 1,  "hp": 1.3, "ac": 1,  "prof": 1},
+    "elite":    {"ru": "матёрый",    "cr": 2,  "hp": 1.6, "ac": 2,  "prof": 2},
+    "leader":   {"ru": "вожак",      "cr": 2,  "hp": 1.5, "ac": 1,  "prof": 2},
+    "weakened": {"ru": "истощённый", "cr": -1, "hp": 0.5, "ac": -1, "prof": -1},
+    "frenzied": {"ru": "бешеный",    "cr": 1,  "hp": 1.1, "ac": -2, "prof": 2},
+    "ancient":  {"ru": "древний",    "cr": 3,  "hp": 2.0, "ac": 2,  "prof": 3},
+    "scarred":  {"ru": "израненный", "cr": 0,  "hp": 0.7, "ac": 0,  "prof": 1},
+}
+
+
+def make_variant(base_ref: str, variant: str) -> StatBlock | None:
+    """Производный стат-блок: базовое существо × модификатор вариации (бывалый/матёрый/…). Регистрирует и возвращает."""
+    import dataclasses
+    base = STAT_BLOCKS.get(base_ref)
+    v = MONSTER_VARIANTS.get(variant)
+    if not base or not v:
+        return None
+    ref = f"{base_ref}#{variant}"
+    if ref in STAT_BLOCKS:
+        return STAT_BLOCKS[ref]
+    sb = dataclasses.replace(
+        base, ref=ref, name=f"{v['ru'].capitalize()} {base.name.lower()}",
+        hp=max(1, int(base.hp * v["hp"])), ac=max(1, base.ac + v["ac"]),
+        proficiency=max(2, base.proficiency + v["prof"]), cr=max(0.0, base.cr + v["cr"]))
+    STAT_BLOCKS[ref] = sb
+    MONSTER_XP.setdefault(ref, _xp_by_cr(sb.cr))
+    return sb
+
 
 def load_srd(world) -> tuple[int, int]:
     """Регистрирует монстров и предметы SRD: курируемый seed + полный дамп от fetch_srd.

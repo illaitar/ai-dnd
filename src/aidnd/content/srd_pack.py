@@ -46,6 +46,11 @@ def _load(fn: str) -> list:
         return json.load(f)
 
 
+# полные записи бестиария (механика + ЛОР: тип/размер/среда/чувства/языки/иммунитеты/атака/описание) —
+# справочная база мира: NPC «подтягивают» её при разговоре, генераторы — при наполнении сцены
+BESTIARY: dict[str, dict] = {}
+
+
 def load_srd(world) -> tuple[int, int]:
     """Регистрирует монстров и предметы SRD: курируемый seed + полный дамп от fetch_srd.
     Возвращает (добавлено монстров, предметов). Дубликаты по id игнорируются."""
@@ -54,7 +59,8 @@ def load_srd(world) -> tuple[int, int]:
     items = _load("seed_items.json") + _load("items.json")
     for m in monsters:
         ref = m.get("id") or _slug(m["name"], "srd")
-        if ref in STAT_BLOCKS:                            # курируемые не трогаем
+        BESTIARY[ref] = m                                 # полная запись (механика+лор) для справки NPC/генераторов
+        if ref in STAT_BLOCKS:                            # курируемые стат-блоки не трогаем
             continue
         cr = float(m.get("cr", 0))
         STAT_BLOCKS[ref] = StatBlock(

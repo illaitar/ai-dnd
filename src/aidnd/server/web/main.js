@@ -382,8 +382,9 @@ function renderNpcs(npcs) {
   bindChips();
 }
 function renderQuick() {
-  const jr = (lastView && lastView.journey)                          // путь прерван событием → продолжить
-    ? `<span class="chip cont" data-cmd="дальше">▶ Идти дальше</span>` : "";
+  const jr = (lastView && lastView.journey)                          // путь прерван → продолжить (вывески → ещё «нанести»)
+    ? ((lastView.journey.kind === "signs" ? `<span class="chip cont" data-cmd="да">📍 Нанести на карту</span>` : "")
+       + `<span class="chip cont" data-cmd="дальше">▶ Идти дальше</span>`) : "";
   const cmds = [["осмотреться", "осмотреться"], ["обыскать", "обыскать комнату"], ["ждать", "ждать"]];
   $("quick").innerHTML = jr + cmds.map(([l, c]) => `<span class="chip" data-cmd="${c}">${l}</span>`).join("")
     + `<span class="chip" data-open="inv">🎒 инвентарь</span>`

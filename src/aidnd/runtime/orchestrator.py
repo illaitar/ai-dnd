@@ -387,9 +387,14 @@ class GameSession:
         if self.combat and self.combat.state.mode == "active":
             return {"kind": "combat", "text": "Идёт бой — используй боевые действия.",
                     "view": self.view()}
-        if self._journey:                                 # путь прерван уличным событием — «дальше» или свернул
+        if self._journey:                                 # путь прерван (событие/встречный/вывески) — «дальше» или свернул
             if self._is_continue(text):
                 return self._post(self._finish_journey(), "move")
+            if self._journey.get("kind") == "signs" and self._is_record_yes(text):  # «да» → нанести вывески + дойти
+                rec = self._record_signs()
+                fin = self._finish_journey()
+                fin["text"] = (rec.get("text") or "").rstrip() + "\n" + (fin.get("text") or "")
+                return self._post(fin, "move")
             self._journey = None                          # любое иное действие = свернул с пути → МАРШРУТ СБРОШЕН
             npc = self._match_npc(text)                   # окликнул встречного/присутствующего → разговор
             react = (self._do_talk(Action(actor=self.player, verb="talk", target=npc), text)
@@ -903,7 +908,7 @@ class GameSession:
         if g and not region_travel:
             a_node, b_node = self._city_node_of(cur), self._city_node_of(dest)
             if a_node and b_node and a_node != b_node:
-                route_ids = g.buildings_along(a_node, b_node)
+                route_ids = g.seen_along(a_node, b_node)   # дома у перекрёстков, мимо которых реально проходишь
                 steps = g.path_steps(a_node, b_node)
         if lead is None:
             if region_travel:
@@ -932,7 +937,21 @@ class GameSession:
             if pb:
                 self._journey = {"dest": dest, "route_ids": route_ids, "event": pb, "reacted": False}
                 return {"kind": "narration", "text": pb["line"], "view": self.view()}
+            signs = self._visible_signs(route_ids, place=dest)   # вывески: пройденные + примыкающие к НАЗНАЧЕНИЮ
+            if signs:                                     # → ПРЕРЫВАНИЕ (выкинуть из карты + «да» нанести / «дальше»)
+                self._sign_offer = signs
+                self._journey = {"dest": dest, "route_ids": route_ids, "kind": "signs",
+                                 "signs": signs, "reacted": False}
+                return self._present_signs(signs, dest)
         return self._arrive(dest, cur, path, region_travel, ticks, lead, route_ids)
+
+    def _present_signs(self, signs: list[dict], dest: str) -> dict:
+        """Незнакомые вывески в пути прерывают как событие: выкинуть из карты, «да» нанести / «дальше» идти."""
+        names = ", ".join(f"«{s['label']}»" for s in signs[:5])
+        more = f" и ещё {len(signs) - 5}" if len(signs) > 5 else ""
+        return {"kind": "narration", "view": self.view(), "signs_offer": [dict(s) for s in signs],
+                "text": f"📍 По пути попадаются незнакомые вывески: {names}{more}. «да» — нанести их на "
+                        f"карту; «дальше» — идти к «{self._place_name(dest)}» не отвлекаясь."}
 
     def _arrive(self, dest: str, cur: str, path: list[str], region_travel: bool,
                 ticks: int, lead: str, route_ids: list[str]) -> dict:
@@ -965,7 +984,7 @@ class GameSession:
         look["text"] = lead + " " + look["text"]
         if debunked:
             look["text"] += "\n⚠ Сведения об этом месте оказались ложными!"
-        return self._offer_signs(look, extra=route_ids)   # вывески по пути + ближайшие вокруг
+        return self._offer_signs(look)                    # вывески по пути уже показаны прерыванием — тут только стационар
 
     # --- случайные события на перекрёстках (в пути по городу) ---------------------------- #
     _STREET_AMBIENT = [
@@ -3564,27 +3583,26 @@ class GameSession:
         par = getattr(p, "parent", None) if p else None
         return par if par in g.door else None
 
-    def _visible_signs(self, extra_ids: list[str] | None = None) -> list[dict]:
-        """Вывески, видимые «вокруг»: БЛИЖАЙШИЕ по улицам здания (CityGraph) + переданные (по пути),
-        ещё не записанные на карту. Детерминированно, без LLM. Фоллбэк — примыкающие места."""
+    def _visible_signs(self, extra_ids: list[str] | None = None, place: str | None = None) -> list[dict]:
+        """Вывески видны ТОЛЬКО снаружи. Изнутри здания — никаких (ты в помещении). На площади/перекрёстке —
+        дома, примыкающие к нему (связи). В пути — дома у перекрёстков по маршруту (extra_ids). place — для
+        какого места считать (по умолчанию текущее; в прерывании пути считаем для НАЗНАЧЕНИЯ).
+        Детерминированно, без LLM, ещё не записанные на карту."""
         recorded = self._recorded_places()
-        g = self._city_graph()
-        node = self._city_node_of(self.current_place())
-        ids: list[str] = []
-        if g and node:
-            ids = list(extra_ids or [])
-            for bid in g.near(node, k=6):                 # ближайшие по улицам — что реально видно (с запасом под фильтр)
-                if bid not in ids:
-                    ids.append(bid)
-        else:                                             # старый путь: примыкающие публичные места
-            ids = list(extra_ids or []) + list(self.world.spatial.connections(self.current_place()))
+        loc = place or self.current_place()
+        ids = list(extra_ids or [])                       # дома у перекрёстков, мимо которых прошёл по пути
+        p = self.world.spatial.places.get(loc)
+        if not p or getattr(p, "kind", "") != "building":  # снаружи (площадь/перекрёсток) → ПРИЛЕГАЮЩИЕ дома
+            g = self._city_graph()                         # (честная геометрия CityGraph, не хаб-связи), дальние — по пути
+            node = self._city_node_of(loc)
+            ids += g.around_of(node) if (g and node) else list(self.world.spatial.connections(loc))
         out, seen = [], set()
         for pid in ids:
-            p = self.world.spatial.places.get(pid)
-            if not p or pid in recorded or pid in seen:
+            pl = self.world.spatial.places.get(pid)
+            if not pl or pid in recorded or pid in seen:
                 continue
-            if set(p.affordances or []) & self._PUBLIC_AFF:   # только публичные здания = вывески (не дикие земли/тайный манор)
-                out.append({"place": pid, "label": p.name})
+            if set(pl.affordances or []) & self._PUBLIC_AFF:   # только публичные здания = вывески (не дикие/тайный манор)
+                out.append({"place": pid, "label": pl.name})
                 seen.add(pid)
         return out
 
@@ -4972,7 +4990,8 @@ class GameSession:
             "map_recorded": sorted(self._recorded_places()),   # записанные места — фронт метит их на city-SVG
             "guild_here": self._at_guild(),                     # игрок в Доме гильдии → доступен экран гильдии
             "watch": self._watch_view(),                        # статус розыска/штрафа у городской стражи
-            "journey": ({"dest_name": self._place_name(self._journey["dest"])}
+            "journey": ({"dest_name": self._place_name(self._journey["dest"]),
+                         "kind": self._journey.get("kind")}    # signs → фронт даёт кнопку «нанести на карту»
                         if self._journey else None),           # путь прерван событием → индикатор «в пути»
             "seed": self.world.seed,
             "time": self.world.clock.hhmm(),

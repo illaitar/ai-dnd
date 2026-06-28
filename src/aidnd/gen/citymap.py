@@ -122,6 +122,40 @@ class CityGraph:
         self.at_node: dict[int, list[str]] = {}            # перекрёсток → здания с дверью здесь
         for bid, nd in self.door.items():
             self.at_node.setdefault(nd, []).append(bid)
+        self._build_proximity()                            # честная геометрическая близость (раз при сборке)
+
+    def _build_proximity(self) -> None:
+        """ЧЕСТНО (по геометрии, раз при сборке): для каждого перекрёстка — дома в физическом радиусе вокруг
+        него (что видно, стоя на этом перекрёстке). Радиус ~2 длины уличного сегмента — соседние строения,
+        а не весь город. Используется для вывесок: на перекрёстке/в пути видишь только прилегающие дома."""
+        pos = {it["i"]: (it["x"], it["y"]) for it in self.intersections}
+        segs = sorted((pos[a][0] - pos[b][0]) ** 2 + (pos[a][1] - pos[b][1]) ** 2
+                      for a, b in self.edges if a in pos and b in pos)
+        seg = (segs[len(segs) // 2] ** 0.5) if segs else 32.0   # медианный сегмент улицы
+        r2 = (seg * 2.2) ** 2                                    # радиус «видно вокруг» (≈2 перекрёстка)
+        bpos = {bid: pos[nd] for bid, nd in self.door.items() if nd in pos}
+        self.around: dict[int, list[str]] = {}             # перекрёсток → дома в радиусе (соседние)
+        for i, (x, y) in pos.items():
+            blds = [bid for bid, (bx, by) in bpos.items() if (bx - x) ** 2 + (by - y) ** 2 <= r2]
+            if blds:
+                self.around[i] = blds
+
+    def around_of(self, a_bld: str) -> list[str]:
+        """Дома, прилегающие к перекрёстку здания a (видно, выйдя к нему), кроме самого a."""
+        nd = self.door.get(a_bld)
+        return [b for b in self.around.get(nd, []) if b != a_bld] if nd is not None else []
+
+    def seen_along(self, a_bld: str, b_bld: str) -> list[str]:
+        """Дома, мимо которых реально проходишь от a к b: на каждом перекрёстке пути — его прилегающие дома."""
+        if a_bld not in self.door or b_bld not in self.door:
+            return []
+        out, seen = [], set()
+        for nd in self._bfs_nodes(self.door[a_bld], self.door[b_bld]):
+            for bid in self.around.get(nd, []):
+                if bid != a_bld and bid not in seen:
+                    seen.add(bid)
+                    out.append(bid)
+        return out
 
     def _bfs_nodes(self, src: int, dst: int) -> list[int]:
         """Кратчайший путь по перекрёсткам (список узлов), [] если недостижимо."""
@@ -163,8 +197,9 @@ class CityGraph:
                     order.append(bid)
         return order
 
-    def near(self, a_bld: str, k: int = 4) -> list[str]:
-        """До k ближайших по улицам зданий от двери a (что видно «вокруг»), по возрастанию пути."""
+    def near(self, a_bld: str, k: int = 4, max_dist: int | None = None) -> list[str]:
+        """До k ближайших по улицам зданий от двери a (что видно «вокруг»), по возрастанию пути.
+        max_dist (если задан) — не дальше стольких уличных шагов: «вокруг» = реально смежное, не весь район."""
         if a_bld not in self.door:
             return []
         src = self.door[a_bld]
@@ -173,12 +208,17 @@ class CityGraph:
         found: list[tuple[int, str]] = []
         while q:
             n = q.popleft()
+            d = dist[n]
+            if max_dist is not None and d > max_dist:
+                continue
             for bid in self.at_node.get(n, []):
                 if bid != a_bld:
-                    found.append((dist[n], bid))
+                    found.append((d, bid))
+            if max_dist is not None and d >= max_dist:
+                continue                                  # дальше границы не расширяемся
             for m in self._adj.get(n, []):
                 if m not in dist:
-                    dist[m] = dist[n] + 1
+                    dist[m] = d + 1
                     q.append(m)
         found.sort(key=lambda t: t[0])
         out: list[str] = []

@@ -106,6 +106,29 @@ def build_fact_base(world, model=None) -> None:
         reg(f"болтают, что в месте «{label}» опасность {s['danger']}: {s['contents']}", key,
             "city", 0.2, [label.lower(), "опасность", s["danger"]], subject=s.get("place"))
 
+    # городские ЗДАНИЯ → горожане знают, что есть в городе и зачем (чтобы у любого спросить, где что)
+    _BLD_DESC = [
+        ("inn", "постоялый двор: там ночлег, горячая еда и свежие сплетни"),
+        ("guild", "дом гильдии приключенцев: там берут контракты на угрозы"),
+        ("shrine", "святилище: туда идут помолиться и за исцелением"),
+        ("townhall", "дом градоправителя: там городская власть"),
+        ("board", "городская доска: там вывешивают заказы и розыск"),
+        ("shop", "лавка: там берут припасы и снаряжение в дорогу"),
+        ("drink", "питейная: там пропускают кружку"),
+        ("serve", "там можно перекусить"),
+        ("farm", "хозяйство на окраине: там растят и продают снедь"),
+    ]
+    for pid, pl in sorted(world.spatial.places.items()):
+        if getattr(pl, "kind", "") != "building" or getattr(pl, "parent", "") != "settlement:phandalin":
+            continue
+        affs = set(getattr(pl, "affordances", []) or [])
+        if affs & {"hideout", "manor"}:                   # тайные/частные места не на слуху
+            continue
+        desc = next((d for a, d in _BLD_DESC if a in affs), None)
+        if desc:
+            reg(f"«{pl.name}» — {desc}", "места", "city", 0.03,
+                [pl.name.lower(), "место", "город", "где"], subject=pid)
+
     # фракционные знания → область faction:<id> (знают члены фракции)
     for fid, items in FACTION_KNOWLEDGE.items():
         for it in items:

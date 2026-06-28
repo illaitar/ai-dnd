@@ -373,6 +373,11 @@ def _create_pc(world: World, pc_spec: dict | None = None,
     world.ecs.add(pc, Affiliation(affinity=dict(class_affinity.get(spec["klass"], {}))))
     world.commit("set_position", "worldgen", target=pc,
                  payload={"region": REGION, "place": start_place})
+    sp = world.spatial.places.get(start_place)            # стартовое место (таверна) — сразу на карте: мы тут стоим
+    world.commit("map_update", pc, payload={"player": pc, "belief": {
+        "id": f"belief:seen:{start_place}", "site": "", "place": start_place, "source": "start",
+        "label": (sp.name if sp else start_place), "terrain": "", "direction": "", "contents": "",
+        "danger": "", "reliability": "explored", "true": True, "verified": True}})
     # инвентарь и экип по выбранному снаряжению
     carry = Container("carry:hero", owner_ref=pc, kind="carry")
     world.containers["carry:hero"] = carry

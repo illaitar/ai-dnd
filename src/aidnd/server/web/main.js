@@ -613,7 +613,7 @@ async function ensureTown(seed) {
   try { const r = await fetch("/town_layout?seed=" + seed); if (r.ok) { townBuildings = (await r.json()).buildings || []; townSeed = seed; } }
   catch (e) { townBuildings = []; }
 }
-let mapMode = "region", citySel = null, cityState = null, cityCur = 0, cityStep = 0, cityQuiet = 2, cityMarks = [];
+let mapMode = "region", citySel = null, cityState = null, cityMarks = [];
 let cityBadges = [], cityArrow = null, cityScale = 1;  // записанные места (номера) + стрелка игрока поверх city-SVG
 // HiDPI: рисуем во внутренний бэк-стор ~2× (CSS ужимает обратно) → резкие карты/подписи.
 // Геометрия карт строится от W/H, поэтому больший бэк-стор просто увеличивает чёткость;
@@ -661,8 +661,8 @@ async function drawCityLevel(tick = -1) {
       if (!window.drawCity) return;
       await ensureTown(seed);
       const out = window.drawCity(cv.getContext("2d"), cv.width, cv.height, { seed, buildings: townBuildings || [], keyHouses, chrome: true });
-      mapHits = out.hits; cityState = { ...out, seed }; cityCur = out.streets.start;
-      renderLegend(out.legend); mapMode = "city"; cityStep = 0; cityQuiet = 2; cityMarks = []; drawFx();
+      mapHits = out.hits; cityState = { ...out, seed };
+      renderLegend(out.legend); mapMode = "city"; cityMarks = []; drawFx();
       return;
     }
   }
@@ -672,10 +672,9 @@ async function drawCityLevel(tick = -1) {
   mapHits = data.hits.map(h => ({ ...h, x: h.x * k, y: h.y * k, r: (h.r || 14) * k }));
   cityState = { seed, streets: { start: data.streets.start, adj: data.streets.adj,
                                  nodes: data.streets.nodes.map(n => [n[0] * k, n[1] * k]) } };
-  cityCur = cityState.streets.start;
   computeCityOverlay();                                        // бейджи записанных + стрелка игрока на реальных точках
   renderLegend(cityBadges.map(b => ({ n: b.n, name: b.name, id: b.id })));   // легенда — только записанные
-  mapMode = "city"; cityStep = 0; cityQuiet = 2; cityMarks = []; drawFx();
+  mapMode = "city"; cityMarks = []; drawFx();
   ensureIncidentControls();                                    // дебаг-слой событий (тумблер + скраббер)
   if (incidentMode) fetchIncidents();
 }
@@ -833,44 +832,21 @@ function ensureIncidentControls() {
     incTimer = setTimeout(() => drawCityLevel(incidentTick), 120);   // перерисовка карты под тик (overlay внутри)
   };
 }
-function bfs(adj, s, t) { if (s === t) return [s]; const prev = new Array(adj.length).fill(-1); prev[s] = s; const q = [s]; while (q.length) { const u = q.shift(); for (const v of adj[u]) if (prev[v] < 0) { prev[v] = u; if (v === t) { const p = [t]; let x = t; while (x !== s) { x = prev[x]; p.push(x); } return p.reverse(); } q.push(v); } } return null; }
 function nearestNode(s, x, y) { let bi = 0, bd = 1e9; s.nodes.forEach((n, i) => { const d = Math.hypot(n[0] - x, n[1] - y); if (d < bd) { bd = d; bi = i; } }); return bi; }
-async function cityWalk(hit) {
-  const s = cityState.streets, target = nearestNode(s, hit.x, hit.y), path = bfs(s.adj, cityCur, target);
-  if (!path) { cityCur = target; return; }
-  for (let k = 1; k < path.length; k++) {
-    cityCur = path[k]; cityStep++; drawWalk(path, k);
-    try {
-      const r = await fetch(`/city_event?seed=${cityState.seed}&step=${cityStep}&quiet=${cityQuiet}&loc=frontier_town`), d = await r.json();
-      if (d && d.beat) { const ic = { threat: "⚔️", find: "🔎", company: "🧍", ambient: "…" }[d.beat.event] || "•"; logEntry(`${ic} <i>${esc(d.beat.text)}</i>`, "mech"); cityQuiet = 2; cityMarks.push(s.nodes[cityCur].slice()); drawWalk(path, k); }
-      else cityQuiet++;
-    } catch (e) { cityQuiet++; }
-    await new Promise(rs => setTimeout(rs, 430));
-  }
-}
-function drawWalk(path, k) {
-  const fx = $("map-fx"), c = fx.getContext("2d"); c.clearRect(0, 0, fx.width, fx.height);
-  const N = cityState.streets.nodes, s = fx.width / 560;
-  c.strokeStyle = "rgba(120,90,40,.5)"; c.setLineDash([6 * s, 4 * s]); c.lineWidth = 2 * s; c.beginPath();
-  for (let i = 0; i < path.length; i++) { const p = N[path[i]]; i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); } c.stroke(); c.setLineDash([]);
-  c.strokeStyle = "#e0a64d"; c.lineWidth = 3 * s; c.beginPath();
-  for (let i = 0; i <= k; i++) { const p = N[path[i]]; i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); } c.stroke();
-  for (const m of cityMarks) { c.fillStyle = "#e2604a"; c.font = `bold ${Math.round(16 * s)}px Inter`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("❗", m[0], m[1] - 10 * s); }
-  const p = N[cityCur]; c.beginPath(); c.arc(p[0], p[1], 3.6 * s, 0, 7); c.fillStyle = "#3a78b0"; c.fill(); c.lineWidth = 1.4 * s; c.strokeStyle = "#eef4fb"; c.stroke();
-}
-async function goSelection() {
-  const hit = citySel; if (!hit) return;
-  $("map-go").disabled = true;
-  if (hit.crossroad) { await cityWalk(hit); $("map-go").disabled = false; clearSelection(); return; }  // просто дойти
-  if (mapMode === "city") {
-    await cityWalk(hit);                                          // дошли по перекрёсткам с событиями
-    if (hit.go) {                                                 // лендмарк → санкционированный переход «через карту» (минует гейт расстояния)
-      logEntry(`<span class="you">→ ${esc(hit.name || hit.go)}</span>`, "you"); send({ cmd: "travel", place: hit.id }); closeOverlay("mapview");
-    } else send({ cmd: "materialize", place: hit.id, kind: hit.kind });   // дом → наполнить
+function goSelection() {
+  const hit = citySel; if (!hit) return;                 // переход делает СЕРВЕР по дорогам от реальной позиции —
+  if (mapMode === "city") {                              // без клиентской ходьбы из центра (старую выпилили)
+    if (hit.go) {                                        // записанный лендмарк → серверный переход «через карту» (по улицам, с событиями)
+      logEntry(`<span class="you">→ ${esc(hit.name || hit.go)}</span>`, "you");
+      send({ cmd: "travel", place: hit.id }); closeOverlay("mapview");
+    } else if (!hit.crossroad) {                         // дом → наполнить и показать (перекрёсток — не цель перехода)
+      send({ cmd: "materialize", place: hit.id, kind: hit.kind });
+    }
   } else if (hit.go) {
-    logEntry(`<span class="you">→ ${esc(hit.name || hit.go)}</span>`, "you"); send({ cmd: "travel", place: hit.id }); closeOverlay("mapview");
+    logEntry(`<span class="you">→ ${esc(hit.name || hit.go)}</span>`, "you");
+    send({ cmd: "travel", place: hit.id }); closeOverlay("mapview");
   }
-  $("map-go").disabled = false; clearSelection();
+  clearSelection();
 }
 function renderHouse(h) {
   const occ = (h.occupants || []).map(o => `<div class="occ">• <b>${esc(o.name)}</b> — ${esc(o.role)} <span class="tag">(${esc(o.trait)}, ${o.age})</span></div>`).join("") || '<div class="tag">никого нет</div>';

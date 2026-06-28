@@ -497,16 +497,12 @@ class GameSession:
         name = p.name if p else place
         sc = self.scene_context()
         actions = self.affordances_here()
-        text = f"{sc.descriptor}\nТы в локации «{name}». " + self._crowd_line()
+        text = f"{sc.descriptor}\nТы в локации «{name}»."   # лаконично: толпа/действия — чипами и нарратором, не стеной
         if p and p.alterations:                           # стойкие следы действий в локации
             text += " Следы: " + "; ".join(p.alterations) + "."
-        if actions:
-            text += " Можно: " + ", ".join(a["label"] for a in actions) + "."
         g = self._city_graph()
-        in_city = bool(g and place in g.door)              # городское здание/место → выход один: на улицу
-        if in_city:
-            text += "\n🚪 Выйти на улицу — оттуда идёшь по городу."
-        else:                                              # вне города (дикие земли/подземелье) — связи как есть
+        in_city = bool(g and place in g.door)              # город → выход на улицу есть кнопкой (exits), текстом не дублируем
+        if not in_city:                                    # вне города (дикие земли/подземелье) — связи как есть
             roads = self._roads_text()
             if roads:
                 text += f"\n🧭 Отсюда можно пойти: {roads}."

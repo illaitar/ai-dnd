@@ -1564,26 +1564,11 @@ class GameSession:
         self._remember_salient(npc, text)             # имя/цель/намерение игрока → точная память для узнавания
         self.world.commit("talk", self.player, target=npc, payload={"topic": topic[:60]})
         self._player_shares_with(npc, topic)          # реплика игрока может научить NPC (игрок — источник молвы)
-        react = self._disposition_reaction(npc, rel, topic)   # П2/П3: наезд враждебного / ложь о секрете
-        if react:
-            self._log_journal(f"Поговорил с {self._display(npc)}.")
+        react = self._arbiter_talk(npc, text, topic, rel)     # ЕДИНЫЙ utility-арбитр вместо cue-цепочки:
+        if react is not None:                                 # читает настоящее состояние NPC, выбирает речевую
+            self._log_journal(f"Поговорил с {self._display(npc)}.")   # способность (наезд/мнение/знание/секрет/ложь)
             self._tick()
             return react
-        opine = self._opine_about(npc, text)                  # №7: мнение NPC о другом знакомом (граф мнений)
-        if opine:
-            self._log_journal(f"Расспросил {self._display(npc)} о знакомом.")
-            self._tick()
-            return opine
-        teach = self._teach_lore(npc, text)                   # игрок РАССКАЗАЛ NPC о существе → личное знание
-        if teach:
-            self._log_journal(f"Поведал {self._display(npc)} о мире.")
-            self._tick()
-            return teach
-        lore = self._do_lore_query(npc, text)                 # NPC «подтягивает» знание о мире (домен ИЛИ выученное)
-        if lore:
-            self._log_journal(f"Расспросил {self._display(npc)} о мире.")
-            self._tick()
-            return lore
         line = self._strip_leading_name(self._npc_reply(npc, decision, topic, rel, first_meeting, hooks), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._talk_turns = getattr(self, "_talk_turns", 0) + 1     # П2: терпение тает → NPC может засобираться
@@ -1594,6 +1579,60 @@ class GameSession:
         self._tick()
         return {"kind": "narration", "text": line, "speaker": self._display(npc),
                 "npc": npc, "decision": decision, "hooks": hooks, "view": self.view()}
+
+    def _arbiter_talk(self, npc: str, text: str, topic: str, rel):
+        """Единый арбитр речевой реакции (заменил cue-цепочку): классифицирует реплику игрока в
+        стимул, читает НАСТОЯЩЕЕ состояние NPC (черты/отношения/занятость) и вероятностно выбирает
+        способность из 9 семейств. Враждебный — наезд; иначе мнение/знание/секрет по полезности.
+        → dict реакции или None (обычный ответ нарратора)."""
+        if self._is_hostile(npc):
+            return self._disposition_reaction(npc, rel, topic)        # враждебный НАЕЗЖАЕТ, не беседует
+        low = (topic or "").lower()
+        if not low:
+            return None
+        import random
+
+        from ..content import lore_ref
+        from ..npc import Context, Stimulus, choose
+        from ..npc.integration import npc_state
+        persona = self.world.ecs.get(npc, Persona)
+        stim = None
+        if (persona and persona.secrets) and any(k in low for k in self._PROBE_KW):
+            stim = Stimulus("asked_secret", source=self.player, data={"sensitive": True})
+        elif any(k in low for k in self._TELL_KW):
+            stim = Stimulus("player_tells", source=self.player)
+        elif any(k in low for k in self._OPINE_KW):
+            subj = self._match_npc(text)
+            if subj and subj != npc and subj != self.player:
+                stim = Stimulus("asked_opinion", source=self.player, target=subj)
+            else:
+                hit = lore_ref.lookup(topic, self.model)
+                if hit:
+                    cat, ref, entry = hit
+                    knows = lore_ref.knows(self.world, npc, cat, ref, entry)
+                    stim = Stimulus("asked_lore", source=self.player, data={"knows": knows})
+        if stim is None:
+            return None
+        st = npc_state(self.world, npc, self.player)
+        if rel is not None:                                          # точные живые отношения к игроку
+            st.relations[self.player] = {"affinity": getattr(rel, "affinity", 0.0),
+                                         "trust": getattr(rel, "trust", 0.0),
+                                         "fear": getattr(rel, "fear", 0.0), "debt": 0}
+        rng = random.Random(f"{npc}|{topic}|{getattr(self, '_talk_turns', 0)}")
+        cap, _top = choose(st, Context(stim, world=self.world), rng)
+        return self._dispatch_cap(cap.key, npc, text, topic, rel) if cap else None
+
+    def _dispatch_cap(self, key: str, npc: str, text: str, topic: str, rel):
+        """Выбранная арбитром способность → исполнитель (логика осталась, ВЫБОР теперь за моделью)."""
+        if key == "opine":
+            return self._opine_about(npc, text)
+        if key == "acknowledge":
+            return self._teach_lore(npc, text)
+        if key in ("inform", "refuse_unknown"):
+            return self._do_lore_query(npc, text)
+        if key in ("withhold_secret", "deceive"):
+            return self._maybe_lie(npc, rel, topic)
+        return None                       # reveal_secret / greet → обычный ответ заземлит факт по доверию
 
     def _maybe_leaving(self, npc: str, rel) -> bool:
         """П2: после нескольких реплик NPC может засобираться. Доверие держит дольше; деятель/занятой уходит быстрее."""

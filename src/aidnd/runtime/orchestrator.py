@@ -1564,6 +1564,11 @@ class GameSession:
         self._remember_salient(npc, text)             # имя/цель/намерение игрока → точная память для узнавания
         self.world.commit("talk", self.player, target=npc, payload={"topic": topic[:60]})
         self._player_shares_with(npc, topic)          # реплика игрока может научить NPC (игрок — источник молвы)
+        react = self._disposition_reaction(npc, rel, topic)   # П2/П3: наезд враждебного / ложь о секрете
+        if react:
+            self._log_journal(f"Поговорил с {self._display(npc)}.")
+            self._tick()
+            return react
         line = self._strip_leading_name(self._npc_reply(npc, decision, topic, rel, first_meeting, hooks), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._talk_turns = getattr(self, "_talk_turns", 0) + 1     # П2: терпение тает → NPC может засобираться
@@ -1622,6 +1627,51 @@ class GameSession:
                     "text": f"{outcome.summary} «Нет, правда пора.» — и {self._display(npc)} уходит по своим делам."}
 
         return self._suspend(req, resume, "Уговорить остаться (Убеждение).")
+
+    _PROBE_KW = ("правд", "скрыва", "тайн", "секрет", "на кого ты работа", "на кого работа",
+                 "кто ты на самом", "признай", "врёшь", "врешь", "обманыва", "что прячешь",
+                 "что скрыва", "не тот, за кого", "выдаёшь себя", "сознай", "в чём твой интерес")
+
+    def _disposition_reaction(self, npc: str, rel, topic: str):
+        """П2/П3: расположение → реакция. Враждебный НАЕЗЖАЕТ (не беседует); припёртый секретчик с малым доверием — ЛЖЁТ."""
+        if self._is_hostile(npc):
+            import random
+
+            from ..gen.seeds import subseed
+            rng = random.Random(subseed(self.world.seed, "confront", npc, self.world.clock.tick))
+            jab = rng.choice(["«Чего тебе? Проваливай, пока цел.»", "«Не до тебя. Отвали.»",
+                              "«Ещё слово — и пожалеешь.»", "«Кто тебя сюда звал? Уходи.»"])
+            self.cognition.observe_and_appraise(npc, self.player, "talk", "hostile", "огрызнулся, гонит игрока")
+            return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                    "text": f"{self._display(npc)} смотрит зло и цедит: {jab}"}
+        return self._maybe_lie(npc, rel, topic)
+
+    def _maybe_lie(self, npc: str, rel, topic: str):
+        """П3: припёртый секретчик с малым доверием ОТРИЦАЕТ правду (лжёт) — фиксируем в книге правды world.told."""
+        if not topic:
+            return None
+        p = self.world.ecs.get(npc, Persona)
+        if not (p and p.secrets) or getattr(rel, "trust", 0.0) >= 0.6:   # доверяет → мог бы и сознаться, не лжём «в защиту»
+            return None
+        if not any(k in topic.lower() for k in self._PROBE_KW):
+            return None
+        if not hasattr(self.world, "told") or self.world.told is None:
+            self.world.told = {}
+        sec = p.secrets[0]
+        self.world.told.setdefault(npc, []).append({                # КНИГА ПРАВДЫ: что СКАЗАЛ против того, что ИСТИННО
+            "topic": topic[:60], "true": sec.get("fact", ""), "told": "отрицание", "tick": self.world.clock.tick})
+        self.cognition.observe_and_appraise(npc, self.player, "deception", "deceptive", "соврал, отрицая правду")
+        self.world.commit("rel_update", self.player, payload={"npc": npc, "target": self.player, "tags": ["lied_to_pc"]})
+        import random
+
+        from ..gen.seeds import subseed
+        rng = random.Random(subseed(self.world.seed, "lie", npc, self.world.clock.tick))
+        deny = rng.choice(["чуть медлит, потом ровно: «Не понимаю, о чём ты. Тебе показалось.»",
+                           "отводит взгляд: «Враньё. Я тут ни при чём.»",
+                           "усмехается слишком быстро: «Глупости. Кто тебе наплёл?»",
+                           "холодно роняет: «Ты не того спрашиваешь. Я чист.»"])
+        return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "lied": True, "view": self.view(),
+                "text": f"{self._display(npc)} {deny}"}
 
     def _strip_leading_name(self, line: str, npc: str) -> str:
         """Реплику показывает поле speaker, поэтому имя в начале текста — лишнее (иначе

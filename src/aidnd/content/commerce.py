@@ -97,3 +97,59 @@ def serve_food(world, player: str) -> str:
     from ..gen.item_gen import spawn_item
     carry = f"carry:{player.split(':', 1)[1]}"
     return spawn_item(world, "tmpl:rations", carry, owner=player, source="service")
+
+
+# --------------------------------------------------------------------------- #
+#  Заказ изделия (П1: занятость + отложенный исход) — мастер «занят до тика T»  #
+# --------------------------------------------------------------------------- #
+CRAFT_ROLES = ("кузнец", "blacksmith", "smith", "оружейник", "бронник", "ремесленник", "weaponsmith", "armorer")
+CRAFT_MENU = {                                   # ключевое слово → (шаблон, часов работы)
+    "кинжал": ("tmpl:dagger", 5), "нож": ("tmpl:dagger", 5),
+    "коротк": ("tmpl:shortsword", 8), "меч": ("tmpl:shortsword", 8),
+    "длинн": ("tmpl:longsword", 11), "полуторн": ("tmpl:longsword", 11),
+    "булав": ("tmpl:mace", 7), "палиц": ("tmpl:mace", 7),
+    "кольчуг": ("tmpl:chain_shirt", 14), "доспех": ("tmpl:chain_shirt", 14), "кожан": ("tmpl:leather", 8),
+}
+
+
+def is_crafter(world, npc: str) -> bool:
+    from ..world.components import Persona
+    p = world.ecs.get(npc, Persona)
+    prof = (((p.profession or "") or (p.archetype or "")).lower() if p else "")
+    return any(r in prof for r in CRAFT_ROLES)
+
+
+def craftable(text: str):
+    """Что просят сковать → (template, часов). None — не распознано."""
+    low = text.lower()
+    for kw, (tmpl, hours) in CRAFT_MENU.items():
+        if kw in low:
+            return tmpl, hours
+    return None
+
+
+def craft_price(world, tmpl: str) -> int:
+    base = world.templates[tmpl].base_value if tmpl in world.templates else 200
+    return max(1, int(base * 1.25))              # custom-работа дороже прилавка
+
+
+def commission(world, npc: str, tmpl: str, until_tick: int, label: str) -> None:
+    if not hasattr(world, "busy") or world.busy is None:
+        world.busy = {}
+    world.busy[npc] = {"until": until_tick, "tmpl": tmpl, "label": label}
+
+
+def busy(world, npc: str):
+    return (getattr(world, "busy", None) or {}).get(npc)
+
+
+def deliver_commission(world, player: str, npc: str, smith=None) -> str | None:
+    """Выдать готовый заказ игроку, снять занятость. Возвращает iid или None."""
+    b = busy(world, npc)
+    if not b:
+        return None
+    from ..gen.item_gen import spawn_item
+    carry = f"carry:{player.split(':', 1)[1]}"
+    iid = spawn_item(world, b["tmpl"], carry, owner=player, source="craft", smith=smith)
+    del world.busy[npc]
+    return iid

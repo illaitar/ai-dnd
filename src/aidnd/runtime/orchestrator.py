@@ -633,6 +633,19 @@ class GameSession:
             here = [n for n in self.npcs_here() if n != self.player]    # услуга ночлега у трактирщика → сделка с торгом
             npc = (self.dialogue_partner if self.dialogue_partner in here else None) or (here[0] if here else None)
             return self._post(self._do_lodging(npc, text), "freeform")
+        if any(k in low for k in ("забрать заказ", "мой заказ", "за заказом", "забрать кинжал",
+                                  "забрать меч", "забрать изделие", "готов ли заказ", "готов мой")):
+            here = [n for n in self.npcs_here() if n != self.player]   # забрать готовый заказ у мастера
+            npc = (self.dialogue_partner if self.dialogue_partner in here else None) or (here[0] if here else None)
+            return self._post(self._collect_commission(npc, text), "serve")
+        if any(k in low for k in ("закаж", "выкуй", "выкова", "скуй", "сделай мне", "изготов", "сков")):
+            from ..content import (
+                commerce,  # заказ ковки: только если назван предмет ИЛИ рядом мастер
+            )
+            here = [n for n in self.npcs_here() if n != self.player]
+            if commerce.craftable(text) or any(commerce.is_crafter(self.world, n) for n in here):
+                npc = (self.dialogue_partner if self.dialogue_partner in here else None) or (here[0] if here else None)
+                return self._post(self._do_commission(npc, text), "serve")
         if any(k in low for k in ("поесть", "перекус", "поем ", "купить еды", "купить еду", "закаж",
                                   "похлёб", "похлеб", "горячей еды")):                # услуга еды → предмет-паёк
             here = [n for n in self.npcs_here() if n != self.player]
@@ -1901,6 +1914,77 @@ class GameSession:
         return {"kind": "narration", "npc": seller, "view": self.view(),
                 "text": f"Ты платишь {self._fmt_price(price)} и получаешь {self._item_name(iid)} — подкрепиться можно "
                         f"командой «съесть паёк». Кошелёк: {self._coins()}."}
+
+    def _tick_hhmm(self, tick: int) -> str:
+        from .. import config
+        m = (int(tick) * config.SIM_MINUTES_PER_TICK) % (24 * 60)
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    def _do_commission(self, npc: str | None, text: str) -> dict:
+        """Заказ изделия (П1): мастер берёт деньги (торг-бросок) и УХОДИТ В РАБОТУ до тика T; забрать — позже."""
+        from .. import config
+        from ..content import commerce
+        here = [n for n in self.npcs_here() if n != self.player]
+        crafters = [n for n in here if commerce.is_crafter(self.world, n)]
+        seller = npc if (npc in crafters) else (crafters[0] if crafters else None)
+        if not seller:
+            return {"kind": "system", "text": "Тут некому ковать — нужен кузнец или ремесленник.", "view": self.view()}
+        b = commerce.busy(self.world, seller)
+        if b:
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"{self._display(seller)} уже занят: {b['label']}. Заберёшь, как будет готово."}
+        spec = commerce.craftable(text)
+        if not spec:
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"{self._display(seller)}: «Что сковать? Кинжал, меч, булаву, кольчугу?»"}
+        tmpl, hours = spec
+        base = commerce.craft_price(self.world, tmpl)
+        if not commerce.can_afford(self.world, self.player, base):
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"За такую работу просят {self._fmt_price(base)} — столько у тебя нет."}
+        item_name = self.world.templates[tmpl].name if tmpl in self.world.templates else "изделие"
+        action = Action(actor=self.player, verb="persuade", target=seller)
+        req = self.rules.build_check_request(self.player, "persuasion", commerce.HAGGLE_DC,
+                                             target=seller, kind="skill")
+
+        def resume(result) -> dict:
+            outcome = self.rules.adjudicate(action, req, result)
+            margin = outcome.detail["total"] - (outcome.detail.get("dc") or commerce.HAGGLE_DC)
+            disc = commerce.haggle_discount(outcome.success, margin)
+            price = int(base * (1 - disc))
+            commerce.charge(self.world, self.player, seller, price)
+            ticks = max(1, hours * 60 // config.SIM_MINUTES_PER_TICK)
+            until = self.world.clock.tick + ticks
+            commerce.commission(self.world, seller, tmpl, until, f"куёт {item_name}")
+            hhmm = self._tick_hhmm(until)
+            self._tick()
+            d = f" (сторговал −{int(disc * 100)}%)" if disc else ""
+            self._log_journal(f"Заказал {item_name} у {self._display(seller)} за {self._fmt_price(price)}{d}.")
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"Сговорились: {self._fmt_price(price)}{d}, работа на ~{hours} ч. Готово к {hhmm} — "
+                            f"приходи и скажи «забрать заказ». Кошелёк: {self._coins()}."}
+
+        return self._suspend(req, resume, "Торг за работу (Убеждение).")
+
+    def _collect_commission(self, npc: str | None, text: str = "") -> dict:
+        """Забрать готовый заказ; если ещё в работе — мастер просит зайти позже."""
+        from ..content import commerce
+        here = [n for n in self.npcs_here() if n != self.player]
+        holders = [n for n in here if commerce.busy(self.world, n)]
+        seller = npc if (npc in holders) else (holders[0] if holders else None)
+        if not seller:
+            return {"kind": "system", "text": "Тут никто не держит твой заказ.", "view": self.view()}
+        b = commerce.busy(self.world, seller)
+        if self.world.clock.tick < b["until"]:
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"{self._display(seller)}: «Ещё в работе — {b['label']}. Загляни к {self._tick_hhmm(b['until'])}.»"}
+        from ..gen.item_gen import _smith_for
+        smith = _smith_for(self.model, f"изделие работы мастера {self._display(seller)}")
+        iid = commerce.deliver_commission(self.world, self.player, seller, smith)
+        self._tick()
+        self._log_journal(f"Забрал заказ у {self._display(seller)}: {self._item_name(iid)}.")
+        return {"kind": "narration", "npc": seller, "view": self.view(),
+                "text": f"{self._display(seller)} вытирает руки и вручает тебе {self._item_name(iid)} — заказ готов."}
 
     def _do_buy(self, action: Action, text: str) -> dict:
         shop = self._shop_here()

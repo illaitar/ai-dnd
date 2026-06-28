@@ -133,7 +133,7 @@ def disclosable(persona, trust: float, topic: str | None = None) -> list[dict]:
 #  с доменным: знает = в домене ИЛИ выучил. Новая база подключается добавлением ветки сюда.
 # --------------------------------------------------------------------------- #
 KNOWLEDGE_DOMAINS: dict[str, dict] = {
-    "_everyone": {"bestiary": {"max_tier": 1}},                    # слабых тварей знает каждый
+    "_everyone": {"bestiary": {"max_tier": 1}, "equipment": {"max_tier": 9}},   # слабых тварей и обычную снарягу — каждый
     "следопыт": {"bestiary": {"types": {"beast", "plant", "monstrosity", "fey"}, "max_tier": 9}},
     "ranger":   {"bestiary": {"types": {"beast", "plant", "monstrosity", "fey"}, "max_tier": 9}},
     "охотник":  {"bestiary": {"types": {"beast", "monstrosity"}, "max_tier": 6}},
@@ -151,14 +151,17 @@ KNOWLEDGE_DOMAINS: dict[str, dict] = {
     "рыцарь":   {"bestiary": {"max_tier": 8}},
     "капитан":  {"bestiary": {"max_tier": 9}},
     "наёмник":  {"bestiary": {"max_tier": 7}},
-    "маг":      {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
-    "mage":     {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
-    "wizard":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
-    "мудрец":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
-    "sage":     {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
-    "учёный":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
-    "гильдмастер": {"bestiary": {"max_tier": 12}},
-    "guildmaster": {"bestiary": {"max_tier": 12}},
-    "кузнец":   {"bestiary": {"max_tier": 3}},
-    "blacksmith": {"bestiary": {"max_tier": 3}},
+    "маг":      {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}, "magicitems": {"max_tier": 6}},
+    "mage":     {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}, "magicitems": {"max_tier": 6}},
+    "wizard":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}, "magicitems": {"max_tier": 6}},
+    "мудрец":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}, "magicitems": {"max_tier": 6}},
+    "sage":     {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}, "magicitems": {"max_tier": 6}},
+    "учёный":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}, "magicitems": {"max_tier": 6}},
+    "гильдмастер": {"bestiary": {"max_tier": 12}, "magicitems": {"max_tier": 4}},
+    "guildmaster": {"bestiary": {"max_tier": 12}, "magicitems": {"max_tier": 4}},
+    "кузнец":   {"bestiary": {"max_tier": 3}, "equipment": {"max_tier": 9}},
+    "blacksmith": {"bestiary": {"max_tier": 3}, "equipment": {"max_tier": 9}},
+    "merchant":  {"magicitems": {"max_tier": 3}, "equipment": {"max_tier": 9}},
+    "торговец":  {"magicitems": {"max_tier": 3}, "equipment": {"max_tier": 9}},
+    "лавочник":  {"magicitems": {"max_tier": 3}, "equipment": {"max_tier": 9}},
 }

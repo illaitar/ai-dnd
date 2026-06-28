@@ -50,6 +50,8 @@ def _load(fn: str) -> list:
 # справочная база мира: NPC «подтягивают» её при разговоре, генераторы — при наполнении сцены
 BESTIARY: dict[str, dict] = {}
 SPELLS: dict[str, dict] = {}                              # справочный каталог заклинаний (имя/уровень/школа/описание)
+MAGICITEMS: dict[str, dict] = {}                          # магпредметы (редкость/тип/настройка/эффект)
+EQUIPMENT: dict[str, dict] = {}                           # снаряжение: оружие+броня (урон/AC/свойства/цена)
 
 # ВАРИАЦИИ существ — набор атрибутов поверх базового стат-блока (имя/флейвор уточняет LLM при появлении)
 MONSTER_VARIANTS = {
@@ -115,9 +117,15 @@ def load_srd(world) -> tuple[int, int]:
             stackable=it.get("stackable", False), max_stack=it.get("max_stack", 1),
             tags=tuple(it.get("tags", [])))
         ni += 1
-    for s in _load("spells.json"):                        # заклинания — вторая справочная категория
+    for s in _load("spells.json"):                        # справочные категории реестра
         SPELLS[s.get("id") or _slug(s["name"], "spell")] = s
+    for it in _load("magicitems.json"):
+        MAGICITEMS[it.get("id") or _slug(it["name"], "mitem")] = it
+    for g in _load("equipment.json"):
+        EQUIPMENT[g.get("id") or _slug(g["name"], "gear")] = g
     from . import lore_ref  # справочные базы → реестр lore_ref
     lore_ref.register("bestiary", BESTIARY)
     lore_ref.register("spells", SPELLS)
+    lore_ref.register("magicitems", MAGICITEMS)
+    lore_ref.register("equipment", EQUIPMENT)
     return nm, ni

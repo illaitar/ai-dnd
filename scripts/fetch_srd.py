@@ -120,6 +120,36 @@ def fetch_spells() -> list:
     return out
 
 
+def fetch_magicitems() -> list:
+    """Справочный каталог магпредметов (редкость/тип/настройка/эффект) — для знания NPC и лора лута."""
+    out = []
+    for it in _pages("magicitems", "document__slug=wotc-srd"):
+        out.append({
+            "id": _slug(it["name"], "mitem"), "name": it["name"],
+            "rarity": (it.get("rarity") or "uncommon").lower(), "itype": it.get("type") or "",
+            "attunement": bool(it.get("requires_attunement") in ("requires attunement", True, "yes")),
+            "desc": (it.get("desc") or "")[:500],
+        })
+    out.sort(key=lambda r: (r["rarity"], r["name"]))
+    return out
+
+
+def fetch_equipment() -> list:
+    """Справочный каталог снаряжения (оружие + броня): урон/свойства/AC/цена — для знания торговцев/кузнецов."""
+    out = []
+    for w in _pages("weapons", "document__slug=wotc-srd"):
+        out.append({"id": _slug(w["name"], "gear"), "name": w["name"], "kind": "weapon",
+                    "category": w.get("category") or "", "damage": w.get("damage_dice") or "",
+                    "damage_type": w.get("damage_type") or "", "properties": w.get("properties") or [],
+                    "cost": w.get("cost") or "", "weight": w.get("weight") or ""})
+    for a in _pages("armor", "document__slug=wotc-srd"):
+        out.append({"id": _slug(a["name"], "gear"), "name": a["name"], "kind": "armor",
+                    "category": a.get("category") or "", "ac": a.get("ac_string") or str(a.get("base_ac") or ""),
+                    "cost": a.get("cost") or ""})
+    out.sort(key=lambda r: (r["kind"], r["name"]))
+    return out
+
+
 def fetch_items() -> list:
     out = []
     for it in _pages("magicitems"):

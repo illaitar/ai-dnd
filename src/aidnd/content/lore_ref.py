@@ -29,7 +29,7 @@ def lookup(query: str):
     for cat, db in CATALOGS.items():
         for ref, e in db.items():
             for nm in (e.get("name_ru") or "", e.get("name") or ""):
-                cores = [w.rstrip("ьъ")[:6] for w in nm.lower().split()]   # корни слов: терпят склонения
+                cores = [w.rstrip("ьъ")[:5] for w in nm.lower().split()]   # корни слов (5 букв): терпят склонения (длинный/длинном)
                 cores = [c for c in cores if len(c) >= 3]
                 matched = [c for c in cores if (" " + c) in low]
                 if not matched:
@@ -128,5 +128,30 @@ def facts(category: str, entry: dict) -> str:
             parts.append("длительность " + str(e["duration"]))
         if e.get("desc"):
             parts.append(str(e["desc"])[:220])
+        return ". ".join(p for p in parts if p)
+    if category == "magicitems":
+        e = entry
+        nm = e.get("name_ru") or e.get("name")
+        rar = {"common": "обычный", "uncommon": "необычный", "rare": "редкий", "very rare": "очень редкий",
+               "legendary": "легендарный", "artifact": "артефакт"}.get((e.get("rarity") or "").lower(),
+                                                                        e.get("rarity", ""))
+        att = ", требует настройки" if e.get("attunement") else ""
+        parts = [f"{nm} — магический предмет ({rar}{att})"]
+        if e.get("itype"):
+            parts.append("тип: " + str(e["itype"]))
+        if e.get("desc"):
+            parts.append(str(e["desc"])[:220])
+        return ". ".join(p for p in parts if p)
+    if category == "equipment":
+        e = entry
+        nm = e.get("name_ru") or e.get("name")
+        if e.get("kind") == "weapon":
+            parts = [f"{nm} — оружие ({e.get('category', '')})", f"урон {e.get('damage', '')} {e.get('damage_type', '')}"]
+            if e.get("properties"):
+                parts.append("свойства: " + ", ".join(str(p) for p in e["properties"][:4]))
+        else:
+            parts = [f"{nm} — броня ({e.get('category', '')})", f"КД {e.get('ac', '')}"]
+        if e.get("cost"):
+            parts.append("цена " + str(e["cost"]))
         return ". ".join(p for p in parts if p)
     return ""

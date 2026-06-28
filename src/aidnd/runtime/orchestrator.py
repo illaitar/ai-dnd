@@ -630,6 +630,11 @@ class GameSession:
             here = [n for n in self.npcs_here() if n != self.player]    # услуга ночлега у трактирщика → сделка с торгом
             npc = (self.dialogue_partner if self.dialogue_partner in here else None) or (here[0] if here else None)
             return self._post(self._do_lodging(npc, text), "freeform")
+        if any(k in low for k in ("поесть", "перекус", "поем ", "купить еды", "купить еду", "закаж",
+                                  "похлёб", "похлеб", "горячей еды")):                # услуга еды → предмет-паёк
+            here = [n for n in self.npcs_here() if n != self.player]
+            npc = (self.dialogue_partner if self.dialogue_partner in here else None) or (here[0] if here else None)
+            return self._post(self._do_serve(npc, text), "serve")
         if "штраф" in low and any(k in low for k in ("заплат", "уплат", "оплат", "плачу")):
             return self._post(self.pay_fine(), "freeform")   # уладить дело со стражей
         if self._followers() and any(k in low for k in self._UNFOLLOW_CUES):
@@ -1810,7 +1815,7 @@ class GameSession:
         base = commerce.room_rate(self.world, inn) * nights
         if not commerce.can_afford(self.world, self.player, base):
             return {"kind": "narration", "npc": seller, "view": self.view(),
-                    "text": f"На {nights} {self._nights_word(nights)} просят {base // 100} ср — столько у тебя не наберётся."}
+                    "text": f"На {nights} {self._nights_word(nights)} просят {self._fmt_price(base)} — столько у тебя не наберётся."}
         action = Action(actor=self.player, verb="persuade", target=seller)
         req = self.rules.build_check_request(self.player, "persuasion", commerce.HAGGLE_DC,
                                              target=seller, kind="skill")
@@ -1828,12 +1833,32 @@ class GameSession:
                                                     "сговорились о ночлеге")
             self._tick()
             d = f" (сторговал −{int(disc * 100)}%)" if disc else ""
-            self._log_journal(f"Снял комнату за {price // 100} ср{d}.")
+            self._log_journal(f"Снял комнату за {self._fmt_price(price)}{d}.")
             return {"kind": "narration", "npc": seller, "view": self.view(),
-                    "text": f"Сделка: {price // 100} ср за {nights} {self._nights_word(nights)}{d}. У тебя ключ "
+                    "text": f"Сделка: {self._fmt_price(price)} за {nights} {self._nights_word(nights)}{d}. У тебя ключ "
                             f"от гостевой комнаты. Кошелёк: {self._coins()}. Скажи «идти в комнату», чтобы подняться."}
 
         return self._suspend(req, resume, "Торг за комнату (Убеждение).")
+
+    def _do_serve(self, npc: str | None, text: str) -> dict:
+        """Заказать еду — сделка-услуга: оплата → предмет-паёк в инвентарь (ешь отдельно «съесть паёк»)."""
+        from ..content import commerce
+        place = self.current_place()
+        p = self.world.spatial.places.get(place)
+        if not (p and {"inn", "serve", "eat"} & set(getattr(p, "affordances", []) or [])):
+            return {"kind": "system", "text": "Здесь не кормят — нужен трактир или постоялый двор.", "view": self.view()}
+        here = [n for n in self.npcs_here() if n != self.player]
+        seller = npc if (npc and npc in here) else (here[0] if here else None)
+        price = commerce.MEAL_PRICE_CP
+        if not commerce.charge(self.world, self.player, seller or place, price):
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"Горячая еда — {self._fmt_price(price)}, а монет столько нет."}
+        iid = commerce.serve_food(self.world, self.player)
+        self._tick()
+        self._log_journal(f"Взял горячей еды ({self._fmt_price(price)}).")
+        return {"kind": "narration", "npc": seller, "view": self.view(),
+                "text": f"Ты платишь {self._fmt_price(price)} и получаешь {self._item_name(iid)} — подкрепиться можно "
+                        f"командой «съесть паёк». Кошелёк: {self._coins()}."}
 
     def _do_buy(self, action: Action, text: str) -> dict:
         shop = self._shop_here()

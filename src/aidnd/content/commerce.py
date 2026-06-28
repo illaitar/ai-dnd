@@ -10,14 +10,14 @@
 from __future__ import annotations
 
 from ..inventory.container import _pay, wallet_value_cp
-from ..inventory.items import ItemTemplate
+from ..inventory.items import COIN, ItemTemplate
 from ..world.spatial import Place
 
-ROOM_RATE_CP = 500          # ночлег: 5 ср за ночь (база; позже — по качеству двора через wares_of)
-MEAL_PRICE_CP = 40          # сытная еда (паёк): 4 ср
-DRINK_PRICE_CP = 15         # кружка эля
-HAGGLE_DC = 13              # базовая стойкость продавца к торгу
-HAGGLE_CAP = 0.25           # максимум скидки торгом (вниз, никогда вверх)
+ROOM_RATE_CP = 5 * COIN["sp"]    # ночлег: 5 ср за ночь (канон LMoP; COIN[sp]=10cp)
+MEAL_PRICE_CP = 3 * COIN["sp"]   # горячая еда (паёк): 3 ср
+DRINK_PRICE_CP = 2 * COIN["sp"]  # кружка эля: 2 ср
+HAGGLE_DC = 13                   # базовая стойкость продавца к торгу
+HAGGLE_CAP = 0.25                # максимум скидки торгом (вниз, никогда вверх)
 
 _ROOM_KEY = "tmpl:room_key"
 

@@ -625,6 +625,11 @@ class GameSession:
                 or (here[0] if len(here) == 1 else None)
             if npc:
                 return self._post(self._do_pickpocket(npc, text), "freeform")
+        if any(k in low for k in ("снять комнат", "снять номер", "снять койк", "комнату на",
+                                  "переночев", "ночлег", "на постой", "снять угол")):
+            here = [n for n in self.npcs_here() if n != self.player]    # услуга ночлега у трактирщика → сделка с торгом
+            npc = (self.dialogue_partner if self.dialogue_partner in here else None) or (here[0] if here else None)
+            return self._post(self._do_lodging(npc, text), "freeform")
         if "штраф" in low and any(k in low for k in ("заплат", "уплат", "оплат", "плачу")):
             return self._post(self.pay_fine(), "freeform")   # уладить дело со стражей
         if self._followers() and any(k in low for k in self._UNFOLLOW_CUES):
@@ -1781,6 +1786,54 @@ class GameSession:
             self._log_journal("Забрал: " + ", ".join(taken) + ".")
         return {"kind": "narration", "text": f"Ты забираешь: {', '.join(taken) or 'ничего'}.",
                 "view": self.view()}
+
+    @staticmethod
+    def _nights_word(n: int) -> str:
+        return ("ночь" if n % 10 == 1 and n % 100 != 11
+                else "ночи" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "ночей")
+
+    def _parse_nights(self, text: str) -> int:
+        import re
+        m = re.search(r"(\d+)\s*(ноч|сут|дн|ден)", text.lower())
+        return max(1, min(30, int(m.group(1)) if m else 1))
+
+    def _do_lodging(self, npc: str | None, text: str) -> dict:
+        """Снять комнату — сделка-услуга: цена rate×ночи, бросок-торг (Убеждение), оплата → КЛЮЧ + гостевая комната."""
+        from ..content import commerce
+        inn = self.current_place()
+        p = self.world.spatial.places.get(inn)
+        if not (p and {"inn", "serve"} & set(getattr(p, "affordances", []) or [])):
+            return {"kind": "system", "text": "Здесь комнат не сдают.", "view": self.view()}
+        here = [n for n in self.npcs_here() if n != self.player]
+        seller = npc if (npc and npc in here) else (here[0] if here else None)
+        nights = self._parse_nights(text)
+        base = commerce.room_rate(self.world, inn) * nights
+        if not commerce.can_afford(self.world, self.player, base):
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"На {nights} {self._nights_word(nights)} просят {base // 100} ср — столько у тебя не наберётся."}
+        action = Action(actor=self.player, verb="persuade", target=seller)
+        req = self.rules.build_check_request(self.player, "persuasion", commerce.HAGGLE_DC,
+                                             target=seller, kind="skill")
+
+        def resume(result) -> dict:
+            outcome = self.rules.adjudicate(action, req, result)
+            margin = outcome.detail["total"] - (outcome.detail.get("dc") or commerce.HAGGLE_DC)
+            disc = commerce.haggle_discount(outcome.success, margin)
+            price = int(base * (1 - disc))
+            if not commerce.charge(self.world, self.player, seller or inn, price):
+                return {"kind": "system", "text": "Денег всё же не хватило.", "view": self.view()}
+            rid, _key = commerce.grant_lodging(self.world, self.player, inn)   # комната — портал двора → достижима «изнутри»
+            if seller:
+                self.cognition.observe_and_appraise(seller, self.player, "trade", "friendly",
+                                                    "сговорились о ночлеге")
+            self._tick()
+            d = f" (сторговал −{int(disc * 100)}%)" if disc else ""
+            self._log_journal(f"Снял комнату за {price // 100} ср{d}.")
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"Сделка: {price // 100} ср за {nights} {self._nights_word(nights)}{d}. У тебя ключ "
+                            f"от гостевой комнаты. Кошелёк: {self._coins()}. Скажи «идти в комнату», чтобы подняться."}
+
+        return self._suspend(req, resume, "Торг за комнату (Убеждение).")
 
     def _do_buy(self, action: Action, text: str) -> dict:
         shop = self._shop_here()
@@ -3960,6 +4013,10 @@ class GameSession:
     def _entry_blocked(self, dest: str) -> dict | None:
         """Гейт входа в гражданские здания (ратуша/святилище) по часам — закрыто внутрь не пускаем
         (лавки пускают: можно осмотреться/поговорить, торговля гейтится отдельно)."""
+        from ..content import commerce
+        if commerce.is_guest_room(dest) and not commerce.holds_lodging(self.world, dest):
+            return {"kind": "system", "view": self.view(),
+                    "text": "Гостевая комната заперта — сними её у трактирщика, получишь ключ."}
         p = self.world.spatial.places.get(dest)
         if not p or not getattr(p, "hours", None):
             return None

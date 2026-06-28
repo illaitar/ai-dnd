@@ -114,4 +114,6 @@ def load_srd(world) -> tuple[int, int]:
             stackable=it.get("stackable", False), max_stack=it.get("max_stack", 1),
             tags=tuple(it.get("tags", [])))
         ni += 1
+    from . import lore_ref  # бестиарий — первая справочная категория реестра
+    lore_ref.register("bestiary", BESTIARY)
     return nm, ni

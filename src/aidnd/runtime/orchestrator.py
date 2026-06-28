@@ -1574,7 +1574,12 @@ class GameSession:
             self._log_journal(f"Расспросил {self._display(npc)} о знакомом.")
             self._tick()
             return opine
-        lore = self._do_lore_query(npc, text)                 # NPC «подтягивает» знание о мире (существа/… из баз)
+        teach = self._teach_lore(npc, text)                   # игрок РАССКАЗАЛ NPC о существе → личное знание
+        if teach:
+            self._log_journal(f"Поведал {self._display(npc)} о мире.")
+            self._tick()
+            return teach
+        lore = self._do_lore_query(npc, text)                 # NPC «подтягивает» знание о мире (домен ИЛИ выученное)
         if lore:
             self._log_journal(f"Расспросил {self._display(npc)} о мире.")
             self._tick()
@@ -1716,10 +1721,9 @@ class GameSession:
         hit = lore_ref.lookup(text)
         if not hit:
             return None
-        cat, _ref, entry = hit
-        p = self.world.ecs.get(npc, Persona)
+        cat, ref, entry = hit
         nm = entry.get("name_ru") or entry.get("name")
-        if not lore_ref.knows(p, cat, entry):
+        if not lore_ref.knows(self.world, npc, cat, ref, entry):   # домен профессии ИЛИ выучено лично
             return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
                     "text": f"«{nm}? Не моё это — про такое не ведаю.»"}
         f = lore_ref.facts(cat, entry)
@@ -1728,10 +1732,31 @@ class GameSession:
             from ..inference.agents import render_scene
             summary = ("Игрок спросил, что ты знаешь об этом существе. Перескажи СВОИМИ словами в голосе "
                        "персонажа, коротко и по делу, СТРОГО по фактам (ничего не выдумывая сверх): " + f)
-            out = render_scene(self.model, summary, p, scene=self._narrator_context(), mode="ambient",
+            out = render_scene(self.model, summary, self.world.ecs.get(npc, Persona),
+                               scene=self._narrator_context(), mode="ambient",
                                pc=self._pc_brief(), gear=self._pc_gear())
             line = self._strip_leading_name((out or {}).get("narration") or f, npc)
         return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(), "text": line}
+
+    _TELL_KW = ("видел", "видела", "встретил", "встретила", "убил", "убила", "напал", "повстречал",
+                "там был", "там были", "знаешь, ", "представь", "наткнул")
+
+    def _teach_lore(self, npc: str, text: str):
+        """Игрок РАССКАЗАЛ NPC о существе, которого тот не знал → личное знание (выучил с твоих слов; потом расползётся)."""
+        low = text.lower()
+        if not any(k in low for k in self._TELL_KW):
+            return None
+        from ..content import lore_ref
+        hit = lore_ref.lookup(text)
+        if not hit:
+            return None
+        cat, ref, entry = hit
+        if lore_ref.knows(self.world, npc, cat, ref, entry):
+            return None                                   # уже знает — обычный диалог
+        lore_ref.learn(self.world, npc, cat, ref)
+        nm = entry.get("name_ru") or entry.get("name")
+        return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                "text": f"«{nm}, говоришь? Надо же — не знал про такое. Запомню.»"}
 
     def _strip_leading_name(self, line: str, npc: str) -> str:
         """Реплику показывает поле speaker, поэтому имя в начале текста — лишнее (иначе

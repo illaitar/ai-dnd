@@ -122,3 +122,43 @@ def disclosable(persona, trust: float, topic: str | None = None) -> list[dict]:
                 continue
             out.append(k)
     return out
+
+
+# --------------------------------------------------------------------------- #
+#  ДОМЕННОЕ знание о справочных базах мира (бестиарий/заклинания/…) — расширяемо.
+#  Профессия/роль → {категория базы: правило}; правило = {types?: набор, max_tier: число}.
+#  tier — обобщённая «известность/опасность» сущности (CR у тварей, уровень у заклинаний,
+#  ранг редкости у предметов — функцию tier даёт lore_ref на категорию). Личное знание
+#  (выученное опытом/рассказом/диффузией) лежит отдельно (world.lore_learned) и складывается
+#  с доменным: знает = в домене ИЛИ выучил. Новая база подключается добавлением ветки сюда.
+# --------------------------------------------------------------------------- #
+KNOWLEDGE_DOMAINS: dict[str, dict] = {
+    "_everyone": {"bestiary": {"max_tier": 1}},                    # слабых тварей знает каждый
+    "следопыт": {"bestiary": {"types": {"beast", "plant", "monstrosity", "fey"}, "max_tier": 9}},
+    "ranger":   {"bestiary": {"types": {"beast", "plant", "monstrosity", "fey"}, "max_tier": 9}},
+    "охотник":  {"bestiary": {"types": {"beast", "monstrosity"}, "max_tier": 6}},
+    "зверолов": {"bestiary": {"types": {"beast", "monstrosity"}, "max_tier": 6}},
+    "друид":    {"bestiary": {"types": {"beast", "plant", "fey", "elemental"}, "max_tier": 12}},
+    "жрец":     {"bestiary": {"types": {"undead", "fiend", "celestial", "aberration"}, "max_tier": 30},
+                 "spells": {"max_tier": 9}},
+    "priest":   {"bestiary": {"types": {"undead", "fiend", "celestial", "aberration"}, "max_tier": 30},
+                 "spells": {"max_tier": 9}},
+    "паладин":  {"bestiary": {"types": {"undead", "fiend"}, "max_tier": 10}},
+    "страж":    {"bestiary": {"max_tier": 6}},
+    "guard":    {"bestiary": {"max_tier": 6}},
+    "солдат":   {"bestiary": {"max_tier": 6}},
+    "ветеран":  {"bestiary": {"max_tier": 8}},
+    "рыцарь":   {"bestiary": {"max_tier": 8}},
+    "капитан":  {"bestiary": {"max_tier": 9}},
+    "наёмник":  {"bestiary": {"max_tier": 7}},
+    "маг":      {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
+    "mage":     {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
+    "wizard":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
+    "мудрец":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
+    "sage":     {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
+    "учёный":   {"bestiary": {"max_tier": 30}, "spells": {"max_tier": 9}},
+    "гильдмастер": {"bestiary": {"max_tier": 12}},
+    "guildmaster": {"bestiary": {"max_tier": 12}},
+    "кузнец":   {"bestiary": {"max_tier": 3}},
+    "blacksmith": {"bestiary": {"max_tier": 3}},
+}

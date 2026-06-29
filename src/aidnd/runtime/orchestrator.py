@@ -1584,6 +1584,56 @@ class GameSession:
                 "Дважды ты сходишь с дороги, заслышав чужие голоса, и пережидаешь в укрытии."]
         return random.Random(subseed(self.world.seed, "travel_incident", dest)).choice(flav)
 
+    _DIRECTIONS_KW = ("где наход", "где кузниц", "где гильд", "где лавк", "где храм", "где святил",
+                      "где ратуш", "где трактир", "где доск", "как пройти", "как добра", "как дойти",
+                      "как попаст", "покажи дорог", "укажи дорог", "укажи путь", "проводи", "подскажи дорог",
+                      "где найти", "где тут", "где здесь", "в какую сторон", "куда идти к", "куда идти за",
+                      "где это", "не подскаж")
+
+    def _mark_told(self, place_id: str, npc: str) -> bool:
+        """Отметить на карте место, дорогу к которому РАССКАЗАЛ NPC (не визит — «со слов»). Делает место
+        достижимым для навигации (текст + карта). True — новая отметка."""
+        bid = f"belief:told:{place_id}"
+        if bid in self.world.player_maps.get(self.player, {}):
+            return False
+        from ..content.region import REGION_SITES, reachable_place_to_site
+        key = reachable_place_to_site(place_id)
+        truth = REGION_SITES.get(key, {}) if key else {}
+        belief = {"id": bid, "site": key, "place": place_id, "source": npc,
+                  "label": truth.get("label") or self._place_name(place_id),
+                  "terrain": truth.get("terrain", ""), "direction": truth.get("direction", ""),
+                  "contents": "", "danger": "", "reliability": "told", "true": True, "verified": False}
+        self.world.commit("map_update", self.player, payload={"player": self.player, "belief": belief})
+        return True
+
+    def _ask_directions(self, npc: str, text: str):
+        """Игрок спрашивает у присутствующего NPC дорогу → если тот не враждебен, объясняет и место
+        ложится на карту (навигация открыта). → dict реакции или None (не про дорогу / некуда)."""
+        place = self._match_place(text)
+        if not place or place == self.current_place():
+            return None
+        name = self._place_name(place)
+        if self._is_hostile(npc):                          # враждебный дорогу не покажет
+            return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                    "text": f"{self._display(npc)} хмуро отрезает: «Сам ищи. Не нанимался тебе город показывать»."}
+        from ..content import acquaintance
+        acquaintance.record_meeting(self.world, npc, self.player, self.world.clock.tick)
+        fresh = self._mark_told(place, npc)
+        note = " — ты отмечаешь это на карте." if fresh else " (это уже есть на твоей карте)."
+        if self.model is not None:                         # живая подсказка в голосе NPC
+            from ..inference.agents import render_dialogue
+            persona = self.world.ecs.get(npc, Persona)
+            line = render_dialogue(
+                self.model, persona, self._memory_summary(npc, self.cognition.retrieve(npc, "", self.player).rel, False),
+                situation=f"The player asks you the way to «{name}». You are a local who knows the town.",
+                player_line=text, intent=f"point them the way to «{name}» in a couple of sentences",
+                scene=self._narrator_context(), mode="dialogue", pc=self._pc_brief())
+            if line and not self._degenerate(line):
+                return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                        "text": line + note}
+        return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                "text": f"{self._display(npc)} толково объясняет, как добраться до «{name}»{note}"}
+
     def _record_explored(self, place_id: str) -> None:
         """Помечает посещённую локацию как достоверно известную на карте игрока.
         Личный визит ДОЛЖЕН быть не беднее купленного слуха — поэтому подтягиваем
@@ -1652,6 +1702,12 @@ class GameSession:
 
         self.lod.ensure_tier(npc, in_dialogue=True)
         self.charts.enrich(npc)
+        if any(k in text.lower() for k in self._DIRECTIONS_KW):   # спросил у местного дорогу → объяснит + отметка на карте
+            d = self._ask_directions(npc, text)
+            if d is not None:
+                self.dialogue_partner = npc
+                self._tick()
+                return d
         ctx0 = self.cognition.retrieve(npc, "", self.player)
         rel = ctx0.rel
         now = self.world.clock.tick

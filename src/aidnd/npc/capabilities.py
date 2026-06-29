@@ -102,7 +102,7 @@ CAPABILITIES: list[Cap] = [
         lambda s, c: c.k() in {"tick", "hungry"},
         lambda s, c: s.n("hunger") * 1.3 + (0.3 if _midday(c) else 0)),
     Cap("carouse", "body",
-        lambda s, c: (c.k() == "festival") or (c.k() == "tick" and _evening(c)),
+        lambda s, c: (c.k() == "festival") or (c.k() == "tick" and (_evening(c) or s.n("social") > 0.7)),
         lambda s, c: s.n("social") * s.t("sociability") * 1.0 + (0.6 if c.k() == "festival" else 0)
         + (0.5 if s.has_mood("drunk") else 0)),
 
@@ -215,7 +215,7 @@ CAPABILITIES: list[Cap] = [
         lambda s, c: _sr(s, c)["trust"] * 0.7 + s.t("sociability") * 0.3 + 0.2
         - (0.6 if _sr(s, c)["trust"] < 0.2 else 0)),
     Cap("greet", "speak",
-        lambda s, c: c.k() in {"meet_npc", "tick"} or c.k().startswith("asked"),
+        lambda s, c: c.k() == "meet_npc" or c.k().startswith("asked"),   # только когда ЕСТЬ к кому (не в пустоту)
         lambda s, c: 0.25 + s.t("sociability") * 0.2),
     Cap("thank_gift", "speak",
         lambda s, c: c.k() == "offered_gift",

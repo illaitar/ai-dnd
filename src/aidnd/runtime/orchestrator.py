@@ -1845,6 +1845,17 @@ class GameSession:
         top = evaluate(st, Context(stim, world=self.world))
         return bool(top) and top[0][0].key == "yield_demand"
 
+    def _service_refused(self, npc: str, kind: str) -> bool:
+        """Модель NPC: откажет ли в услуге из-за дурной репутации/враждебности (топ == refuse_reputation)."""
+        from ..npc import Context, Stimulus, evaluate
+        from ..npc.integration import npc_state
+        st = npc_state(self.world, npc, self.player)
+        rel = self.cognition.retrieve(npc, "", self.player).rel
+        bad = self._is_hostile(npc) or getattr(rel, "affinity", 0.0) < -0.4   # враждебность ИЛИ крепкая неприязнь
+        stim = Stimulus(kind, source=self.player, data={"bad_rep": bad})
+        top = evaluate(st, Context(stim, world=self.world))
+        return bool(top) and top[0][0].key == "refuse_reputation"
+
     def _do_persuade(self, action: Action, text: str) -> dict:
         return self._social_check(action, text, "persuasion")
 
@@ -2111,6 +2122,9 @@ class GameSession:
             return {"kind": "system", "text": "Здесь комнат не сдают.", "view": self.view()}
         here = [n for n in self.npcs_here() if n != self.player]
         seller = npc if (npc and npc in here) else (here[0] if here else None)
+        if seller and self._service_refused(seller, "asked_lodging"):     # модель: враждебному не сдаёт
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"{self._display(seller)}: «Тебе комнаты не будет. Ищи ночлег в другом месте.»"}
         nights = self._parse_nights(text)
         base = commerce.room_rate(self.world, inn) * nights
         if not commerce.can_afford(self.world, self.player, base):
@@ -2149,6 +2163,9 @@ class GameSession:
             return {"kind": "system", "text": "Здесь не кормят — нужен трактир или постоялый двор.", "view": self.view()}
         here = [n for n in self.npcs_here() if n != self.player]
         seller = npc if (npc and npc in here) else (here[0] if here else None)
+        if seller and self._service_refused(seller, "asked_food"):        # модель: враждебному не наливает
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"{self._display(seller)}: «Тебя не обслуживаю. Проваливай.»"}
         price = commerce.MEAL_PRICE_CP
         if not commerce.charge(self.world, self.player, seller or place, price):
             return {"kind": "narration", "npc": seller, "view": self.view(),
@@ -2174,6 +2191,9 @@ class GameSession:
         seller = npc if (npc in crafters) else (crafters[0] if crafters else None)
         if not seller:
             return {"kind": "system", "text": "Тут некому ковать — нужен кузнец или ремесленник.", "view": self.view()}
+        if self._service_refused(seller, "asked_commission"):             # модель: враждебному не куёт
+            return {"kind": "narration", "npc": seller, "view": self.view(),
+                    "text": f"{self._display(seller)}: «Для тебя работать не стану. Иди отсюда.»"}
         b = commerce.busy(self.world, seller)
         if b:
             return {"kind": "narration", "npc": seller, "view": self.view(),

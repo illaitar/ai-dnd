@@ -127,7 +127,7 @@ CAPABILITIES: list[Cap] = [
         lambda s, c: c.k() == "supply_cut",
         lambda s, c: s.t("greed") * 0.9 + 0.5),
     Cap("refuse_reputation", "trade",
-        lambda s, c: c.k() in {"asked_buy", "asked_lodging", "asked_commission"} and bool(c.d("bad_rep")),
+        lambda s, c: c.k().startswith("asked") and bool(c.d("bad_rep")),
         lambda s, c: (1 - s.t("greed")) * 0.5 + s.t("pride") * 0.5 + s.t("lawful") * 0.3 + 0.3),
 
     # ─ УСЛУГИ ─ (выдают КОНКРЕТНЫЙ объект/эффект)

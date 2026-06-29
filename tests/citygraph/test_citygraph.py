@@ -47,7 +47,7 @@ def test_graph_connected_enough(city):
 
 # --------------------------------------------------------- равные отрезки --- #
 def test_segments_roughly_equal(city):
-    lengths = [e.length for e in city.edges()]
+    lengths = [e.length for e in city.edges() if e.kind == "road"]
     interval = city.stats()["interval"]
     med = statistics.median(lengths)
     assert 0.7 * interval <= med <= 1.3 * interval          # медиана у целевого интервала
@@ -184,3 +184,47 @@ def test_key_buildings_count_and_distinct_houses():
 def test_segment_param_overrides_interval():
     c = generate(CityParams(seed=7, segment=20.0, key_buildings=4))
     assert abs(c.stats()["interval"] - 20.0) < 1e-6
+
+
+# --------------------------------------------------------- типы переходов --- #
+def test_key_building_has_interior_and_door(city):
+    ek = {(min(e.a, e.b), max(e.a, e.b)): e.kind for e in city.edges()}
+    for kb in city.key_buildings.values():
+        assert kb.interior >= 0
+        assert city.node_kind(kb.interior) == NodeKind.INTERIOR
+        assert ek.get((min(kb.interior, kb.node), max(kb.interior, kb.node))) == "door"
+
+
+def test_route_marks_enter_and_exit(city):
+    # переход здание↔улица обозначен ОТДЕЛЬНО (exit/enter), а не как шаг по дороге
+    kbs = list(city.key_buildings)
+    r = city.route(kbs[0], kbs[5])
+    assert r.found
+    assert r.steps[0].kind == "exit"
+    assert r.steps[-1].kind == "enter"
+    assert all(s.kind == "road" for s in r.steps[1:-1])
+    winds = {"С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"}
+    assert all(s.heading in winds for s in r.steps if s.kind == "road")
+
+
+def test_exits_categorized(city):
+    kb = next(iter(city.key_buildings.values()))
+    assert any(m.kind == "exit" for m in city.exits(kb.interior))          # из нутра — выход
+    door_moves = city.exits(kb.node)                                       # у двери — заход + дороги
+    assert any(m.kind == "enter" and m.name == kb.name for m in door_moves)
+    assert any(m.kind == "road" and m.heading for m in door_moves)
+    assert any(m.kind == "road" for m in city.exits(kb.crossroad))         # перекрёсток — дороги
+
+
+def test_subspace_routing_and_exits():
+    city = generate(CityParams(seed=11, key_buildings=6))     # свой город — мутируем под-зданиями
+    kb = list(city.key_buildings)[1]
+    sub = city.add_subspace(kb, "Подвал")
+    assert sub is not None and city.node_kind(sub) == NodeKind.INTERIOR
+    assert any(m.kind == "internal" and m.name == "Подвал"
+               for m in city.exits(city.key_buildings[kb].interior))
+    r = city.route(list(city.key_buildings)[3], sub)
+    assert r.found and r.steps[-1].kind == "internal" and r.steps[-1].name == "Подвал"
+    sub2 = city.add_subspace(sub, "Тайник")                   # вложенность: подвал у подвала
+    assert sub2 is not None
+    assert any(m.kind == "internal" and m.name == "Тайник" for m in city.exits(sub))

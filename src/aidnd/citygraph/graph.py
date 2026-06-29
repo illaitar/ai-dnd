@@ -12,12 +12,17 @@
 from __future__ import annotations
 
 import heapq
+import math
 
-from .model import Edge, House, KeyBuilding, Node, NodeKind, Route, Sign
+from .model import Edge, House, KeyBuilding, Move, Node, NodeKind, Route, Sign, Step
 
 
 def _dist(a: tuple, b: tuple) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def _ek(a: int, b: int) -> tuple:
+    return (a, b) if a < b else (b, a)
 
 
 def _dist2_seg(p, a, b) -> float:
@@ -68,6 +73,9 @@ class City:
         self._partition_houses(raw.get("houses") or [])
         self.key_buildings: dict[str, KeyBuilding] = {}
         self._landmarks = list(raw.get("keys") or [])
+        self._interior_name: dict[int, str] = {}             # узел-нутро → имя здания/под-здания
+        self._interior_building: dict[int, str | None] = {}  # узел-нутро → id корневого ключевого здания
+        self._interior_parent: dict[int, int | None] = {}    # под-здание → родительское нутро
 
     def _pick_interval(self, xy: list, adj: list) -> float:
         if self.params.segment:
@@ -144,26 +152,27 @@ class City:
                 polylines.append(path)
         return polylines, junctions
 
-    def _link(self, a: int, b: int) -> None:
+    def _link(self, a: int, b: int, kind: str = "road") -> None:
         if b not in self._adj[a]:
             self._adj[a].append(b)
         if a not in self._adj[b]:
             self._adj[b].append(a)
+        self._ekind[_ek(a, b)] = kind
+
+    def _new_node(self, pos: tuple, kind: NodeKind) -> int:
+        nid = self._next
+        self._next += 1
+        self._xy[nid], self._kind[nid], self._adj[nid] = pos, kind, []
+        return nid
 
     def _resample(self, polylines: list, xy: dict, junctions: set) -> None:
         """Полилинии → узлы: развилки=перекрёстки, внутри — точки через РАВНЫЙ интервал по длине дуги."""
-        self._xy, self._kind, self._adj, self._next = {}, {}, {}, 0
+        self._xy, self._kind, self._adj, self._ekind, self._next = {}, {}, {}, {}, 0
         cr_map: dict[int, int] = {}
-
-        def new_node(pos, kind):
-            nid = self._next
-            self._next += 1
-            self._xy[nid], self._kind[nid], self._adj[nid] = pos, kind, []
-            return nid
 
         def crossroad(src):
             if src not in cr_map:
-                cr_map[src] = new_node(xy[src], NodeKind.CROSSROAD)
+                cr_map[src] = self._new_node(xy[src], NodeKind.CROSSROAD)
             return cr_map[src]
 
         for pl in polylines:
@@ -178,7 +187,7 @@ class City:
             n = max(1, round(length / self._interval))
             prev = a
             for k in range(1, n):
-                nid = new_node(self._point_at(pts, seglen, length * k / n), NodeKind.POINT)
+                nid = self._new_node(self._point_at(pts, seglen, length * k / n), NodeKind.POINT)
                 self._link(prev, nid)
                 prev = nid
             self._link(prev, b)
@@ -273,7 +282,9 @@ class City:
     # ----------------------------------------------------- ключевые здания - #
     def assign_key_buildings(self, n: int, names: list[str] | None = None) -> list[KeyBuilding]:
         """Выбрать n равномерно разнесённых домов (farthest-point sampling) и поселить в них
-        ключевые здания. Перезаписывает прежнее распределение."""
+        ключевые здания: каждому — узел-нутро + door-ребро к ближайшей точке дороги (вход/выход).
+        Перезаписывает прежнее распределение (вместе с под-зданиями)."""
+        self._clear_interiors()
         ids = list(self.houses)
         n = max(0, min(int(n), len(ids)))
         chosen = self._spread_select(ids, n)
@@ -285,9 +296,45 @@ class City:
             nm = names[k] if names and k < len(names) else f"Здание {k + 1}"
             bid = f"key:{k + 1}"
             ho.building = bid
+            interior = self._new_node((ho.x, ho.y), NodeKind.INTERIOR)
+            self._link(interior, ho.node, kind="door")        # вход/выход к ближайшей точке дороги
+            self._interior_name[interior] = nm
+            self._interior_building[interior] = bid
+            self._interior_parent[interior] = None
             self.key_buildings[bid] = KeyBuilding(
-                id=bid, name=nm, x=ho.x, y=ho.y, node=ho.node, crossroad=ho.crossroad, house=hid)
+                id=bid, name=nm, x=ho.x, y=ho.y, node=ho.node,
+                crossroad=ho.crossroad, house=hid, interior=interior)
         return list(self.key_buildings.values())
+
+    def add_subspace(self, building, name: str) -> int | None:
+        """Добавить под-здание (подвал и т.п.) к ключевому зданию ИЛИ к другому нутру (вложенность).
+        Связь — internal-ребро; легальные переходы те же. Возвращает id нового узла-нутра."""
+        if building in self.key_buildings:
+            parent, root = self.key_buildings[building].interior, building
+        elif isinstance(building, int) and self._kind.get(building) == NodeKind.INTERIOR:
+            parent, root = building, self._interior_building.get(building)
+        else:
+            return None
+        px, py = self._xy[parent]
+        node = self._new_node((px + 6.0, py + 6.0), NodeKind.INTERIOR)
+        self._link(parent, node, kind="internal")
+        self._interior_name[node] = name
+        self._interior_building[node] = root
+        self._interior_parent[node] = parent
+        return node
+
+    def _clear_interiors(self) -> None:
+        for n in list(getattr(self, "_interior_name", {})):
+            self._remove_node(n)
+        self._interior_name, self._interior_building, self._interior_parent = {}, {}, {}
+
+    def _remove_node(self, n: int) -> None:
+        for m in list(self._adj.get(n, [])):
+            self._adj[m] = [x for x in self._adj[m] if x != n]
+            self._ekind.pop(_ek(n, m), None)
+        self._adj.pop(n, None)
+        self._xy.pop(n, None)
+        self._kind.pop(n, None)
 
     def _spread_select(self, ids: list, n: int) -> list:
         """Жадная равномерная выборка n точек: каждый раз берём самую далёкую от уже выбранных."""
@@ -312,14 +359,53 @@ class City:
 
     # ----------------------------------------------------- передвижение ---- #
     def _resolve(self, e) -> int | None:
-        """Конечная точка: id узла | id дома | id ключевого здания → узел графа."""
+        """Конечная точка: id узла | id дома | id ключевого здания → узел графа.
+        Здание → его НУТРО (чтобы маршрут включал выход/вход явными шагами)."""
         if isinstance(e, int):
             return e if e in self._xy else None
+        if e in self.key_buildings:
+            return self.key_buildings[e].interior
         if e in self.houses:
             return self.houses[e].node
-        if e in self.key_buildings:
-            return self.key_buildings[e].node
         return None
+
+    def _heading(self, a: int, b: int) -> str:
+        """Румб перехода a→b (8 сторон; экран: y вниз, поэтому север = вверх)."""
+        ax, ay = self._xy[a]
+        bx, by = self._xy[b]
+        ang = math.degrees(math.atan2(-(by - ay), bx - ax)) % 360.0
+        dirs = ["В", "СВ", "С", "СЗ", "З", "ЮЗ", "Ю", "ЮВ"]
+        return dirs[int((ang + 22.5) // 45) % 8]
+
+    def _step(self, u: int, v: int) -> Step:
+        k = self._ekind.get(_ek(u, v), "road")
+        if k == "door":
+            if self._kind[u] == NodeKind.INTERIOR:
+                return Step(u, v, "exit", name="на улицу")
+            return Step(u, v, "enter", name=self._interior_name.get(v))
+        if k == "internal":
+            return Step(u, v, "internal", name=self._interior_name.get(v))
+        return Step(u, v, "road", heading=self._heading(u, v))
+
+    def exits(self, node: int) -> list[Move]:
+        """Легальные переходы из узла, категоризованные: road (с румбом) | enter | exit | internal.
+        Это и есть «куда отсюда можно легально пойти» для любой ключевой точки/здания."""
+        if node not in self._adj:
+            return []
+        interior = self._kind.get(node) == NodeKind.INTERIOR
+        out = []
+        for nb in self._adj[node]:
+            k = self._ekind.get(_ek(node, nb), "road")
+            if k == "road":
+                out.append(Move(to=nb, kind="road", heading=self._heading(node, nb)))
+            elif k == "door":
+                if interior:
+                    out.append(Move(to=nb, kind="exit", name="на улицу"))
+                else:
+                    out.append(Move(to=nb, kind="enter", name=self._interior_name.get(nb)))
+            elif k == "internal":
+                out.append(Move(to=nb, kind="internal", name=self._interior_name.get(nb)))
+        return out
 
     def _astar(self, src: int, dst: int) -> list[int]:
         if src == dst:
@@ -362,11 +448,12 @@ class City:
         if not nodes:
             return Route(found=False)
         edges = list(zip(nodes, nodes[1:]))
+        steps = [self._step(u, v) for u, v in edges]
         crossroads = [n for n in nodes if self._kind[n] == NodeKind.CROSSROAD]
         length = sum(_dist(self._xy[u], self._xy[v]) for u, v in edges)
         signs = self._signs_along(nodes, a, b)
-        return Route(found=True, nodes=nodes, edges=edges, crossroads=crossroads,
-                     length=length, signs=signs)
+        return Route(found=True, nodes=nodes, edges=edges, steps=steps,
+                     crossroads=crossroads, length=length, signs=signs)
 
     def _signs_along(self, nodes: list[int], a, b) -> list[Sign]:
         """Вывески: ключевые здания, мимо которых реально проходишь (дверь на маршруте ИЛИ дверь в
@@ -398,7 +485,8 @@ class City:
         return [Node(i, x, y, self._kind[i]) for i, (x, y) in self._xy.items()]
 
     def edges(self) -> list[Edge]:
-        return [Edge(a, b, _dist(self._xy[a], self._xy[b]), (a, b) in self._bridge_edges)
+        return [Edge(a, b, _dist(self._xy[a], self._xy[b]), (a, b) in self._bridge_edges,
+                     self._ekind.get((a, b), "road"))
                 for a, b in self._unique_edges()]
 
     def houses_at_crossroad(self, cr: int) -> list[str]:
@@ -427,15 +515,18 @@ class City:
                        "river": self.params.river, "walls": self.params.walls},
             "size": {"w": self.params.width, "h": self.params.height},
             "stats": self.stats(),
-            "nodes": [{"id": i, "x": round(x, 1), "y": round(y, 1), "kind": self._kind[i].value}
+            "nodes": [{"id": i, "x": round(x, 1), "y": round(y, 1), "kind": self._kind[i].value,
+                       "name": self._interior_name.get(i)}
                       for i, (x, y) in self._xy.items()],
-            "edges": [{"a": a, "b": b, "bridge": (a, b) in self._bridge_edges}
+            "edges": [{"a": a, "b": b, "bridge": (a, b) in self._bridge_edges,
+                       "kind": self._ekind.get((a, b), "road")}
                       for a, b in self._unique_edges()],
             "houses": [{"id": h.id, "x": round(h.x, 1), "y": round(h.y, 1),
                         "node": h.node, "crossroad": h.crossroad, "building": h.building}
                        for h in self.houses.values()],
             "key_buildings": [{"id": kb.id, "name": kb.name, "x": round(kb.x, 1), "y": round(kb.y, 1),
-                               "node": kb.node, "crossroad": kb.crossroad, "house": kb.house}
+                               "node": kb.node, "crossroad": kb.crossroad, "house": kb.house,
+                               "interior": kb.interior}
                               for kb in self.key_buildings.values()],
             "river": {"pts": [[round(x, 1), round(y, 1)] for x, y in (self.river.get("pts") or [])],
                       "w": self.river.get("w", 0)},

@@ -160,12 +160,11 @@ def _work_x(world, a, _b):
     return f"{_name(world, a)} занят делом."
 
 
-# способность модели NPC → агентная команда + её эффект (диффузия/потепление/ссора/утоление нужды)
-_EX = {"gossip": _gossip_x, "confront": _confront_x, "socialize": _socialize_x, "pursue_agenda": _agenda_x,
-       "eat": _eat_x, "rest": _rest_x, "carouse": _carouse_x, "work": _work_x}
-_CAP2CMD = {"gossip": "gossip", "threaten": "confront", "advance_agenda": "pursue_agenda",
-            "greet": "socialize", "seek_out": "socialize", "solicit_alms": "socialize",
-            "eat": "eat", "routine_sleep": "rest", "carouse": "carouse", "routine_work": "work"}
+# способность модели → её эффект (диффузия/потепление/ссора/утоление нужды), по КЛЮЧУ способности
+_EX = {"gossip": _gossip_x, "threaten": _confront_x, "greet": _socialize_x, "seek_out": _socialize_x,
+       "solicit_alms": _socialize_x, "advance_agenda": _agenda_x,
+       "eat": _eat_x, "routine_sleep": _rest_x, "carouse": _carouse_x, "routine_work": _work_x}
+_DIRECTED = {"gossip", "threaten", "greet", "seek_out", "solicit_alms"}   # обращено к собеседнику (NPC ИЛИ игроку)
 
 
 def _now_hhmm(world) -> int:
@@ -174,13 +173,23 @@ def _now_hhmm(world) -> int:
     return (m // 60) * 100 + (m % 60)
 
 
-def choose(world, a: str, peers: list[str]):
-    """Behaviour-выбор через ЕДИНЫЙ utility-арбитр: на тике NPC взвешивает СОЦКОНТАКТ (сплетня/ссора)
-    ПРОТИВ self-care (поесть/поспать/посидеть — по накопленным нуждам) и своей агенды. Сохраняет
-    интерфейс (cmd, target|None, ex) и эффекты-диффузию. → (cmd, b, ex) или None."""
+def _affinity(world, a, b, player=None) -> float:
+    """Отношение a к b: к ИГРОКУ — из Relationships (канон), к NPC — из графа мнений."""
+    if player is not None and b == player:
+        from ..world.components import Relationships
+        rels = world.ecs.get(a, Relationships)
+        edge = rels.edges.get(player) if rels else None
+        return getattr(edge, "affinity", 0.0) if edge else 0.0
+    return opinion(world, a, b)
+
+
+def choose(world, a: str, peers: list[str], player: str | None = None):
+    """ЕДИНЫЙ behaviour-выбор: NPC взвешивает self-care (по нуждам), агенду и СОЦКОНТАКТ с самым заметным
+    из присутствующих — где ИГРОК участвует как равный «сосед». Выбран собеседником игрок → это проактивный
+    подход к нему (тем же арбитром, без спецпути). → (cap_key, target|None, ex) или None."""
     from ..npc import Context, Stimulus, choose_multi
     from ..npc.integration import npc_state
-    rng = random.Random(subseed(world.seed, "choose", a, world.clock.tick))   # тик в seed → выбор меняется со временем
+    rng = random.Random(subseed(world.seed, "choose", a, world.clock.tick))
     active = False
     try:
         from .agency import is_active
@@ -191,22 +200,31 @@ def choose(world, a: str, peers: list[str]):
     if active:
         st.agenda = st.agenda or ["замысел"]
     hhmm = _now_hhmm(world)
-    ctxs = [Context(Stimulus("tick", data={"important": active}), time_hhmm=hhmm, world=world)]  # self-care/работа/агенда
-    b = None
+    ctxs = [Context(Stimulus("tick", data={"important": active}), time_hhmm=hhmm, world=world)]
+    target = None
     if peers:
-        b = max(peers, key=lambda x: abs(opinion(world, a, x)))   # самый «яркий» сосед — точка контакта
-        aff = opinion(world, a, b)
-        st.relations[b] = {"affinity": aff, "trust": 0.0, "fear": 0.0, "debt": 0}
-        _c, v = _strongest_opinion(world, a, b)           # ссора (threaten) конкурирует ВНУТРИ meet_npc лишь у настоящих недругов
+        def _salience(b):                                  # к кому потянет: сила отношения ИЛИ новизна чужака-новичка
+            s = 0.25 + abs(_affinity(world, a, b, player))
+            if player is not None and b == player:         # чужак-искатель заметен сам по себе — тянет общительных/любопытных
+                s += 0.45 + st.t("sociability") * 0.45 + st.t("curiosity") * 0.3
+            return s + rng.uniform(0, 0.3)
+        target = max(peers, key=_salience)
+        st.relations[target] = {"affinity": _affinity(world, a, target, player),
+                                "trust": 0.0, "fear": 0.0, "debt": 0}
+        _c, v = _strongest_opinion(world, a, target)       # о ком сплетничать (не о собеседнике)
         juicy = min(1.0, abs(v)) if _c is not None else 0.15
-        ctxs.append(Context(Stimulus("meet_npc", source=b, target=b,
+        ctxs.append(Context(Stimulus("meet_npc", source=target, target=target,
                                      data={"juicy": juicy, "important": active}), time_hhmm=hhmm, world=world))
+        if player is not None and target == player:        # собеседник — игрок: дельцу/нищему дать предложить/поклянчить
+            if st.t("ambition") > 0.6 or st.t("greed") > 0.6:
+                ctxs.append(Context(Stimulus("opportunity", source=player), time_hhmm=hhmm, world=world))
+            if (world.ecs.get(a, Persona).profession or "") == "нищий":
+                ctxs.append(Context(Stimulus("see_rich", source=player), time_hhmm=hhmm, world=world))
     cap, _top = choose_multi(st, ctxs, rng)
     if not cap:
         return None
-    cmd = _CAP2CMD.get(cap.key, "socialize")
-    peer_cmd = cmd in ("gossip", "confront", "socialize")
-    return cmd, (b if peer_cmd else None), _EX[cmd]
+    tgt = target if cap.key in _DIRECTED else None
+    return cap.key, tgt, _EX.get(cap.key, _socialize_x)
 
 
 def step_social(world, rounds: int = 6) -> list[dict]:

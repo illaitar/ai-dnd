@@ -981,6 +981,9 @@ class GameSession:
             elif key == "threaten":
                 ex(self.world, a, target)
                 self._overheard_val = f"🗣 {da} сцепился с {db} — летят резкие слова."
+            elif key == "commission":
+                ex(self.world, a, target)                 # провести сделку (оплата + мастер в работу)
+                self._overheard_val = f"🗣 {da} что-то заказывает у {db}."
             else:                                         # greet и прочее обращённое
                 ex(self.world, a, target)
                 self._overheard_val = f"🗣 {da} о чём-то вполголоса толкует с {db}."

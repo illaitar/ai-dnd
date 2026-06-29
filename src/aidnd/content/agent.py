@@ -163,11 +163,32 @@ def _work_x(world, a, _b):
     return f"{_name(world, a)} занят делом."
 
 
-# способность модели → её эффект (диффузия/потепление/ссора/утоление нужды), по КЛЮЧУ способности
+def _commission_x(world, a, _b):
+    """NPC заказывает ковку у со-локализованного мастера b: платит, ставит мастера в работу."""
+    from ..world.components import Persona
+    from . import commerce
+    b = _b
+    if not b or commerce.busy(world, b):                   # мастер занят — только приценился
+        return f"{_name(world, a)} заглядывает к {_name(world, b)}, да тот занят работой."
+    pa = world.ecs.get(a, Persona)
+    prof = (pa.profession or "") if pa else ""
+    tmpl, hours = (("tmpl:shortsword", 8) if any(w in prof for w in ("страж", "guard", "солдат", "наёмник", "рыцар"))
+                   else ("tmpl:dagger", 5))                # воин — меч, прочие — кинжал/нож
+    price = commerce.craft_price(world, tmpl)
+    if not commerce.charge(world, a, b, price):
+        return f"{_name(world, a)} приценивается у {_name(world, b)}, да не по карману."
+    from .. import config
+    until = world.clock.tick + max(1, hours * 60 // config.SIM_MINUTES_PER_TICK)
+    item = world.templates[tmpl].name if tmpl in world.templates else "изделие"
+    commerce.commission(world, b, tmpl, until, f"куёт {item} для {_name(world, a)}")
+    return f"{_name(world, a)} заказывает у {_name(world, b)} ковку: {item} ({price} мон.)."
+
+
+# способность модели → её эффект (диффузия/потепление/ссора/утоление нужды/сделка), по КЛЮЧУ способности
 _EX = {"gossip": _gossip_x, "threaten": _confront_x, "greet": _socialize_x, "seek_out": _socialize_x,
-       "solicit_alms": _socialize_x, "advance_agenda": _agenda_x,
+       "solicit_alms": _socialize_x, "advance_agenda": _agenda_x, "commission": _commission_x,
        "eat": _eat_x, "routine_sleep": _rest_x, "carouse": _carouse_x, "routine_work": _work_x}
-_DIRECTED = {"gossip", "threaten", "greet", "seek_out", "solicit_alms"}   # обращено к собеседнику (NPC ИЛИ игроку)
+_DIRECTED = {"gossip", "threaten", "greet", "seek_out", "solicit_alms", "commission"}   # обращено к собеседнику
 
 
 def _now_hhmm(world) -> int:
@@ -216,8 +237,11 @@ def choose(world, a: str, peers: list[str], player: str | None = None):
                                 "trust": 0.0, "fear": 0.0, "debt": 0}
         _c, v = _strongest_opinion(world, a, target)       # о ком сплетничать (не о собеседнике)
         juicy = min(1.0, abs(v)) if _c is not None else 0.15
+        from . import commerce
+        peer_craft = commerce.is_crafter(world, target) and not commerce.is_crafter(world, a)  # собеседник — мастер
         ctxs.append(Context(Stimulus("meet_npc", source=target, target=target,
-                                     data={"juicy": juicy, "important": active}), time_hhmm=hhmm, world=world))
+                                     data={"juicy": juicy, "important": active, "peer_craft": peer_craft}),
+                            time_hhmm=hhmm, world=world))
         if player is not None and target == player:        # собеседник — игрок: дельцу/нищему дать предложить/поклянчить
             if st.t("ambition") > 0.6 or st.t("greed") > 0.6:
                 ctxs.append(Context(Stimulus("opportunity", source=player), time_hhmm=hhmm, world=world))

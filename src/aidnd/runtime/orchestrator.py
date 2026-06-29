@@ -987,27 +987,39 @@ class GameSession:
         return self._overheard_val
 
     def _social_to_player(self, npc: str, key: str) -> str | None:
-        """Способность, выбранную NPC В СТОРОНУ ИГРОКА, показать игроку. self-care/агенда → None (к игроку не идёт)."""
+        """Способность NPC В СТОРОНУ ИГРОКА → реплика с НАСТОЯЩИМ содержимым из знаний NPC (слух/зацепка,
+        гейтится доверием; зацепка с unlocks_quest становится делом — собеседник назначен). self-care → None."""
         from ..content import agent
+        from ..content.knowledge import disclosable
         da = self._display_pc(npc)
-        if key == "greet":
-            return f"{da} подсаживается к тебе перекинуться словом."
+        if key == "threaten":
+            return f"{da} надвигается, недобро глядя: «Чего тебе тут надо?»"
+        if key == "solicit_alms":
+            return f"{da} тянет к тебе ладонь: «Подайте монетку, добрый господин…»"
+        persona = self.world.ecs.get(npc, Persona)
+        rel = self.cognition.retrieve(npc, "", self.player).rel
+        # NPC сам подошёл → охотно делится тем, что не тайна (общие слухи/зацепки); тайны по-прежнему за доверием
+        facts = disclosable(persona, max(getattr(rel, "trust", 0.0), 0.2)) if persona else []
+        pick = facts[self.world.clock.tick % len(facts)] if facts else None
+        if key == "seek_out":
+            leads = [f for f in facts if f.get("unlocks_quest")]
+            it = leads[self.world.clock.tick % len(leads)] if leads else pick
+            if it:
+                tail = " — и, кажется, за этим есть дело." if it.get("unlocks_quest") else ""
+                return f"{da} подсаживается с деловым видом: «{it['fact']}»{tail}"
+            return f"{da} подходит с деловым видом, будто у него к тебе разговор."
         if key == "gossip":
-            c, v = agent._strongest_opinion(self.world, npc, self.player)
+            if pick:
+                return f"{da} наклоняется ближе и вполголоса: «{pick['fact']}»"
+            c, v = agent._strongest_opinion(self.world, npc, self.player)   # нет фактов — мнение о знакомом
             if c is None:
                 return f"{da} подсаживается к тебе перекинуться словом."
             sub = self._display_pc(c)
-            tone = "тепло отзывается о" if v > 0 else "перемывает кости"
-            variants = [f"{da} подсаживается и вполголоса {tone} {sub} — будто проверяя, как ты отнесёшься.",
-                        f"{da} ловит твой взгляд и доверительно делится мнением о {sub}.",
-                        f"{da} наклоняется ближе: «Слыхал про {sub}?» — и выкладывает, что думает."]
-            return variants[self.world.clock.tick % len(variants)]
-        if key == "seek_out":
-            return f"{da} подходит с деловым видом: похоже, у него к тебе предложение."
-        if key == "solicit_alms":
-            return f"{da} тянет к тебе ладонь: «Подайте монетку, добрый господин…»"
-        if key == "threaten":
-            return f"{da} надвигается, недобро глядя: «Чего тебе тут надо?»"
+            return f"{da} подсаживается и вполголоса {'тепло отзывается о' if v > 0 else 'перемывает кости'} {sub}."
+        if key == "greet":
+            if pick:
+                return f"{da} подсаживается перекинуться словом и между делом роняет: «{pick['fact']}»"
+            return f"{da} подсаживается к тебе перекинуться словом."
         return None
 
     # --- «кто заметный/выделяющийся?» — выбор по значимости, нарратор озвучивает --- #

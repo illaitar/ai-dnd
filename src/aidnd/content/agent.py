@@ -90,13 +90,52 @@ def _gossip_ap(world, a, b):
     return c is not None and abs(v) >= 0.35 and opinion(world, a, b) >= -0.1
 
 
+# слухи о ТЕМАХ (не о людях): что NPC знает по миру и разносит по городу
+_NEWSY = {"redbrands", "mine", "wyvern_tor", "cragmaw", "zhentarim", "gundren", "lionshield",
+          "omens", "thundertree", "wave_echo", "garaele", "monsters"}
+_TOPIC_RU = {"redbrands": "Красные плащи", "mine": "рудник", "wyvern_tor": "орки Вайверн-Тора",
+             "cragmaw": "гоблины Крэгмо", "zhentarim": "Жентарим", "gundren": "Гундрен",
+             "lionshield": "пропавший караван", "omens": "дурные знамения", "thundertree": "Громовое Древо",
+             "wave_echo": "Пещера Эха Волн", "garaele": "дела сестры Гараэле", "factions": "здешние силы",
+             "monsters": "твари в округе"}
+
+
+def topic_rumor(world, a: str, b: str):
+    """Слух о ТЕМЕ, который a знает, а b ещё нет (для диффузии молвы меж NPC).
+    → (label, fact, item) | None. Выбор варьируется по тику."""
+    pa = world.ecs.get(a, Persona)
+    if not pa or not getattr(pa, "knowledge", None):
+        return None
+    pb = world.ecs.get(b, Persona)
+    bf = {k.get("fact") for k in (pb.knowledge if pb else [])}
+    cands = [k for k in pa.knowledge if k.get("topic") in _NEWSY and k.get("fact") not in bf]
+    if not cands:
+        return None
+    rng = random.Random(subseed(world.seed, "rumor", a, world.clock.tick))
+    k = rng.choice(cands)
+    return _TOPIC_RU.get(k.get("topic"), k.get("topic")), k.get("fact"), k
+
+
+def diffuse_rumor(world, b: str, item: dict) -> None:
+    """b перенимает слух (молва ползёт по городу) — лёгкая диффузия знания меж NPC."""
+    pb = world.ecs.get(b, Persona)
+    if pb is not None and not any(x.get("fact") == item.get("fact") for x in pb.knowledge):
+        pb.knowledge.append(dict(item))
+
+
 def _gossip_u(world, a, b):
     _c, v = _strongest_opinion(world, a, b)
-    return 0.40 + abs(v) * 0.45                                   # ярче мнение → охотнее сплетничает
+    rum = 0.3 if topic_rumor(world, a, b) else 0.0               # есть свежий слух о теме → охотнее
+    return 0.40 + abs(v) * 0.45 + rum
 
 
 def _gossip_x(world, a, b):
-    c, v = _strongest_opinion(world, a, b)
+    rum = topic_rumor(world, a, b)                               # СНАЧАЛА — слух о теме (Красные плащи/рудник/…)
+    if rum is not None:
+        label, fact, item = rum
+        diffuse_rumor(world, b, item)                            # молва расползается: b теперь тоже знает
+        return f"{_name(world, a)} вполголоса делится с {_name(world, b)} слухом про {label}: «{fact[:60]}»."
+    c, v = _strongest_opinion(world, a, b)                       # иначе — мнение о человеке (как было)
     if c is None:
         return f"{_name(world, a)} поболтал с {_name(world, b)}."
     nb = opinion(world, b, c) + 0.3 * (v - opinion(world, b, c))  # ДИФФУЗИЯ: мнение b о c тянется к мнению a

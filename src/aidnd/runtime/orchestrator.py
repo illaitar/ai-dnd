@@ -1004,13 +1004,17 @@ class GameSession:
                 self._overheard_val = f"🗣 {da} знакомится с {db}."
             elif conv.phase == "small_talk":
                 self._overheard_val = f"🗣 {da} о пустяках перекидывается словом с {db}."
-            elif key == "gossip":                         # по делу (substance+) → реальный обмен/диффузия
-                c, v = agent._strongest_opinion(self.world, a, target)
-                if c is None:
+            elif key == "gossip":                         # по делу (substance+) → слух о ТЕМЕ или мнение о человеке
+                rum = agent.topic_rumor(self.world, a, target)   # узнать ДО исполнения (ex затем диффундирует)
+                if rum is None and agent._strongest_opinion(self.world, a, target)[0] is None:
                     return None
-                ex(self.world, a, target)
-                self._overheard_val = (f"🗣 {da} вполголоса {'чернит' if v < 0 else 'нахваливает'} "
-                                       f"{self._display_pc(c)} — слушает {db}.")
+                ex(self.world, a, target)                 # _gossip_x: слух (диффузия молвы) ИЛИ мнение (диффузия мнения)
+                if rum is not None:
+                    self._overheard_val = f"🗣 {da} вполголоса делится с {db} слухом про {rum[0]}."
+                else:
+                    c, v = agent._strongest_opinion(self.world, a, target)
+                    self._overheard_val = (f"🗣 {da} вполголоса {'чернит' if v < 0 else 'нахваливает'} "
+                                           f"{self._display_pc(c)} — слушает {db}.")
             elif key == "commission":
                 ex(self.world, a, target)                 # провести сделку (оплата + мастер в работу)
                 self._overheard_val = f"🗣 {da} что-то заказывает у {db}."

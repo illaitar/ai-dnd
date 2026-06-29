@@ -208,11 +208,30 @@ class GameSession:
                 "npcs": [], "exits": [{"id": b, "name": self._place_name(b)} for b in exits if b],
                 "actions": [], "scene": sc.to_dict(), "view": self.view()}
 
+    def _match_place_among(self, text: str, places) -> str | None:
+        """Стем-матч имени места среди ЗАДАННЫХ (терпит падежи). Нужен на улице, где current_place=
+        place:streets ломает _match_place/_place_candidates (нет hops от синтетического узла)."""
+        import re
+        low = text.lower()
+        toks = [t for t in re.split(r"[^0-9a-zа-яё]+", low) if len(t) >= 3]
+        best, bsc = None, 0
+        for pid in places:
+            nm = self._place_name(pid).lower()
+            sc = 5 if nm and nm in low else 0
+            for w in nm.split():
+                if len(w) >= 4 and any(t.startswith(w[:5]) or w[:5].startswith(t) for t in toks):
+                    sc += 1
+            if sc > bsc:
+                best, bsc = pid, sc
+        return best if bsc >= 1 else None
+
     def _step_inside(self, text: str = "") -> dict:
         """Зайти в здание с улицы (названное, иначе якорное/ближайшее)."""
         here, leads = self._road_buildings()
         cand = here + leads
         target = self._match_place(text) if text else None
+        if target not in cand:                                # на улице _match_place мажет (place:streets) →
+            target = self._match_place_among(text, cand)      # стем-матч прямо среди здешних зданий
         if target not in cand:
             anchor = self._anchor_building()
             target = anchor if anchor in cand else (cand[0] if cand else None)

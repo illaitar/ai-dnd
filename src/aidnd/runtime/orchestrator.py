@@ -1688,6 +1688,8 @@ class GameSession:
             approached = npc == getattr(self, "_pc_approacher", None)   # уже завязался разговор, — отвечает (пусть сдержанно)
             if approached or (not self._is_hostile(npc) and getattr(rel, "trust", 0.0) > -0.15):
                 decision = {"action": "share_info", "rationale_tags": ["engaged"]}
+        if self._sells(npc) and any(k in topic.lower() for k in self._GOODS_KW):  # торговца про товар →
+            decision = {"action": "trade", "rationale_tags": ["sells_goods"]}     # предложи, не футболь
         hooks = self.director.surface_hooks_near(npc)
         self.cognition.observe_and_appraise(npc, self.player, "talk", action.tone,
                                             f"игрок сказал: {topic[:120]}")
@@ -2468,6 +2470,14 @@ class GameSession:
         if c or not parts:
             parts.append(f"{c} мед")
         return " ".join(parts)
+
+    def _sells(self, npc: str) -> bool:
+        """Торгует ли этот NPC: владелец лавки на месте ИЛИ мастер-ремесленник."""
+        from ..content import commerce
+        shop = self._shop_here()
+        if shop and self.world.containers[shop].owner_ref == npc:
+            return True
+        return commerce.is_crafter(self.world, npc)
 
     def _merchant_here(self) -> str | None:
         """С кем торговаться: владелец лавки, иначе текущий собеседник/первый NPC рядом."""
@@ -3837,10 +3847,16 @@ class GameSession:
         """rel-грунт для нарратора (отношение + гард первой встречи). Память об игроке теперь —
         отдельным полем `memory` (см. _npc_memory), чтобы train==inference с датасетом."""
         base = self._rel_summary(rel, first_meeting)
+        trust = getattr(rel, "trust", 0.0)
+        no_invent = " Never invent facts, names or a shared past you were not given."
         if first_meeting:
             return (base + ". CRITICAL: you have NEVER met this person before — do NOT pretend to "
-                    "recognise them, do NOT invent any shared past or earlier conversation.")
-        return base
+                    "recognise them or invent earlier talk. Speak freely and share common rumours, but keep "
+                    "your DEEPEST secrets to yourself until a stranger earns your trust." + no_invent)
+        if trust < 0.0:
+            return (base + ". You do not trust them yet — chat and share common knowledge and rumours "
+                    "naturally, but hold your real SECRETS back." + no_invent)
+        return base + ". Speak naturally about whatever you genuinely know." + no_invent
 
     def _pc_brief(self) -> str:
         """Кто игрок: раса + класс (для отсылок в прозе, напр. «дворф-воин»)."""
@@ -3950,7 +3966,10 @@ class GameSession:
             line = render_dialogue(
                 self.model, persona, self._memory_summary(npc, rel, first_meeting, topic),
                 situation=f"The player says/asks: «{topic}». Your stance: {action}.{goal}",
-                player_line=topic, intent=action, scene=self._narrator_context(),
+                player_line=topic,
+                intent=("offer your wares — name a few things you sell and invite them to look or haggle"
+                        if action == "trade" else action),
+                scene=self._narrator_context(),
                 facts=[it["fact"] for it in feed], mode="dialogue", pc=self._pc_brief(),
                 memory=self._npc_memory(npc, topic, first_meeting),
                 history=(self._convo_history(conv) or self._recent_context()))
@@ -3977,8 +3996,10 @@ class GameSession:
         return self._maybe_hook(templates.get(action, templates["respond"]), hooks)
 
     # --- слухи как память: что игрок знает / узнаёт / приносит сам ---------- #
-    _NEWS_KW = ("нов", "слух", "вест", "молв", "сплетн", "что слышно", "что происходит",
-                "что творит", "что в город", "чем живёт", "чем живет", "свеж")
+    _NEWS_KW = ("новост", "что нового", "слух", "молв", "сплетн", "что слышно", "что происходит",
+                "что творит", "что в город", "чем живёт", "чем живет", "свежие вести", "какие вести")
+    _GOODS_KW = ("прода", "товар", "купить", "куплю", "почём", "почем", "ассортимент", "чем торгу",
+                 "что есть у тебя", "припас", "снаряж", "оружие", "доспех", "броню", "за сколько")
 
     def _is_news_query(self, topic: str | None) -> bool:
         low = (topic or "").lower()

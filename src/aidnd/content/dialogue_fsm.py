@@ -100,7 +100,7 @@ def _readiness(world, conv: Conversation, speaker: str, listener: str, player: s
         "opening":    (1.0 - acq) * 1.4 - conv.phase_turn * 0.6,           # чужие держатся; знакомые мимо
         "small_talk": st.t("sociability") * 0.8 + st.n("social") * 0.5 - busy * 0.6 + acq * 0.2,
         "substance":  acq * 0.4 + rap * 0.8 + st.t("curiosity") * 0.4 + has_goal * 0.5 + 0.2,
-        "confidence": trust * 1.0 + rap * 0.6 - st.t("pride") * 0.3,        # лишь при доверии+рапорте
+        "confidence": trust * 1.1 + rap * 0.35 - st.t("pride") * 0.3,   # секреты/сделки — В ОСНОВНОМ по доверию, рапорт лишь помогает
         "closing":    (1.0 - patience) + st.n("fatigue") * 0.4 + st.n("hunger") * 0.3 - rap * 0.4,
     }
 

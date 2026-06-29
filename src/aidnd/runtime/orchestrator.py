@@ -962,6 +962,10 @@ class GameSession:
             if not line:
                 return None
             self.dialogue_partner = a
+            self._pc_approacher = a                       # сам подошёл → его ответ не будет «холодным незнакомцем»
+            # тёплая оценка + память, чтобы ОТВЕТ был согласован с подходом
+            self.cognition.observe_and_appraise(a, self.player, "talk", "friendly",
+                                                "сам подошёл к игроку и завёл разговор")
             self._overheard_val = f"👋 {line}"
         elif target is not None:                          # NPC↔NPC → подслушано
             db = self._display_pc(target)
@@ -1611,6 +1615,8 @@ class GameSession:
         # игрок что-то СКАЗАЛ/СПРОСИЛ → реакция с учётом отношений и гейтов
         ctx = self.cognition.retrieve(npc, topic, self.player)
         decision = self.cognition.policy(npc, "talk", action.tone, ctx, self.player)
+        if npc == getattr(self, "_pc_approacher", None) and decision.get("action") == "withhold":
+            decision = {"action": "share_info", "rationale_tags": ["approached_pc"]}   # сам подошёл → не «холодный незнакомец»
         hooks = self.director.surface_hooks_near(npc)
         self.cognition.observe_and_appraise(npc, self.player, "talk", action.tone,
                                             f"игрок сказал: {topic[:120]}")

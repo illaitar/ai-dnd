@@ -1022,6 +1022,20 @@ def estimate_plausibility(manager, entity_descriptor: str, ctx_digest: str):
                  ["plausibility", "drivers"])
 
 
+def estimate_scalar(manager, question: str, default: float = 0.0) -> float:
+    """Точка LLM №3 (субъективное суждение): оценка 0..1 на вопрос — вход в utility-модель NPC
+    («насколько серьёзна угроза», «выгодно ли соврать»). Офлайн/сбой → default (детерминизм тестов)."""
+    if is_offline(manager):
+        return default
+    out = _call(manager, "plausibility", "estimate_plausibility",
+                f"Оцени силу/вероятность от 0 до 1: {question}\nCall estimate_plausibility.",
+                ["plausibility"])
+    try:
+        return max(0.0, min(1.0, float(out["plausibility"]))) if out else default
+    except Exception:
+        return default
+
+
 def world_effects(manager, action_text: str, outcome: str, location: str,
                   npcs: list[str] | None = None, items: list[str] | None = None, history: str = ""):
     """Стойкие последствия успешного/крит-провального freeform: следы на локации/NPC/предмете,

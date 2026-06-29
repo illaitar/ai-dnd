@@ -1619,7 +1619,7 @@ class GameSession:
                                          "trust": getattr(rel, "trust", 0.0),
                                          "fear": getattr(rel, "fear", 0.0), "debt": 0}
         rng = random.Random(f"{npc}|{topic}|{getattr(self, '_talk_turns', 0)}")
-        cap, _top = choose(st, Context(stim, world=self.world), rng)
+        cap, _top = choose(st, Context(stim, world=self.world, judge=self._judge), rng)
         return self._dispatch_cap(cap.key, npc, text, topic, rel) if cap else None
 
     def _dispatch_cap(self, key: str, npc: str, text: str, topic: str, rel):
@@ -1831,9 +1831,15 @@ class GameSession:
         toks = [w for w in re.split(r"[^0-9a-zа-яё]+", t) if w and w not in greetings]
         return text.strip() if ("?" in text or len(" ".join(toks)) >= 4) else ""
 
-    def _intimidation_yields(self, npc: str) -> bool:
+    def _judge(self, question: str, default: float):
+        """Точка LLM №3: субъективная оценка 0..1 как вход в utility-модель. Офлайн → default."""
+        from ..inference.agents import estimate_scalar
+        return estimate_scalar(self.model, question, default)
+
+    def _intimidation_yields(self, npc: str, text: str = "") -> bool:
         """Модель NPC: уступит ли под прямой угрозой БЕЗ броска. Берём ТОП способности (argmax,
-        детерминированно): threatened == yield_demand → уступка; иначе сопротивляется (бросок)."""
+        детерминированно): threatened == yield_demand → уступка; иначе сопротивляется (бросок).
+        Серьёзность угрозы — суждение LLM по словам игрока (офлайн → 0.6)."""
         from ..npc import Context, Stimulus, evaluate
         from ..npc.integration import npc_state
         st = npc_state(self.world, npc, self.player)
@@ -1841,8 +1847,9 @@ class GameSession:
         st.relations[self.player] = {"affinity": getattr(rel, "affinity", 0.0),
                                      "trust": getattr(rel, "trust", 0.0),
                                      "fear": getattr(rel, "fear", 0.0), "debt": 0}
-        stim = Stimulus("threatened", source=self.player, data={"threat": 0.6})
-        top = evaluate(st, Context(stim, world=self.world))
+        threat = self._judge(f"насколько серьёзна и правдоподобна угроза: «{text[:80]}»", 0.6) if text else 0.6
+        stim = Stimulus("threatened", source=self.player, data={"threat": threat})
+        top = evaluate(st, Context(stim, world=self.world, judge=self._judge))
         return bool(top) and top[0][0].key == "yield_demand"
 
     def _service_refused(self, npc: str, kind: str) -> bool:
@@ -1872,7 +1879,7 @@ class GameSession:
         self.lod.ensure_tier(npc, in_dialogue=True)
         # МОДЕЛЬ решает: уступить под прямой угрозой БЕЗ броска (страх/гордость/смелость) или
         # сопротивляться (тогда обычная проверка). Топ-способность threatened == yield_demand → уступка.
-        if skill == "intimidation" and self._intimidation_yields(npc):
+        if skill == "intimidation" and self._intimidation_yields(npc, text):
             self.cognition.observe_and_appraise(npc, self.player, "intimidate", "fearful",
                                                 "игрок надавил — NPC уступает под угрозой")
             self.dialogue_partner = npc

@@ -241,7 +241,7 @@ CAPABILITIES: list[Cap] = [
         lambda s, c: (1 - s.t("bravery")) * 0.8 + _sr(s, c)["fear"] * 0.6 + 0.2 - s.t("pride") * 0.4),
     Cap("yield_demand", "fight",
         lambda s, c: c.k() == "threatened",
-        lambda s, c: _sr(s, c)["fear"] * 0.6 + c.d("threat", 0.5) * (1 - s.t("pride")) * 0.9
+        lambda s, c: _sr(s, c)["fear"] * 1.0 + c.d("threat", 0.5) * (1 - s.t("pride")) * 0.9
         - c.d("demand_value", 0) * s.t("greed") * 0.4),
     Cap("take_cover", "fight",
         lambda s, c: c.k() in {"attack_on_town", "alarm_bell"},

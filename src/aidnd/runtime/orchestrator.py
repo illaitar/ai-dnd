@@ -1831,6 +1831,20 @@ class GameSession:
         toks = [w for w in re.split(r"[^0-9a-zа-яё]+", t) if w and w not in greetings]
         return text.strip() if ("?" in text or len(" ".join(toks)) >= 4) else ""
 
+    def _intimidation_yields(self, npc: str) -> bool:
+        """Модель NPC: уступит ли под прямой угрозой БЕЗ броска. Берём ТОП способности (argmax,
+        детерминированно): threatened == yield_demand → уступка; иначе сопротивляется (бросок)."""
+        from ..npc import Context, Stimulus, evaluate
+        from ..npc.integration import npc_state
+        st = npc_state(self.world, npc, self.player)
+        rel = self.cognition.retrieve(npc, "", self.player).rel
+        st.relations[self.player] = {"affinity": getattr(rel, "affinity", 0.0),
+                                     "trust": getattr(rel, "trust", 0.0),
+                                     "fear": getattr(rel, "fear", 0.0), "debt": 0}
+        stim = Stimulus("threatened", source=self.player, data={"threat": 0.6})
+        top = evaluate(st, Context(stim, world=self.world))
+        return bool(top) and top[0][0].key == "yield_demand"
+
     def _do_persuade(self, action: Action, text: str) -> dict:
         return self._social_check(action, text, "persuasion")
 
@@ -1845,12 +1859,11 @@ class GameSession:
         if not npc:
             return {"kind": "system", "text": "Не на кого воздействовать.", "view": self.view()}
         self.lod.ensure_tier(npc, in_dialogue=True)
-        # уже напуганный (fear-гейт открыт) уступает БЕЗ броска — иначе геймплейный пут
-        # запугивания игнорировал страх, расходясь с когницией (fear≥0.6 → защита)
-        from ..cognition import gate_open
-        if skill == "intimidation" and gate_open(self.world, npc, self.player, "yield"):
+        # МОДЕЛЬ решает: уступить под прямой угрозой БЕЗ броска (страх/гордость/смелость) или
+        # сопротивляться (тогда обычная проверка). Топ-способность threatened == yield_demand → уступка.
+        if skill == "intimidation" and self._intimidation_yields(npc):
             self.cognition.observe_and_appraise(npc, self.player, "intimidate", "fearful",
-                                                "игрок надавил на и без того напуганного")
+                                                "игрок надавил — NPC уступает под угрозой")
             self.dialogue_partner = npc
             self._log_journal(f"{self._display(npc)} уступает под давлением (уже в страхе).")
             self._tick()

@@ -270,7 +270,7 @@ CAPABILITIES: list[Cap] = [
 
     # ─ ЦЕЛИ / ПРОАКТИВНОСТЬ / МОРАЛЬ ─
     Cap("advance_agenda", "pursue",
-        lambda s, c: c.k() in {"tick", "faction_order"} and (bool(s.agenda) or bool(c.d("important"))),
+        lambda s, c: c.k() in {"tick", "faction_order", "meet_npc"} and (bool(s.agenda) or bool(c.d("important"))),
         lambda s, c: s.t("ambition") * 0.8 + 0.4),
     Cap("seek_out", "pursue",
         lambda s, c: c.k() == "opportunity",

@@ -135,22 +135,42 @@ SELF_COMMANDS = [
 ]
 
 
+# способность модели NPC → агентная команда + её эффект (диффузия/потепление/ссора)
+_EX = {"gossip": _gossip_x, "confront": _confront_x, "socialize": _socialize_x, "pursue_agenda": _agenda_x}
+_CAP2CMD = {"gossip": "gossip", "threaten": "confront", "advance_agenda": "pursue_agenda",
+            "greet": "socialize", "seek_out": "socialize"}
+
+
 def choose(world, a: str, peers: list[str]):
-    """Behaviour-выбор: лучшая по утилите исходящая команда (с лёгким шумом). → (key, target|None, execute)."""
+    """Behaviour-выбор через ЕДИНЫЙ utility-арбитр модели NPC (черты + граф мнений → способность).
+    Сохраняет интерфейс (key, target|None, execute) и эффекты-диффузию. → (key, b, ex) или None."""
+    from ..npc import Context, Stimulus
+    from ..npc import choose as _arb
+    from ..npc.integration import npc_state
     rng = random.Random(subseed(world.seed, "choose", a, len(peers)))
-    cands = []
-    for key, ap, ut, ex in SELF_COMMANDS:
-        if ap(world, a, None):
-            cands.append((ut(world, a, None), key, None, ex))
-    for b in peers:
-        for key, ap, ut, ex in PEER_COMMANDS:
-            if ap(world, a, b):
-                cands.append((ut(world, a, b), key, b, ex))
-    if not cands:
-        return None
-    cands.sort(key=lambda c: c[0] + rng.uniform(0.0, 0.15), reverse=True)
-    _u, key, b, ex = cands[0]
-    return key, b, ex
+    active = False
+    try:
+        from .agency import is_active
+        active = is_active(world, a)
+    except Exception:
+        active = False
+    if not peers:                                         # без соседей — только своя агенда
+        return ("pursue_agenda", None, _agenda_x) if active else None
+    b = max(peers, key=lambda x: abs(opinion(world, a, x)))   # самый «яркий» сосед — точка контакта
+    aff = opinion(world, a, b)
+    st = npc_state(world, a)
+    st.relations[b] = {"affinity": aff, "trust": 0.0, "fear": 0.0, "debt": 0}
+    if active:
+        st.agenda = st.agenda or ["замысел"]
+    if aff < -0.35:                                       # крепкая неприязнь → ссора
+        stim = Stimulus("rival_present", source=b, target=b)
+    else:
+        _c, v = _strongest_opinion(world, a, b)           # есть яркое мнение о ком-то → сочнее сплетня
+        juicy = min(1.0, abs(v)) if _c is not None else 0.15
+        stim = Stimulus("meet_npc", source=b, target=b, data={"juicy": juicy, "important": active})
+    cap, _top = _arb(st, Context(stim, world=world), rng)
+    cmd = _CAP2CMD.get(cap.key, "socialize") if cap else "socialize"
+    return cmd, (None if cmd == "pursue_agenda" else b), _EX[cmd]
 
 
 def step_social(world, rounds: int = 6) -> list[dict]:

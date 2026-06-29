@@ -1703,8 +1703,21 @@ class GameSession:
             self._log_journal(f"Поговорил с {self._display(npc)}.")   # способность (наезд/мнение/знание/секрет/ложь)
             self._tick()
             return react
+        extra = None
+        if any(k in (topic or "").lower() for k in self._OPINE_KW):   # вопрос-мнение → грунт отношения по графу ВСЕГДА
+            subj = self._opine_subject(npc, text)                     # (не только когда арбитр выбрал 'opine')
+            from ..content import acquaintance
+            if subj and subj not in (npc, self.player) and acquaintance.acquainted(self.world, npc, subj):
+                extra = [self._opinion_grounding(npc, subj)]
+        gate = getattr(rel, "trust", 0.0)                  # эффективный гейт раскрытия по краям:
+        if action.tone == "hostile":                       # грубость ЗАМЫКАЕТ — секретов не выдаём
+            gate = min(gate, -0.2)
+        fear = getattr(rel, "fear", 0.0)
+        if fear >= 0.4:                                    # под СТРАХОМ раскалывается (страх как принуждённое доверие)
+            gate = max(gate, fear)
         line = self._strip_leading_name(
-            self._npc_reply(npc, decision, topic, rel, first_meeting, hooks, phase=conv.phase, conv=conv), npc)
+            self._npc_reply(npc, decision, topic, rel, first_meeting, hooks, gate_level=gate,
+                            phase=conv.phase, conv=conv, extra_facts=extra), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._convo_log(conv, self._display(npc), line)        # ответ NPC → транскрипт разговора
         self.cognition.observe(npc, f"я ответил игроку про «{topic[:60]}»", importance=3)  # своя реплика в память
@@ -1865,10 +1878,11 @@ class GameSession:
         return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "lied": True, "view": self.view(),
                 "text": f"{self._display(npc)} {deny}"}
 
-    _OPINE_KW = ("что думаешь", "что скажешь", "что за человек", "расскажи про", "расскажи о",
+    _OPINE_KW = ("что думаешь", "что скажешь", "что за человек", "что за птица", "расскажи про", "расскажи о",
                  "знаешь ли", "знаком с", "каков он", "мнение о", "мнение про", "доверять ли",
                  "как тебе", "что ты о", "что знаешь", "знаешь про", "знаешь что",
-                 "что известно", "слышал о", "слышал про", "слыхал о", "слыхал про", "что такое")
+                 "что известно", "слышал о", "слышал про", "слыхал о", "слыхал про", "что такое",
+                 "стоит ли", "вести дела с", "иметь дело с", "обратиться к", "можно ли верить", "можно ли довер")
 
     def _opine_about(self, npc: str, text: str):
         """№7: NPC высказывает мнение о ДРУГОМ знакомом (граф мнений world.opinions). Имя — через _display (гейт знакомства)."""
@@ -1883,12 +1897,14 @@ class GameSession:
             return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
                     "text": f"«{self._display(subject)}? Впервые слышу — не знаю такого.»"}
         aff = agent.opinion(self.world, npc, subject)
+        if -0.3 <= aff <= 0.3:                             # нейтральное — не плоский шаблон, пусть озвучит LLM с грунтом
+            return None                                    # (упадёт в _npc_reply, куда _do_talk подмешает грунт мнения)
+        ps = self.world.ecs.get(subject, Persona)
+        f = getattr(ps, "gender", "") == "female"          # род местоимений по полу субъекта
         if aff > 0.3:
-            take = "Хороший человек, я ему доверяю."
-        elif aff < -0.3:
-            take = "Не по душе он мне — держись от него подальше."
+            take = "Хорошая, я ей доверяю." if f else "Хороший человек, я ему доверяю."
         else:
-            take = "Да обычный. Ничего особого про него не скажу."
+            take = "Не по душе она мне — держись от неё подальше." if f else "Не по душе он мне — держись от него подальше."
         return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
                 "text": f"О {self._display(subject)}: «{take}»"}
 
@@ -3945,8 +3961,23 @@ class GameSession:
                 return line
         return self._greeting_fallback(persona, first_meeting)
 
+    def _opinion_grounding(self, npc: str, subj: str) -> str:
+        """Грунт для прозы: НАСТОЯЩЕЕ отношение npc к третьему лицу subj (граф мнений), словами —
+        чтобы LLM не сочинял отношение с потолка, даже когда арбитр не выбрал явную способность 'мнение'."""
+        from ..content import agent
+        aff = agent.opinion(self.world, npc, subj)
+        name = self._display(subj)
+        if aff > 0.3:
+            t = "тепло относишься и доверяешь"
+        elif aff < -0.3:
+            t = "недолюбливаешь, советуешь держаться от него подальше"
+        else:
+            t = "относишься ровно, сдержанно, без особых чувств"
+        return f"Твоё личное отношение к {name}: {t} — отвечай в этом духе, не выдумывай иного."
+
     def _npc_reply(self, npc: str, decision: dict, topic: str, rel, first_meeting, hooks,
-                   gate_level: float | None = None, phase: str | None = None, conv=None) -> str:
+                   gate_level: float | None = None, phase: str | None = None, conv=None,
+                   extra_facts=None) -> str:
         persona = self.world.ecs.get(npc, Persona)
         action = decision.get("action", "respond")
         action = action if isinstance(action, str) else "respond"
@@ -3959,6 +3990,7 @@ class GameSession:
             return (f"{name} разводит руками: «Да ничего нового, чего бы ты от меня "
                     f"уже не слышал. Пока тихо».")
         feed = items[:2]                                # 1–2 факта: что отдали нарратору ≈ что игрок узнаёт
+        facts = list(extra_facts or []) + [it["fact"] for it in feed]   # грунт мнения (если есть) — первым
         if self.model is not None:
             from ..content.dialogue_fsm import phase_intent
             from ..inference.agents import render_dialogue
@@ -3970,7 +4002,7 @@ class GameSession:
                 intent=("offer your wares — name a few things you sell and invite them to look or haggle"
                         if action == "trade" else action),
                 scene=self._narrator_context(),
-                facts=[it["fact"] for it in feed], mode="dialogue", pc=self._pc_brief(),
+                facts=facts, mode="dialogue", pc=self._pc_brief(),
                 memory=self._npc_memory(npc, topic, first_meeting),
                 history=(self._convo_history(conv) or self._recent_context()))
             if line and not self._degenerate(line):     # отсеять мусорный вывод модели («??????»)

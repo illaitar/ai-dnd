@@ -96,10 +96,21 @@ def has_met(world, a: str, b: str, now: int | None = None) -> bool:
 
 def feels_stranger(world, a: str, b: str, now: int) -> bool:
     """Ощущается ли b для a ЧУЖАКОМ прямо сейчас (для тона приветствия/фазы знакомства):
-    общинно-знакомый — никогда; иначе — если личная встреча уже выветрилась."""
+    общинно-знакомый — никогда; высокое доверие подразумевает прежнее знакомство (даже без записи
+    встречи — давний завсегдатай); иначе — если личная встреча уже выветрилась."""
     if community_acquainted(world, a, b):
         return False
-    return not has_met(world, a, b, now=now)
+    if has_met(world, a, b, now=now):
+        return False
+    try:                                                   # высокий trust ⇒ они не впервые видятся
+        from ..world.components import Relationships
+        rels = world.ecs.get(a, Relationships)
+        e = rels.edges.get(b) if rels else None
+        if e and getattr(e, "trust", 0.0) >= 0.4:
+            return False
+    except Exception:
+        pass
+    return True
 
 
 def community_acquainted(world, a: str, b: str) -> bool:

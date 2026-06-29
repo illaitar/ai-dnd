@@ -47,8 +47,8 @@ def npc_state(world, npc, player: str = "player") -> NpcState:
     return st
 
 
-# скорость роста нужд за тик (динамика, накапливается в NpcState; сбрасывается распорядком)
-_NEED_RATE = {"hunger": 0.05, "fatigue": 0.04, "social": 0.03, "purpose": 0.02}
+# скорость роста нужд за тик (динамика, накапливается в NpcState; сбрасывается распорядком/действием)
+_NEED_RATE = {"hunger": 0.05, "fatigue": 0.04, "social": 0.03, "purpose": 0.02, "gear": 0.006}
 
 
 def tick_minds(world, dt: int = 1) -> None:

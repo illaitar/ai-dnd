@@ -3272,6 +3272,8 @@ class GameSession:
         self.world.clock.advance(n)
         from ..npc.integration import tick_minds
         tick_minds(self.world, n)                          # нужды NPC растут со временем (живут в NpcState)
+        from ..content import commerce
+        commerce.deliver_npc_orders(self.world)            # готовые заказы NPC-покупателей — забрать у мастера
         self.lod.tick(self.player)
         self._expire_conditions()                         # временные эффекты (опьянение и пр.) спадают со временем
         # оборот слухов: знания расходятся по NPC. Длинный сон/ожидание = несколько оборотов,

@@ -15,7 +15,7 @@ import random
 from dataclasses import dataclass, field
 
 # нужды — давление 0..1, растёт со временем/событиями, действие его утоляет
-NEEDS = ("hunger", "fatigue", "safety", "wealth", "social", "purpose")
+NEEDS = ("hunger", "fatigue", "safety", "wealth", "social", "purpose", "gear")
 
 # черты — статические веса 0..1, масштабируют слагаемые полезности (характер)
 TRAITS = ("greed", "bravery", "honesty", "curiosity", "pride",

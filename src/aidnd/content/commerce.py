@@ -133,10 +133,22 @@ def craft_price(world, tmpl: str) -> int:
     return max(1, int(base * 1.25))              # custom-работа дороже прилавка
 
 
-def commission(world, npc: str, tmpl: str, until_tick: int, label: str) -> None:
+def commission(world, npc: str, tmpl: str, until_tick: int, label: str, buyer: str | None = None) -> None:
     if not hasattr(world, "busy") or world.busy is None:
         world.busy = {}
-    world.busy[npc] = {"until": until_tick, "tmpl": tmpl, "label": label}
+    world.busy[npc] = {"until": until_tick, "tmpl": tmpl, "label": label, "buyer": buyer}
+
+
+def deliver_npc_orders(world) -> list:
+    """Готовые заказы NPC-покупателей: вручить изделие покупателю-NPC, освободить мастера. → [(buyer, crafter, iid)]."""
+    busy_map = getattr(world, "busy", None) or {}
+    out = []
+    for crafter, b in list(busy_map.items()):
+        buyer = b.get("buyer")
+        if buyer and world.clock.tick >= b.get("until", 0):
+            iid = deliver_commission(world, buyer, crafter)        # spawn изделия владельцу-NPC + снять занятость
+            out.append((buyer, crafter, iid))
+    return out
 
 
 def busy(world, npc: str):

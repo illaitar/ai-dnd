@@ -180,7 +180,9 @@ def _commission_x(world, a, _b):
     from .. import config
     until = world.clock.tick + max(1, hours * 60 // config.SIM_MINUTES_PER_TICK)
     item = world.templates[tmpl].name if tmpl in world.templates else "изделие"
-    commerce.commission(world, b, tmpl, until, f"куёт {item} для {_name(world, a)}")
+    commerce.commission(world, b, tmpl, until, f"куёт {item} для {_name(world, a)}", buyer=a)
+    from ..npc.integration import relax_need
+    relax_need(world, a, "gear")                           # заказал — нужда в снаряжении утолена (получит, как сготовят)
     return f"{_name(world, a)} заказывает у {_name(world, b)} ковку: {item} ({price} мон.)."
 
 

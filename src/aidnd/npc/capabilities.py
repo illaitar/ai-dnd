@@ -129,9 +129,9 @@ CAPABILITIES: list[Cap] = [
     Cap("refuse_reputation", "trade",
         lambda s, c: c.k().startswith("asked") and bool(c.d("bad_rep")),
         lambda s, c: (1 - s.t("greed")) * 0.5 + s.t("pride") * 0.5 + s.t("lawful") * 0.3 + 0.3),
-    Cap("commission", "trade",                              # NPC сам заказывает у со-локализованного мастера
+    Cap("commission", "trade",                              # NPC сам заказывает у мастера — КОГДА снаряга износилась
         lambda s, c: c.k() == "meet_npc" and bool(c.d("peer_craft")),
-        lambda s, c: 1.4 + s.t("greed") * 0.3),             # пришёл к мастеру = за делом (гейт — кошель+свободный мастер, не каждый)
+        lambda s, c: s.n("gear") * 1.9 + s.t("greed") * 0.3),  # нужда в снаряжении высока → закажет; свежая снаряга → нет
 
     # ─ УСЛУГИ ─ (выдают КОНКРЕТНЫЙ объект/эффект)
     Cap("provide_lodging", "serve",

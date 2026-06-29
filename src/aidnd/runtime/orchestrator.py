@@ -969,18 +969,30 @@ class GameSession:
             self.cognition.observe_and_appraise(a, self.player, "talk", "friendly",
                                                 "сам подошёл к игроку и завёл разговор")
             self._overheard_val = f"👋 {line}"
-        elif target is not None:                          # NPC↔NPC → подслушано
+        elif target is not None:                          # NPC↔NPC → подслушано, С ФАЗАМИ разговора (та же машина)
+            from ..content import acquaintance, dialogue_fsm
+            conv = self._npc_convo(a, target)
+            dialogue_fsm.advance(self.world, conv, a, target, self.player)
             db = self._display_pc(target)
-            if key == "gossip":
+            if conv.track == "hostile":                   # агр-арка: осадить → давить → развязка (не одноразовый наезд)
+                if key == "threaten":
+                    ex(self.world, a, target)
+                arc = {"menace": "холодно осаживает", "pressure": "наседает с угрозами на",
+                       "resolve": "сцепился с"}.get(conv.phase, "грозит")
+                self._overheard_val = (f"🗣 {da} {arc} {db}"
+                                       + (" — летят резкие слова." if conv.phase == "resolve" else "."))
+            elif conv.phase == "opening":                 # чужие сперва знакомятся
+                acquaintance.record_meeting(self.world, a, target)
+                self._overheard_val = f"🗣 {da} знакомится с {db}."
+            elif conv.phase == "small_talk":
+                self._overheard_val = f"🗣 {da} о пустяках перекидывается словом с {db}."
+            elif key == "gossip":                         # по делу (substance+) → реальный обмен/диффузия
                 c, v = agent._strongest_opinion(self.world, a, target)
                 if c is None:
                     return None
-                ex(self.world, a, target)                 # диффузия мнения о c по сети
+                ex(self.world, a, target)
                 self._overheard_val = (f"🗣 {da} вполголоса {'чернит' if v < 0 else 'нахваливает'} "
                                        f"{self._display_pc(c)} — слушает {db}.")
-            elif key == "threaten":
-                ex(self.world, a, target)
-                self._overheard_val = f"🗣 {da} сцепился с {db} — летят резкие слова."
             elif key == "commission":
                 ex(self.world, a, target)                 # провести сделку (оплата + мастер в работу)
                 self._overheard_val = f"🗣 {da} что-то заказывает у {db}."
@@ -1588,6 +1600,19 @@ class GameSession:
         c = getattr(self, "conversation", None)
         if c is None or c.b != npc:
             c = self.conversation = Conversation(a=self.player, b=npc, known=not first_meeting)
+        return c
+
+    def _npc_convo(self, a: str, b: str):
+        """Та же стейт-машина для NPC↔NPC: хранится на пару (world.convos); known — по знакомству (Ф1)."""
+        from ..content import acquaintance
+        from ..content.dialogue_fsm import Conversation
+        convos = getattr(self.world, "convos", None)
+        if convos is None:
+            convos = self.world.convos = {}
+        key = frozenset((a, b))
+        c = convos.get(key)
+        if c is None:
+            c = convos[key] = Conversation(a=a, b=b, known=acquaintance.acquainted(self.world, a, b))
         return c
 
     def _do_talk(self, action: Action, text: str) -> dict:

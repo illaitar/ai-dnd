@@ -44,15 +44,16 @@ class _Progress:
 
 def new_session(seed: int = config.WORLD_SEED, roster_size: int = 12,
                 use_model: bool = True, scenario: str | None = None,
-                pc_spec: dict | None = None, progress=None) -> GameSession:
+                pc_spec: dict | None = None, progress=None, model=None) -> GameSession:
     """Строит мир (пре-ген), регистрирует квесты, возвращает игровую сессию.
 
     scenario/pc_spec — выбор старта новой игры. ModelManager передаётся всегда; если
     сервер недоступен, агенты возвращают None и движок идёт по детерминированным
-    фоллбэкам (док 08 §9). На сессию вешается boot — параметры пре-гена для сейв/лоада.
+    фоллбэкам (док 08 §9). `model` — явная инъекция менеджера (напр. FakeModel в тестах). На сессию
+    вешается boot — параметры пре-гена для сейв/лоада.
     """
     from .content.newgame import default_scenario, resolve_pc_spec
-    manager = ModelManager() if use_model else None
+    manager = model if model is not None else (ModelManager() if use_model else None)
     available = bool(manager and manager.available())
     if config.LLM_REQUIRED and not available:             # режим без фоллбэков — модель обязательна
         raise RuntimeError(
@@ -67,15 +68,18 @@ def new_session(seed: int = config.WORLD_SEED, roster_size: int = 12,
                         scenario=scenario, pc_spec=pc_spec, progress=bus)
     quests = QuestSystem(world)
     register_quests(world, quests)
-    session = GameSession(world, model=manager if use_model else None, quest_system=quests)
+    session = GameSession(world, model=manager, quest_system=quests)   # менеджер (реальный/фейк/None); is_offline решит на месте
     if model is not None and bus is not None:             # жадное обогащение на старте
         from .gen.faction_gen import enrich_all
         enrich_all(world, session.charts, model, bus)
-        from .gen.economy import enrich_economy            # лавки/пулы лута/новые предметы
+        from .gen.economy import enrich_economy  # лавки/пулы лута/новые предметы
         enrich_economy(world, model, bus)
-        from .gen.locations import enrich_locations        # полные описания локаций (контекст нарратора)
+        from .gen.locations import enrich_locations  # полные описания локаций (контекст нарратора)
         enrich_locations(world, model, bus)
-    from .gen.campaign import forge_main_quest, plan_to_quest   # сюжет — ПОСЛЕ обогащения (богаче лидеры/цели)
+    from .gen.campaign import (  # сюжет — ПОСЛЕ обогащения (богаче лидеры/цели)
+        forge_main_quest,
+        plan_to_quest,
+    )
     if bus:
         bus(0, 0, "Пишу сюжет кампании")
     main_plan = forge_main_quest(world, model)

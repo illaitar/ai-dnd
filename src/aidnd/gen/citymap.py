@@ -25,8 +25,9 @@ def _citygen():
     if _CITYGEN is None:
         path = os.path.join(os.path.dirname(__file__), "..", "server", "web", "citygen.py")
         spec = importlib.util.spec_from_file_location("aidnd_citygen", path)
-        _CITYGEN = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(_CITYGEN)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)                        # сперва ПОЛНОСТЬЮ загрузить в локаль…
+        _CITYGEN = mod                                      # …и лишь потом публиковать (иначе гонка: пустой модуль)
     return _CITYGEN
 
 

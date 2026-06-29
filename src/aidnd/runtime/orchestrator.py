@@ -352,18 +352,6 @@ class GameSession:
                 if not blk:
                     continue
                 target = blk.place
-            mind = (getattr(self.world, "npc_minds", None) or {}).get(npc)
-            if mind is not None:                          # распорядок сбрасывает нужды: поел/поспал/выпил/при деле
-                tp = self.world.spatial.places.get(target)
-                aff = set(getattr(tp, "affordances", []) or []) if tp else set()
-                if {"eat", "serve"} & aff:
-                    mind.needs["hunger"] = 0.1
-                if {"sleep", "home", "inn"} & aff:
-                    mind.needs["fatigue"] = 0.1
-                if "drink" in aff:
-                    mind.needs["social"] = 0.1
-                if {"work", "serve", "shop"} & aff:
-                    mind.needs["purpose"] = 0.15
             pos = self.world.position(npc)
             cur_pl = pos.place_id if pos else None
             tr = self.world.transits.get(npc)

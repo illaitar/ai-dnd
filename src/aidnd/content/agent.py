@@ -180,7 +180,7 @@ def choose(world, a: str, peers: list[str]):
     интерфейс (cmd, target|None, ex) и эффекты-диффузию. → (cmd, b, ex) или None."""
     from ..npc import Context, Stimulus, choose_multi
     from ..npc.integration import npc_state
-    rng = random.Random(subseed(world.seed, "choose", a, len(peers)))
+    rng = random.Random(subseed(world.seed, "choose", a, world.clock.tick))   # тик в seed → выбор меняется со временем
     active = False
     try:
         from .agency import is_active
@@ -197,13 +197,10 @@ def choose(world, a: str, peers: list[str]):
         b = max(peers, key=lambda x: abs(opinion(world, a, x)))   # самый «яркий» сосед — точка контакта
         aff = opinion(world, a, b)
         st.relations[b] = {"affinity": aff, "trust": 0.0, "fear": 0.0, "debt": 0}
-        if aff < -0.35:                                   # крепкая неприязнь → ссора
-            ctxs.append(Context(Stimulus("rival_present", source=b, target=b), time_hhmm=hhmm, world=world))
-        else:
-            _c, v = _strongest_opinion(world, a, b)       # есть яркое мнение → сочнее сплетня
-            juicy = min(1.0, abs(v)) if _c is not None else 0.15
-            ctxs.append(Context(Stimulus("meet_npc", source=b, target=b,
-                                         data={"juicy": juicy, "important": active}), time_hhmm=hhmm, world=world))
+        _c, v = _strongest_opinion(world, a, b)           # ссора (threaten) конкурирует ВНУТРИ meet_npc лишь у настоящих недругов
+        juicy = min(1.0, abs(v)) if _c is not None else 0.15
+        ctxs.append(Context(Stimulus("meet_npc", source=b, target=b,
+                                     data={"juicy": juicy, "important": active}), time_hhmm=hhmm, world=world))
     cap, _top = choose_multi(st, ctxs, rng)
     if not cap:
         return None

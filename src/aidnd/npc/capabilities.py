@@ -200,7 +200,8 @@ CAPABILITIES: list[Cap] = [
         lambda s, c: c.k() == "faction_order" and (s.role == "глава" or bool(c.d("delegate"))),
         lambda s, c: s.t("ambition") * 0.7 + 0.5),
     Cap("threaten", "speak",
-        lambda s, c: c.k() in {"insulted", "debtor_public", "rival_present", "blackmail_target", "accused"},
+        lambda s, c: c.k() in {"insulted", "debtor_public", "rival_present", "blackmail_target", "accused"}
+        or (c.k() == "meet_npc" and _tr(s, c)["affinity"] < -0.5),   # в людном месте цапаются лишь настоящие недруги
         lambda s, c: (1 - _tr(s, c)["affinity"]) * 0.6 + s.t("pride") * 0.4 - s.t("lawful") * 0.3
         + (0.4 if c.k() == "blackmail_target" else 0)),
     Cap("persuade", "speak",

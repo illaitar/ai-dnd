@@ -225,9 +225,11 @@ CAPABILITIES: list[Cap] = [
 
     # ─ БОЙ / БЕГСТВО ─
     Cap("attack", "fight",
-        lambda s, c: c.k() in {"threatened", "attacked_in_combat", "insulted", "defend_self"},
+        lambda s, c: c.k() in {"threatened", "attacked_in_combat", "insulted", "defend_self", "see_wanted"},
         lambda s, c: s.t("bravery") * (0.6 + c.d("my_strength", 0.5) - c.d("threat", 0.5))
-        - _sr(s, c)["fear"] * 0.5 + (s.t("pride") * 0.4 if c.k() == "insulted" else 0)),
+        - _sr(s, c)["fear"] * 0.5 + (s.t("pride") * 0.4 if c.k() == "insulted" else 0)
+        + ((1 - s.t("lawful")) * 0.5 + s.t("bravery") * c.d("severity", 0.4) * 0.4
+           if c.k() == "see_wanted" else 0)),     # на розыскного: брутальная/беззаконная стража набрасывается
     Cap("defend", "fight",
         lambda s, c: c.k() in {"ally_threatened", "attack_on_town", "theft_seen"}
         and (s.t("bravery") > 0.5 or s.t("loyalty") > 0.55 or s.role in {"стражник", "guard", "наёмник"}),

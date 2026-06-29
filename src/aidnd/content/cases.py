@@ -95,14 +95,30 @@ def wanted_status(world, subject: str) -> str:
 
 
 def confront_action(world, subject: str) -> str:
-    """Что делает дознаватель/стража при встрече: none | question | fine | hostile."""
+    """Что делает дознаватель/стража при встрече: none | question | fine | hostile.
+    Для розыскного выбор «штраф vs набросится» делает АРБИТР МОДЕЛИ по характеру стражи
+    (свёрнут из темперамента: брутальность→смелость, мздоимство→жадность/беззаконность)."""
     st = wanted_status(world, subject)
     if st == "clear":
         return "none"
     if st == "suspect":
         return "question"
-    t = temperament_of(world)                              # wanted: штраф или враждебность по характеру
-    import random
+    t = temperament_of(world)
+    try:
+        from ..npc import Context, Stimulus, evaluate
+        from ..npc.state import make_state
+        seed = sum(ord(ch) for ch in str(t.get("key", "watch")))
+        gs = make_state(name="watch", role="стражник", seed=seed)
+        gs.traits["bravery"] = min(1.0, 0.55 + t.get("hostile", 0.3))     # брутальный темперамент → агрессивнее
+        gs.traits["greed"] = min(1.0, 0.4 + t.get("bribe", 0.2))          # мздоимец → корыстнее
+        gs.traits["lawful"] = max(0.2, 0.8 - t.get("bribe", 0.2) - t.get("hostile", 0.3) * 0.5)  # враждебный/продажный → меньше сдержанности → насилие
+        stim = Stimulus("see_wanted", source=subject, data={"severity": suspicion_of(world, subject)})
+        top = evaluate(gs, Context(stim, world=world))                    # argmax — детерминированно (реплей-safe)
+        if top:
+            return "hostile" if top[0][0].key == "attack" else "fine"
+    except Exception:
+        pass
+    import random  # фоллбэк — прежний seed-roll по темпераменту
 
     from ..gen.seeds import subseed
     roll = random.Random(subseed(world.seed, "confront", subject, day_number(world.clock.tick))).random()

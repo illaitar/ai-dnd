@@ -791,7 +791,7 @@ def narrator_user(mode: str, *, name: str = "", kind: str = "", race: str = "", 
                   traits: str = "", epithet: str = "", rel: str = "", scene: str = "",
                   situation: str = "", player_line: str = "", intent: str = "", tone: str = "",
                   outcome: str = "", facts=None, topic: str = "", pc: str = "", gear: str = "",
-                  memory=None, history: str = "") -> str:
+                  memory=None, history: str = "", gender: str = "") -> str:
     """ЕДИНЫЙ user-промпт нарратора — общий для рантайма и датасета (train == inference).
     Печатает только заданные поля; `mode` (вид реплики) задаёт форму вывода.
     pc/gear — кто игрок и его снаряжение (для отсылок в прозе); memory — что NPC помнит об
@@ -802,6 +802,9 @@ def narrator_user(mode: str, *, name: str = "", kind: str = "", race: str = "", 
                                      f"черты: {traits}" if traits else "",
                                      f"эпитет: {epithet}" if epithet else "") if x)
         L.append(f"NPC: {name}" + (f" — {meta}" if meta else ""))
+        if gender:                                    # пригвоздить грамматический род (Линэн — женщина и т.п.)
+            L.append(f"Пол персонажа: {gender}. Веди речь и ВСЕ ремарки этого NPC строго в "
+                     f"соответствующем грамматическом роде (женщина → женский, мужчина → мужской).")
     if pc:
         L.append(f"Player character: {pc}" + (f"; снаряжение: {gear}" if gear else ""))
     elif gear:
@@ -844,6 +847,7 @@ def _persona_fields(persona) -> dict:
         "voice": getattr(persona, "voice", None) or "",
         "traits": ", ".join(getattr(persona, "traits", []) or []),
         "epithet": getattr(persona, "epithet", "") or "",
+        "gender": {"female": "женщина", "male": "мужчина"}.get(getattr(persona, "gender", "") or "", ""),
     }
 
 

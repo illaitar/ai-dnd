@@ -53,18 +53,24 @@ def _name(world, npc: str) -> str:
 
 
 def _strongest_opinion(world, a: str, exclude: str | None):
-    """О ком у a самое яркое мнение (для сплетни) — кроме самого a и собеседника, и ТОЛЬКО о ЗНАКОМЫХ."""
+    """О ком a сплетничает — среди тех, о ком есть ЗАМЕТНОЕ мнение (и кого ЗНАЕТ). Субъект ВАРЬИРУЕТСЯ
+    по тику (не залипать на одном раунд за раундом), вес ∝ яркости мнения. Детерминированно (реплей-сейф)."""
     from . import acquaintance
-    best, bv = None, 0.0
+    cands = []
     for c in world.npcs():
         if c == a or c == exclude or not world.is_alive(c):
             continue
         if not acquaintance.acquainted(world, a, c):       # сплетничают лишь о тех, кого знают
             continue
         v = opinion(world, a, c)
-        if abs(v) > abs(bv):
-            best, bv = c, v
-    return best, bv
+        if abs(v) >= 0.3:                                  # только заметные мнения
+            cands.append((c, v))
+    if not cands:
+        return None, 0.0
+    cands.sort(key=lambda cv: abs(cv[1]), reverse=True)
+    top = cands[:4]                                        # из ярчайших — взвешенный выбор, разный по тикам
+    rng = random.Random(subseed(world.seed, "gossipsubj", a, world.clock.tick))
+    return rng.choices(top, weights=[abs(v) + 0.1 for _, v in top])[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -172,8 +178,13 @@ def _commission_x(world, a, _b):
         return f"{_name(world, a)} заглядывает к {_name(world, b)}, да тот занят работой."
     pa = world.ecs.get(a, Persona)
     prof = (pa.profession or "") if pa else ""
-    tmpl, hours = (("tmpl:shortsword", 8) if any(w in prof for w in ("страж", "guard", "солдат", "наёмник", "рыцар"))
-                   else ("tmpl:dagger", 5))                # воин — меч, прочие — кинжал/нож
+    warlike = any(w in prof for w in ("страж", "guard", "солдат", "наёмник", "рыцар", "воин", "knight"))
+    menu = ([("tmpl:shortsword", 8), ("tmpl:longsword", 11), ("tmpl:mace", 7), ("tmpl:chain_shirt", 14)]
+            if warlike else                                # воин — оружие/броня; прочие — варьируем по нужде/ремеслу
+            [("tmpl:dagger", 5), ("tmpl:mace", 7), ("tmpl:leather", 8), ("tmpl:chain_shirt", 14)])
+    menu = [(t, h) for t, h in menu if t in world.templates] or [("tmpl:dagger", 5)]
+    rng = random.Random(subseed(world.seed, "commission", a, world.clock.tick))
+    tmpl, hours = rng.choice(menu)                         # разный предмет, не всегда «кинжал»
     price = commerce.craft_price(world, tmpl)
     if not commerce.charge(world, a, b, price):
         return f"{_name(world, a)} приценивается у {_name(world, b)}, да не по карману."

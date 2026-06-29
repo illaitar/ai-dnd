@@ -123,11 +123,11 @@ def _add_npc(world: World, npc_id: str, name: str, archetype: str, stat_ref: str
              race: str = "human", faction: str | None = None, traits=None,
              voice=None, profession: str | None = None, works_at: str | None = None,
              lives_in: str | None = None, place: str | None = None,
-             knowledge=None, secrets=None, epithet=None, aliases=None) -> str:
+             knowledge=None, secrets=None, epithet=None, aliases=None, gender="unknown") -> str:
     world.ecs.spawn(npc_id)
     sb = get_stat_block(stat_ref)
     persona = Persona(
-        name=name, archetype=archetype, race=race, profession=profession,
+        name=name, archetype=archetype, race=race, profession=profession, gender=gender,
         traits=list(traits or []), voice=voice, stat_block_ref=stat_ref,
         faction=faction, epithet=epithet, aliases=list(aliases or []),
         knowledge=list(knowledge or []),
@@ -168,7 +168,7 @@ def _add_npc(world: World, npc_id: str, name: str, archetype: str, stat_ref: str
 
 def _build_named_npcs(world: World) -> None:
     _add_npc(world, "npc:gorthok_ironhand", "Горток Железная Рука", "blacksmith", "srd:commoner",
-             race="dwarf", profession="кузнец", works_at="building:smithy",
+             race="dwarf", gender="male", profession="кузнец", works_at="building:smithy",
              lives_in="building:smithy", place="building:smithy",
              traits=["gruff", "honest", "hardworking"], voice="говорит коротко и по делу, ворчлив",
              aliases=["горток", "кузнец", "железная рука"],
@@ -177,55 +177,55 @@ def _build_named_npcs(world: World) -> None:
                         {"fact": "без хорошей руды я кую только подковы да гвозди", "topic": "trade",
                          "disclosure_gate": {"trust": 0.05}}])
     _add_npc(world, "npc:toblen_stonehill", "Тоблен Стоунхилл", "innkeeper", "srd:commoner",
-             profession="innkeeper", works_at="building:stonehill_inn",
+             gender="male", profession="innkeeper", works_at="building:stonehill_inn",
              lives_in="building:stonehill_inn", place="building:stonehill_inn",
              traits=["welcoming", "gossipy"], voice="говорит тепло, любит поболтать",
              aliases=["толбен", "толбен стоунхилл", "трактирщик"],
              knowledge=[{"fact": "Redbrands shake down merchants", "topic": "redbrands",
                          "disclosure_gate": {"trust": 0.2}}])
     _add_npc(world, "npc:linene_graywind", "Линэн Грейвинд", "merchant", "srd:commoner",
-             profession="merchant", works_at="building:lionshield_coster",
+             gender="female", profession="merchant", works_at="building:lionshield_coster",
              lives_in="building:lionshield_coster", place="building:lionshield_coster",
              traits=["shrewd", "worried"], aliases=["линен", "линен грейвинд"],
              knowledge=[{"fact": "a wagon of Lionshield goods was stolen near the trail",
                          "topic": "lionshield", "disclosure_gate": {"trust": 0.1},
                          "unlocks_quest": "quest:lionshield_goods"}])
     _add_npc(world, "npc:harbin_wester", "Харбин Вестер", "townmaster", "srd:commoner",
-             profession="guard", works_at="building:townmaster_hall",
+             gender="male", profession="guard", works_at="building:townmaster_hall",
              lives_in="building:townmaster_hall", place="building:townmaster_hall",
              traits=["timid", "bureaucratic"], aliases=["харбин", "харбин вестер", "градоправитель"],
              knowledge=[{"fact": "orcs raid from Wyvern Tor", "topic": "wyvern_tor",
                          "disclosure_gate": {"trust": 0.1}, "unlocks_quest": "quest:wyvern_tor_orcs"}])
     _add_npc(world, "npc:sister_garaele", "Сестра Гараэль", "priest", "srd:acolyte",
-             race="half-elf", faction="faction:harpers", profession="priest",
+             race="half-elf", gender="female", faction="faction:harpers", profession="priest",
              works_at="building:shrine_of_luck", lives_in="building:shrine_of_luck",
              place="building:shrine_of_luck", traits=["earnest", "secretive"],
              aliases=["гарэле", "сестра гарэле", "жрица"])
     _add_npc(world, "npc:daran_edermath", "Даран Эдермат", "retired_adventurer", "srd:veteran",
-             profession="farmhand", works_at="building:edermath_orchard",
+             gender="male", profession="farmhand", works_at="building:edermath_orchard",
              lives_in="building:edermath_orchard", place="building:edermath_orchard",
              traits=["honest", "vigilant"], faction="faction:lords_alliance",
              aliases=["даран", "даран эдермат"])
     _add_npc(world, "npc:halia_thornton", "Халия Торнтон", "guildmaster", "srd:thug",
-             faction="faction:zhentarim", profession="merchant",
+             faction="faction:zhentarim", gender="female", profession="merchant",
              works_at="building:townmaster_hall", lives_in="building:townmaster_hall",
              place="building:townmaster_hall", traits=["ambitious", "manipulative"],
              aliases=["халия", "халия торнтон"],
              secrets=[{"fact": "I run the Zhentarim cell here",
                        "reveal_conditions": ["trust>0.6"], "consequence_tags": ["faction"]}])
     _add_npc(world, "npc:guildmaster_yarra", "Ярра Камнехват", "guildmaster", "srd:veteran",
-             faction="faction:adventurers_guild", profession="adventurer",
+             faction="faction:adventurers_guild", gender="female", profession="adventurer",
              works_at="building:adventurers_guild", lives_in="building:adventurers_guild",
              place="building:adventurers_guild",
              traits=["battle-scarred", "shrewd", "fair-minded"],
              voice="низкий, с хрипотцой; коротко и по делу",
              aliases=["ярра", "мастер гильдии", "гильдмастер", "камнехват"])
     sildar = _add_npc(world, "npc:sildar_hallwinter", "Сильдар Холлвинтер", "knight", "srd:veteran",
-                      faction="faction:lords_alliance", traits=["noble", "weary"],
+                      faction="faction:lords_alliance", gender="male", traits=["noble", "weary"],
                       place="building:stonehill_inn", aliases=["сильдар", "сильдар холлвинтер"])
     world.ecs.get(sildar, Persona).companion = False  # напарник временно отключён (тест соло)
     _add_npc(world, "npc:gundren_rockseeker", "Гундрен Рокссикер", "prospector", "srd:commoner",
-             race="dwarf", traits=["excitable", "secretive"], place="place:cragmaw_klarg_cave",
+             race="dwarf", gender="male", traits=["excitable", "secretive"], place="place:cragmaw_klarg_cave",
              aliases=["гундрен", "гундрен рокскикер"])
     # антагонист — социальный босс Redbrand Hideout
     _add_npc(world, "npc:iarno_glasstaff", "Иарно Албрек", "mage", "srd:mage",

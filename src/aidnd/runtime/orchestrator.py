@@ -1740,7 +1740,7 @@ class GameSession:
         elif any(k in low for k in self._TELL_KW):
             stim = Stimulus("player_tells", source=self.player)
         elif any(k in low for k in self._OPINE_KW):
-            subj = self._match_npc(text)
+            subj = self._opine_subject(npc, text)         # ТРЕТЬЕ лицо (не адресат), даже если не в комнате
             if subj and subj != npc and subj != self.player:
                 stim = Stimulus("asked_opinion", source=self.player, target=subj)
             else:
@@ -1875,7 +1875,7 @@ class GameSession:
         low = text.lower()
         if not any(k in low for k in self._OPINE_KW):
             return None
-        subject = self._match_npc(text)
+        subject = self._opine_subject(npc, text)          # третье лицо (исключая адресата), хоть и не в комнате
         if not subject or subject == npc or subject == self.player:
             return None
         from ..content import acquaintance, agent
@@ -4227,6 +4227,25 @@ class GameSession:
         base = tmpl.name if tmpl else inst.template_id
         return f"{base}×{inst.quantity}" if inst.quantity > 1 else base
 
+    def _npc_match_score(self, low: str, toks: list, npc: str) -> int:
+        """Очки совпадения ссылки (low/toks) с именем/эпитетом/алиасами NPC. Полное вхождение=5, стем=+1."""
+        p = self.world.ecs.get(npc, Persona)
+        if not p:
+            return 0
+        forms = [p.name.lower()] + ([p.epithet.lower()] if p.epithet else []) \
+            + [a.lower() for a in getattr(p, "aliases", [])]
+        score = 0
+        for form in forms:
+            if form and form in low:                      # полное вхождение формы
+                score = max(score, 5)
+            for w in form.split():
+                if len(w) < 3:
+                    continue
+                stem = w[:5]
+                if any(t.startswith(stem) or stem.startswith(t) for t in toks):
+                    score += 1
+        return score
+
     def _match_npc(self, text: str) -> str | None:
         """Сопоставляет ссылку игрока с присутствующим NPC по имени, эпитету и рус.
         алиасам. Стем-матч (как у _match_place) терпит падежи: «Гарэле/Гарэлой»,
@@ -4236,28 +4255,42 @@ class GameSession:
         toks = [t for t in re.split(r"[^0-9a-zа-яё]+", low) if len(t) >= 3]
         best, best_score = None, 0
         for npc in self.npcs_here():
-            p = self.world.ecs.get(npc, Persona)
-            if not p:
-                continue
-            forms = [p.name.lower()]
-            if p.epithet:
-                forms.append(p.epithet.lower())
-            forms += [a.lower() for a in getattr(p, "aliases", [])]
-            score = 0
-            for form in forms:
-                if form and form in low:                  # полное вхождение формы
-                    score = max(score, 5)
-                for w in form.split():
-                    if len(w) < 3:
-                        continue
-                    stem = w[:5]
-                    if any(t.startswith(stem) or stem.startswith(t) for t in toks):
-                        score += 1
+            score = self._npc_match_score(low, toks, npc)
             if score > best_score:
                 best, best_score = npc, score
         if best and best_score >= 3:                      # уверенный детерм. матч — без ML
             return best
         return self._resolve_ref_ml(text) or best or self._match_pop(low)   # слабо/нет → лёгкая ML по кличке/описанию
+
+    def _opine_subject(self, npc: str, text: str) -> str | None:
+        """Кого ИМЕННО игрок просит оценить — ТРЕТЬЕ ЛИЦО, не адресат. Кандидаты — ЗНАКОМЫЕ этому NPC
+        (присутствуют или нет), исключая собеседника и игрока. Сперва детерм. матч по имени; если нет —
+        спрашиваем LLM (роль/описание/«тот кузнец»). Кэш на ход, чтобы не звать модель дважды."""
+        ck = (npc, text)
+        if getattr(self, "_opine_cache", (None, None))[0] == ck:
+            return self._opine_cache[1]
+        import re
+
+        from ..content import acquaintance
+        low = text.lower()
+        toks = [t for t in re.split(r"[^0-9a-zа-яё]+", low) if len(t) >= 3]
+        cands = [n for n in self.world.npcs()
+                 if n != npc and n != self.player and self.world.is_alive(n)
+                 and self.world.ecs.get(n, Persona) and acquaintance.acquainted(self.world, npc, n)]
+        best, best_score = None, 0
+        for c in cands:
+            score = self._npc_match_score(low, toks, c)
+            if score > best_score:
+                best, best_score = c, score
+        subj = best if (best and best_score >= 3) else None
+        if subj is None and self.model is not None and cands:   # по имени нет → LLM: есть ли третье лицо?
+            from ..inference.agents import resolve_npc_ref
+            idx = resolve_npc_ref(self.model, text,
+                                  [{"name": self._display(c), "hint": self._npc_hint(c)} for c in cands])
+            if isinstance(idx, int) and 0 <= idx < len(cands):
+                subj = cands[idx]
+        self._opine_cache = (ck, subj)
+        return subj
 
     def _npc_hint(self, npc: str) -> str:
         """Краткая подсказка о присутствующем для ML-резолюции (профессия/эпитет/черта)."""

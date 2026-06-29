@@ -30,7 +30,7 @@ HOME = None                                   # «дома/за городом»
 PROFILE = {
     "inn":    {"sat": {"hunger": 0.45, "social": 0.45}, "draw": 1.0, "peak": "evening"},
     "tavern": {"sat": {"hunger": 0.35, "social": 0.55}, "draw": 1.0, "peak": "evening"},
-    "shop":   {"sat": {"hunger": 0.30, "social": 0.10}, "draw": 0.7, "peak": "day"},
+    "shop":   {"sat": {"hunger": 0.30}, "draw": 0.7, "peak": "day"},     # работа кормит, но общения не даёт — к вечеру тянет в люди
     "shrine": {"sat": {"social": 0.25}, "draw": 0.45, "peak": "day"},
     "square": {"sat": {"social": 0.45}, "draw": 0.7, "peak": "day"},
     "work":   {"sat": {}, "draw": 0.95, "peak": "work"},        # работа: тянет в часы, нужд не гасит
@@ -109,24 +109,33 @@ class CitySim:
             kinds.add("work")
         if is_home:
             kinds.add("home")
+        pk = self.kind.get(place, "")                                      # тип места учитываем ВСЕГДА:
+        if pk:                                                             # инн даёт social и своему хозяину (иначе уходит)
+            kinds.add(pk)
         if not kinds:
-            kinds.add(self.kind.get(place, ""))
+            kinds.add("")
         best = -1e9
         for kind in kinds:                                                 # берём лучший подходящий профиль
             prof = PROFILE.get(kind, {"sat": {}, "draw": 0.4, "peak": ""})
             s = prof["draw"] * _time_mult(prof["peak"], minute)
             for need, amt in prof["sat"].items():                          # закрывает горящую нужду — ценно
-                s += a["needs"][need] * amt * 3.0
+                nv = a["needs"][need]
+                s += nv * amt * 3.0
+                if nv > 0.65:                                              # ГОРЯЩАЯ нужда тянет к утолителю
+                    s += (nv - 0.65) * amt * 8.0                           # поверх инерции дома/работы (иначе сидят сиднем)
             best = max(best, s)
         u = best
+        burn = max(0.0, max(a["needs"].values()) - 0.65) / 0.35            # 0 при ≤0.65, 1 при нужде 1.0
+        stay = 1.0 - 0.55 * burn                                           # «держащие» бонусы слабеют, когда нужда горит
         if is_home:
-            u += 0.4                                                        # свой дом
+            u += 0.4 * stay                                                # свой дом (но не держит, когда гонит нужда)
         if is_work:
-            u += 0.5                                                        # свой труд
+            u += 0.5 * stay                                                # свой труд
         if place == a["place"]:
-            u += 0.9                                                        # инерция — не дёргаться без повода
-        if a["owl"] and phase(minute) == "night":                          # ночная натура: не домой, а наружу
-            u += (-2.4 if is_home else 1.3) * a["owl"]
+            u += 0.9 * stay                                                # инерция — не дёргаться без повода
+        if a["owl"] and phase(minute) == "night":                          # ночная натура: не домой, а наружу —
+            if not (is_home and self.kind.get(place, "") in ("inn", "tavern")):   # но если ДОМ и есть ночная жизнь
+                u += (-2.4 if is_home else 1.3) * a["owl"]                  # (трактир), не гнать хозяина прочь
         return u
 
     def _decide(self, a: dict, minute: int):
@@ -160,7 +169,12 @@ class CitySim:
         at_work = (a["place"] is not None and a["place"] == a["work"])
         working = at_work and 7 <= minute // 60 < 18                       # на работе в рабочие часы — устаёт
         resting = at_home and not working                                  # дома вне работы — отдыхает
-        sat = {} if resting else PROFILE.get(self.kind.get(a["place"], ""), {}).get("sat", {})
+        psat = PROFILE.get(self.kind.get(a["place"], ""), {}).get("sat", {})
+        if resting:                                                        # дома отдыхаешь; если дом людный (инн) —
+            soc = psat.get("social")                                       # компания всё же гасит тоску (хозяин не уходит)
+            sat = {"social": soc * 0.6} if soc else {}
+        else:
+            sat = psat
         self._evolve(a, resting, working, sat)
         dest = self._decide(a, minute)
         if dest != a["place"]:                                            # решил идти — в путь (займёт время)

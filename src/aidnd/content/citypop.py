@@ -195,6 +195,7 @@ class CityPopulation:
 
     def target_of(self, npc: str) -> str | None:
         """Куда рядовой ростер-NPC хочет быть СЕЙЧАС по нуждам (для оркестратора вместо блока расписания)."""
+        self.tick()                                            # догнать ABM до текущего тика (иначе читаем устаревшее)
         a = getattr(self, "sim", None) and self.sim.agents.get(npc)
         if not a:
             return None

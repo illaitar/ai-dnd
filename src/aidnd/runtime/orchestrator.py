@@ -1578,6 +1578,15 @@ class GameSession:
                                   f"{self._display(b['source'])} оказались враньём.")
         return debunked
 
+    def _conversation(self, npc: str, first_meeting: bool = False):
+        """Стейт-машина разговора игрок↔NPC: одна на партнёра, сброс при смене собеседника.
+        known снапшотим из first_meeting (ДО записи встречи) — иначе фаза знакомства пропускается."""
+        from ..content.dialogue_fsm import Conversation
+        c = getattr(self, "conversation", None)
+        if c is None or c.b != npc:
+            c = self.conversation = Conversation(a=self.player, b=npc, known=not first_meeting)
+        return c
+
     def _do_talk(self, action: Action, text: str) -> dict:
         npc = action.target or self._match_npc(text) or self.dialogue_partner
         if not npc:
@@ -1611,12 +1620,19 @@ class GameSession:
             line = self._strip_leading_name(self._npc_greeting(npc, rel, first_meeting), npc)
             line += self._reveal_note(self._reveal_from_dialogue(npc, rel, None))
             self._talk_turns, self._npc_leaving = 0, None     # новый разговор — счётчик терпения с нуля
+            from ..content import dialogue_fsm
+            conv = self._conversation(npc, first_meeting)
+            dialogue_fsm.advance(self.world, conv, npc, self.player, self.player)   # FSM: фаза знакомства
             self._tick()
             return {"kind": "narration", "text": line, "speaker": self._display(npc),
                     "npc": npc, "hint": "Спроси о чём-нибудь, предложи дело или скажи что-то.",
-                    "topics": self._topic_hints(npc, rel), "view": self.view()}
+                    "topics": self._topic_hints(npc, rel), "phase": conv.phase, "view": self.view()}
 
         # игрок что-то СКАЗАЛ/СПРОСИЛ → реакция с учётом отношений и гейтов
+        from ..content import dialogue_fsm
+        conv = self._conversation(npc, first_meeting)
+        dialogue_fsm.advance(self.world, conv, npc, self.player, self.player,   # FSM: продвинуть фазу разговора
+                             trigger=("hostile" if action.tone == "hostile" else None))
         ctx = self.cognition.retrieve(npc, topic, self.player)
         decision = self.cognition.policy(npc, "talk", action.tone, ctx, self.player)
         if decision.get("action") == "withhold":          # стонолит лишь ВРАЖДЕБНЫЙ/недоверчивый; нейтральный, с кем
@@ -1634,7 +1650,8 @@ class GameSession:
             self._log_journal(f"Поговорил с {self._display(npc)}.")   # способность (наезд/мнение/знание/секрет/ложь)
             self._tick()
             return react
-        line = self._strip_leading_name(self._npc_reply(npc, decision, topic, rel, first_meeting, hooks), npc)
+        line = self._strip_leading_name(
+            self._npc_reply(npc, decision, topic, rel, first_meeting, hooks, phase=conv.phase), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._talk_turns = getattr(self, "_talk_turns", 0) + 1     # П2: терпение тает → NPC может засобираться
         self._npc_leaving = npc if self._maybe_leaving(npc, rel) else None
@@ -1644,7 +1661,7 @@ class GameSession:
         self._tick()
         return {"kind": "narration", "text": line, "speaker": self._display(npc),
                 "npc": npc, "decision": decision, "hooks": hooks,
-                "topics": self._topic_hints(npc, rel), "view": self.view()}
+                "topics": self._topic_hints(npc, rel), "phase": conv.phase, "view": self.view()}
 
     def _arbiter_talk(self, npc: str, text: str, topic: str, rel):
         """Единый арбитр речевой реакции (заменил cue-цепочку): классифицирует реплику игрока в
@@ -3857,7 +3874,7 @@ class GameSession:
         return self._greeting_fallback(persona, first_meeting)
 
     def _npc_reply(self, npc: str, decision: dict, topic: str, rel, first_meeting, hooks,
-                   gate_level: float | None = None) -> str:
+                   gate_level: float | None = None, phase: str | None = None) -> str:
         persona = self.world.ecs.get(npc, Persona)
         action = decision.get("action", "respond")
         action = action if isinstance(action, str) else "respond"
@@ -3871,10 +3888,12 @@ class GameSession:
                     f"уже не слышал. Пока тихо».")
         feed = items[:2]                                # 1–2 факта: что отдали нарратору ≈ что игрок узнаёт
         if self.model is not None:
+            from ..content.dialogue_fsm import phase_intent
             from ..inference.agents import render_dialogue
+            goal = f" Conversation phase: {phase_intent(phase)}." if phase else ""   # FSM ведёт арку (знакомство→слухи→…)
             line = render_dialogue(
                 self.model, persona, self._memory_summary(npc, rel, first_meeting, topic),
-                situation=f"The player says/asks: «{topic}». Your stance: {action}.",
+                situation=f"The player says/asks: «{topic}». Your stance: {action}.{goal}",
                 player_line=topic, intent=action, scene=self._narrator_context(),
                 facts=[it["fact"] for it in feed], mode="dialogue", pc=self._pc_brief(),
                 memory=self._npc_memory(npc, topic, first_meeting), history=self._recent_context())

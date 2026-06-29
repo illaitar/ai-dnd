@@ -2552,8 +2552,17 @@ class GameSession:
             return {"kind": "system", "text": f"Продажа не удалась: {e}", "view": self.view()}
 
     def _item_match(self, iid: str, low: str) -> bool:
+        import re
         name = self._item_name(iid).split("×")[0].strip().lower()
-        return bool(name) and (name in low or any(w in low for w in name.split() if len(w) > 3))
+        if not name:
+            return False
+        if name in low:                                   # полное имя
+            return True
+        toks = [t for t in re.split(r"[^0-9a-zа-яё]+", low) if len(t) >= 3]
+        for w in name.split():                            # слово имени со стем-матчем (терпит падежи; «меч» тоже)
+            if len(w) >= 3 and any(t.startswith(w[:5]) or w[:5].startswith(t) for t in toks):
+                return True
+        return False
 
     # ----------------------------------------------------- торговля/торг ----
     _GIVE_FRAC = {"none": 0.0, "small": 0.25, "fair": 0.5, "max": 0.85}
@@ -2589,8 +2598,17 @@ class GameSession:
     def _make_offer(self, kind: str, ref, label: str, base_cp: int, merchant, place, shop=None) -> dict:
         floor = max(1, int(base_cp * 0.65))   # жёсткая граница (макс ~35% уступки); сам торг ведёт LLM по персоне
         return {"kind": kind, "ref": ref, "label": label, "base_cp": int(base_cp),
-                "quote_cp": int(base_cp), "floor_cp": floor, "rounds": 0,
+                "quote_cp": int(base_cp), "floor_cp": floor, "rounds": 0, "qty": 1,
                 "merchant": merchant, "place": place, "shop": shop}
+
+    def _buy_qty(self, low: str, stock: int) -> int:
+        """Сколько штук просит игрок (цифрой или словом); по умолчанию 1, не больше остатка."""
+        import re
+        m = re.search(r"\b(\d+)\b", low)
+        words = {"одну": 1, "один": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5,
+                 "шесть": 6, "десять": 10, "пару": 2, "пары": 2, "несколько": 3}
+        n = int(m.group(1)) if m else next((v for k, v in words.items() if k in low), 1)
+        return max(1, min(n, max(1, stock)))
 
     def _resolve_offer(self, text: str) -> dict | None:
         """Что игрок хочет купить/снять у торговца тут (предмет лавки или услуга двора). None — ничего."""
@@ -2601,8 +2619,13 @@ class GameSession:
             c = self.world.containers[shop]
             iid = next((i for i in c.items if self._item_match(i, low)), None)
             if iid is not None:
-                base = inv.price_of(self.world, self.world.items[iid], c, self.player)
-                return self._make_offer("buy", iid, self._item_name(iid), base, c.owner_ref, place, shop=shop)
+                stock = self.world.items[iid].quantity
+                qty = self._buy_qty(low, stock)                       # по умолчанию 1 штука, не весь стек
+                base = inv.price_of(self.world, self.world.items[iid], c, self.player, qty=qty)
+                label = self._item_name(iid).split("×")[0].strip() + (f"×{qty}" if qty > 1 else "")
+                off = self._make_offer("buy", iid, label, base, c.owner_ref, place, shop=shop)
+                off["qty"] = qty
+                return off
             return None
         from ..inventory.items import COIN
         affs = {a["affordance"] for a in self.affordances_here()}
@@ -2663,7 +2686,7 @@ class GameSession:
         price = hag["quote_cp"]
         try:
             if hag["kind"] == "buy":
-                inv.buy_at(self.world, self.player, hag["shop"], hag["ref"], price)
+                inv.buy_at(self.world, self.player, hag["shop"], hag["ref"], price, qty=hag.get("qty", 1))
             elif hag["kind"] == "rent":
                 self._haggle = None
                 return self._rent_room(price_cp=price)
@@ -2683,7 +2706,8 @@ class GameSession:
         self._haggle = None
         if hag["kind"] == "buy":
             try:
-                inv.buy_at(self.world, self.player, hag["shop"], hag["ref"], hag["base_cp"])
+                inv.buy_at(self.world, self.player, hag["shop"], hag["ref"], hag["base_cp"],
+                           qty=hag.get("qty", 1))
                 self._tick()
                 return {"kind": "narration", "view": self.view(),
                         "text": f"Ты покупаешь «{hag['label']}» за {self._fmt_price(hag['base_cp'])}. "

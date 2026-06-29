@@ -114,10 +114,12 @@ def _faction_reaction(world, shop: Container, buyer: str) -> float:
         return 0.0
 
 
-def price_of(world, inst: ItemInstance, shop: Container, buyer: str) -> int:
-    """Цена покупки в медяках: base × фракционный множитель (свои дешевле, враги дороже)."""
+def price_of(world, inst: ItemInstance, shop: Container, buyer: str, qty: int | None = None) -> int:
+    """Цена покупки в медяках: base × фракционный множитель (свои дешевле, враги дороже).
+    qty=None → за весь стек; число → за столько штук (поштучная покупка из пачки)."""
     tmpl = world.templates.get(inst.template_id)
-    base = (tmpl.base_value if tmpl else 0) * inst.quantity
+    q = inst.quantity if qty is None else max(1, min(int(qty), inst.quantity))
+    base = (tmpl.base_value if tmpl else 0) * q
     mult = max(0.8, min(1.25, 1.0 - _faction_reaction(world, shop, buyer) * 0.15))
     from ..content.economy import (
         price_factor,  # снабжение: дефицит ресурса дороже, скидка гильдии дешевле
@@ -138,14 +140,23 @@ def buy(world, player: str, shop_id: str, instance_id: str) -> None:
     _pay(world, player, shop.owner_ref or shop_id, price_cp)
 
 
-def buy_at(world, player: str, shop_id: str, instance_id: str, price_cp: int) -> None:
-    """Покупка по ДОГОВОРНОЙ цене (после торга) — иначе как buy()."""
+def buy_at(world, player: str, shop_id: str, instance_id: str, price_cp: int,
+           qty: int | None = None) -> None:
+    """Покупка по ДОГОВОРНОЙ цене (после торга) — иначе как buy(). qty=None → весь инстанс;
+    число < остатка стека → отколоть столько штук (поштучно из пачки)."""
     shop = world.containers[shop_id]
+    inst = world.items.get(instance_id)
     price_cp = max(1, int(price_cp))
     if wallet_value_cp(world.wallet(player)) < price_cp:
         raise InventoryError("недостаточно средств")
     player_carry = f"carry:{player.split(':',1)[1]}"
-    move(world, shop_id, player_carry, instance_id, actor=player)
+    take = inst.quantity if (inst is None or qty is None) else max(1, int(qty))
+    if inst is not None and inst.quantity > take:          # сплит стека: уносим take штук, остаток в лавке
+        from ..gen.item_gen import spawn_item
+        inst.quantity -= take
+        spawn_item(world, inst.template_id, player_carry, qty=take, owner=player, source="buy")
+    else:
+        move(world, shop_id, player_carry, instance_id, actor=player)
     _pay(world, player, shop.owner_ref or shop_id, price_cp)
 
 

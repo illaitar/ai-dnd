@@ -1614,7 +1614,7 @@ class GameSession:
             self._tick()
             return {"kind": "narration", "text": line, "speaker": self._display(npc),
                     "npc": npc, "hint": "Спроси о чём-нибудь, предложи дело или скажи что-то.",
-                    "view": self.view()}
+                    "topics": self._topic_hints(npc, rel), "view": self.view()}
 
         # игрок что-то СКАЗАЛ/СПРОСИЛ → реакция с учётом отношений и гейтов
         ctx = self.cognition.retrieve(npc, topic, self.player)
@@ -1641,7 +1641,8 @@ class GameSession:
         self._log_journal(f"Поговорил с {self._display(npc)}.")
         self._tick()
         return {"kind": "narration", "text": line, "speaker": self._display(npc),
-                "npc": npc, "decision": decision, "hooks": hooks, "view": self.view()}
+                "npc": npc, "decision": decision, "hooks": hooks,
+                "topics": self._topic_hints(npc, rel), "view": self.view()}
 
     def _arbiter_talk(self, npc: str, text: str, topic: str, rel):
         """Единый арбитр речевой реакции (заменил cue-цепочку): классифицирует реплику игрока в
@@ -3811,6 +3812,30 @@ class GameSession:
         if m3:
             self.cognition.observe(npc, f"игрок ищет: {m3.group(1).strip(chr(32)+chr(34)+'«»')[:32]}", importance=6)
 
+    _TOPIC_LABEL = {"redbrands": "Красные плащи", "mine": "рудник", "gundren": "Гундрен Рокссикер",
+                    "lionshield": "товары Львинощита", "cragmaw": "гоблины Крэгмо", "wyvern_tor": "Вайверн-Тор",
+                    "wave_echo": "Пещера Эха Волн", "thundertree": "Громовое Древо", "garaele": "сестра Гараэле",
+                    "glasstaff": "Стеклянный Посох", "zhentarim": "Жентарим", "harpers": "Арфисты",
+                    "lords_alliance": "Союз Лордов", "omens": "дурные знамения", "trade": "торговля и дела",
+                    "rumors": "городские слухи", "alderleaf": "ферма Олдерлиф", "zhentarim_secret": "тёмные дела",
+                    "phandalin": "город Фэндалин", "geography": "окрестные места", "history": "былое",
+                    "factions": "здешние силы", "monsters": "твари в округе", "magic": "магия"}
+
+    def _topic_hints(self, npc: str, rel) -> list[str]:
+        """Подсказки-темы (свободный диалог + чем помочь): о чём этого NPC можно расспросить — из того,
+        что он готов раскрыть по текущему доверию (тайны проявятся, лишь когда доверие вырастет)."""
+        from ..content.knowledge import disclosable
+        persona = self.world.ecs.get(npc, Persona)
+        if not persona:
+            return []
+        seen, out = set(), []
+        for f in disclosable(persona, max(getattr(rel, "trust", 0.0), 0.05)):
+            t = f.get("topic")
+            if t and t not in seen:
+                seen.add(t)
+                out.append(self._TOPIC_LABEL.get(t, t))
+        return out[:5]
+
     def _npc_greeting(self, npc: str, rel, first_meeting: bool) -> str:
         """Приветствие NPC при инициации — заземлено, без выдуманной истории."""
         persona = self.world.ecs.get(npc, Persona)
@@ -3818,9 +3843,11 @@ class GameSession:
             from ..inference.agents import render_dialogue
             line = render_dialogue(
                 self.model, persona, self._memory_summary(npc, rel, first_meeting),
-                situation=("A stranger walks up and greets you for the first time"
-                           if first_meeting else "Someone you know greets you"),
-                player_line="", intent="greet and ask what they want",
+                situation=("A newcomer you have never met has walked up to you"
+                           if first_meeting else "Someone you already know greets you"),
+                player_line="",
+                intent=("introduce yourself by name, then ask who this stranger is and what they want"
+                        if first_meeting else "greet them warmly and ask what they need"),
                 scene=self._narrator_context(), mode="greeting", pc=self._pc_brief(),
                 memory=self._npc_memory(npc, "", first_meeting), history=self._recent_context())
             if line:

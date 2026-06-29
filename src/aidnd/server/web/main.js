@@ -202,6 +202,7 @@ function render(r) {
   if (r.kind === "saves") { if (r.games) lobbyGames = r.games; if (!$("lobby").classList.contains("hidden")) renderLobby(); }
   if (r.route_xy) cityRoute = r.route_xy;               // маршрут последней ходьбы по карте → пунктир поверх города
   if (r.view) updateView(r.view);
+  if (r.npc) renderTopics(r.topics || []);             // диалог: чипы «о чём спросить» (по знаниям NPC и доверию)
   if (r.travel_far) openOverlay("mapview");           // «далеко — открой карту»: сразу показываем карту для маршрута
   if (r.kind === "error" && !$("levelup").classList.contains("hidden")) $("lvl-msg").textContent = r.text;
   if (r.kind === "look") {                               // игра началась/загружена — прячем стартовые экраны
@@ -376,6 +377,14 @@ function renderConnectivity(c) {
 function renderExits(exits) {
   $("exits").innerHTML = "<span class='state'>выходы:</span> " + (exits || []).map(e =>
     `<span class="chip exit" data-go="${e.id}">${esc(e.name)}</span>`).join("");
+  bindChips();
+}
+function renderTopics(topics) {                          // диалог: чипы «о чём спросить» (клик → «спросить про …»)
+  const q = $("quick"); if (!q) return;
+  q.querySelectorAll(".chip.topic, .topic-label").forEach(e => e.remove());
+  if (!topics || !topics.length) return;
+  q.insertAdjacentHTML("afterbegin", `<span class="state topic-label">спросить:</span> `
+    + topics.map(t => `<span class="chip topic" data-cmd="спросить про ${esc(t)}">💬 ${esc(t)}</span>`).join(" "));
   bindChips();
 }
 function renderNpcs(npcs) {

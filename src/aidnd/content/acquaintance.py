@@ -10,7 +10,14 @@
 
 from __future__ import annotations
 
+import math
+
 from ..world.components import Persona
+
+# Распад знакомства (тики; SIM_MINUTES_PER_TICK=10 → 144 тика/сутки):
+_FADE_TICKS = 432        # одиночная мимолётная встреча тускнеет за ~3 суток без контакта
+_STICK_COUNT = 3         # после стольких ОТДЕЛЬНЫХ встреч — знаком прочно (больше не тускнеет)
+_SESSION_GAP = 18        # встречи дальше ~3 ч друг от друга считаются разными сессиями
 
 
 def _persona(world, n):
@@ -35,17 +42,64 @@ def _met_map(world) -> dict:
     return world.met
 
 
-def record_meeting(world, a: str, b: str) -> None:
-    """a и b теперь знакомы лично (встретились/поговорили) — взаимно."""
+def _rec(world, a: str, b: str):
+    """Запись встречи a→b: {"last": тик, "count": число отдельных сессий} или None."""
+    r = _met_map(world).get(a, {}).get(b)
+    return r if isinstance(r, dict) else None
+
+
+def record_meeting(world, a: str, b: str, now: int = 0) -> None:
+    """a и b встретились лично (взаимно). Хранится время последней встречи и счётчик ОТДЕЛЬНЫХ
+    сессий: внутри одного разговора (ходы близко по времени) счётчик не растёт — растёт лишь на
+    новых встречах (дальше _SESSION_GAP). Так знакомство КРЕПНЕТ с повторными визитами."""
     if not a or not b or a == b:
         return
     m = _met_map(world)
-    m.setdefault(a, set()).add(b)
-    m.setdefault(b, set()).add(a)
+    for x, y in ((a, b), (b, a)):
+        d = m.setdefault(x, {})
+        r = d.get(y)
+        if not isinstance(r, dict):                        # первая встреча (или миграция старого set)
+            d[y] = {"last": now, "count": 1}
+        else:
+            if now - r.get("last", now) >= _SESSION_GAP:   # новая сессия, не продолжение разговора
+                r["count"] = r.get("count", 1) + 1
+            r["last"] = now
 
 
-def has_met(world, a: str, b: str) -> bool:
-    return b in _met_map(world).get(a, set())
+def familiarity(world, a: str, b: str, now: int) -> float:
+    """Сила знакомства a с b [0..1]: крепнет с числом встреч, тает в отсутствие контакта.
+    Прочное знакомство (count ≥ _STICK_COUNT) держится и не падает ниже 0.5."""
+    if community_acquainted(world, a, b):
+        return 1.0
+    r = _rec(world, a, b)
+    if not r:
+        return 0.0
+    base = min(1.0, r.get("count", 1) / _STICK_COUNT)
+    decay = math.exp(-max(0, now - r.get("last", now)) / _FADE_TICKS)
+    fam = base * decay
+    return max(0.5, fam) if r.get("count", 1) >= _STICK_COUNT else fam
+
+
+def has_met(world, a: str, b: str, now: int | None = None) -> bool:
+    """Знают ли друг друга по личной встрече. now=None → «когда-либо» (без распада, для мнений/сплетен).
+    now задан → с распадом: мимолётная встреча тускнеет за _FADE_TICKS, прочное знакомство держится."""
+    r = _rec(world, a, b)
+    if not r:
+        old = _met_map(world).get(a)                       # совместимость со старым set-форматом
+        return isinstance(old, set) and b in old
+    if now is None:
+        return True
+    if r.get("count", 1) >= _STICK_COUNT:                  # знаком прочно — не забывается
+        return True
+    return (now - r.get("last", now)) <= _FADE_TICKS       # одиночная встреча ещё свежа?
+
+
+def feels_stranger(world, a: str, b: str, now: int) -> bool:
+    """Ощущается ли b для a ЧУЖАКОМ прямо сейчас (для тона приветствия/фазы знакомства):
+    общинно-знакомый — никогда; иначе — если личная встреча уже выветрилась."""
+    if community_acquainted(world, a, b):
+        return False
+    return not has_met(world, a, b, now=now)
 
 
 def community_acquainted(world, a: str, b: str) -> bool:

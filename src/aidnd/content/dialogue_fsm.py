@@ -40,6 +40,7 @@ class Conversation:
     covered: set = field(default_factory=set)  # затронутые темы — не повторяться
     goal: str = ""                            # топик/намерение (у NPC с агендой)
     known: bool | None = None                 # знали ли друг друга ДО этого разговора (снапшот; None → считать по графу)
+    log: list = field(default_factory=list)   # транскрипт пары [{who,line}] — обе стороны, последние реплики (для контекста)
 
 
 def _affinity(world, a, b, player):

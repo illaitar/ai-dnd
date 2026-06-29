@@ -729,6 +729,20 @@ class GameSession:
                 lines.append(f"Мастер: {h['out'][:120]}")
         return "\n".join(lines)
 
+    def _convo_log(self, conv, who: str, line: str) -> None:
+        """Дописать реплику (любой стороны) в транскрипт ИМЕННО этого разговора."""
+        if conv is None or not line:
+            return
+        conv.log.append({"who": who, "line": (line or "").strip()[:200]})
+        conv.log[:] = conv.log[-8:]                        # держим последние 8 реплик
+
+    def _convo_history(self, conv, n: int = 6) -> str:
+        """Транскрипт конкретного разговора (обе стороны) — контекст для нарратора, чтобы NPC
+        помнил, что уже сказано, и не переспрашивал «кто ты» после знакомства."""
+        if conv is None or not getattr(conv, "log", None):
+            return ""
+        return "\n".join(f"{h['who']}: {h['line']}" for h in conv.log[-n:])
+
     # ===================================================================== #
     #  Нарративный темп: при затишье и подходящей обстановке — случайный бит #
     # ===================================================================== #
@@ -964,7 +978,7 @@ class GameSession:
             self.dialogue_partner = a
             self._pc_approacher = a                       # сам подошёл → его ответ не будет «холодным незнакомцем»
             from ..content import acquaintance
-            acquaintance.record_meeting(self.world, a, self.player)   # подошёл → знакомы лично
+            acquaintance.record_meeting(self.world, a, self.player, self.world.clock.tick)  # подошёл → знакомы лично
             # тёплая оценка + память, чтобы ОТВЕТ был согласован с подходом
             self.cognition.observe_and_appraise(a, self.player, "talk", "friendly",
                                                 "сам подошёл к игроку и завёл разговор")
@@ -973,6 +987,10 @@ class GameSession:
             from ..content import acquaintance, dialogue_fsm
             conv = self._npc_convo(a, target)
             dialogue_fsm.advance(self.world, conv, a, target, self.player)
+            tone = "hostile" if conv.track == "hostile" else "friendly"
+            for x, y in ((a, target), (target, a)):       # обе стороны: память о разговоре + переоценка (без рефлексии)
+                self.cognition.observe(x, f"перемолвился с {self._display_pc(y)}", importance=2)
+                self.cognition.appraise(x, y, "talk", tone)
             db = self._display_pc(target)
             if conv.track == "hostile":                   # агр-арка: осадить → давить → развязка (не одноразовый наезд)
                 if key == "threaten":
@@ -982,7 +1000,7 @@ class GameSession:
                 self._overheard_val = (f"🗣 {da} {arc} {db}"
                                        + (" — летят резкие слова." if conv.phase == "resolve" else "."))
             elif conv.phase == "opening":                 # чужие сперва знакомятся
-                acquaintance.record_meeting(self.world, a, target)
+                acquaintance.record_meeting(self.world, a, target, self.world.clock.tick)
                 self._overheard_val = f"🗣 {da} знакомится с {db}."
             elif conv.phase == "small_talk":
                 self._overheard_val = f"🗣 {da} о пустяках перекидывается словом с {db}."
@@ -1631,13 +1649,14 @@ class GameSession:
         self.lod.ensure_tier(npc, in_dialogue=True)
         self.charts.enrich(npc)
         ctx0 = self.cognition.retrieve(npc, "", self.player)
-        first_meeting = not ctx0.memories          # нет воспоминаний об игроке = впервые
         rel = ctx0.rel
+        now = self.world.clock.tick
+        from ..content import acquaintance
+        first_meeting = acquaintance.feels_stranger(self.world, npc, self.player, now)  # затухающий флаг (не память)
         topic = self._extract_topic(text, npc)
         self.dialogue_partner = npc
         self.world.commit("set_flag", self.player, payload={"flag": f"talked:{npc}"})  # для квестов «поговорить с …»
-        from ..content import acquaintance
-        acquaintance.record_meeting(self.world, npc, self.player)     # знакомство: NPC теперь знает игрока лично
+        acquaintance.record_meeting(self.world, npc, self.player, now)   # знакомство крепнет с повторами визитов
 
         if not topic:
             # ИНИЦИАЦИЯ: NPC приветствует и сам спрашивает, что нужно — без реакции
@@ -1645,12 +1664,13 @@ class GameSession:
             self.cognition.observe(npc, "ко мне подошёл незнакомец", importance=2)
             self.world.commit("talk", self.player, target=npc, payload={"opening": True})
             self._log_journal(f"Заговорил с {self._display(npc)}.")
-            line = self._strip_leading_name(self._npc_greeting(npc, rel, first_meeting), npc)
-            line += self._reveal_note(self._reveal_from_dialogue(npc, rel, None))
-            self._talk_turns, self._npc_leaving = 0, None     # новый разговор — счётчик терпения с нуля
             from ..content import dialogue_fsm
             conv = self._conversation(npc, first_meeting)
+            line = self._strip_leading_name(self._npc_greeting(npc, rel, first_meeting, conv), npc)
+            line += self._reveal_note(self._reveal_from_dialogue(npc, rel, None))
+            self._talk_turns, self._npc_leaving = 0, None     # новый разговор — счётчик терпения с нуля
             dialogue_fsm.advance(self.world, conv, npc, self.player, self.player)   # FSM: фаза знакомства
+            self._convo_log(conv, self._display(npc), line)        # приветствие → транскрипт разговора
             self._tick()
             return {"kind": "narration", "text": line, "speaker": self._display(npc),
                     "npc": npc, "hint": "Спроси о чём-нибудь, предложи дело или скажи что-то.",
@@ -1659,6 +1679,7 @@ class GameSession:
         # игрок что-то СКАЗАЛ/СПРОСИЛ → реакция с учётом отношений и гейтов
         from ..content import dialogue_fsm
         conv = self._conversation(npc, first_meeting)
+        self._convo_log(conv, "Игрок", topic)              # реплика игрока → транскрипт ДО ответа NPC
         dialogue_fsm.advance(self.world, conv, npc, self.player, self.player,   # FSM: продвинуть фазу разговора
                              trigger=("hostile" if action.tone == "hostile" else None))
         ctx = self.cognition.retrieve(npc, topic, self.player)
@@ -1675,12 +1696,16 @@ class GameSession:
         self._player_shares_with(npc, topic)          # реплика игрока может научить NPC (игрок — источник молвы)
         react = self._arbiter_talk(npc, text, topic, rel)     # ЕДИНЫЙ utility-арбитр вместо cue-цепочки:
         if react is not None:                                 # читает настоящее состояние NPC, выбирает речевую
+            self._convo_log(conv, self._display(npc), react.get("text", ""))   # ответ NPC → транскрипт
+            self.cognition.observe(npc, f"я ответил игроку про «{topic[:60]}»", importance=3)  # своя реплика в память
             self._log_journal(f"Поговорил с {self._display(npc)}.")   # способность (наезд/мнение/знание/секрет/ложь)
             self._tick()
             return react
         line = self._strip_leading_name(
-            self._npc_reply(npc, decision, topic, rel, first_meeting, hooks, phase=conv.phase), npc)
+            self._npc_reply(npc, decision, topic, rel, first_meeting, hooks, phase=conv.phase, conv=conv), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
+        self._convo_log(conv, self._display(npc), line)        # ответ NPC → транскрипт разговора
+        self.cognition.observe(npc, f"я ответил игроку про «{topic[:60]}»", importance=3)  # своя реплика в память
         self._talk_turns = getattr(self, "_talk_turns", 0) + 1     # П2: терпение тает → NPC может засобираться
         self._npc_leaving = npc if self._maybe_leaving(npc, rel) else None
         if self._npc_leaving:
@@ -3885,7 +3910,7 @@ class GameSession:
                 out.append(self._TOPIC_LABEL.get(t, t))
         return out[:5]
 
-    def _npc_greeting(self, npc: str, rel, first_meeting: bool) -> str:
+    def _npc_greeting(self, npc: str, rel, first_meeting: bool, conv=None) -> str:
         """Приветствие NPC при инициации — заземлено, без выдуманной истории."""
         persona = self.world.ecs.get(npc, Persona)
         if self.model is not None:
@@ -3898,13 +3923,14 @@ class GameSession:
                 intent=("introduce yourself by name, then ask who this stranger is and what they want"
                         if first_meeting else "greet them warmly and ask what they need"),
                 scene=self._narrator_context(), mode="greeting", pc=self._pc_brief(),
-                memory=self._npc_memory(npc, "", first_meeting), history=self._recent_context())
+                memory=self._npc_memory(npc, "", first_meeting),
+                history=(self._convo_history(conv) or self._recent_context()))
             if line:
                 return line
         return self._greeting_fallback(persona, first_meeting)
 
     def _npc_reply(self, npc: str, decision: dict, topic: str, rel, first_meeting, hooks,
-                   gate_level: float | None = None, phase: str | None = None) -> str:
+                   gate_level: float | None = None, phase: str | None = None, conv=None) -> str:
         persona = self.world.ecs.get(npc, Persona)
         action = decision.get("action", "respond")
         action = action if isinstance(action, str) else "respond"
@@ -3926,7 +3952,8 @@ class GameSession:
                 situation=f"The player says/asks: «{topic}». Your stance: {action}.{goal}",
                 player_line=topic, intent=action, scene=self._narrator_context(),
                 facts=[it["fact"] for it in feed], mode="dialogue", pc=self._pc_brief(),
-                memory=self._npc_memory(npc, topic, first_meeting), history=self._recent_context())
+                memory=self._npc_memory(npc, topic, first_meeting),
+                history=(self._convo_history(conv) or self._recent_context()))
             if line and not self._degenerate(line):     # отсеять мусорный вывод модели («??????»)
                 if sharing:
                     self._record_player_learned(npc, feed)

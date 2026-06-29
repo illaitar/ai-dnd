@@ -70,11 +70,11 @@ def test_house_partition_unique(city):
 
 
 def test_house_bound_to_nearest_crossroad(city):
-    # «дом между ключевыми точками попадает только в одну» = в ближайшую
+    # «дом между ключевыми точками попадает только в одну» = в ближайшую КЛЮЧЕВУЮ ТОЧКУ
     import random
     rng = random.Random(1)
-    xy = {n.id: (n.x, n.y) for n in city.nodes() if n.kind in
-          (NodeKind.CROSSROAD, NodeKind.BRIDGE, NodeKind.GATE)}
+    kps = set(city.key_points())
+    xy = {n.id: (n.x, n.y) for n in city.nodes() if n.id in kps}
     for h in rng.sample(list(city.houses.values()), 40):
         nearest = min(xy, key=lambda i: (xy[i][0] - h.x) ** 2 + (xy[i][1] - h.y) ** 2)
         assert h.crossroad == nearest

@@ -28,17 +28,18 @@ def _citygen():
     return _CITYGEN
 
 
-def _gate_points(gate_edges) -> list:
-    out = []
+def _gate_points(gate_edges, wall_poly) -> list:
+    """Ворота → точки. gate_edges генератора — ИНДЕКСЫ рёбер контура стены (берём середину ребра)."""
+    out, n = [], len(wall_poly)
     for ge in gate_edges or []:
         try:
-            if isinstance(ge, dict):
-                if ge.get("m"):
-                    out.append((float(ge["m"][0]), float(ge["m"][1])))
-                    continue
-                a, b = ge.get("a"), ge.get("b")
-                if a and b:
+            if isinstance(ge, int):
+                if 0 <= ge < n:
+                    a, b = wall_poly[ge], wall_poly[(ge + 1) % n]
                     out.append(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))
+            elif isinstance(ge, dict) and ge.get("a") and ge.get("b"):
+                a, b = ge["a"], ge["b"]
+                out.append(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))
             elif isinstance(ge, (list, tuple)) and len(ge) >= 2:
                 a, b = ge[0], ge[1]
                 out.append(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))
@@ -62,8 +63,9 @@ def _extract(m: dict, p: CityParams) -> dict:
                    for b in (m.get("bridges") or []) if b.get("cross")]
     else:
         river, bridges = {"pts": [], "w": 0}, []
-    walls = [(float(x), float(y)) for x, y in (m.get("wall_poly") or [])] if p.walls else []
-    gates = _gate_points(m.get("gate_edges")) if p.walls else []
+    wall_poly = m.get("wall_poly") or []
+    walls = [(float(x), float(y)) for x, y in wall_poly] if p.walls else []
+    gates = _gate_points(m.get("gate_edges"), wall_poly) if p.walls else []
     return {"nodes": nodes, "adj": adj, "houses": houses, "keys": keys,
             "river": river, "bridges": bridges, "walls": walls, "gates": gates}
 

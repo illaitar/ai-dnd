@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Граф города — дебаг</title>
+<style>
+  :root { --bg:#11141a; --panel:#1b1f28; --line:#2a3040; --txt:#dfe5ef; --mut:#8b96ab; --acc:#5aa0ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.45 system-ui, sans-serif; }
+  header { padding:10px 16px; background:#0d0f14; border-bottom:1px solid var(--line);
+           display:flex; gap:12px; align-items:center; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  header .mut { color:var(--mut); font-size:12px; }
+  header a { margin-left:auto; color:var(--acc); text-decoration:none; }
+  .wrap { display:flex; height:calc(100vh - 43px); }
+  aside { width:300px; flex:none; overflow-y:auto; padding:12px; border-right:1px solid var(--line);
+          background:var(--panel); }
+  main { flex:1; overflow:auto; background:#0c0e13; display:flex; align-items:flex-start; justify-content:center; }
+  svg { width:100%; height:auto; background:#0c0e13; }
+  section { margin-bottom:14px; }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut);
+       margin:0 0 7px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  label.row { display:flex; align-items:center; gap:7px; margin:4px 0; font-size:13px; cursor:pointer; }
+  label.row input[type=number] { margin-left:auto; width:74px; }
+  input[type=number] { background:#0e1117; border:1px solid var(--line); color:var(--txt);
+                       border-radius:5px; padding:3px 6px; }
+  .sw { width:11px; height:11px; border-radius:2px; flex:none; border:1px solid #0006; }
+  button { background:var(--acc); color:#06101f; border:0; border-radius:6px; padding:7px 12px;
+           font-weight:600; cursor:pointer; width:100%; margin-top:4px; }
+  button.alt { background:#2a3140; color:var(--txt); width:auto; padding:5px 10px; margin:2px 4px 2px 0; }
+  .presets { display:flex; flex-wrap:wrap; }
+  #info, #stats { font-size:12px; color:var(--mut); }
+  #info b, #stats b { color:var(--txt); }
+  .pill { display:inline-block; background:#222a38; border-radius:4px; padding:1px 6px; margin:2px 3px 0 0;
+          font-size:11px; color:var(--txt); }
+  .hint { font-size:11px; color:var(--mut); margin-top:5px; }
+  .kb { cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🗺 Граф города</h1>
+  <span class="mut" id="sub">дебаг-визуализация · единая система передвижения</span>
+  <a href="/">← в игру</a>
+</header>
+<div class="wrap">
+  <aside>
+    <section>
+      <h2>Генерация</h2>
+      <label class="row">seed <input type="number" id="p-seed" value="7"></label>
+      <label class="row">ключевых зданий <input type="number" id="p-key" value="10" min="0" max="40"></label>
+      <label class="row">отрезок (px, 0=авто) <input type="number" id="p-seg" value="0" min="0" max="80"></label>
+      <label class="row"><input type="checkbox" id="p-river" checked> река (мосты)</label>
+      <label class="row"><input type="checkbox" id="p-walls" checked> стены (ворота)</label>
+      <button id="gen">Сгенерировать</button>
+    </section>
+    <section>
+      <h2>Слои</h2>
+      <div id="layers"></div>
+      <div class="presets">
+        <button class="alt" data-preset="debug">Дебаг</button>
+        <button class="alt" data-preset="final">Итог</button>
+      </div>
+    </section>
+    <section>
+      <h2>Маршрут (A* по графу)</h2>
+      <div class="hint">Кликни два ключевых здания на карте: A → B. Путь — группа переходов по перекрёсткам.</div>
+      <div id="info">—</div>
+    </section>
+    <section>
+      <h2>Статистика</h2>
+      <div id="stats">—</div>
+    </section>
+  </aside>
+  <main><svg id="map" viewBox="0 0 980 700"></svg></main>
+</div>
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+function E(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const hue = id => (id * 47) % 360;           // цвет дома по его перекрёстку (раздел виден глазом)
+
+// слои: id, подпись, цвет-образец, по умолчанию вкл
+const LAYERS = [
+  ["walls", "Стены", "#9a6", 1], ["river", "Река", "#39f", 1],
+  ["edges", "Дороги (рёбра)", "#7a8499", 1], ["houses", "Дома (по перекрёстку)", "#c97", 1],
+  ["points", "Под-точки", "#5aa0ff", 0], ["route", "Маршрут", "#37e06a", 1],
+  ["crossroads", "Перекрёстки", "#ffffff", 1], ["bridges", "Мосты", "#ef8a3a", 1],
+  ["gates", "Ворота", "#3ec06a", 1], ["keys", "Ключевые здания", "#ff5050", 1],
+];
+const PRESETS = {
+  debug: ["walls","river","edges","houses","points","route","crossroads","bridges","gates","keys"],
+  final: ["walls","river","edges","route","keys"],
+};
+
+let DATA = null, PARAMS = null, pickA = null;
+
+function buildLayerToggles() {
+  const box = $("layers"); box.innerHTML = "";
+  for (const [id, label, color, on] of LAYERS) {
+    const l = document.createElement("label"); l.className = "row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = !!on; cb.dataset.layer = id;
+    cb.onchange = () => { const g = $("L-" + id); if (g) g.style.display = cb.checked ? "" : "none"; };
+    const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = color;
+    l.append(cb, sw, document.createTextNode(label)); box.appendChild(l);
+  }
+}
+function setPreset(name) {
+  const on = new Set(PRESETS[name] || []);
+  document.querySelectorAll("#layers input").forEach(cb => {
+    cb.checked = on.has(cb.dataset.layer);
+    const g = $("L-" + cb.dataset.layer); if (g) g.style.display = cb.checked ? "" : "none";
+  });
+}
+
+function params() {
+  return { seed: +$("p-seed").value, key_buildings: +$("p-key").value,
+           river: $("p-river").checked, walls: $("p-walls").checked,
+           segment: +$("p-seg").value || 0 };
+}
+function qs(p) {
+  return Object.entries(p).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
+}
+
+async function generate() {
+  PARAMS = params();
+  const r = await fetch("/api/citydebug/generate?" + qs(PARAMS));
+  if (!r.ok) { $("sub").textContent = "ошибка: " + r.status + " (нужен вход владельцем)"; return; }
+  DATA = await r.json(); pickA = null; render(); showStats();
+  $("info").textContent = "—";
+}
+
+function render() {
+  const svg = $("map"); svg.innerHTML = "";
+  svg.setAttribute("viewBox", `0 0 ${DATA.size.w} ${DATA.size.h}`);
+  const g = {}; for (const [id] of LAYERS) g[id] = E("g", { id: "L-" + id }, svg);
+  const NX = {}; DATA.nodes.forEach(n => NX[n.id] = n);
+
+  // стены
+  if (DATA.walls && DATA.walls.length)
+    E("polygon", { points: DATA.walls.map(p => p.join(",")).join(" "),
+                   fill: "none", stroke: "#7e9a55", "stroke-width": 3, opacity: .8 }, g.walls);
+  // река
+  if (DATA.river && DATA.river.pts && DATA.river.pts.length)
+    E("polyline", { points: DATA.river.pts.map(p => p.join(",")).join(" "), fill: "none",
+                    stroke: "#2f6fae", "stroke-width": Math.max(4, DATA.river.w || 6),
+                    "stroke-opacity": .45, "stroke-linecap": "round" }, g.river);
+  // рёбра
+  for (const e of DATA.edges) {
+    const a = NX[e.a], b = NX[e.b];
+    E("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+                stroke: e.bridge ? "#ef8a3a" : "#6b7488",
+                "stroke-width": e.bridge ? 3 : 1 }, e.bridge ? g.bridges : g.edges);
+  }
+  // дома — цвет по перекрёстку (видно раздел «один перекрёсток на дом»)
+  for (const h of DATA.houses)
+    E("circle", { cx: h.x, cy: h.y, r: 2,
+                  fill: `hsl(${hue(h.crossroad)} 60% 58%)`, "fill-opacity": .75 }, g.houses);
+  // под-точки и перекрёстки
+  for (const n of DATA.nodes) {
+    if (n.kind === "point")
+      E("circle", { cx: n.x, cy: n.y, r: 1.5, fill: "#5aa0ff", "fill-opacity": .8 }, g.points);
+    else if (n.kind === "crossroad")
+      E("circle", { cx: n.x, cy: n.y, r: 3, fill: "#fff", stroke: "#222", "stroke-width": 1 }, g.crossroads);
+    else if (n.kind === "bridge")
+      E("rect", { x: n.x - 3, y: n.y - 3, width: 6, height: 6, fill: "#ef8a3a",
+                  transform: `rotate(45 ${n.x} ${n.y})` }, g.bridges);
+    else if (n.kind === "gate")
+      E("rect", { x: n.x - 3.5, y: n.y - 3.5, width: 7, height: 7, fill: "#3ec06a" }, g.gates);
+  }
+  // ключевые здания (кликабельны для маршрута)
+  for (const kb of DATA.key_buildings) {
+    const c = E("circle", { cx: kb.x, cy: kb.y, r: 5.5, fill: "#ff5050",
+                            stroke: "#fff", "stroke-width": 1.5, class: "kb" }, g.keys);
+    c.style.cursor = "pointer"; c.onclick = () => pickRoute(kb.id);
+    E("text", { x: kb.x + 8, y: kb.y + 4, fill: "#ffd0d0", "font-size": 11 }, g.keys).textContent = kb.name;
+  }
+  // применить текущее состояние тумблеров
+  document.querySelectorAll("#layers input").forEach(cb => {
+    const gg = $("L-" + cb.dataset.layer); if (gg) gg.style.display = cb.checked ? "" : "none";
+  });
+}
+
+function showStats() {
+  const s = DATA.stats;
+  $("stats").innerHTML =
+    `узлов <b>${s.nodes}</b> · рёбер <b>${s.edges}</b> · отрезок <b>${s.interval}px</b><br>` +
+    `перекрёстков <b>${s.by_kind.crossroad || 0}</b> · точек <b>${s.by_kind.point || 0}</b> · ` +
+    `мостов <b>${s.by_kind.bridge || 0}</b> · ворот <b>${s.by_kind.gate || 0}</b><br>` +
+    `домов <b>${s.houses}</b> · ключевых зданий <b>${s.key_buildings}</b>`;
+}
+
+async function pickRoute(id) {
+  if (!pickA) { pickA = id; $("info").innerHTML = `A = <b>${id}</b> · выбери B…`; highlightRoute(null); return; }
+  if (id === pickA) { pickA = null; $("info").textContent = "сброшено"; highlightRoute(null); return; }
+  const r = await fetch("/api/citydebug/route?" + qs(PARAMS) + "&a=" + pickA + "&b=" + id);
+  const route = await r.json();
+  const a = pickA; pickA = null;
+  if (!route.found) { $("info").innerHTML = `маршрут ${a}→${id}: <b>не найден</b>`; return; }
+  highlightRoute(route);
+  const signs = route.signs.length
+    ? route.signs.map(s => `<span class="pill">${s.name}</span>`).join("")
+    : "<span class='mut'>нет</span>";
+  $("info").innerHTML =
+    `<b>${a} → ${id}</b><br>длина <b>${route.length}px</b> · ` +
+    `реберных переходов <b>${route.edges.length}</b> · перекрёстков <b>${route.crossroads.length}</b>` +
+    `<div style="margin-top:6px">вывески по пути:<br>${signs}</div>`;
+}
+
+function highlightRoute(route) {
+  const g = $("L-route"); g.innerHTML = "";
+  if (!route) return;
+  const NX = {}; DATA.nodes.forEach(n => NX[n.id] = n);
+  const pts = route.nodes.map(id => `${NX[id].x},${NX[id].y}`).join(" ");
+  E("polyline", { points: pts, fill: "none", stroke: "#37e06a", "stroke-width": 4,
+                  "stroke-linejoin": "round", "stroke-linecap": "round", opacity: .95 }, g);
+  for (const cr of route.crossroads)
+    E("circle", { cx: NX[cr].x, cy: NX[cr].y, r: 4.5, fill: "none",
+                  stroke: "#37e06a", "stroke-width": 2 }, g);
+}
+
+$("gen").onclick = generate;
+document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => setPreset(b.dataset.preset));
+buildLayerToggles();
+generate();
+</script>
+</body>
+</html>

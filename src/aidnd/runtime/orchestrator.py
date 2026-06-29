@@ -1713,15 +1713,17 @@ class GameSession:
             from ..content import acquaintance
             if subj and subj not in (npc, self.player) and acquaintance.acquainted(self.world, npc, subj):
                 extra = [self._opinion_grounding(npc, subj)]
+        threatened = action.tone == "hostile" or any(k in (text or "").lower() for k in self._THREAT_KW)
         gate = getattr(rel, "trust", 0.0)                  # эффективный гейт раскрытия по краям:
-        if action.tone == "hostile":                       # грубость ЗАМЫКАЕТ — секретов не выдаём
+        if threatened:                                     # грубость/угроза ЗАМЫКАЕТ — секретов не выдаём
             gate = min(gate, -0.2)
         fear = getattr(rel, "fear", 0.0)
         if fear >= 0.4:                                    # под СТРАХОМ раскалывается (страх как принуждённое доверие)
             gate = max(gate, fear)
+        threat_note = self._threat_persona_note(npc) if threatened else None   # диспозиция под угрозой по персоне
         line = self._strip_leading_name(
             self._npc_reply(npc, decision, topic, rel, first_meeting, hooks, gate_level=gate,
-                            phase=conv.phase, conv=conv, extra_facts=extra), npc)
+                            phase=conv.phase, conv=conv, extra_facts=extra, threat_note=threat_note), npc)
         line += self._reveal_note(self._reveal_from_dialogue(npc, rel, topic))
         self._convo_log(conv, self._display(npc), line)        # ответ NPC → транскрипт разговора
         self.cognition.observe(npc, f"я ответил игроку про «{topic[:60]}»", importance=3)  # своя реплика в память
@@ -3981,7 +3983,7 @@ class GameSession:
 
     def _npc_reply(self, npc: str, decision: dict, topic: str, rel, first_meeting, hooks,
                    gate_level: float | None = None, phase: str | None = None, conv=None,
-                   extra_facts=None) -> str:
+                   extra_facts=None, threat_note: str | None = None) -> str:
         persona = self.world.ecs.get(npc, Persona)
         action = decision.get("action", "respond")
         action = action if isinstance(action, str) else "respond"
@@ -4001,7 +4003,7 @@ class GameSession:
             goal = f" Conversation phase: {phase_intent(phase)}." if phase else ""   # FSM ведёт арку (знакомство→слухи→…)
             line = render_dialogue(
                 self.model, persona, self._memory_summary(npc, rel, first_meeting, topic),
-                situation=f"The player says/asks: «{topic}». Your stance: {action}.{goal}",
+                situation=f"The player says/asks: «{topic}». Your stance: {action}.{goal}{threat_note or ''}",
                 player_line=topic,
                 intent=("offer your wares — name a few things you sell and invite them to look or haggle"
                         if action == "trade" else action),
@@ -4036,6 +4038,34 @@ class GameSession:
                 "что творит", "что в город", "чем живёт", "чем живет", "свежие вести", "какие вести")
     _GOODS_KW = ("прода", "товар", "купить", "куплю", "почём", "почем", "ассортимент", "чем торгу",
                  "что есть у тебя", "припас", "снаряж", "оружие", "доспех", "броню", "за сколько")
+    _THREAT_KW = ("угрож", "запуга", "припугн", "или пожалеешь", "или хуже", "гони монет", "гони кошел",
+                  "отдавай", "выкладывай", "считаю до", "хватайся за меч", "разнесу", "переверну", "подпалю",
+                  "сожгу", "убью", "прирежу", "не доживёшь", "пожалеешь", "по-хорошему", "пока цел",
+                  "пока я добр", "не зли меня", "живо", "молот в руках", "нож", "кошель на стол")
+
+    def _threat_persona_note(self, npc: str) -> str:
+        """Как этот NPC держится ПОД УГРОЗОЙ — по чертам персоны (чинит «трус играет храбреца»)."""
+        p = self.world.ecs.get(npc, Persona)
+        traits = {t.lower() for t in (getattr(p, "traits", []) or [])}
+        prof = (getattr(p, "profession", "") or "").lower()
+        if traits & {"timid", "cowardly", "meek", "nervous", "fearful", "welcoming", "gossipy", "worried"}:
+            disp = "fearful"
+        elif traits & {"manipulative", "shrewd", "ambitious", "calculating", "cunning"}:
+            disp = "cool"
+        elif (traits & {"noble", "brave", "gruff", "vigilant", "battle-scarred", "stern", "honest", "hardworking"}
+              or any(w in prof for w in ("knight", "guard", "veteran", "рыцар", "страж", "солдат", "наёмник"))):
+            disp = "firm"
+        else:
+            disp = "fearful"                                # обычный житель-не-боец под угрозой пугается
+        return {
+            "fearful": " ВАЖНО: тебе угрожают, а ты НЕ боец — реагируй со СТРАХОМ: дрогни, замямли, попробуй "
+                       "откупиться мелочью, потянуть время или позвать на помощь. Не строй стоическую твёрдость. "
+                       "Секрет нахрапом всё равно не выдавай.",
+            "cool":    " ВАЖНО: тебе угрожают, но ты хладнокровен и хитёр — не пугайся и не геройствуй: спокойно "
+                       "переведи стрелки, потяни, прощупай, не выдай ничего важного.",
+            "firm":    " ВАЖНО: тебе угрожают, но ты бывалый и не из пугливых — холодно осади, не уступи ни на "
+                       "грош, при нужде возьмись за оружие.",
+        }[disp]
 
     def _is_news_query(self, topic: str | None) -> bool:
         low = (topic or "").lower()

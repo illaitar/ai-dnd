@@ -49,7 +49,7 @@ def _apply_setup(s, setup: dict) -> None:
         p = s.world.position(n)
         if p and place:
             p.place_id = place
-    pr, tgt = setup.get("player_rel"), setup.get("target")
+    pr, tgt = setup.get("player_rel"), setup.get("target") or setup.get("npc")
     if pr and tgt:
         r = s.world.ecs.get(tgt, Relationships) or Relationships()
         s.world.ecs.add(tgt, r)
@@ -89,7 +89,8 @@ def run(spec: dict) -> dict:
         elif spec["kind"] == "npc_npc":
             from aidnd.content import agent as _ag
             from aidnd.content import dialogue_fsm
-            npcs = (spec.get("setup") or {}).get("npcs") or []
+            setup = spec.get("setup") or {}
+            npcs = setup.get("npcs") or []
             a = npcs[0] if npcs else None
             b = npcs[1] if len(npcs) > 1 else None
             for _ in range(int(spec.get("rounds", 6))):    # ВЕДЁМ ЗАДАННУЮ ПАРУ через FSM (не случайный амбиент)
@@ -101,13 +102,57 @@ def run(spec: dict) -> dict:
                     row = {"a": _ag._name(s.world, a), "b": _ag._name(s.world, b),
                            "phase": conv.phase, "track": conv.track,
                            "a_does": pa[0] if pa else None, "b_does": pb[0] if pb else None}
-                    if pa and pa[0] == "gossip":           # о ком и каким тоном сплетничает a
-                        c, v = _ag._strongest_opinion(s.world, a, b)
-                        row["gossip_about"] = _ag._name(s.world, c) if c else None
-                        row["tone"] = "чернит" if v < 0 else "хвалит"
+                    if pa and pa[0] == "gossip":           # слух о ТЕМЕ (приоритет) либо мнение о человеке
+                        rum = _ag.topic_rumor(s.world, a, b)
+                        if rum is not None:
+                            row["rumor_about"] = rum[0]
+                            row["rumor"] = (rum[1] or "")[:60]
+                            _ag.diffuse_rumor(s.world, b, rum[2])   # молва расползается → след. раунд иная тема
+                        else:
+                            c, v = _ag._strongest_opinion(s.world, a, b)
+                            row["gossip_about"] = _ag._name(s.world, c) if c else None
+                            row["tone"] = "чернит" if v < 0 else "хвалит"
                     if pa and pa[0] == "commission":       # реально провести сделку (оплата + мастер в работу)
                         row["commission_fired"] = _ag._commission_x(s.world, a, b)
                     tr.append(row)
+                s._tick(1)
+        elif spec["kind"] == "npc_player":                 # NPC САМ инициирует к игроку (враждебность/розыск)
+            from aidnd.content import agent as _ag
+            setup = spec.get("setup") or {}
+            npc = setup.get("npc") or (setup.get("npcs") or [None])[0]
+            place = setup.get("place")
+            if place:
+                s.npcs_here()
+                if s.world.position(npc):
+                    s.world.position(npc).place_id = place
+                s.world.position(s.player).place_id = place
+                s._road = None
+                (getattr(s.world, "transits", None) or {}).pop(npc, None)
+            _AGGR = {"threaten", "confront", "menace", "attack", "demand", "extort", "intimidate"}
+            for _ in range(int(spec.get("rounds", 4))):
+                pick = _ag.choose(s.world, npc, [s.player], player=s.player)
+                cap = pick[0] if pick else None
+                tgt = pick[1] if pick else None
+                tr.append({"npc": _ag._name(s.world, npc), "does": cap,
+                           "toward_player": tgt == s.player, "aggressive": cap in _AGGR})
+                s._tick(1)
+        elif spec["kind"] == "npc_env":                    # NPC↔ОКРУЖЕНИЕ: живёт по нуждам/времени (self-care/рутина)
+            from aidnd.content import agent as _ag
+            from aidnd.npc.integration import npc_state, tick_minds
+            setup = spec.get("setup") or {}
+            npc = setup.get("npc")
+            place = setup.get("place")
+            if place and s.world.position(npc):
+                s.world.position(npc).place_id = place
+            for _ in range(int(spec.get("rounds", 8))):
+                st = npc_state(s.world, npc)
+                pick = _ag.choose(s.world, npc, [], player=None)   # нет соседей → self-care/агенда/рутина
+                tr.append({"npc": _ag._name(s.world, npc), "does": pick[0] if pick else None,
+                           "hhmm": _ag._now_hhmm(s.world),
+                           "needs": {k: round(st.n(k), 2) for k in ("hunger", "fatigue", "social", "gear")}})
+                if pick and pick[2]:
+                    pick[2](s.world, npc, None)             # ИСПОЛНИТЬ (eat→утолить голод, rest→усталость…)
+                tick_minds(s.world, 1.0)                    # нужды растут со временем
                 s._tick(1)
     except Exception as e:  # noqa: BLE001
         tr.append({"error": f"{type(e).__name__}: {e}"})

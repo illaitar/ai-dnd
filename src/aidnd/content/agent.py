@@ -53,10 +53,13 @@ def _name(world, npc: str) -> str:
 
 
 def _strongest_opinion(world, a: str, exclude: str | None):
-    """О ком у a самое яркое мнение (для сплетни) — кроме самого a и собеседника."""
+    """О ком у a самое яркое мнение (для сплетни) — кроме самого a и собеседника, и ТОЛЬКО о ЗНАКОМЫХ."""
+    from . import acquaintance
     best, bv = None, 0.0
     for c in world.npcs():
         if c == a or c == exclude or not world.is_alive(c):
+            continue
+        if not acquaintance.acquainted(world, a, c):       # сплетничают лишь о тех, кого знают
             continue
         v = opinion(world, a, c)
         if abs(v) > abs(bv):

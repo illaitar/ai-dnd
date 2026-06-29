@@ -963,6 +963,8 @@ class GameSession:
                 return None
             self.dialogue_partner = a
             self._pc_approacher = a                       # сам подошёл → его ответ не будет «холодным незнакомцем»
+            from ..content import acquaintance
+            acquaintance.record_meeting(self.world, a, self.player)   # подошёл → знакомы лично
             # тёплая оценка + память, чтобы ОТВЕТ был согласован с подходом
             self.cognition.observe_and_appraise(a, self.player, "talk", "friendly",
                                                 "сам подошёл к игроку и завёл разговор")
@@ -1597,6 +1599,8 @@ class GameSession:
         topic = self._extract_topic(text, npc)
         self.dialogue_partner = npc
         self.world.commit("set_flag", self.player, payload={"flag": f"talked:{npc}"})  # для квестов «поговорить с …»
+        from ..content import acquaintance
+        acquaintance.record_meeting(self.world, npc, self.player)     # знакомство: NPC теперь знает игрока лично
 
         if not topic:
             # ИНИЦИАЦИЯ: NPC приветствует и сам спрашивает, что нужно — без реакции
@@ -1799,7 +1803,10 @@ class GameSession:
         subject = self._match_npc(text)
         if not subject or subject == npc or subject == self.player:
             return None
-        from ..content import agent
+        from ..content import acquaintance, agent
+        if not acquaintance.acquainted(self.world, npc, subject):     # слой знакомства: о незнакомом мнения нет
+            return {"kind": "narration", "npc": npc, "speaker": self._display(npc), "view": self.view(),
+                    "text": f"«{self._display(subject)}? Впервые слышу — не знаю такого.»"}
         aff = agent.opinion(self.world, npc, subject)
         if aff > 0.3:
             take = "Хороший человек, я ему доверяю."

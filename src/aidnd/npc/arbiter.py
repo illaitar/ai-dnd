@@ -67,6 +67,34 @@ def choose(state, ctx, rng=None, caps=None) -> tuple:
     return top[-1][0], top
 
 
+def choose_multi(state, ctxs, rng=None) -> tuple:
+    """Выбор по НЕСКОЛЬКИМ стимулам сразу (напр. self-care «tick» + социальный «meet_npc»):
+    объединить оценки (по ключу — максимум), отсечь по реалистичности, top-k, softmax-жребий.
+    → (Cap | None, shortlist)."""
+    rng = rng or random.Random()
+    best: dict = {}
+    for ctx in ctxs:
+        for cap, u in evaluate(state, ctx):
+            if cap.key not in best or u > best[cap.key][1]:
+                best[cap.key] = (cap, u)
+    merged = sorted(best.values(), key=lambda x: x[1], reverse=True)
+    top = shortlist(merged)
+    if not top:
+        return None, []
+    temp = max(0.12, state.temp)
+    us = [u for _, u in top]
+    m = max(us)
+    weights = [math.exp((u - m) / temp) for u in us]
+    total = sum(weights) or 1.0
+    r = rng.random() * total
+    acc = 0.0
+    for (cap, _u), w in zip(top, weights):
+        acc += w
+        if r <= acc:
+            return cap, top
+    return top[-1][0], top
+
+
 def distribution(state, ctx, caps=None) -> list[tuple]:
     """Вероятности выбора по shortlist (для анализа/тестов). [(key, p), ...]."""
     top = shortlist(evaluate(state, ctx, caps))

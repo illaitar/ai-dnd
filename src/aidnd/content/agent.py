@@ -135,17 +135,50 @@ SELF_COMMANDS = [
 ]
 
 
-# способность модели NPC → агентная команда + её эффект (диффузия/потепление/ссора)
-_EX = {"gossip": _gossip_x, "confront": _confront_x, "socialize": _socialize_x, "pursue_agenda": _agenda_x}
+# self-care: NPC утоляет накопленную нужду (виден как обрывок жизни города)
+def _eat_x(world, a, _b):
+    from ..npc.integration import relax_need
+    relax_need(world, a, "hunger")
+    return f"{_name(world, a)} подкрепляется."
+
+
+def _rest_x(world, a, _b):
+    from ..npc.integration import relax_need
+    relax_need(world, a, "fatigue")
+    return f"{_name(world, a)} отдыхает, клюёт носом."
+
+
+def _carouse_x(world, a, _b):
+    from ..npc.integration import relax_need
+    relax_need(world, a, "social")
+    return f"{_name(world, a)} балагурит за кружкой."
+
+
+def _work_x(world, a, _b):
+    from ..npc.integration import relax_need
+    relax_need(world, a, "purpose")
+    return f"{_name(world, a)} занят делом."
+
+
+# способность модели NPC → агентная команда + её эффект (диффузия/потепление/ссора/утоление нужды)
+_EX = {"gossip": _gossip_x, "confront": _confront_x, "socialize": _socialize_x, "pursue_agenda": _agenda_x,
+       "eat": _eat_x, "rest": _rest_x, "carouse": _carouse_x, "work": _work_x}
 _CAP2CMD = {"gossip": "gossip", "threaten": "confront", "advance_agenda": "pursue_agenda",
-            "greet": "socialize", "seek_out": "socialize"}
+            "greet": "socialize", "seek_out": "socialize", "solicit_alms": "socialize",
+            "eat": "eat", "routine_sleep": "rest", "carouse": "carouse", "routine_work": "work"}
+
+
+def _now_hhmm(world) -> int:
+    from .. import config
+    m = (world.clock.tick * config.SIM_MINUTES_PER_TICK) % (24 * 60)
+    return (m // 60) * 100 + (m % 60)
 
 
 def choose(world, a: str, peers: list[str]):
-    """Behaviour-выбор через ЕДИНЫЙ utility-арбитр модели NPC (черты + граф мнений → способность).
-    Сохраняет интерфейс (key, target|None, execute) и эффекты-диффузию. → (key, b, ex) или None."""
-    from ..npc import Context, Stimulus
-    from ..npc import choose as _arb
+    """Behaviour-выбор через ЕДИНЫЙ utility-арбитр: на тике NPC взвешивает СОЦКОНТАКТ (сплетня/ссора)
+    ПРОТИВ self-care (поесть/поспать/посидеть — по накопленным нуждам) и своей агенды. Сохраняет
+    интерфейс (cmd, target|None, ex) и эффекты-диффузию. → (cmd, b, ex) или None."""
+    from ..npc import Context, Stimulus, choose_multi
     from ..npc.integration import npc_state
     rng = random.Random(subseed(world.seed, "choose", a, len(peers)))
     active = False
@@ -154,23 +187,29 @@ def choose(world, a: str, peers: list[str]):
         active = is_active(world, a)
     except Exception:
         active = False
-    if not peers:                                         # без соседей — только своя агенда
-        return ("pursue_agenda", None, _agenda_x) if active else None
-    b = max(peers, key=lambda x: abs(opinion(world, a, x)))   # самый «яркий» сосед — точка контакта
-    aff = opinion(world, a, b)
     st = npc_state(world, a)
-    st.relations[b] = {"affinity": aff, "trust": 0.0, "fear": 0.0, "debt": 0}
     if active:
         st.agenda = st.agenda or ["замысел"]
-    if aff < -0.35:                                       # крепкая неприязнь → ссора
-        stim = Stimulus("rival_present", source=b, target=b)
-    else:
-        _c, v = _strongest_opinion(world, a, b)           # есть яркое мнение о ком-то → сочнее сплетня
-        juicy = min(1.0, abs(v)) if _c is not None else 0.15
-        stim = Stimulus("meet_npc", source=b, target=b, data={"juicy": juicy, "important": active})
-    cap, _top = _arb(st, Context(stim, world=world), rng)
-    cmd = _CAP2CMD.get(cap.key, "socialize") if cap else "socialize"
-    return cmd, (None if cmd == "pursue_agenda" else b), _EX[cmd]
+    hhmm = _now_hhmm(world)
+    ctxs = [Context(Stimulus("tick", data={"important": active}), time_hhmm=hhmm, world=world)]  # self-care/работа/агенда
+    b = None
+    if peers:
+        b = max(peers, key=lambda x: abs(opinion(world, a, x)))   # самый «яркий» сосед — точка контакта
+        aff = opinion(world, a, b)
+        st.relations[b] = {"affinity": aff, "trust": 0.0, "fear": 0.0, "debt": 0}
+        if aff < -0.35:                                   # крепкая неприязнь → ссора
+            ctxs.append(Context(Stimulus("rival_present", source=b, target=b), time_hhmm=hhmm, world=world))
+        else:
+            _c, v = _strongest_opinion(world, a, b)       # есть яркое мнение → сочнее сплетня
+            juicy = min(1.0, abs(v)) if _c is not None else 0.15
+            ctxs.append(Context(Stimulus("meet_npc", source=b, target=b,
+                                         data={"juicy": juicy, "important": active}), time_hhmm=hhmm, world=world))
+    cap, _top = choose_multi(st, ctxs, rng)
+    if not cap:
+        return None
+    cmd = _CAP2CMD.get(cap.key, "socialize")
+    peer_cmd = cmd in ("gossip", "confront", "socialize")
+    return cmd, (b if peer_cmd else None), _EX[cmd]
 
 
 def step_social(world, rounds: int = 6) -> list[dict]:

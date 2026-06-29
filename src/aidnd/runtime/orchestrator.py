@@ -979,6 +979,14 @@ class GameSession:
         elif key == "socialize":
             ex(self.world, a, b)
             self._overheard_val = f"{da} о чём-то вполголоса толкует с {db}."
+        elif key == "pursue_agenda":
+            ex(self.world, a, None)
+            self._overheard_val = f"{da} занят каким-то своим замыслом."
+        elif key in ("eat", "rest", "carouse", "work"):   # self-care: накопленная нужда взяла верх над болтовнёй
+            ex(self.world, a, None)
+            _t = {"eat": "перекусывает в сторонке", "rest": "присел передохнуть, клюёт носом",
+                  "carouse": "балагурит за кружкой", "work": "поглощён своим делом"}
+            self._overheard_val = f"{da} {_t[key]}."
         return self._overheard_val
 
     # --- «кто заметный/выделяющийся?» — выбор по значимости, нарратор озвучивает --- #

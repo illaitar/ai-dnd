@@ -42,6 +42,7 @@ def _build_places(world: World) -> None:
          ["inn", "serve", "drink", "eat", "residential"]),
         ("building:barthens_provisions", "Лавка Бартена", "market", ["shop", "work"]),
         ("building:lionshield_coster", "Львинощит Костер", "market", ["shop", "work"]),
+        ("building:smithy", "Кузница «Наковальня Фэндалина»", "market", ["smithy", "craft", "shop", "work"]),
         ("building:townmaster_hall", "Ратуша", "market", ["townhall", "work"]),
         ("building:shrine_of_luck", "Святилище Удачи", "market", ["shrine", "work"]),
         ("building:sleeping_giant", "Таверна «Спящий великан»", "outskirts",
@@ -87,6 +88,7 @@ def _build_places(world: World) -> None:
                        parent="settlement:phandalin", district="market",
                        affordances=["guild", "work"], hours=(8, 22)))
     sp.link(sq, "к гильдии", "building:adventurers_guild")
+    sp.link(sq, "к кузнице", "building:smithy")          # кузница — внекомпасный портал у площади (заказ ковки)
 
     # --- региональный слой странствий ------------------------------------- #
     # Из города «наружу» в дикие земли, оттуда — к сайтам по СТОРОНАМ СВЕТА
@@ -165,6 +167,15 @@ def _add_npc(world: World, npc_id: str, name: str, archetype: str, stat_ref: str
 
 
 def _build_named_npcs(world: World) -> None:
+    _add_npc(world, "npc:gorthok_ironhand", "Горток Железная Рука", "blacksmith", "srd:commoner",
+             race="dwarf", profession="кузнец", works_at="building:smithy",
+             lives_in="building:smithy", place="building:smithy",
+             traits=["gruff", "honest", "hardworking"], voice="говорит коротко и по делу, ворчлив",
+             aliases=["горток", "кузнец", "железная рука"],
+             knowledge=[{"fact": "телеги с рудой из шахты не приходят уже недели две", "topic": "mine",
+                         "disclosure_gate": {"trust": 0.1}},
+                        {"fact": "без хорошей руды я кую только подковы да гвозди", "topic": "trade",
+                         "disclosure_gate": {"trust": 0.05}}])
     _add_npc(world, "npc:toblen_stonehill", "Тоблен Стоунхилл", "innkeeper", "srd:commoner",
              profession="innkeeper", works_at="building:stonehill_inn",
              lives_in="building:stonehill_inn", place="building:stonehill_inn",

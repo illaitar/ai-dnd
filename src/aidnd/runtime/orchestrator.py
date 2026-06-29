@@ -1619,8 +1619,10 @@ class GameSession:
         # игрок что-то СКАЗАЛ/СПРОСИЛ → реакция с учётом отношений и гейтов
         ctx = self.cognition.retrieve(npc, topic, self.player)
         decision = self.cognition.policy(npc, "talk", action.tone, ctx, self.player)
-        if npc == getattr(self, "_pc_approacher", None) and decision.get("action") == "withhold":
-            decision = {"action": "share_info", "rationale_tags": ["approached_pc"]}   # сам подошёл → не «холодный незнакомец»
+        if decision.get("action") == "withhold":          # стонолит лишь ВРАЖДЕБНЫЙ/недоверчивый; нейтральный, с кем
+            approached = npc == getattr(self, "_pc_approacher", None)   # уже завязался разговор, — отвечает (пусть сдержанно)
+            if approached or (not self._is_hostile(npc) and getattr(rel, "trust", 0.0) > -0.15):
+                decision = {"action": "share_info", "rationale_tags": ["engaged"]}
         hooks = self.director.surface_hooks_near(npc)
         self.cognition.observe_and_appraise(npc, self.player, "talk", action.tone,
                                             f"игрок сказал: {topic[:120]}")

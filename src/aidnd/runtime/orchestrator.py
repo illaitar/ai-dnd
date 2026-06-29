@@ -520,9 +520,13 @@ class GameSession:
         text = f"{sc.descriptor}\nТы в локации «{name}»."   # лаконично: толпа/действия — чипами и нарратором, не стеной
         if p and p.alterations:                           # стойкие следы действий в локации
             text += " Следы: " + "; ".join(p.alterations) + "."
-        ov = self._social_overheard()                     # живой город: обрывок взаимодействия NPC↔NPC вокруг
-        if ov:
-            text += f"\n🗣 {ov}"
+        pro = self._proactive_npc()                       # NPC сам подошёл к игроку (П6) — приоритетнее фонового
+        if pro:
+            text += f"\n👋 {pro}"
+        else:
+            ov = self._social_overheard()                 # иначе — обрывок взаимодействия NPC↔NPC вокруг
+            if ov:
+                text += f"\n🗣 {ov}"
         g = self._city_graph()
         in_city = bool(g and place in g.door)              # город → выход на улицу есть кнопкой (exits), текстом не дублируем
         if not in_city:                                    # вне города (дикие земли/подземелье) — связи как есть
@@ -938,7 +942,7 @@ class GameSession:
         if getattr(self, "_overheard_tick", None) == tick:
             return self._overheard_val
         self._overheard_tick, self._overheard_val = tick, None
-        here = [n for n in self.npcs_here() if n != self.player and self.world.is_alive(n)]
+        here = [n for n in self.npcs_here() if n != self.player and self.world.is_alive(n) and not self._asleep(n)]
         if len(here) < 2:
             return None
         import random
@@ -976,6 +980,85 @@ class GameSession:
                   "carouse": "балагурит за кружкой", "work": "поглощён своим делом"}
             self._overheard_val = f"{da} {_t[key]}."
         return self._overheard_val
+
+    def _proactive_npc(self) -> str | None:
+        """П6: в людном месте NPC САМ подходит к ИГРОКУ (по характеру/отношению) — заговорить, предложить
+        дело, поклянчить, шепнуть сплетню или наехать. Решает арбитр модели. Кэш на тик; делает собеседником."""
+        tick = self.world.clock.tick
+        if getattr(self, "_proactive_tick", None) == tick:
+            return self._proactive_val
+        self._proactive_tick, self._proactive_val = tick, None
+        if self._road is not None or self.pending_roll is not None:
+            return None
+        here = [n for n in self.npcs_here() if n != self.player and self.world.is_alive(n)
+                and not self._asleep(n)]                  # бодрствующие рядом (и незнакомец может подсесть)
+        if not here:
+            return None
+        import random
+
+        from ..content import agent
+        from ..gen.seeds import subseed
+        from ..npc import Context, Stimulus, choose_multi
+        from ..npc.integration import npc_state
+        rng = random.Random(subseed(self.world.seed, "proactive", tick))
+        if rng.random() > 0.33:                           # не каждый ход — иначе пристают без конца
+            return None
+
+        def pull(n):                                      # самый «контактный»: общительность/амбиции/сильное мнение
+            st = npc_state(self.world, n)
+            return (st.t("sociability") + st.t("ambition") + st.t("greed") * 0.4
+                    + abs(agent.opinion(self.world, n, self.player)) * 0.6 + rng.uniform(0, 0.4))
+        weights = [(n, max(0.05, pull(n))) for n in here]   # взвешенный жребий — подходят разные, не один и тот же
+        total = sum(w for _, w in weights) or 1.0
+        r, acc, npc = rng.random() * total, 0.0, weights[-1][0]
+        for n, w in weights:
+            acc += w
+            if r <= acc:
+                npc = n
+                break
+        st = npc_state(self.world, npc, self.player)
+        rel = self.cognition.retrieve(npc, "", self.player).rel
+        st.relations[self.player] = {"affinity": getattr(rel, "affinity", 0.0),
+                                     "trust": getattr(rel, "trust", 0.0),
+                                     "fear": getattr(rel, "fear", 0.0), "debt": 0}
+        subj, v = agent._strongest_opinion(self.world, npc, self.player)
+        juicy = min(1.0, abs(v)) if subj is not None else 0.2
+        ctxs = [Context(Stimulus("meet_npc", source=self.player, target=self.player,
+                                 data={"juicy": juicy}), world=self.world)]
+        if st.t("ambition") > 0.6 or st.t("greed") > 0.6:           # деловой/амбициозный — с предложением
+            ctxs.append(Context(Stimulus("opportunity", source=self.player), world=self.world))
+        if (self.world.ecs.get(npc, Persona).profession or "") == "нищий":
+            ctxs.append(Context(Stimulus("see_rich", source=self.player), world=self.world))
+        cap, _top = choose_multi(st, ctxs, rng)
+        line = self._proactive_line(npc, cap.key, subj, v) if cap else None
+        if line:
+            self.dialogue_partner = npc                   # игрок может ответить словами
+            self._proactive_val = line
+        return self._proactive_val
+
+    def _proactive_line(self, npc: str, key: str, subject, v: float) -> str | None:
+        """Выбранная способность → как это выглядит для игрока. self-care/агенда → к игроку не подходит (None)."""
+        da = self._display_pc(npc)
+        if key in ("greet", "socialize"):
+            return f"{da} подсаживается к тебе перекинуться словом."
+        if key == "gossip" and subject is not None:
+            sub = self._display_pc(subject)
+            tone = "тепло отзывается о" if v > 0 else "перемывает кости"
+            variants = [
+                f"{da} подсаживается и вполголоса {tone} {sub} — будто проверяя, как ты отнесёшься.",
+                f"{da} ловит твой взгляд и доверительно делится мнением о {sub}.",
+                f"{da} наклоняется ближе: «Слыхал про {sub}?» — и выкладывает, что думает.",
+            ]
+            return variants[self.world.clock.tick % len(variants)]
+        if key == "seek_out":
+            return f"{da} подходит с деловым видом: похоже, у него к тебе предложение."
+        if key == "solicit_alms":
+            return f"{da} тянет к тебе ладонь: «Подайте монетку, добрый господин…»"
+        if key == "threaten":
+            return f"{da} надвигается, недобро глядя: «Чего тебе тут надо?»"
+        if key == "opine" and subject is not None:
+            return f"{da} заводит с тобой речь о {self._display_pc(subject)}."
+        return None
 
     # --- «кто заметный/выделяющийся?» — выбор по значимости, нарратор озвучивает --- #
     def _salience(self, npc: str) -> float:

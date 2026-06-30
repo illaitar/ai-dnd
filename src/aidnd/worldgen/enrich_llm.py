@@ -132,7 +132,10 @@ class LLMEnricher(Enricher):
         data = self._call(_ROOM_SYS, user)
         if not data:
             return None
-        return {"description": str(data.get("description", "")), "contents": str(data.get("contents", ""))}
+        cont = data.get("contents", "")
+        if isinstance(cont, list):
+            cont = ", ".join(str(x) for x in cont)
+        return {"description": str(data.get("description", "")), "contents": str(cont)}
 
 
 def _norm_building(d: dict) -> dict:

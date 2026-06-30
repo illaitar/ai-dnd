@@ -17,8 +17,11 @@
   .seg button.on { background:var(--acc); color:#06101f; }
   .wrap { display:flex; height:calc(100vh - 41px); }
   aside { width:320px; flex:none; overflow-y:auto; padding:12px; border-right:1px solid var(--line); background:var(--panel); }
-  main { flex:1; overflow:hidden; background:#0c0e13; position:relative; display:flex; align-items:center; justify-content:center; }
-  svg { width:100%; height:100%; }
+  main { flex:1; overflow:hidden; background:#0c0e13; position:relative; }
+  #citybg { position:absolute; inset:0; z-index:0; display:none; }
+  #citybg svg, svg#map { width:100%; height:100%; }
+  svg#map { position:absolute; inset:0; z-index:1; }
+  .sub { margin:2px 0 2px 5px; font-size:11.5px; } .sub b { color:#cfe0ff; }
   section { margin-bottom:14px; }
   h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:0 0 7px; border-bottom:1px solid var(--line); padding-bottom:4px; }
   label.row { display:flex; align-items:center; gap:7px; margin:4px 0; font-size:13px; cursor:pointer; }
@@ -39,7 +42,8 @@
   .pill { display:inline-block; background:#222a38; border-radius:4px; padding:1px 6px; margin:2px 3px 0 0; font-size:11px; }
   .hint { font-size:11px; color:var(--mut); margin:3px 0 6px; }
   /* плавающая карточка локации */
-  #card { position:absolute; top:14px; right:14px; width:262px; background:#171c25; border:1px solid #313a4c; border-radius:10px; box-shadow:0 10px 30px #0008; padding:0; }
+  #card { position:absolute; top:14px; right:14px; z-index:2; width:290px; max-height:calc(100% - 28px); overflow:auto; background:#171c25; border:1px solid #313a4c; border-radius:10px; box-shadow:0 10px 30px #0008; padding:0; }
+  #card-name { color:#c9a8ff; }
   #card.hidden { display:none; }
   .card-h { display:flex; align-items:center; gap:8px; padding:9px 11px; border-bottom:1px solid var(--line); }
   .card-h b { font-size:13px; } #card-x { margin-left:auto; cursor:pointer; color:var(--mut); }
@@ -89,6 +93,7 @@
     <section><h2>Статистика</h2><div id="stats">—</div></section>
   </aside>
   <main>
+    <div id="citybg"></div>
     <svg id="map" viewBox="0 0 980 700" preserveAspectRatio="xMidYMid meet"></svg>
     <div id="card" class="hidden">
       <div class="card-h"><b id="card-name"></b><span id="card-x">✕</span></div>
@@ -104,7 +109,7 @@ function E(t, a, p) { const e = document.createElementNS(NS, t); for (const k in
 const hue = id => (id * 47) % 360;
 const WIND = { "С":"север","СВ":"северо-восток","В":"восток","ЮВ":"юго-восток","Ю":"юг","ЮЗ":"юго-запад","З":"запад","СЗ":"северо-запад" };
 const LM = { river:"у реки", wall:"у стены", gate:"у ворот", bridge:"у моста" };
-const ROOFS = ["#b08d57","#9c7a4d","#8f6f5d","#7e7468","#a6794a","#946b52"];
+const SRV = { eat:"еда", drink:"выпивка", lodging:"ночлег", shop:"лавка", commission:"заказ", heal:"лечение", pray:"молитва", store:"склад" };
 
 const LAYERS = [
   ["walls","Стены","#9a6",1],["river","Река","#39f",1],["edges","Дороги (рёбра)","#7a8499",1],
@@ -114,7 +119,7 @@ const LAYERS = [
 ];
 const PRESETS = { debug: LAYERS.map(l => l[0]), final: ["walls","river","edges","route","keys"] };
 
-let DATA = null, PARAMS = null, VIEW = "graph", NX = {};
+let DATA = null, PARAMS = null, VIEW = "graph", NX = {}, CITYSVG = {};
 let routeA = null, routeB = null, lastRoute = null, cardRouteId = null, cardLabel = "", selBuilding = null;
 
 function params() { return { seed:+$("p-seed").value, key_buildings:+$("p-key").value, river:$("p-river").checked, walls:$("p-walls").checked, segment:+$("p-seg").value||0 }; }
@@ -151,8 +156,16 @@ function setView(v) {
 function render() {
   const svg = $("map"); svg.innerHTML = "";
   svg.setAttribute("viewBox", `0 0 ${DATA.size.w} ${DATA.size.h}`);
-  (VIEW === "city" ? renderCity : renderGraph)(svg);
+  if (VIEW === "city") { $("citybg").style.display = "block"; ensureCitySvg(); renderCity(svg); }
+  else { $("citybg").style.display = "none"; renderGraph(svg); }
   if (lastRoute) highlightRoute(lastRoute);
+}
+async function ensureCitySvg() {
+  const k = qs(PARAMS);
+  if (CITYSVG[k]) { $("citybg").innerHTML = CITYSVG[k]; return; }
+  $("citybg").innerHTML = "<div style='color:#8b96ab;padding:22px'>рендер города…</div>";
+  const d = await fetch("/api/citydebug/citysvg?" + k).then(r => r.json());
+  CITYSVG[k] = d.svg; if (VIEW === "city") $("citybg").innerHTML = d.svg;
 }
 
 function renderGraph(svg) {
@@ -171,26 +184,23 @@ function renderGraph(svg) {
     else if (n.kind === "interior") E("rect", { x: n.x - 2.5, y: n.y - 2.5, width: 5, height: 5, fill: "#c46bff", "fill-opacity": .9 }, g.interiors);
   }
   for (const kb of DATA.key_buildings) {
-    clickable(E("circle", { cx: kb.x, cy: kb.y, r: 5.5, fill: "#ff5050", stroke: "#fff", "stroke-width": 1.5 }, g.keys), kb.node, kb.id, kb.id, kb.name);
-    E("text", { x: kb.x + 8, y: kb.y + 4, fill: "#ffd0d0", "font-size": 11 }, g.keys).textContent = kb.name;
+    const c = E("circle", { cx: kb.x, cy: kb.y, r: 5.5, fill: "#a855f7", stroke: "#fff", "stroke-width": 1.5 }, g.keys);
+    c.style.cursor = "pointer"; c.onclick = ev => { ev.stopPropagation(); openBuilding(kb.id); };
+    E("text", { x: kb.x + 8, y: kb.y + 4, fill: "#e8d0ff", "font-size": 11 }, g.keys).textContent = kb.name;
   }
   applyToggles();
 }
 
 function renderCity(svg) {
-  E("g", { id: "L-route" }, svg);                         // под-слой для маршрута (заполнит highlightRoute)
-  const wards = E("g", {}, svg), water = E("g", {}, svg), roads = E("g", {}, svg), houses = E("g", {}, svg), marks = E("g", {}, svg);
-  if (DATA.walls.length) {
-    E("polygon", { points: DATA.walls.map(p => p.join(",")).join(" "), fill: "rgba(150,140,110,.05)", stroke: "#8a8170", "stroke-width": 5, "stroke-linejoin": "round" }, wards);
+  E("g", { id: "L-route" }, svg);                         // под-слой маршрута (заполнит highlightRoute)
+  const hot = E("g", {}, svg), marks = E("g", {}, svg);
+  for (const h of DATA.houses) {                          // кликабельные хот-споты по ВСЕМ домам поверх рендера
+    const c = E("circle", { cx: h.x, cy: h.y, r: 4, fill: "transparent" }, hot);
+    c.style.cursor = "pointer"; c.onclick = ev => { ev.stopPropagation(); openBuilding(h.id); };
   }
-  if (DATA.river.pts.length) E("polyline", { points: DATA.river.pts.map(p => p.join(",")).join(" "), fill: "none", stroke: "#33597f", "stroke-width": (DATA.river.w || 8) + 2, "stroke-opacity": .85, "stroke-linecap": "round", "stroke-linejoin": "round" }, water);
-  for (const e of DATA.edges) { if (e.kind === "door" || e.kind === "internal") continue; const a = NX[e.a], b = NX[e.b];
-    E("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: e.bridge ? "#caa06a" : "#4b5365", "stroke-width": e.bridge ? 4 : 1.6, "stroke-linecap": "round" }, roads); }
-  for (const h of DATA.houses) { const s = 3.4, rot = (h.node * 37) % 50 - 25;
-    E("rect", { x: h.x - s / 2, y: h.y - s / 2, width: s, height: s, rx: .6, fill: ROOFS[h.node % ROOFS.length], "fill-opacity": .95, transform: `rotate(${rot} ${h.x} ${h.y})` }, houses); }
-  for (const n of DATA.nodes) if (n.kind === "gate") E("rect", { x: n.x - 4, y: n.y - 4, width: 8, height: 8, fill: "#6fae6a", stroke: "#1a2a18" }, marks);
-  for (const kb of DATA.key_buildings) {
-    clickable(E("circle", { cx: kb.x, cy: kb.y, r: 6, fill: "#e34b4b", stroke: "#fff", "stroke-width": 2 }, marks), kb.node, kb.id, kb.id, kb.name);
+  for (const kb of DATA.key_buildings) {                  // ключевые — монотонно-фиолетовая вывеска
+    const c = E("circle", { cx: kb.x, cy: kb.y, r: 6, fill: "#a855f7", stroke: "#fff", "stroke-width": 2 }, marks);
+    c.style.cursor = "pointer"; c.onclick = ev => { ev.stopPropagation(); openBuilding(kb.id); };
     const t = E("text", { x: kb.x + 9, y: kb.y + 4, fill: "#fff", "font-size": 12, "font-weight": 600, "paint-order": "stroke", stroke: "#0009", "stroke-width": 3 }, marks); t.textContent = kb.name;
   }
 }
@@ -210,6 +220,24 @@ async function openCard(locNode, routeId, buildingId, label) {
   if (d.nearby && d.nearby.length) b += `<div class="cl">рядом: ${d.nearby.map(n => n.name + " <span class='g'>(" + n.dist + "px)</span>").join(", ")}</div>`;
   $("card-body").innerHTML = b;
   $("card").classList.remove("hidden");
+}
+
+async function openBuilding(id) {
+  cardRouteId = id; selBuilding = id; $("sel").textContent = id;
+  $("card-name").textContent = "…"; $("card-body").innerHTML = "<span class='g'>генерирую описание…</span>"; $("card").classList.remove("hidden");
+  const d = await fetch("/api/citydebug/building?" + qs(PARAMS) + "&bid=" + encodeURIComponent(id)).then(r => r.json());
+  if (d.error) { $("card-body").innerHTML = d.error; return; }
+  const e = d.enrichment || {};
+  cardLabel = e.name || d.sign || (d.is_key ? id : "Дом");
+  $("card-name").textContent = cardLabel + (e.type ? " · " + e.type : "") + (d.is_key ? " 🪧" : "");
+  let b = "";
+  if (e.services && e.services.length) b += `<div class="cl">${e.services.map(s => `<span class="pill">${SRV[s] || s}</span>`).join("")}</div>`;
+  if (e.description) b += `<div class="cl">${e.description}</div>`;
+  if (e.notable) b += `<div class="cl">🏷 <span class="g">примечательное:</span> ${e.notable}</div>`;
+  if (e.secret) b += `<div class="cl">🔒 <span class="g">тайна:</span> ${e.secret.hint || ""}${e.secret.room ? " <span class='g'>(" + e.secret.room + ")</span>" : ""}</div>`;
+  if (e.sub_rooms && e.sub_rooms.length) b += `<div class="cl"><span class="g">помещения:</span>${e.sub_rooms.map(s => `<div class="sub">└ <b>${s.name}</b> <span class="g">[${s.kind}/${s.access}]</span> ${s.description || ""}${s.contents ? " <span class='g'>· " + s.contents + "</span>" : ""}</div>`).join("")}</div>`;
+  b += `<div class="cl g" style="margin-top:6px;border-top:1px solid #2a3040;padding-top:5px">узел ${d.node} · ${d.kind}${d.landmarks && d.landmarks.length ? " · " + d.landmarks.map(t => LM[t] || t).join(", ") : ""}</div>`;
+  $("card-body").innerHTML = b;
 }
 
 function setRoutePoint(slot) {

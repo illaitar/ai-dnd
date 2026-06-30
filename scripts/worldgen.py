@@ -57,10 +57,16 @@ def main() -> None:
         conc = args.concurrency or mgr.enrich_concurrency()
     print(f"насыщение: до {conc} промптов одновременно.")
 
+    _phase = [""]
+
     def on_prog(s):
+        if s["phase"] != _phase[0]:               # новая фаза — с новой строки
+            if _phase[0]:
+                print()
+            _phase[0] = s["phase"]
         bar = "#" * int(20 * s["pct"] / 100)
-        print(f"\r  [{bar:<20}] {s['done']}/{s['total']} зданий · батч {s['batch']}/{s['batches_total']}"
-              f" · {s['pct']}%   ", end="", flush=True)
+        print(f"\r  {s['phase']:<14} [{bar:<20}] {s['done']}/{s['total']} · "
+              f"батч {s['batch']}/{s['batches_total']} · {s['pct']}%   ", end="", flush=True)
 
     enr = enrich_city(city, args.enrich, enricher, max_concurrent=conc, on_progress=on_prog)
     print()

@@ -8,8 +8,8 @@
 from __future__ import annotations
 
 from .enrich_llm import BuildingCtx, Enricher, LLMEnricher, StubEnricher
-from .enrichment import Building, Enrichment, enrich_city
+from .enrichment import Building, Enrichment, SubRoom, enrich_city
 from .progress import Progress
 
-__all__ = ["enrich_city", "Enrichment", "Building", "Enricher", "LLMEnricher",
+__all__ = ["enrich_city", "Enrichment", "Building", "SubRoom", "Enricher", "LLMEnricher",
            "StubEnricher", "BuildingCtx", "Progress"]

@@ -1,5 +1,5 @@
-"""Тесты слоя насыщения (через StubEnricher — без LLM): scope keys/all, прогресс-батчи,
-структура слоя, детерминизм."""
+"""Тесты слоя насыщения (через StubEnricher — без LLM): двухфазность (здания → очередь суб-помещений),
+богатые поля, отсутствие вложенности суб-помещений, прогресс-батчи по фазам, детерминизм."""
 
 from __future__ import annotations
 
@@ -17,9 +17,10 @@ def city():
 
 
 # ----------------------------------------------------------------- прогресс - #
-def test_progress_batches():
-    p = Progress(total=50, max_concurrent=8)
-    assert p.batches_total == math.ceil(50 / 8) == 7    # здания / макс одновременных
+def test_progress_batches_and_label():
+    p = Progress(total=50, max_concurrent=8, label="здания")
+    assert p.batches_total == math.ceil(50 / 8) == 7
+    assert p.snapshot()["phase"] == "здания"
     for _ in range(50):
         p.tick(1)
     s = p.snapshot()
@@ -29,38 +30,62 @@ def test_progress_batches():
 def test_progress_callback_fires():
     seen = []
     p = Progress(total=4, max_concurrent=2, on_update=lambda s: seen.append(s["done"]))
-    p.tick(); p.tick(); p.tick(); p.tick()
+    for _ in range(4):
+        p.tick()
     assert seen == [1, 2, 3, 4]
 
 
-# -------------------------------------------------------------- насыщение --- #
-def test_enrich_keys_only(city):
+# -------------------------------------------------------- богатые поля ------ #
+def test_building_rich_fields(city):
     enr = enrich_city(city, "keys", StubEnricher(), max_concurrent=4)
-    assert set(enr.buildings) == set(city.key_buildings)         # ровно ключевые
+    assert set(enr.buildings) == set(city.key_buildings)
     for b in enr.buildings.values():
         assert b.description and b.node >= 0
-    assert enr.progress["done"] == len(city.key_buildings)
-    assert enr.progress["batches_total"] == math.ceil(len(city.key_buildings) / 4)
+        assert b.type                                  # тип закреплён
+        assert isinstance(b.services, list)            # услуги — список
+    # значимые здания: есть услуги, хозяин, тайна
+    assert any(b.services and b.keeper and b.secret for b in enr.buildings.values())
 
 
+# ------------------------------------------ двухфазность: суб-помещения ----- #
+def test_subrooms_generated_in_phase_two(city):
+    enr = enrich_city(city, "keys", StubEnricher(), max_concurrent=4)
+    subs = [s for b in enr.buildings.values() for s in b.sub_rooms]
+    assert subs                                        # суб-помещения есть
+    for s in subs:
+        assert s.kind and s.access                     # из стаба (фаза 1)
+        assert s.description and s.contents             # заполнено в фазе 2
+        assert s.parent in enr.buildings               # привязка к родителю
+
+
+def test_subrooms_have_no_nested_subrooms(city):
+    enr = enrich_city(city, "keys", StubEnricher(), max_concurrent=4)
+    for b in enr.buildings.values():
+        for s in b.sub_rooms:
+            assert not hasattr(s, "sub_rooms")          # у суб-помещения нет своих суб-помещений
+
+
+def test_progress_two_phases(city):
+    enr = enrich_city(city, "keys", StubEnricher(), max_concurrent=4)
+    assert enr.progress["buildings"]["phase"] == "здания"
+    assert enr.progress["buildings"]["done"] == len(city.key_buildings)
+    assert enr.progress["subrooms"]["phase"] == "суб-помещения"
+    n_subs = sum(len(b.sub_rooms) for b in enr.buildings.values())
+    assert enr.progress["subrooms"]["done"] == n_subs
+
+
+# -------------------------------------------------------------- scope all --- #
 def test_enrich_all_buildings(city):
     enr = enrich_city(city, "all", StubEnricher(), max_concurrent=16)
     expected = len(city.key_buildings) + sum(1 for h in city.houses.values() if not h.building)
-    assert len(enr.buildings) == expected                       # ключевые + все дома
-    assert enr.progress["total"] == expected
-    # значимые здания получают доп-помещение (подвал), дома — нет
-    assert any(b.sub_rooms for b in enr.buildings.values())
+    assert len(enr.buildings) == expected
+    assert enr.progress["buildings"]["total"] == expected
 
 
-def test_enrichment_serializable(city):
-    enr = enrich_city(city, "keys", StubEnricher(), max_concurrent=8)
+def test_enrichment_serializable_and_deterministic(city):
     import json
-    d = enr.to_dict()
-    json.dumps(d, ensure_ascii=False)                           # сериализуемо
-    assert d["scope"] == "keys" and d["buildings"]
-
-
-def test_enrich_deterministic_with_stub(city):
-    a = enrich_city(city, "keys", StubEnricher(), max_concurrent=8).to_dict()["buildings"]
-    b = enrich_city(city, "keys", StubEnricher(), max_concurrent=8).to_dict()["buildings"]
-    assert a == b
+    a = enrich_city(city, "keys", StubEnricher(), max_concurrent=8).to_dict()
+    b = enrich_city(city, "keys", StubEnricher(), max_concurrent=8).to_dict()
+    json.dumps(a, ensure_ascii=False)
+    assert a["buildings"] == b["buildings"]
+    assert a["scope"] == "keys"

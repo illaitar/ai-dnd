@@ -64,8 +64,8 @@
   <aside>
     <section>
       <h2>Генерация</h2>
-      <label class="row">seed <input type="number" id="p-seed" value="7"></label>
-      <label class="row">ключевых зданий <input type="number" id="p-key" value="10" min="0" max="40"></label>
+      <label class="row">seed <input type="number" id="p-seed" value="1"></label>
+      <label class="row">ключевых зданий <input type="number" id="p-key" value="12" min="0" max="40"></label>
       <label class="row">отрезок (px, 0=авто) <input type="number" id="p-seg" value="0" min="0" max="80"></label>
       <label class="row"><input type="checkbox" id="p-river" checked> река (мосты)</label>
       <label class="row"><input type="checkbox" id="p-walls" checked> стены (ворота)</label>
@@ -224,19 +224,29 @@ async function openCard(locNode, routeId, buildingId, label) {
 
 async function openBuilding(id) {
   cardRouteId = id; selBuilding = id; $("sel").textContent = id;
-  $("card-name").textContent = "…"; $("card-body").innerHTML = "<span class='g'>генерирую описание…</span>"; $("card").classList.remove("hidden");
+  $("card-name").textContent = "…"; $("card-body").innerHTML = "<span class='g'>загрузка…</span>"; $("card").classList.remove("hidden");
   const d = await fetch("/api/citydebug/building?" + qs(PARAMS) + "&bid=" + encodeURIComponent(id)).then(r => r.json());
   if (d.error) { $("card-body").innerHTML = d.error; return; }
-  const e = d.enrichment || {};
-  cardLabel = e.name || d.sign || (d.is_key ? id : "Дом");
+  const e = d.data || {};
+  cardLabel = d.sign || e.type || (d.is_key ? id : "Дом");
   $("card-name").textContent = cardLabel + (e.type ? " · " + e.type : "") + (d.is_key ? " 🪧" : "");
   let b = "";
+  const meta = [e.tier, e.size, e.condition, e.age, e.lighting, e.foot_traffic].filter(Boolean);
+  if (meta.length) b += `<div class="cl g">${meta.join(" · ")}</div>`;
+  if (e.materials && (e.materials.walls || e.materials.roof)) b += `<div class="cl"><span class="g">материалы:</span> ${[e.materials.walls, e.materials.roof].filter(Boolean).join(" / ")}</div>`;
   if (e.services && e.services.length) b += `<div class="cl">${e.services.map(s => `<span class="pill">${SRV[s] || s}</span>`).join("")}</div>`;
-  if (e.description) b += `<div class="cl">${e.description}</div>`;
-  if (e.notable) b += `<div class="cl">🏷 <span class="g">примечательное:</span> ${e.notable}</div>`;
-  if (e.secret) b += `<div class="cl">🔒 <span class="g">тайна:</span> ${e.secret.hint || ""}${e.secret.room ? " <span class='g'>(" + e.secret.room + ")</span>" : ""}</div>`;
-  if (e.sub_rooms && e.sub_rooms.length) b += `<div class="cl"><span class="g">помещения:</span>${e.sub_rooms.map(s => `<div class="sub">└ <b>${s.name}</b> <span class="g">[${s.kind}/${s.access}]</span> ${s.description || ""}${s.contents ? " <span class='g'>· " + s.contents + "</span>" : ""}</div>`).join("")}</div>`;
-  b += `<div class="cl g" style="margin-top:6px;border-top:1px solid #2a3040;padding-top:5px">узел ${d.node} · ${d.kind}${d.landmarks && d.landmarks.length ? " · " + d.landmarks.map(t => LM[t] || t).join(", ") : ""}</div>`;
+  if (e.wares && e.wares.length) b += `<div class="cl"><span class="g">товар:</span> ${e.wares.join(", ")}</div>`;
+  if (e.features && e.features.length) b += `<div class="cl">${e.features.map(x => `<span class="pill">${x}</span>`).join("")}</div>`;
+  if (e.smells && e.smells.length) b += `<div class="cl g">пахнет: ${e.smells.join(", ")}</div>`;
+  if (e.sounds && e.sounds.length) b += `<div class="cl g">слышно: ${e.sounds.join(", ")}</div>`;
+  const soc = [e.occupants_kind, e.prosperity, e.reputation, e.hours].filter(Boolean);
+  if (soc.length) b += `<div class="cl g">${soc.join(" · ")}</div>`;
+  if (e.notable) b += `<div class="cl">🏷 ${e.notable}</div>`;
+  if (e.secret) b += `<div class="cl">🔒 <span class="g">тайна:</span> ${e.secret.what}${e.secret.where ? " (" + e.secret.where + ")" : ""}${e.secret.gate ? " <span class='g'>· " + e.secret.gate + "</span>" : ""}</div>`;
+  if (e.valuables && e.valuables.length) b += `<div class="cl">💰 ${e.valuables.join(", ")}</div>`;
+  if (e.rumors && e.rumors.length) b += `<div class="cl g">слухи: ${e.rumors.join("; ")}</div>`;
+  if (e.sub_rooms && e.sub_rooms.length) b += `<div class="cl"><span class="g">помещения:</span>${e.sub_rooms.map(s => `<div class="sub">└ <b>${s.name}</b> <span class="g">[${s.kind}/${s.access}]</span>${s.features && s.features.length ? " " + s.features.join(", ") : ""}${s.contents && s.contents.length ? " <span class='g'>· " + s.contents.join(", ") + "</span>" : ""}</div>`).join("")}</div>`;
+  b += `<div class="cl g" style="margin-top:6px;border-top:1px solid #2a3040;padding-top:5px">узел ${d.node} · ${d.kind}${d.landmarks && d.landmarks.length ? " · " + d.landmarks.map(t => LM[t] || t).join(", ") : ""} · ${d.world ? "из БД мира " + d.world : "сгенерено"}</div>`;
   $("card-body").innerHTML = b;
 }
 

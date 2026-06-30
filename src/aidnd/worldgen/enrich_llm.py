@@ -1,13 +1,10 @@
 """Модуль использования LLM для насыщения локаций — ОТДЕЛЬНЫЙ от скрипта генерации.
 
-Два промпта (двухфазно):
-  describe_building(ctx) — богатый JSON здания; суб-помещения объявляет СТАБАМИ (имя/тип/доступ,
-    без описаний) → они уходят в очередь на отдельную генерацию;
-  describe_subroom(parent, stub) — ДРУГОЙ промпт: описывает одно суб-помещение С КОНТЕКСТОМ здания.
-    У суб-помещения своих суб-помещений нет.
+Описание здания = ФАКТШИТ ХАРАКТЕРИСТИК (теги/энумы/короткие фразы), НЕ проза: прозу нарратор
+соберёт в рантайме из этих фактов. Один вызов на здание (суб-помещения инлайн). Обезличенно —
+людей не выдумываем (NPC отдельным пассом), роли — в occupants_kind.
 
-`LLMEnricher` — реальный путь (роль location_writer, свободная проза в JSON-полях).
-`StubEnricher` — детерминированная заглушка (офлайн / тесты / dry-run).
+LLMEnricher — реальный путь; StubEnricher — детерминированная заглушка (офлайн/тесты).
 """
 
 from __future__ import annotations
@@ -17,13 +14,20 @@ import re
 from dataclasses import dataclass, field
 
 SERVICES = ("eat", "drink", "lodging", "shop", "commission", "heal", "pray", "store")
+TIERS = ("poor", "modest", "comfortable", "wealthy")
+SIZES = ("small", "medium", "large")
+AGES = ("new", "established", "old", "ancient")
+CONDITIONS = ("pristine", "sound", "worn", "dilapidated")
+LIGHTING = ("dark", "dim", "firelit", "bright")
+TRAFFIC = ("quiet", "moderate", "busy")
+PROSPERITY = ("struggling", "stable", "thriving")
+REPUTATION = ("respected", "neutral", "dubious", "shady")
 ROOM_KINDS = ("cellar", "backroom", "attic", "quarters", "hidden")
 ROOM_ACCESS = ("public", "staff", "locked", "hidden")
 
 
 @dataclass
 class BuildingCtx:
-    """Что слой графа знает о здании-слоте; из этого LLM сочиняет облик/функцию/доп-помещения."""
     id: str
     name_hint: str
     role_hint: str
@@ -32,28 +36,21 @@ class BuildingCtx:
 
 
 _BUILD_SYS = (
-    "Ты — генератор зданий для тёмно-фэнтезийного фронтирного городка (D&D, Фэндалин). "
-    "По краткой подсказке придумай ЖИВОЕ, конкретное здание. ОПИСЫВАЙ САМО МЕСТО, ОБЕЗЛИЧЕННО: "
-    "НЕ придумывай и НЕ называй людей (хозяев, работников, жильцов) — персонажи добавятся отдельно. "
-    "Помещения называй по функции (Кухня, Кладовая, Жилая комната), не по людям. "
-    "Верни ТОЛЬКО JSON (без markdown), поля:\n"
-    "name — имя/вывеска места (без имён людей);\n"
-    "type — тип (таверна/кузница/лавка/храм/усадьба/склад/жилой дом…);\n"
-    "services — массив из [eat, drink, lodging, shop, commission, heal, pray, store]: что тут можно делать;\n"
-    "notable — одна примечательная деталь МЕСТА (трофей, странность; без людей);\n"
-    "secret — {hint, room} тайна места или null;\n"
-    "description — 2-4 предложения живой прозой про место: облик, атмосфера, звуки-запахи (без людей);\n"
-    "sub_rooms — массив доп-помещений ТОЛЬКО как заявки: [{name, kind:(cellar|backroom|attic|quarters|hidden), "
-    "access:(public|staff|locked|hidden)}], БЕЗ описаний; 0-4 шт (у жилого дома обычно 0-1). "
-    "Не выдумывай несуществующих фактов мира."
-)
-
-_ROOM_SYS = (
-    "Ты описываешь ОДНО под-помещение ВНУТРИ заданного здания, в согласии с ним. ОБЕЗЛИЧЕННО: "
-    "опиши само помещение, БЕЗ людей и имён (персонажи добавятся отдельно). "
-    "Верни ТОЛЬКО JSON (без markdown): description — 1-2 предложения живой прозой про помещение; "
-    "contents — что внутри (предметы/мебель/тайник/«пусто»). "
-    "У под-помещения НЕТ собственных под-помещений — не упоминай их."
+    "Ты — генератор ХАРАКТЕРИСТИК зданий для тёмно-фэнтезийного фронтирного городка (D&D, Фэндалин). "
+    "По краткой подсказке верни ТОЛЬКО JSON-фактшит — КОРОТКО, теги/энумы/короткие фразы, БЕЗ прозы и "
+    "абзацев-описаний (прозу соберёт нарратор). ОБЕЗЛИЧЕННО: не выдумывай и не называй людей (NPC отдельно), "
+    "роли — в occupants_kind. Поля:\n"
+    "type — тип; tier (poor|modest|comfortable|wealthy); size (small|medium|large); floors (число 1-3); "
+    "age (new|established|old|ancient); condition (pristine|sound|worn|dilapidated); "
+    "materials {walls, roof}; features (массив коротких факт-тегов: дверь/очаг/балки/ставни…); "
+    "smells (массив); sounds (массив); lighting (dark|dim|firelit|bright); "
+    "services (массив из [eat,drink,lodging,shop,commission,heal,pray,store]; ПУСТО для жилого дома); "
+    "wares (массив товаров — для лавок); hours (короткая фраза); foot_traffic (quiet|moderate|busy); "
+    "occupants_kind (роли без имён); prosperity (struggling|stable|thriving); "
+    "reputation (respected|neutral|dubious|shady); notable (одна короткая деталь места); "
+    "secret ({what, where, gate} или null); valuables (массив — что украсть); rumors (массив коротких зацепок); "
+    "sub_rooms (массив {name, kind:(cellar|backroom|attic|quarters|hidden), access:(public|staff|locked|hidden), "
+    "features:[...], contents:[...]}; 0-4, у жилого дома 0-1)."
 )
 
 
@@ -73,82 +70,90 @@ def _parse_json(text: str | None) -> dict | None:
     return None
 
 
-class Enricher:
-    """Интерфейс насыщения: здание (фаза 1) и суб-помещение (фаза 2)."""
-
-    def describe_building(self, ctx: BuildingCtx) -> dict | None:
-        raise NotImplementedError
-
-    def describe_subroom(self, parent: dict, stub: dict) -> dict | None:
-        raise NotImplementedError
+def _enum(v, allowed, default):
+    return v if v in allowed else default
 
 
-class StubEnricher(Enricher):
-    """Без LLM: детерминированный фейк. Для офлайна/тестов/dry-run."""
-
-    def describe_building(self, ctx: BuildingCtx) -> dict:
-        sig = "значим" in ctx.role_hint
-        where = ", ".join(ctx.landmarks) if ctx.landmarks else "в глубине квартала"
-        return {
-            "name": ctx.name_hint, "type": ctx.name_hint.lower(),
-            "services": (["eat", "drink"] if sig else []),
-            "notable": "примечательная деталь (заглушка)",
-            "secret": ({"hint": "тайник под полом", "room": "Подвал"} if sig else None),
-            "description": f"{ctx.name_hint}. {ctx.role_hint.capitalize()}, {where}. (заглушка)",
-            "sub_rooms": ([{"name": "Подвал", "kind": "cellar", "access": "locked"}] if sig else []),
-        }
-
-    def describe_subroom(self, parent: dict, stub: dict) -> dict:
-        return {"description": f"{stub.get('name', 'Помещение')} в «{parent.get('name', '')}». (заглушка)",
-                "contents": "бочки, пыль"}
-
-
-class LLMEnricher(Enricher):
-    """Реальный путь: роль location_writer, свободная проза в JSON-полях."""
-
-    def __init__(self, manager):
-        self.manager = manager
-
-    def _call(self, system: str, user: str) -> dict | None:
-        if not self.manager.available():
-            return None
-        resp = self.manager.call("location_writer",
-                                 [{"role": "system", "content": system},
-                                  {"role": "user", "content": user}],
-                                 options={"temperature": 0.7})
-        return _parse_json(resp.get("content") if resp else None)
-
-    def describe_building(self, ctx: BuildingCtx) -> dict | None:
-        user = (f"Здание-слот: подсказка типа «{ctx.name_hint}», {ctx.role_hint}; "
-                f"ориентиры: {', '.join(ctx.landmarks) or 'нет'}; мир: {ctx.region}.")
-        data = self._call(_BUILD_SYS, user)
-        return _norm_building(data) if data else None
-
-    def describe_subroom(self, parent: dict, stub: dict) -> dict | None:
-        user = (f"Здание «{parent.get('name', '')}» ({parent.get('type', '')}): "
-                f"{parent.get('description', '')}\n"
-                f"Опиши его под-помещение «{stub.get('name', '')}» "
-                f"(тип {stub.get('kind', '')}, доступ {stub.get('access', '')}).")
-        data = self._call(_ROOM_SYS, user)
-        if not data:
-            return None
-        cont = data.get("contents", "")
-        if isinstance(cont, list):
-            cont = ", ".join(str(x) for x in cont)
-        return {"description": str(data.get("description", "")), "contents": str(cont)}
+def _list(v):
+    if isinstance(v, list):
+        return [str(x).strip() for x in v if str(x).strip()]
+    if isinstance(v, str) and v.strip():
+        return [v.strip()]
+    return []
 
 
 def _norm_building(d: dict) -> dict:
-    """Привести вывод модели к ожидаемой форме (терпимо к пропускам/мусору)."""
-    services = [s for s in (d.get("services") or []) if s in SERVICES]
     subs = []
     for s in (d.get("sub_rooms") or [])[:4]:
         if not isinstance(s, dict) or not s.get("name"):
             continue
         subs.append({"name": str(s["name"]).strip(),
-                     "kind": s.get("kind") if s.get("kind") in ROOM_KINDS else "backroom",
-                     "access": s.get("access") if s.get("access") in ROOM_ACCESS else "public"})
-    secret = d.get("secret") if isinstance(d.get("secret"), dict) and d["secret"].get("hint") else None
-    return {"name": str(d.get("name") or "").strip(), "type": str(d.get("type") or "").strip(),
-            "services": services, "notable": str(d.get("notable") or "").strip(),
-            "secret": secret, "description": str(d.get("description") or "").strip(), "sub_rooms": subs}
+                     "kind": _enum(s.get("kind"), ROOM_KINDS, "backroom"),
+                     "access": _enum(s.get("access"), ROOM_ACCESS, "public"),
+                     "features": _list(s.get("features")), "contents": _list(s.get("contents"))})
+    mat = d.get("materials") if isinstance(d.get("materials"), dict) else {}
+    secret = d.get("secret") if isinstance(d.get("secret"), dict) and d["secret"].get("what") else None
+    try:
+        floors = max(1, min(4, int(d.get("floors", 1))))
+    except (TypeError, ValueError):
+        floors = 1
+    return {
+        "type": str(d.get("type") or "").strip(),
+        "tier": _enum(d.get("tier"), TIERS, "modest"), "size": _enum(d.get("size"), SIZES, "small"),
+        "floors": floors, "age": _enum(d.get("age"), AGES, "established"),
+        "condition": _enum(d.get("condition"), CONDITIONS, "sound"),
+        "materials": {"walls": str(mat.get("walls", "") or ""), "roof": str(mat.get("roof", "") or "")},
+        "features": _list(d.get("features")), "smells": _list(d.get("smells")), "sounds": _list(d.get("sounds")),
+        "lighting": _enum(d.get("lighting"), LIGHTING, "dim"),
+        "services": [s for s in _list(d.get("services")) if s in SERVICES],
+        "wares": _list(d.get("wares")), "hours": str(d.get("hours") or "").strip(),
+        "foot_traffic": _enum(d.get("foot_traffic"), TRAFFIC, "moderate"),
+        "occupants_kind": str(d.get("occupants_kind") or "").strip(),
+        "prosperity": _enum(d.get("prosperity"), PROSPERITY, "stable"),
+        "reputation": _enum(d.get("reputation"), REPUTATION, "neutral"),
+        "notable": str(d.get("notable") or "").strip(),
+        "secret": ({"what": str(secret.get("what", "")), "where": str(secret.get("where", "")),
+                    "gate": str(secret.get("gate", ""))} if secret else None),
+        "valuables": _list(d.get("valuables")), "rumors": _list(d.get("rumors")), "sub_rooms": subs,
+    }
+
+
+class Enricher:
+    def describe_building(self, ctx: BuildingCtx) -> dict | None:
+        raise NotImplementedError
+
+
+class StubEnricher(Enricher):
+    """Без LLM: детерминированный фактшит. Для офлайна/тестов/dry-run."""
+
+    def describe_building(self, ctx: BuildingCtx) -> dict:
+        sig = "значим" in ctx.role_hint
+        return _norm_building({
+            "type": ctx.name_hint.lower(), "tier": "modest", "size": "small",
+            "condition": "sound", "materials": {"walls": "брёвна", "roof": "солома"},
+            "features": ["низкая дверь", "ставни"], "smells": ["дым"], "sounds": ["тишина"],
+            "services": (["eat", "drink"] if sig else []),
+            "occupants_kind": ("хозяин и слуга" if sig else "семья горожан"),
+            "notable": "примечательная деталь (заглушка)",
+            "secret": ({"what": "тайник под полом", "where": "подвал", "gate": "доверие"} if sig else None),
+            "sub_rooms": ([{"name": "Подвал", "kind": "cellar", "access": "locked",
+                            "features": ["бочки"], "contents": ["припасы"]}] if sig else []),
+        })
+
+
+class LLMEnricher(Enricher):
+    """Реальный путь: роль location_writer, фактшит-JSON (без прозы)."""
+
+    def __init__(self, manager):
+        self.manager = manager
+
+    def describe_building(self, ctx: BuildingCtx) -> dict | None:
+        if not self.manager.available():
+            return None
+        user = (f"Здание-слот: подсказка типа «{ctx.name_hint}», {ctx.role_hint}; "
+                f"ориентиры: {', '.join(ctx.landmarks) or 'нет'}; мир: {ctx.region}.")
+        resp = self.manager.call("location_writer",
+                                 [{"role": "system", "content": _BUILD_SYS},
+                                  {"role": "user", "content": user}], options={"temperature": 0.6})
+        data = _parse_json(resp.get("content") if resp else None)
+        return _norm_building(data) if data else None

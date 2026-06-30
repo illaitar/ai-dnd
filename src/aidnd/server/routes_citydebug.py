@@ -15,9 +15,7 @@ from fastapi.responses import HTMLResponse
 
 from ..citygraph import CityParams, generate
 from ..citygraph.generate import _citygen
-from ..worldgen import LLMEnricher, StubEnricher
-from ..worldgen.enrich_llm import BuildingCtx
-from ..worldgen.enrichment import _name_hint
+from ..worldgen import LLMEnricher, StubEnricher, WorldStore, building_ctx
 from .models import User
 from .routes_auth import CurrentUser
 
@@ -26,6 +24,7 @@ WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 _ALLOWED = {"kleit@yandex.ru"}
 _CACHE: dict[tuple, object] = {}
 _MODEL = None
+_STORE = None
 
 
 def _model():
@@ -34,6 +33,13 @@ def _model():
         from ..inference import ModelManager
         _MODEL = ModelManager()
     return _MODEL
+
+
+def _store() -> WorldStore:
+    global _STORE
+    if _STORE is None:
+        _STORE = WorldStore()
+    return _STORE
 
 
 def _gate(user: CurrentUser) -> User:
@@ -136,36 +142,32 @@ def citydebug_citysvg(_: Owner, seed: int = 7, key_buildings: int = 8, river: bo
 @router.get("/api/citydebug/building")
 def citydebug_building(_: Owner, bid: str, seed: int = 7, key_buildings: int = 8, river: bool = True,
                        walls: bool = True, segment: float | None = None) -> dict:
-    """Здание (любое — ВСЕ строения это дома; ключевые лишь с вывеской): графо-факты + LLM-описание
-    (ленивая генерация при первом клике, кэш на объекте города)."""
+    """Здание (любое — ВСЕ строения это дома; ключевые лишь с вывеской): графо-факты + фактшит характеристик.
+    Сначала из БД мира (если параметры совпали), иначе ленивая генерация (кэш на городе)."""
     city = _city(seed, key_buildings, river, walls, segment)
     is_key = bid in city.key_buildings
     if is_key:
-        b, idx = city.key_buildings[bid], list(city.key_buildings).index(bid)
+        idx, node, sign = list(city.key_buildings).index(bid), city.key_buildings[bid].node, city.key_buildings[bid].name
     elif bid in city.houses:
-        b, idx = city.houses[bid], 0
+        idx, node, sign = 0, city.houses[bid].node, None
     else:
         return {"error": "нет такого здания"}
-    node = b.node
-    landmarks = city._landmarks_at(node) if node in city._xy else []   # noqa: SLF001 — дебаг
-    cache = city.__dict__.setdefault("_enrich", {})
-    if bid not in cache:
-        ctx = BuildingCtx(id=bid, name_hint=_name_hint(is_key, idx, landmarks),
-                          role_hint=("значимое здание небольшого городка" if is_key else "жилой дом горожанина"),
-                          landmarks=landmarks)
-        mdl = _model()
-        enr = LLMEnricher(mdl) if mdl.available() else StubEnricher()
-        res = enr.describe_building(ctx) or {}
-        if res.get("sub_rooms"):                              # фаза 2 — суб-помещения с контекстом
-            parent = {"name": res.get("name"), "type": res.get("type"), "description": res.get("description")}
-            for sr in res["sub_rooms"]:
-                sd = enr.describe_subroom(parent, sr)
-                if sd:
-                    sr["description"], sr["contents"] = sd.get("description", ""), sd.get("contents", "")
-        cache[bid] = res
+    data = None
+    wid = _store().find_world(seed, key_buildings, river, walls, segment)
+    if wid:
+        row = _store().get_building(wid, bid)
+        if row:
+            data, sign = row["data"], row["sign"]
+    if data is None:                                         # нет в БД — генерим лениво (кэш на городе)
+        cache = city.__dict__.setdefault("_enrich", {})
+        if bid not in cache:
+            mdl = _model()
+            enr = LLMEnricher(mdl) if mdl.available() else StubEnricher()
+            cache[bid] = enr.describe_building(building_ctx(city, bid, is_key, idx)) or {}
+        data = cache[bid]
+    landmarks = city._landmarks_at(node) if node in city._xy else []   # noqa: SLF001
     return {"id": bid, "is_key": is_key, "node": node, "kind": str(city.node_kind(node) or ""),
-            "sign": (city.key_buildings[bid].name if is_key else None),
-            "landmarks": landmarks, "enrichment": cache[bid],
+            "world": wid, "sign": sign, "landmarks": landmarks, "data": data,
             "exits": [{"kind": mv.kind, "heading": mv.heading, "name": mv.name} for mv in city.exits(node)]}
 
 

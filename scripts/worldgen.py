@@ -22,20 +22,28 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from aidnd.citygraph import CityParams, generate  # noqa: E402
-from aidnd.worldgen import LLMEnricher, StubEnricher, enrich_city  # noqa: E402
+from aidnd.worldgen import (  # noqa: E402
+    LLMEnricher,
+    StubEnricher,
+    WorldStore,
+    enrich_city,
+    store_world,
+)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Генерация мира: город + насыщение локаций")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--key", type=int, default=10, help="число ключевых зданий")
-    ap.add_argument("--enrich", choices=["keys", "all"], default="keys",
+    ap.add_argument("--enrich", choices=["keys", "all"], default="all",
                     help="keys — только ключевые локации; all — каждое здание")
+    ap.add_argument("--world", type=int, default=0, help="id мира — сохранить насыщение в БД (0=не сохранять)")
+    ap.add_argument("--db", default=None, help="путь к worlds.db (по умолч. <repo>/data/worlds.db)")
     ap.add_argument("--no-river", action="store_true")
     ap.add_argument("--no-walls", action="store_true")
     ap.add_argument("--concurrency", type=int, default=0, help="макс. одновременных промптов (0=авто)")
     ap.add_argument("--stub", action="store_true", help="без LLM (детерминированная заглушка)")
-    ap.add_argument("--out", default="world.json")
+    ap.add_argument("--out", default="-", help="JSON-дамп (- = не писать, основное хранилище — БД)")
     args = ap.parse_args()
 
     city = generate(CityParams(seed=args.seed, key_buildings=args.key,
@@ -71,13 +79,18 @@ def main() -> None:
     enr = enrich_city(city, args.enrich, enricher, max_concurrent=conc, on_progress=on_prog)
     print()
 
-    out = {"params": {"seed": args.seed, "key_buildings": args.key,
-                      "river": not args.no_river, "walls": not args.no_walls, "enrich": args.enrich},
-           "graph": city.debug_data(), "enrichment": enr.to_dict()}
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=1)
-    sub = sum(len(b.sub_rooms) for b in enr.buildings.values())
-    print(f"готово: {args.out} — насыщено {len(enr.buildings)} зданий, доп-помещений {sub}.")
+    if args.world:
+        store = WorldStore(args.db)
+        store_world(store, args.world, city, enr)
+        print(f"мир {args.world} → БД {store.path}: зданий в базе {store.count(args.world)}.")
+    if args.out and args.out != "-":
+        out = {"params": {"seed": args.seed, "key_buildings": args.key,
+                          "river": not args.no_river, "walls": not args.no_walls, "enrich": args.enrich},
+               "graph": city.debug_data(), "enrichment": enr.to_dict()}
+        with open(args.out, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=1)
+    sub = sum(len(b.data.get("sub_rooms", [])) for b in enr.buildings.values())
+    print(f"готово: насыщено {len(enr.buildings)} зданий, суб-помещений {sub}.")
 
 
 if __name__ == "__main__":

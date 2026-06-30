@@ -67,22 +67,33 @@ def building_ctx(city, bid: str, is_key: bool, idx: int):
 
 
 def enrich_city(city, scope: str, enricher: Enricher, max_concurrent: int = 8,
-                on_progress=None) -> Enrichment:
-    """Насытить локации фактшитами (одна фаза, в память). scope: 'keys' | 'all'."""
+                on_progress=None, store=None, world_id: int | None = None, resume: bool = False) -> Enrichment:
+    """Насытить локации фактшитами (одна фаза). scope: 'keys' | 'all'. Если задан store+world_id —
+    пишем в БД ИНКРЕМЕНТАЛЬНО (каждое здание сразу, в главном потоке → без гонок SQLite; обрыв не теряет
+    прогресс). resume=True — пропускать уже насыщённые в БД (доделать после обрыва)."""
     targets = _targets(city, scope)
+    if resume and store is not None and world_id is not None:
+        done = store.building_ids(world_id)
+        targets = [t for t in targets if t[0] not in done]
     prog = Progress(len(targets), max_concurrent, on_progress, label="здания")
     enr = Enrichment(scope=scope)
+    save = store is not None and world_id is not None
+    if save:
+        p = city.params
+        store.upsert_world(world_id, p.seed, p.key_buildings, p.river, p.walls, p.segment)
 
     def work(item):
         idx, (bid, is_key, node_) = item
         data = enricher.describe_building(building_ctx(city, bid, is_key, idx))
-        if data:
-            sign = city.key_buildings[bid].name if is_key else None
-            enr.add(bid, node_, is_key, sign, data)
+        return bid, node_, is_key, (city.key_buildings[bid].name if is_key else None), data
 
     with ThreadPoolExecutor(max_workers=max(1, max_concurrent)) as ex:
         for fut in as_completed([ex.submit(work, it) for it in enumerate(targets)]):
-            fut.result()
+            bid, node_, is_key, sign, data = fut.result()
+            if data:
+                enr.add(bid, node_, is_key, sign, data)
+                if save:
+                    store.save_building(world_id, bid, is_key, node_, sign, data)
             prog.tick(1)
     enr.progress = prog.snapshot()
     return enr

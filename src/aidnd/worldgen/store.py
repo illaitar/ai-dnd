@@ -67,6 +67,14 @@ class WorldStore:
         with self._conn() as c:
             return c.execute("SELECT COUNT(*) FROM buildings WHERE world_id=?", (world_id,)).fetchone()[0]
 
+    def building_ids(self, world_id: int) -> set:
+        with self._conn() as c:
+            return {r[0] for r in c.execute("SELECT building_id FROM buildings WHERE world_id=?", (world_id,))}
+
+    def clear_world(self, world_id: int) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM buildings WHERE world_id=?", (world_id,))
+
 
 def _row(r) -> dict:
     return {"building_id": r["building_id"], "is_key": bool(r["is_key"]), "node": r["node"],

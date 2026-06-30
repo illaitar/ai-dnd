@@ -27,7 +27,6 @@ from aidnd.worldgen import (  # noqa: E402
     StubEnricher,
     WorldStore,
     enrich_city,
-    store_world,
 )
 
 
@@ -39,6 +38,8 @@ def main() -> None:
                     help="keys — только ключевые локации; all — каждое здание")
     ap.add_argument("--world", type=int, default=0, help="id мира — сохранить насыщение в БД (0=не сохранять)")
     ap.add_argument("--db", default=None, help="путь к worlds.db (по умолч. <repo>/data/worlds.db)")
+    ap.add_argument("--resume", action="store_true", help="доделать только недостающие здания (после обрыва)")
+    ap.add_argument("--fresh", action="store_true", help="очистить мир в БД перед насыщением")
     ap.add_argument("--no-river", action="store_true")
     ap.add_argument("--no-walls", action="store_true")
     ap.add_argument("--concurrency", type=int, default=0, help="макс. одновременных промптов (0=авто)")
@@ -76,12 +77,14 @@ def main() -> None:
         print(f"\r  {s['phase']:<14} [{bar:<20}] {s['done']}/{s['total']} · "
               f"батч {s['batch']}/{s['batches_total']} · {s['pct']}%   ", end="", flush=True)
 
-    enr = enrich_city(city, args.enrich, enricher, max_concurrent=conc, on_progress=on_prog)
+    store = WorldStore(args.db) if args.world else None
+    if store and args.fresh:
+        store.clear_world(args.world)
+    enr = enrich_city(city, args.enrich, enricher, max_concurrent=conc, on_progress=on_prog,
+                      store=store, world_id=(args.world or None), resume=args.resume)
     print()
 
     if args.world:
-        store = WorldStore(args.db)
-        store_world(store, args.world, city, enr)
         print(f"мир {args.world} → БД {store.path}: зданий в базе {store.count(args.world)}.")
     if args.out and args.out != "-":
         out = {"params": {"seed": args.seed, "key_buildings": args.key,

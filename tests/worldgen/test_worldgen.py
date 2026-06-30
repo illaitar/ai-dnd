@@ -43,8 +43,9 @@ def test_building_rich_fields(city):
         assert b.description and b.node >= 0
         assert b.type                                  # тип закреплён
         assert isinstance(b.services, list)            # услуги — список
-    # значимые здания: есть услуги, хозяин, тайна
-    assert any(b.services and b.keeper and b.secret for b in enr.buildings.values())
+        assert not hasattr(b, "keeper")                # хозяина НЕ генерируем (NPC — отдельный пасс)
+    # значимые здания: есть услуги и тайна
+    assert any(b.services and b.secret for b in enr.buildings.values())
 
 
 # ------------------------------------------ двухфазность: суб-помещения ----- #

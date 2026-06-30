@@ -33,23 +33,26 @@ class BuildingCtx:
 
 _BUILD_SYS = (
     "Ты — генератор зданий для тёмно-фэнтезийного фронтирного городка (D&D, Фэндалин). "
-    "По краткой подсказке придумай ЖИВОЕ, конкретное здание. Верни ТОЛЬКО JSON (без markdown), поля:\n"
-    "name — собственное имя/вывеска;\n"
+    "По краткой подсказке придумай ЖИВОЕ, конкретное здание. ОПИСЫВАЙ САМО МЕСТО, ОБЕЗЛИЧЕННО: "
+    "НЕ придумывай и НЕ называй людей (хозяев, работников, жильцов) — персонажи добавятся отдельно. "
+    "Помещения называй по функции (Кухня, Кладовая, Жилая комната), не по людям. "
+    "Верни ТОЛЬКО JSON (без markdown), поля:\n"
+    "name — имя/вывеска места (без имён людей);\n"
     "type — тип (таверна/кузница/лавка/храм/усадьба/склад/жилой дом…);\n"
     "services — массив из [eat, drink, lodging, shop, commission, heal, pray, store]: что тут можно делать;\n"
-    "keeper — {name, role} хозяина (или null для пустого дома);\n"
-    "notable — одна примечательная деталь (трофей, странность);\n"
+    "notable — одна примечательная деталь МЕСТА (трофей, странность; без людей);\n"
     "secret — {hint, room} тайна места или null;\n"
-    "description — 2-4 предложения живой прозой: облик, атмосфера, звуки-запахи;\n"
+    "description — 2-4 предложения живой прозой про место: облик, атмосфера, звуки-запахи (без людей);\n"
     "sub_rooms — массив доп-помещений ТОЛЬКО как заявки: [{name, kind:(cellar|backroom|attic|quarters|hidden), "
     "access:(public|staff|locked|hidden)}], БЕЗ описаний; 0-4 шт (у жилого дома обычно 0-1). "
     "Не выдумывай несуществующих фактов мира."
 )
 
 _ROOM_SYS = (
-    "Ты описываешь ОДНО под-помещение ВНУТРИ заданного здания, в согласии с ним. "
-    "Верни ТОЛЬКО JSON (без markdown): description — 1-2 предложения живой прозой; "
-    "contents — что внутри (предметы/тайник/обитатель/«пусто»). "
+    "Ты описываешь ОДНО под-помещение ВНУТРИ заданного здания, в согласии с ним. ОБЕЗЛИЧЕННО: "
+    "опиши само помещение, БЕЗ людей и имён (персонажи добавятся отдельно). "
+    "Верни ТОЛЬКО JSON (без markdown): description — 1-2 предложения живой прозой про помещение; "
+    "contents — что внутри (предметы/мебель/тайник/«пусто»). "
     "У под-помещения НЕТ собственных под-помещений — не упоминай их."
 )
 
@@ -89,7 +92,6 @@ class StubEnricher(Enricher):
         return {
             "name": ctx.name_hint, "type": ctx.name_hint.lower(),
             "services": (["eat", "drink"] if sig else []),
-            "keeper": ({"name": "Хозяин", "role": ctx.name_hint.lower()} if sig else None),
             "notable": "примечательная деталь (заглушка)",
             "secret": ({"hint": "тайник под полом", "room": "Подвал"} if sig else None),
             "description": f"{ctx.name_hint}. {ctx.role_hint.capitalize()}, {where}. (заглушка)",
@@ -143,8 +145,7 @@ def _norm_building(d: dict) -> dict:
         subs.append({"name": str(s["name"]).strip(),
                      "kind": s.get("kind") if s.get("kind") in ROOM_KINDS else "backroom",
                      "access": s.get("access") if s.get("access") in ROOM_ACCESS else "public"})
-    keeper = d.get("keeper") if isinstance(d.get("keeper"), dict) and d["keeper"].get("name") else None
     secret = d.get("secret") if isinstance(d.get("secret"), dict) and d["secret"].get("hint") else None
     return {"name": str(d.get("name") or "").strip(), "type": str(d.get("type") or "").strip(),
-            "services": services, "keeper": keeper, "notable": str(d.get("notable") or "").strip(),
+            "services": services, "notable": str(d.get("notable") or "").strip(),
             "secret": secret, "description": str(d.get("description") or "").strip(), "sub_rooms": subs}

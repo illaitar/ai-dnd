@@ -36,7 +36,6 @@ class Building:
     name: str
     type: str = ""
     services: list = field(default_factory=list)
-    keeper: dict | None = None
     notable: str = ""
     secret: dict | None = None
     description: str = ""
@@ -56,15 +55,14 @@ class Enrichment:
                 for s in (res.get("sub_rooms") or [])]
         self.buildings[bid] = Building(
             id=bid, node=node, name=(res.get("name") or bid), type=res.get("type", ""),
-            services=list(res.get("services") or []), keeper=res.get("keeper"),
+            services=list(res.get("services") or []),
             notable=res.get("notable", ""), secret=res.get("secret"),
             description=res.get("description", ""), sub_rooms=subs)
 
     def to_dict(self) -> dict:
         return {"scope": self.scope, "progress": self.progress, "buildings": {
             b: {"node": x.node, "name": x.name, "type": x.type, "services": x.services,
-                "keeper": x.keeper, "notable": x.notable, "secret": x.secret,
-                "description": x.description,
+                "notable": x.notable, "secret": x.secret, "description": x.description,
                 "sub_rooms": [{"name": s.name, "kind": s.kind, "access": s.access,
                                "contents": s.contents, "description": s.description}
                               for s in x.sub_rooms]}

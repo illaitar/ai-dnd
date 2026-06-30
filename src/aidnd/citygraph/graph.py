@@ -14,7 +14,7 @@ from __future__ import annotations
 import heapq
 import math
 
-from .model import Edge, House, KeyBuilding, Move, Node, NodeKind, Route, Sign, Step
+from .model import Edge, House, KeyBuilding, Move, Nearby, Node, NodeKind, Route, Sign, Step
 
 
 def _dist(a: tuple, b: tuple) -> float:
@@ -44,6 +44,18 @@ def _dist2_to_polyline(p, pts) -> float:
     best = 1e30
     for i in range(len(pts) - 1):
         d = _dist2_seg(p, pts[i], pts[i + 1])
+        if d < best:
+            best = d
+    return best
+
+
+def _dist2_to_poly(p, poly) -> float:
+    """Квадрат расстояния до ЗАМКНУТОГО контура (стены)."""
+    if not poly:
+        return 1e30
+    n, best = len(poly), 1e30
+    for i in range(n):
+        d = _dist2_seg(p, poly[i], poly[(i + 1) % n])
         if d < best:
             best = d
     return best
@@ -452,8 +464,45 @@ class City:
         crossroads = [n for n in nodes if self._kind[n] == NodeKind.CROSSROAD]
         length = sum(_dist(self._xy[u], self._xy[v]) for u, v in edges)
         signs = self._signs_along(nodes, a, b)
-        return Route(found=True, nodes=nodes, edges=edges, steps=steps,
-                     crossroads=crossroads, length=length, signs=signs)
+        start, end = nodes[0], nodes[-1]
+        bearing = (self._heading(start, end)
+                   if start != end and _dist(self._xy[start], self._xy[end]) > 1e-6 else None)
+        return Route(found=True, nodes=nodes, edges=edges, steps=steps, crossroads=crossroads,
+                     length=length, signs=signs, bearing=bearing,
+                     near_target=self._nearest_other_building(end),
+                     landmarks=self._landmarks_at(end))
+
+    def _nearest_other_building(self, node: int) -> Nearby | None:
+        """Ближайшее (по прямой) ключевое здание к узлу, КРОМЕ здания самого узла."""
+        x, y = self._xy[node]
+        self_b = next((bid for bid, kb in self.key_buildings.items() if kb.interior == node), None)
+        best, bd = None, 1e30
+        for bid, kb in self.key_buildings.items():
+            if bid == self_b:
+                continue
+            d = (kb.x - x) ** 2 + (kb.y - y) ** 2
+            if d < bd:
+                bd, best = d, kb
+        return Nearby(best.id, best.name, round(bd ** 0.5, 1)) if best else None
+
+    def _landmarks_at(self, node: int) -> list[str]:
+        """Ориентиры у узла: у реки / у стены / у ворот / у моста (геометрия карты)."""
+        x, y = self._xy[node]
+        thr = (self._interval * 1.5) ** 2
+        tags = []
+        pts = self.river.get("pts") or []
+        w = self.river.get("w", 0) or 0
+        if pts and w and _dist2_to_polyline((x, y), pts) <= (w * 1.6) ** 2:
+            tags.append("river")
+        if self.walls and _dist2_to_poly((x, y), self.walls) <= thr:
+            tags.append("wall")
+        if any((self._xy[g][0] - x) ** 2 + (self._xy[g][1] - y) ** 2 <= thr
+               for g in getattr(self, "_gate_nodes", [])):
+            tags.append("gate")
+        if any((self._xy[b][0] - x) ** 2 + (self._xy[b][1] - y) ** 2 <= thr
+               for b in getattr(self, "_bridge_nodes", [])):
+            tags.append("bridge")
+        return tags
 
     def _signs_along(self, nodes: list[int], a, b) -> list[Sign]:
         """Вывески: ключевые здания, мимо которых реально проходишь (дверь на маршруте ИЛИ дверь в

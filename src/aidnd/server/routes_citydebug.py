@@ -71,7 +71,9 @@ def citydebug_route(_: Owner, a: str, b: str, seed: int = 7, key_buildings: int 
                     segment: float | None = None) -> dict:
     r = _city(seed, key_buildings, river, walls, segment).route(_parse(a), _parse(b))
     return {"found": r.found, "nodes": r.nodes, "length": round(r.length, 1),
-            "crossroads": r.crossroads,
+            "crossroads": r.crossroads, "bearing": r.bearing, "landmarks": r.landmarks,
+            "near_target": ({"id": r.near_target.id, "name": r.near_target.name,
+                             "dist": r.near_target.dist} if r.near_target else None),
             "steps": [{"frm": s.frm, "to": s.to, "kind": s.kind, "heading": s.heading,
                        "name": s.name} for s in r.steps],
             "signs": [{"building": s.building, "name": s.name} for s in r.signs]}

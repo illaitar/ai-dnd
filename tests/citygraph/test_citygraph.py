@@ -228,3 +228,25 @@ def test_subspace_routing_and_exits():
     sub2 = city.add_subspace(sub, "Тайник")                   # вложенность: подвал у подвала
     assert sub2 is not None
     assert any(m.kind == "internal" and m.name == "Тайник" for m in city.exits(sub))
+
+
+# --------------------------------------------------------- аннотации маршрута #
+def test_route_annotations(city):
+    kbs = list(city.key_buildings)
+    r = city.route(kbs[0], kbs[7])
+    assert r.found
+    # 3) сторона света старт→финиш
+    assert r.bearing in {"С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"}
+    # 1) ближайшее к цели ключевое здание, кроме самой цели
+    assert r.near_target is not None
+    assert r.near_target.id in city.key_buildings
+    assert r.near_target.id != kbs[7]
+    assert r.near_target.dist >= 0
+    # 2) ориентиры у цели — подмножество известных видов; в городе с рекой+стеной хоть один встретится
+    valid = {"river", "wall", "gate", "bridge"}
+    seen = set()
+    for kb in kbs:
+        rr = city.route(kbs[0], kb)
+        assert set(rr.landmarks) <= valid
+        seen |= set(rr.landmarks)
+    assert seen

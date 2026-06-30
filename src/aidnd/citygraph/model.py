@@ -91,10 +91,20 @@ class Step:
     name: str | None = None
 
 
+@dataclass(frozen=True)
+class Nearby:
+    """Ближайшее ориентир-здание (его «сущность»)."""
+    id: str
+    name: str
+    dist: float
+
+
 @dataclass
 class Route:
     """Результат прохода А→Б. steps — типизированные шаги (вход/выход обозначены явно);
-    crossroads — ключевые точки в порядке прохода; signs — линки на ключевые здания по пути."""
+    crossroads — ключевые точки в порядке прохода; signs — линки на ключевые здания по пути.
+    bearing — сторона света старт→финиш; near_target — ближайшее к цели ключевое здание (кроме неё);
+    landmarks — ориентиры у цели (river|wall|gate|bridge)."""
     found: bool
     nodes: list[int] = field(default_factory=list)
     edges: list[tuple[int, int]] = field(default_factory=list)
@@ -102,3 +112,6 @@ class Route:
     crossroads: list[int] = field(default_factory=list)
     length: float = 0.0
     signs: list[Sign] = field(default_factory=list)
+    bearing: str | None = None
+    near_target: Nearby | None = None
+    landmarks: list[str] = field(default_factory=list)

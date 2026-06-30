@@ -235,9 +235,15 @@ async function pickRoute(id) {
   }).join("");
   const signs = route.signs.length
     ? route.signs.map(s => `<span class="pill">${s.name}</span>`).join("") : "<span class='g'>нет</span>";
+  const lm = { river: "у реки", wall: "у стены", gate: "у ворот", bridge: "у моста" };
+  const lmStr = (route.landmarks || []).map(t => lm[t] || t).join(", ") || "—";
+  const near = route.near_target ? `${route.near_target.name} (${route.near_target.dist}px)` : "—";
   $("info").innerHTML =
     `<b>${a} → ${id}</b> · длина <b>${route.length}px</b> · перекрёстков <b>${route.crossroads.length}</b>` +
-    `<div style="margin:5px 0;max-height:240px;overflow:auto">${steps}</div>` +
+    `<div>общее направление: <b>${WIND[route.bearing] || route.bearing || "—"}</b></div>` +
+    `<div>цель рядом с: <b>${near}</b></div>` +
+    `<div>ориентиры цели: <b>${lmStr}</b></div>` +
+    `<div style="margin:5px 0;max-height:210px;overflow:auto">${steps}</div>` +
     `вывески по пути:<br>${signs}`;
 }
 

@@ -90,6 +90,26 @@ def citydebug_node(_: Owner, node: int, seed: int = 7, key_buildings: int = 8,
                       for m in city.exits(node)]}
 
 
+@router.get("/api/citydebug/location")
+def citydebug_location(_: Owner, node: int, seed: int = 7, key_buildings: int = 8,
+                       river: bool = True, walls: bool = True,
+                       segment: float | None = None) -> dict:
+    """Карточка локации: имя/вид узла + легальные выходы + ближайшие здания + ориентиры."""
+    city = _city(seed, key_buildings, river, walls, segment)
+    if node not in city._xy:                                  # noqa: SLF001 — дебаг
+        return {"node": node, "exists": False}
+    x, y = city._xy[node]                                     # noqa: SLF001
+    name = next((kb.name for kb in city.key_buildings.values() if node in (kb.node, kb.interior)), None)
+    near = sorted(((((kb.x - x) ** 2 + (kb.y - y) ** 2) ** 0.5, kb)
+                   for kb in city.key_buildings.values() if kb.interior != node),
+                  key=lambda t: t[0])[:5]
+    return {"node": node, "exists": True, "kind": str(city.node_kind(node) or ""), "name": name,
+            "landmarks": city._landmarks_at(node),           # noqa: SLF001
+            "moves": [{"to": m.to, "kind": m.kind, "heading": m.heading, "name": m.name}
+                      for m in city.exits(node)],
+            "nearby": [{"id": kb.id, "name": kb.name, "dist": round(d, 1)} for d, kb in near]}
+
+
 @router.get("/api/citydebug/subspace")
 def citydebug_subspace(_: Owner, building: str, name: str = "Подвал", seed: int = 7,
                        key_buildings: int = 8, river: bool = True, walls: bool = True,

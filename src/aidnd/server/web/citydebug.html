@@ -3,49 +3,58 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Граф города — дебаг</title>
+<title>Город — дебаг</title>
 <style>
   :root { --bg:#11141a; --panel:#1b1f28; --line:#2a3040; --txt:#dfe5ef; --mut:#8b96ab; --acc:#5aa0ff; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.45 system-ui, sans-serif; }
-  header { padding:10px 16px; background:#0d0f14; border-bottom:1px solid var(--line);
-           display:flex; gap:12px; align-items:center; }
+  header { padding:9px 16px; background:#0d0f14; border-bottom:1px solid var(--line); display:flex; gap:14px; align-items:center; }
   header h1 { font-size:15px; margin:0; font-weight:600; }
   header .mut { color:var(--mut); font-size:12px; }
   header a { margin-left:auto; color:var(--acc); text-decoration:none; }
-  .wrap { display:flex; height:calc(100vh - 43px); }
-  aside { width:320px; flex:none; overflow-y:auto; padding:12px; border-right:1px solid var(--line);
-          background:var(--panel); }
-  main { flex:1; overflow:auto; background:#0c0e13; display:flex; align-items:flex-start; justify-content:center; }
-  svg { width:100%; height:auto; background:#0c0e13; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .seg button { background:#161b24; color:var(--mut); border:0; padding:5px 13px; cursor:pointer; font-weight:600; font-size:13px; }
+  .seg button.on { background:var(--acc); color:#06101f; }
+  .wrap { display:flex; height:calc(100vh - 41px); }
+  aside { width:320px; flex:none; overflow-y:auto; padding:12px; border-right:1px solid var(--line); background:var(--panel); }
+  main { flex:1; overflow:hidden; background:#0c0e13; position:relative; display:flex; align-items:center; justify-content:center; }
+  svg { width:100%; height:100%; }
   section { margin-bottom:14px; }
-  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut);
-       margin:0 0 7px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:0 0 7px; border-bottom:1px solid var(--line); padding-bottom:4px; }
   label.row { display:flex; align-items:center; gap:7px; margin:4px 0; font-size:13px; cursor:pointer; }
   label.row input[type=number] { margin-left:auto; width:74px; }
-  input[type=number], input[type=text] { background:#0e1117; border:1px solid var(--line); color:var(--txt);
-                       border-radius:5px; padding:3px 6px; }
+  input[type=number], input[type=text] { background:#0e1117; border:1px solid var(--line); color:var(--txt); border-radius:5px; padding:3px 6px; }
   input[type=text] { width:100%; margin-bottom:5px; }
   .sw { width:11px; height:11px; border-radius:2px; flex:none; border:1px solid #0006; }
-  button { background:var(--acc); color:#06101f; border:0; border-radius:6px; padding:7px 12px;
-           font-weight:600; cursor:pointer; width:100%; margin-top:4px; }
+  button { background:var(--acc); color:#06101f; border:0; border-radius:6px; padding:7px 12px; font-weight:600; cursor:pointer; width:100%; margin-top:4px; }
   button.alt { background:#2a3140; color:var(--txt); width:auto; padding:5px 10px; margin:2px 4px 2px 0; }
+  button.s { padding:3px 9px; font-size:12px; }
   .presets { display:flex; flex-wrap:wrap; }
   #info, #stats { font-size:12px; color:var(--mut); }
-  #info b, #stats b { color:var(--txt); }
-  .step { font-size:12px; padding:1px 0; color:var(--txt); }
-  .step .g { color:var(--mut); }
-  .pill { display:inline-block; background:#222a38; border-radius:4px; padding:1px 6px; margin:2px 3px 0 0;
-          font-size:11px; color:var(--txt); }
+  #info b, #stats b, #route-pts b { color:var(--txt); }
+  #route-pts { font-size:13px; margin-bottom:5px; }
+  .ab { display:inline-block; min-width:14px; height:14px; border-radius:50%; text-align:center; line-height:14px; font-size:10px; color:#06101f; font-weight:700; margin-right:4px; }
+  .step { font-size:12px; padding:1px 0; }
+  .step .g, .g { color:var(--mut); }
+  .pill { display:inline-block; background:#222a38; border-radius:4px; padding:1px 6px; margin:2px 3px 0 0; font-size:11px; }
   .hint { font-size:11px; color:var(--mut); margin:3px 0 6px; }
-  .kb { cursor:pointer; }
+  /* плавающая карточка локации */
+  #card { position:absolute; top:14px; right:14px; width:262px; background:#171c25; border:1px solid #313a4c; border-radius:10px; box-shadow:0 10px 30px #0008; padding:0; }
+  #card.hidden { display:none; }
+  .card-h { display:flex; align-items:center; gap:8px; padding:9px 11px; border-bottom:1px solid var(--line); }
+  .card-h b { font-size:13px; } #card-x { margin-left:auto; cursor:pointer; color:var(--mut); }
+  #card-body { padding:9px 11px; font-size:12px; }
+  .cl { margin:3px 0; } .cl b { color:#cfe0ff; }
+  .card-btns { display:flex; gap:8px; padding:9px 11px; border-top:1px solid var(--line); }
+  .card-btns button { margin:0; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🗺 Граф города</h1>
-  <span class="mut" id="sub">дебаг-визуализация · единая система передвижения</span>
-  <a href="/">← в игру</a>
+  <h1>🗺 Город</h1>
+  <div class="seg"><button id="v-graph" class="on">Граф</button><button id="v-city">Готовый город</button></div>
+  <span class="mut" id="sub">дебаг-визуализация</span>
+  <a href="/npcdebug">NPC-стенд</a><a href="/">в игру</a>
 </header>
 <div class="wrap">
   <aside>
@@ -59,233 +68,208 @@
       <button id="gen">Сгенерировать</button>
     </section>
     <section>
-      <h2>Режим клика</h2>
-      <label class="row"><input type="radio" name="mode" value="route" checked> маршрут (A → B)</label>
-      <label class="row"><input type="radio" name="mode" value="inspect"> осмотр узла (куда можно пойти)</label>
-      <div class="hint">Кликай по зданиям и перекрёстикам. Маршрут: A, затем B. Осмотр: один клик.</div>
+      <h2>Маршрут A → B</h2>
+      <div id="route-pts"><span class="ab" style="background:#37e06a">A</span><b id="ptA">—</b> &nbsp;
+        <span class="ab" style="background:#ff8a3a">B</span><b id="ptB">—</b>
+        <button class="alt s" id="route-reset" style="float:right">сброс</button></div>
+      <div class="hint">Кликни здание/перекрёсток на карте → в карточке назначь точку A или B. Работает в обоих видах.</div>
       <div id="info">—</div>
+    </section>
+    <section id="sec-layers">
+      <h2>Слои (граф)</h2>
+      <div id="layers"></div>
+      <div class="presets"><button class="alt" data-preset="debug">Дебаг</button><button class="alt" data-preset="final">Итог</button></div>
     </section>
     <section>
       <h2>Под-здания</h2>
-      <div class="hint">Выбран: <b id="sel">—</b>. Добавит под-здание (подвал и т.п.) с теми же легальными переходами.</div>
+      <div class="hint">Выбран: <b id="sel">—</b>.</div>
       <input type="text" id="sub-name" value="Подвал">
       <button class="alt" id="add-sub">+ под-здание к выбранному</button>
     </section>
-    <section>
-      <h2>Слои</h2>
-      <div id="layers"></div>
-      <div class="presets">
-        <button class="alt" data-preset="debug">Дебаг</button>
-        <button class="alt" data-preset="final">Итог</button>
-      </div>
-    </section>
-    <section>
-      <h2>Статистика</h2>
-      <div id="stats">—</div>
-    </section>
+    <section><h2>Статистика</h2><div id="stats">—</div></section>
   </aside>
-  <main><svg id="map" viewBox="0 0 980 700"></svg></main>
+  <main>
+    <svg id="map" viewBox="0 0 980 700" preserveAspectRatio="xMidYMid meet"></svg>
+    <div id="card" class="hidden">
+      <div class="card-h"><b id="card-name"></b><span id="card-x">✕</span></div>
+      <div id="card-body"></div>
+      <div class="card-btns"><button class="s" style="background:#37e06a" id="card-a">точка A</button>
+        <button class="s" style="background:#ff8a3a" id="card-b">точка B</button></div>
+    </div>
+  </main>
 </div>
 <script>
-const NS = "http://www.w3.org/2000/svg";
-const $ = id => document.getElementById(id);
-function E(tag, attrs, parent) {
-  const e = document.createElementNS(NS, tag);
-  for (const k in attrs) e.setAttribute(k, attrs[k]);
-  if (parent) parent.appendChild(e);
-  return e;
-}
+const NS = "http://www.w3.org/2000/svg", $ = id => document.getElementById(id);
+function E(t, a, p) { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; }
 const hue = id => (id * 47) % 360;
+const WIND = { "С":"север","СВ":"северо-восток","В":"восток","ЮВ":"юго-восток","Ю":"юг","ЮЗ":"юго-запад","З":"запад","СЗ":"северо-запад" };
+const LM = { river:"у реки", wall:"у стены", gate:"у ворот", bridge:"у моста" };
+const ROOFS = ["#b08d57","#9c7a4d","#8f6f5d","#7e7468","#a6794a","#946b52"];
 
 const LAYERS = [
-  ["walls", "Стены", "#9a6", 1], ["river", "Река", "#39f", 1],
-  ["edges", "Дороги (рёбра)", "#7a8499", 1], ["doors", "Двери/связи", "#c46bff", 1],
-  ["houses", "Дома (по перекрёстку)", "#c97", 1], ["points", "Под-точки", "#5aa0ff", 0],
-  ["route", "Маршрут", "#37e06a", 1], ["crossroads", "Перекрёстки", "#ffffff", 1],
-  ["bridges", "Мосты", "#ef8a3a", 1], ["gates", "Ворота", "#3ec06a", 1],
-  ["interiors", "Нутро/под-здания", "#c46bff", 1], ["keys", "Ключевые здания", "#ff5050", 1],
+  ["walls","Стены","#9a6",1],["river","Река","#39f",1],["edges","Дороги (рёбра)","#7a8499",1],
+  ["doors","Двери/связи","#c46bff",1],["houses","Дома (по перекрёстку)","#c97",1],["points","Под-точки","#5aa0ff",0],
+  ["route","Маршрут","#37e06a",1],["crossroads","Перекрёстки","#fff",1],["bridges","Мосты","#ef8a3a",1],
+  ["gates","Ворота","#3ec06a",1],["interiors","Нутро/под-здания","#c46bff",1],["keys","Ключевые здания","#ff5050",1],
 ];
-const PRESETS = {
-  debug: LAYERS.map(l => l[0]),
-  final: ["walls", "river", "edges", "route", "keys"],
-};
-const WIND = { "С":"север", "СВ":"северо-восток", "В":"восток", "ЮВ":"юго-восток",
-               "Ю":"юг", "ЮЗ":"юго-запад", "З":"запад", "СЗ":"северо-запад" };
+const PRESETS = { debug: LAYERS.map(l => l[0]), final: ["walls","river","edges","route","keys"] };
 
-let DATA = null, PARAMS = null, pickA = null, selBuilding = null;
-const mode = () => document.querySelector("input[name=mode]:checked").value;
+let DATA = null, PARAMS = null, VIEW = "graph", NX = {};
+let routeA = null, routeB = null, lastRoute = null, cardRouteId = null, cardLabel = "", selBuilding = null;
+
+function params() { return { seed:+$("p-seed").value, key_buildings:+$("p-key").value, river:$("p-river").checked, walls:$("p-walls").checked, segment:+$("p-seg").value||0 }; }
+const qs = p => Object.entries(p).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
 
 function buildLayerToggles() {
   const box = $("layers"); box.innerHTML = "";
   for (const [id, label, color, on] of LAYERS) {
     const l = document.createElement("label"); l.className = "row";
-    const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.checked = !!on; cb.dataset.layer = id;
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!on; cb.dataset.layer = id;
     cb.onchange = () => { const g = $("L-" + id); if (g) g.style.display = cb.checked ? "" : "none"; };
     const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = color;
     l.append(cb, sw, document.createTextNode(label)); box.appendChild(l);
   }
 }
-function setPreset(name) {
-  const on = new Set(PRESETS[name] || []);
-  document.querySelectorAll("#layers input").forEach(cb => {
-    cb.checked = on.has(cb.dataset.layer);
-    const g = $("L-" + cb.dataset.layer); if (g) g.style.display = cb.checked ? "" : "none";
-  });
-}
-
-function params() {
-  return { seed: +$("p-seed").value, key_buildings: +$("p-key").value,
-           river: $("p-river").checked, walls: $("p-walls").checked,
-           segment: +$("p-seg").value || 0 };
-}
-const qs = p => Object.entries(p).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
+function applyToggles() { document.querySelectorAll("#layers input").forEach(cb => { const g = $("L-" + cb.dataset.layer); if (g) g.style.display = cb.checked ? "" : "none"; }); }
+function setPreset(name) { const on = new Set(PRESETS[name] || []); document.querySelectorAll("#layers input").forEach(cb => cb.checked = on.has(cb.dataset.layer)); applyToggles(); }
 
 async function generate() {
   PARAMS = params();
   const r = await fetch("/api/citydebug/generate?" + qs(PARAMS));
   if (!r.ok) { $("sub").textContent = "ошибка " + r.status + " (нужен вход владельцем)"; return; }
-  DATA = await r.json(); pickA = null; selBuilding = null; $("sel").textContent = "—";
-  render(); showStats(); $("info").textContent = "—";
+  DATA = await r.json(); NX = {}; DATA.nodes.forEach(n => NX[n.id] = n);
+  routeA = routeB = lastRoute = null; $("ptA").textContent = $("ptB").textContent = "—"; $("card").classList.add("hidden");
+  render(); showStats(); $("info").textContent = "—"; $("sub").textContent = "сцена готова";
+}
+
+function setView(v) {
+  VIEW = v; $("v-graph").classList.toggle("on", v === "graph"); $("v-city").classList.toggle("on", v === "city");
+  $("sec-layers").style.display = v === "graph" ? "" : "none";
+  render();
 }
 
 function render() {
   const svg = $("map"); svg.innerHTML = "";
   svg.setAttribute("viewBox", `0 0 ${DATA.size.w} ${DATA.size.h}`);
-  const g = {}; for (const [id] of LAYERS) g[id] = E("g", { id: "L-" + id }, svg);
-  const NX = {}; DATA.nodes.forEach(n => NX[n.id] = n); window.NX = NX;
+  (VIEW === "city" ? renderCity : renderGraph)(svg);
+  if (lastRoute) highlightRoute(lastRoute);
+}
 
-  if (DATA.walls && DATA.walls.length)
-    E("polygon", { points: DATA.walls.map(p => p.join(",")).join(" "),
-                   fill: "none", stroke: "#7e9a55", "stroke-width": 3, opacity: .8 }, g.walls);
-  if (DATA.river && DATA.river.pts && DATA.river.pts.length)
-    E("polyline", { points: DATA.river.pts.map(p => p.join(",")).join(" "), fill: "none",
-                    stroke: "#2f6fae", "stroke-width": Math.max(4, DATA.river.w || 6),
-                    "stroke-opacity": .45, "stroke-linecap": "round" }, g.river);
-  for (const e of DATA.edges) {
-    const a = NX[e.a], b = NX[e.b];
-    if (e.kind === "door" || e.kind === "internal")
-      E("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: "#c46bff",
-                  "stroke-width": 1.4, "stroke-dasharray": "3 2", opacity: .85 }, g.doors);
-    else
-      E("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y,
-                  stroke: e.bridge ? "#ef8a3a" : "#6b7488",
-                  "stroke-width": e.bridge ? 3 : 1 }, e.bridge ? g.bridges : g.edges);
-  }
-  for (const h of DATA.houses)
-    E("circle", { cx: h.x, cy: h.y, r: 2, fill: `hsl(${hue(h.crossroad)} 60% 58%)`,
-                  "fill-opacity": .75 }, g.houses);
+function renderGraph(svg) {
+  const g = {}; for (const [id] of LAYERS) g[id] = E("g", { id: "L-" + id }, svg);
+  if (DATA.walls.length) E("polygon", { points: DATA.walls.map(p => p.join(",")).join(" "), fill: "none", stroke: "#7e9a55", "stroke-width": 3, opacity: .8 }, g.walls);
+  if (DATA.river.pts.length) E("polyline", { points: DATA.river.pts.map(p => p.join(",")).join(" "), fill: "none", stroke: "#2f6fae", "stroke-width": Math.max(4, DATA.river.w || 6), "stroke-opacity": .45, "stroke-linecap": "round" }, g.river);
+  for (const e of DATA.edges) { const a = NX[e.a], b = NX[e.b];
+    if (e.kind === "door" || e.kind === "internal") E("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: "#c46bff", "stroke-width": 1.4, "stroke-dasharray": "3 2", opacity: .85 }, g.doors);
+    else E("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: e.bridge ? "#ef8a3a" : "#6b7488", "stroke-width": e.bridge ? 3 : 1 }, e.bridge ? g.bridges : g.edges); }
+  for (const h of DATA.houses) E("circle", { cx: h.x, cy: h.y, r: 2, fill: `hsl(${hue(h.crossroad)} 60% 58%)`, "fill-opacity": .75 }, g.houses);
   for (const n of DATA.nodes) {
-    if (n.kind === "point")
-      E("circle", { cx: n.x, cy: n.y, r: 1.5, fill: "#5aa0ff", "fill-opacity": .8 }, g.points);
-    else if (n.kind === "crossroad") {
-      const c = E("circle", { cx: n.x, cy: n.y, r: 3, fill: "#fff", stroke: "#222",
-                              "stroke-width": 1, class: "kb" }, g.crossroads);
-      c.style.cursor = "pointer"; c.onclick = () => clickTarget(n.id, n.id, null);
-    } else if (n.kind === "bridge")
-      E("rect", { x: n.x - 3, y: n.y - 3, width: 6, height: 6, fill: "#ef8a3a",
-                  transform: `rotate(45 ${n.x} ${n.y})` }, g.bridges);
-    else if (n.kind === "gate")
-      E("rect", { x: n.x - 3.5, y: n.y - 3.5, width: 7, height: 7, fill: "#3ec06a" }, g.gates);
-    else if (n.kind === "interior")
-      E("rect", { x: n.x - 2.5, y: n.y - 2.5, width: 5, height: 5, fill: "#c46bff",
-                  "fill-opacity": .9 }, g.interiors);
+    if (n.kind === "point") E("circle", { cx: n.x, cy: n.y, r: 1.5, fill: "#5aa0ff", "fill-opacity": .8 }, g.points);
+    else if (n.kind === "crossroad") clickable(E("circle", { cx: n.x, cy: n.y, r: 3, fill: "#fff", stroke: "#222", "stroke-width": 1 }, g.crossroads), n.id, n.id, null, "перекрёсток " + n.id);
+    else if (n.kind === "bridge") E("rect", { x: n.x - 3, y: n.y - 3, width: 6, height: 6, fill: "#ef8a3a", transform: `rotate(45 ${n.x} ${n.y})` }, g.bridges);
+    else if (n.kind === "gate") E("rect", { x: n.x - 3.5, y: n.y - 3.5, width: 7, height: 7, fill: "#3ec06a" }, g.gates);
+    else if (n.kind === "interior") E("rect", { x: n.x - 2.5, y: n.y - 2.5, width: 5, height: 5, fill: "#c46bff", "fill-opacity": .9 }, g.interiors);
   }
   for (const kb of DATA.key_buildings) {
-    const c = E("circle", { cx: kb.x, cy: kb.y, r: 5.5, fill: "#ff5050",
-                            stroke: "#fff", "stroke-width": 1.5, class: "kb" }, g.keys);
-    c.style.cursor = "pointer";
-    c.onclick = () => clickTarget(kb.id, kb.interior, kb.id);
+    clickable(E("circle", { cx: kb.x, cy: kb.y, r: 5.5, fill: "#ff5050", stroke: "#fff", "stroke-width": 1.5 }, g.keys), kb.node, kb.id, kb.id, kb.name);
     E("text", { x: kb.x + 8, y: kb.y + 4, fill: "#ffd0d0", "font-size": 11 }, g.keys).textContent = kb.name;
   }
-  document.querySelectorAll("#layers input").forEach(cb => {
-    const gg = $("L-" + cb.dataset.layer); if (gg) gg.style.display = cb.checked ? "" : "none";
-  });
+  applyToggles();
+}
+
+function renderCity(svg) {
+  E("g", { id: "L-route" }, svg);                         // под-слой для маршрута (заполнит highlightRoute)
+  const wards = E("g", {}, svg), water = E("g", {}, svg), roads = E("g", {}, svg), houses = E("g", {}, svg), marks = E("g", {}, svg);
+  if (DATA.walls.length) {
+    E("polygon", { points: DATA.walls.map(p => p.join(",")).join(" "), fill: "rgba(150,140,110,.05)", stroke: "#8a8170", "stroke-width": 5, "stroke-linejoin": "round" }, wards);
+  }
+  if (DATA.river.pts.length) E("polyline", { points: DATA.river.pts.map(p => p.join(",")).join(" "), fill: "none", stroke: "#33597f", "stroke-width": (DATA.river.w || 8) + 2, "stroke-opacity": .85, "stroke-linecap": "round", "stroke-linejoin": "round" }, water);
+  for (const e of DATA.edges) { if (e.kind === "door" || e.kind === "internal") continue; const a = NX[e.a], b = NX[e.b];
+    E("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: e.bridge ? "#caa06a" : "#4b5365", "stroke-width": e.bridge ? 4 : 1.6, "stroke-linecap": "round" }, roads); }
+  for (const h of DATA.houses) { const s = 3.4, rot = (h.node * 37) % 50 - 25;
+    E("rect", { x: h.x - s / 2, y: h.y - s / 2, width: s, height: s, rx: .6, fill: ROOFS[h.node % ROOFS.length], "fill-opacity": .95, transform: `rotate(${rot} ${h.x} ${h.y})` }, houses); }
+  for (const n of DATA.nodes) if (n.kind === "gate") E("rect", { x: n.x - 4, y: n.y - 4, width: 8, height: 8, fill: "#6fae6a", stroke: "#1a2a18" }, marks);
+  for (const kb of DATA.key_buildings) {
+    clickable(E("circle", { cx: kb.x, cy: kb.y, r: 6, fill: "#e34b4b", stroke: "#fff", "stroke-width": 2 }, marks), kb.node, kb.id, kb.id, kb.name);
+    const t = E("text", { x: kb.x + 9, y: kb.y + 4, fill: "#fff", "font-size": 12, "font-weight": 600, "paint-order": "stroke", stroke: "#0009", "stroke-width": 3 }, marks); t.textContent = kb.name;
+  }
+}
+
+function clickable(el, locNode, routeId, buildingId, label) { el.style.cursor = "pointer"; el.onclick = ev => { ev.stopPropagation(); openCard(locNode, routeId, buildingId, label); }; return el; }
+
+async function openCard(locNode, routeId, buildingId, label) {
+  cardRouteId = routeId; cardLabel = label; selBuilding = buildingId; $("sel").textContent = buildingId || "—";
+  const d = await fetch("/api/citydebug/location?" + qs(PARAMS) + "&node=" + locNode).then(r => r.json());
+  $("card-name").textContent = label;
+  const by = { road:[], enter:[], exit:[], internal:[] }; (d.moves || []).forEach(m => by[m.kind].push(m));
+  let b = `<div class="cl g">узел ${locNode} · ${d.kind || "—"}</div>`;
+  if (d.landmarks && d.landmarks.length) b += `<div class="cl">ориентиры: <b>${d.landmarks.map(t => LM[t] || t).join(", ")}</b></div>`;
+  if (by.enter.length) b += `<div class="cl">🚪 вход: <b>${by.enter.map(m => m.name).join(", ")}</b></div>`;
+  if (by.internal.length) b += `<div class="cl">↳ вглубь: ${by.internal.map(m => m.name).join(", ")}</div>`;
+  if (by.road.length) b += `<div class="cl">→ дороги: ${by.road.map(m => WIND[m.heading] || m.heading).join(", ")}</div>`;
+  if (d.nearby && d.nearby.length) b += `<div class="cl">рядом: ${d.nearby.map(n => n.name + " <span class='g'>(" + n.dist + "px)</span>").join(", ")}</div>`;
+  $("card-body").innerHTML = b;
+  $("card").classList.remove("hidden");
+}
+
+function setRoutePoint(slot) {
+  const pt = { id: cardRouteId, label: cardLabel };
+  if (slot === "A") routeA = pt; else routeB = pt;
+  $("ptA").textContent = routeA ? routeA.label : "—"; $("ptB").textContent = routeB ? routeB.label : "—";
+  $("card").classList.add("hidden");
+  if (routeA && routeB) computeRoute();
+}
+function resetRoute() { routeA = routeB = lastRoute = null; $("ptA").textContent = $("ptB").textContent = "—"; $("info").textContent = "—"; render(); }
+
+async function computeRoute() {
+  const r = await fetch("/api/citydebug/route?" + qs(PARAMS) + "&a=" + encodeURIComponent(routeA.id) + "&b=" + encodeURIComponent(routeB.id));
+  const route = await r.json();
+  if (!route.found) { $("info").innerHTML = "<b>маршрут не найден</b>"; lastRoute = null; render(); return; }
+  lastRoute = route; render(); showRoute(route);
+}
+
+function showRoute(route) {
+  const icon = { exit:"🚪", enter:"🚪", internal:"↳", road:"→" };
+  const steps = route.steps.map(s => { const lab = s.kind === "road" ? (WIND[s.heading] || s.heading) : s.kind === "enter" ? `вход: ${s.name}` : s.kind === "exit" ? "выход на улицу" : `вглубь: ${s.name}`;
+    return `<div class="step">${icon[s.kind]} <span class="g">${s.kind}</span> ${lab}</div>`; }).join("");
+  const signs = route.signs.length ? route.signs.map(s => `<span class="pill">${s.name}</span>`).join("") : "<span class='g'>нет</span>";
+  const lmStr = (route.landmarks || []).map(t => LM[t] || t).join(", ") || "—";
+  const near = route.near_target ? `${route.near_target.name} (${route.near_target.dist}px)` : "—";
+  $("info").innerHTML = `длина <b>${route.length}px</b> · перекрёстков <b>${route.crossroads.length}</b>` +
+    `<div>направление: <b>${WIND[route.bearing] || route.bearing || "—"}</b></div>` +
+    `<div>цель рядом с: <b>${near}</b></div><div>ориентиры цели: <b>${lmStr}</b></div>` +
+    `<div style="margin:5px 0;max-height:200px;overflow:auto">${steps}</div>вывески по пути:<br>${signs}`;
+}
+
+function highlightRoute(route) {
+  const g = $("L-route"); if (!g) return; g.innerHTML = "";
+  E("polyline", { points: route.nodes.map(id => `${NX[id].x},${NX[id].y}`).join(" "), fill: "none", stroke: "#37e06a", "stroke-width": 4.5, "stroke-linejoin": "round", "stroke-linecap": "round", opacity: .95 }, g);
+  const a = NX[route.nodes[0]], b = NX[route.nodes[route.nodes.length - 1]];
+  E("circle", { cx: a.x, cy: a.y, r: 7, fill: "#37e06a", stroke: "#06101f", "stroke-width": 2 }, g);
+  E("circle", { cx: b.x, cy: b.y, r: 7, fill: "#ff8a3a", stroke: "#06101f", "stroke-width": 2 }, g);
 }
 
 function showStats() {
   const s = DATA.stats, k = s.by_kind;
-  $("stats").innerHTML =
-    `узлов <b>${s.nodes}</b> · рёбер <b>${s.edges}</b> · отрезок <b>${s.interval}px</b><br>` +
-    `перекрёстков <b>${k.crossroad || 0}</b> · точек <b>${k.point || 0}</b> · ` +
-    `мостов <b>${k.bridge || 0}</b> · ворот <b>${k.gate || 0}</b> · нутро <b>${k.interior || 0}</b><br>` +
+  $("stats").innerHTML = `узлов <b>${s.nodes}</b> · рёбер <b>${s.edges}</b> · отрезок <b>${s.interval}px</b><br>` +
+    `перекрёстков <b>${k.crossroad || 0}</b> · точек <b>${k.point || 0}</b> · мостов <b>${k.bridge || 0}</b> · ворот <b>${k.gate || 0}</b><br>` +
     `домов <b>${s.houses}</b> · ключевых зданий <b>${s.key_buildings}</b>`;
 }
 
-// routeId — что передаём в маршрут (id здания или номер узла); inspectId — узел для осмотра
-function clickTarget(routeId, inspectId, buildingId) {
-  if (buildingId) { selBuilding = buildingId; $("sel").textContent = buildingId; }
-  if (mode() === "inspect") inspectNode(inspectId);
-  else pickRoute(routeId);
-}
-
-async function pickRoute(id) {
-  if (pickA === null) { pickA = id; $("info").innerHTML = `A = <b>${id}</b> · выбери B…`; highlightRoute(null); return; }
-  if (id === pickA) { pickA = null; $("info").textContent = "сброшено"; highlightRoute(null); return; }
-  const r = await fetch("/api/citydebug/route?" + qs(PARAMS) + "&a=" + pickA + "&b=" + id);
-  const route = await r.json(); const a = pickA; pickA = null;
-  if (!route.found) { $("info").innerHTML = `маршрут ${a}→${id}: <b>не найден</b>`; return; }
-  highlightRoute(route);
-  const icon = { exit: "🚪", enter: "🚪", internal: "↳", road: "→" };
-  const steps = route.steps.map(s => {
-    const lab = s.kind === "road" ? `${WIND[s.heading] || s.heading}`
-      : s.kind === "enter" ? `вход: ${s.name}`
-      : s.kind === "exit" ? "выход на улицу" : `вглубь: ${s.name}`;
-    return `<div class="step">${icon[s.kind]} <span class="g">${s.kind}</span> ${lab}</div>`;
-  }).join("");
-  const signs = route.signs.length
-    ? route.signs.map(s => `<span class="pill">${s.name}</span>`).join("") : "<span class='g'>нет</span>";
-  const lm = { river: "у реки", wall: "у стены", gate: "у ворот", bridge: "у моста" };
-  const lmStr = (route.landmarks || []).map(t => lm[t] || t).join(", ") || "—";
-  const near = route.near_target ? `${route.near_target.name} (${route.near_target.dist}px)` : "—";
-  $("info").innerHTML =
-    `<b>${a} → ${id}</b> · длина <b>${route.length}px</b> · перекрёстков <b>${route.crossroads.length}</b>` +
-    `<div>общее направление: <b>${WIND[route.bearing] || route.bearing || "—"}</b></div>` +
-    `<div>цель рядом с: <b>${near}</b></div>` +
-    `<div>ориентиры цели: <b>${lmStr}</b></div>` +
-    `<div style="margin:5px 0;max-height:210px;overflow:auto">${steps}</div>` +
-    `вывески по пути:<br>${signs}`;
-}
-
-async function inspectNode(node) {
-  const r = await fetch("/api/citydebug/node?" + qs(PARAMS) + "&node=" + node);
-  const d = await r.json();
-  highlightRoute(null);
-  const by = { road: [], enter: [], exit: [], internal: [] };
-  d.moves.forEach(m => by[m.kind].push(m));
-  let html = `<b>узел ${node}</b> <span class="g">(${d.kind})</span><br>`;
-  if (by.road.length) html += `→ дороги: ${by.road.map(m => WIND[m.heading] || m.heading).join(", ")}<br>`;
-  if (by.enter.length) html += `🚪 вход: ${by.enter.map(m => m.name).join(", ")}<br>`;
-  if (by.exit.length) html += `🚪 выход на улицу<br>`;
-  if (by.internal.length) html += `↳ вглубь: ${by.internal.map(m => m.name).join(", ")}<br>`;
-  if (!d.moves.length) html += `<span class="g">тупик</span>`;
-  $("info").innerHTML = html;
-}
-
-function highlightRoute(route) {
-  const g = $("L-route"); g.innerHTML = "";
-  if (!route) return;
-  const NX = window.NX;
-  const pts = route.nodes.map(id => `${NX[id].x},${NX[id].y}`).join(" ");
-  E("polyline", { points: pts, fill: "none", stroke: "#37e06a", "stroke-width": 4,
-                  "stroke-linejoin": "round", "stroke-linecap": "round", opacity: .95 }, g);
-  for (const cr of route.crossroads)
-    E("circle", { cx: NX[cr].x, cy: NX[cr].y, r: 4.5, fill: "none",
-                  stroke: "#37e06a", "stroke-width": 2 }, g);
-}
-
 async function addSubspace() {
-  if (!selBuilding) { $("info").innerHTML = "сначала кликни здание (оно станет «выбранным»)"; return; }
+  if (!selBuilding) { $("info").innerHTML = "сначала кликни здание"; return; }
   const name = $("sub-name").value || "Подвал";
-  const r = await fetch("/api/citydebug/subspace?" + qs(PARAMS) + "&building=" +
-                        encodeURIComponent(selBuilding) + "&name=" + encodeURIComponent(name));
-  const d = await r.json();
+  const d = await fetch("/api/citydebug/subspace?" + qs(PARAMS) + "&building=" + encodeURIComponent(selBuilding) + "&name=" + encodeURIComponent(name)).then(r => r.json());
   if (d.added == null) { $("info").innerHTML = "не удалось добавить под-здание"; return; }
-  DATA = d.data; render(); showStats();
-  $("info").innerHTML = `добавлено «${name}» (узел ${d.added}) к ${selBuilding}. Маршрут к нему — кликни узел в режиме осмотра или проложи путь.`;
+  DATA = d.data; NX = {}; DATA.nodes.forEach(n => NX[n.id] = n); render(); showStats();
+  $("info").innerHTML = `добавлено «${name}» (узел ${d.added}) к ${selBuilding}.`;
 }
 
 $("gen").onclick = generate;
+$("v-graph").onclick = () => setView("graph"); $("v-city").onclick = () => setView("city");
+$("route-reset").onclick = resetRoute;
+$("card-x").onclick = () => $("card").classList.add("hidden");
+$("card-a").onclick = () => setRoutePoint("A"); $("card-b").onclick = () => setRoutePoint("B");
 $("add-sub").onclick = addSubspace;
 document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => setPreset(b.dataset.preset));
 buildLayerToggles();

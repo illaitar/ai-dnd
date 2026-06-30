@@ -50,7 +50,11 @@ _BUILD_SYS = (
     "reputation (respected|neutral|dubious|shady); notable (одна короткая деталь места); "
     "secret ({what, where, gate} или null); valuables (массив — что украсть); rumors (массив коротких зацепок); "
     "sub_rooms (массив {name, kind:(cellar|backroom|attic|quarters|hidden), access:(public|staff|locked|hidden), "
-    "features:[...], contents:[...]}; 0-4, у жилого дома 0-1)."
+    "features:[...], contents:[...]}; 0-4, у жилого дома 0-1).\n"
+    "ВАЖНО ПРО ЯЗЫК: энум-поля (tier/size/age/condition/lighting/foot_traffic/prosperity/reputation/services, "
+    "kind/access у помещений) — строго АНГЛ. ключи из списков выше. ВСЁ остальное (type, features, smells, sounds, "
+    "wares, occupants_kind, notable, secret, valuables, rumors, имена помещений) — НА РУССКОМ, короткими "
+    "естественными фразами, БЕЗ snake_case и англицизмов."
 )
 
 
@@ -108,7 +112,9 @@ def _norm_building(d: dict) -> dict:
         "services": [s for s in _list(d.get("services")) if s in SERVICES],
         "wares": _list(d.get("wares")), "hours": str(d.get("hours") or "").strip(),
         "foot_traffic": _enum(d.get("foot_traffic"), TRAFFIC, "moderate"),
-        "occupants_kind": str(d.get("occupants_kind") or "").strip(),
+        "occupants_kind": (", ".join(str(x) for x in d["occupants_kind"])
+                           if isinstance(d.get("occupants_kind"), list)
+                           else str(d.get("occupants_kind") or "")).strip(),
         "prosperity": _enum(d.get("prosperity"), PROSPERITY, "stable"),
         "reputation": _enum(d.get("reputation"), REPUTATION, "neutral"),
         "notable": str(d.get("notable") or "").strip(),

@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import math
 
+from .fsm import step as fsm_step
 from .model import EMOTIONS, NEEDS, NpcState, Scene
 
-_NEED_RATE = {"fatigue": 0.015, "hunger": 0.02, "social": 0.012}
+_NEED_RATE = {"fatigue": 0.015, "hunger": 0.02, "social": 0.012, "purpose": 0.01,
+              "wealth": 0.006, "comfort": 0.008, "novelty": 0.014}
 _HALFLIFE = {"anger": 6.0, "fear": 4.0, "joy": 8.0, "distress": 36.0}   # в тиках
 
 
@@ -28,12 +30,16 @@ def _decay_emotion(state: NpcState, dt: int = 1) -> None:
             state.emotion_target.pop(e, None)
 
 
-def advance(state: NpcState, scene: Scene, ticks: int = 1) -> dict:
+def advance(state: NpcState, scene: Scene, ticks: int = 1, stim: dict | None = None) -> dict:
+    trace = None
     for _ in range(max(1, ticks)):
         scene.clock += 1
-        _decay_needs(state)
-        _decay_emotion(state)
-    return {"clock": scene.clock, "needs": {k: round(v, 2) for k, v in state.needs.items()},
+        _decay_needs(state)                              # время идёт — нужды растут
+        trace = fsm_step(state, scene, stim)             # решаем на СВЕЖИХ эмоциях + выросших нуждах
+        _decay_emotion(state)                            # эмоции угасают уже к следующему тику
+        stim = None                                      # стимул одноразовый — только первый тик
+    return {"clock": scene.clock, "mode": state.mode, "fsm": trace,
+            "needs": {k: round(v, 2) for k, v in state.needs.items()},
             "emotion": {k: round(v, 2) for k, v in state.emotion.items()}}
 
 

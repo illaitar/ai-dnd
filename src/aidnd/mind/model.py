@@ -14,7 +14,7 @@ from .memory import MemoryStore
 TRAITS = ("bravery", "greed", "honesty", "curiosity", "pride", "loyalty",
           "sociability", "ambition", "lawful", "irritability")
 ABILITIES = ("str", "dex", "con", "int", "wis", "cha")
-NEEDS = ("fatigue", "hunger", "social")
+NEEDS = ("fatigue", "hunger", "social", "purpose", "wealth", "comfort", "novelty")
 EMOTIONS = ("anger", "fear", "joy", "distress")
 
 
@@ -31,16 +31,38 @@ class NpcConfig:
 
 
 @dataclass
+class Plan:
+    """План рутины: упорядоченные шаги к цели + важность (стойкость к прерыванию)."""
+    goal: str
+    steps: list = field(default_factory=list)            # описания шагов / вызовы инструментов
+    importance: float = 0.4
+    cursor: int = 0
+
+    def done(self) -> bool:
+        return self.cursor >= len(self.steps)
+
+    def current(self):
+        return self.steps[self.cursor] if not self.done() else None
+
+    def view(self) -> dict:
+        return {"goal": self.goal, "steps": self.steps, "cursor": self.cursor,
+                "importance": round(self.importance, 2), "done": self.done()}
+
+
+@dataclass
 class NpcState:
     config: NpcConfig
     node: int | None = None
     hp: int = 10
-    mode: str = "idle"                                   # idle | conversing | flee | fight | trade
+    mode: str = "leisure"                                # routine | leisure | converse | threat
     needs: dict = field(default_factory=lambda: dict.fromkeys(NEEDS, 0.2))
     emotion: dict = field(default_factory=lambda: dict.fromkeys(EMOTIONS, 0.0))
     emotion_target: dict = field(default_factory=dict)   # канал → id источника (на кого/из-за кого)
     relationships: dict = field(default_factory=dict)    # id → {trust, affinity, fear}
     memory: MemoryStore = field(default_factory=MemoryStore)
+    plan: Plan | None = None                           # активный план (режим routine)
+    engagement: float = 0.0                              # вовлечённость в диалог (hold для converse)
+    mode_history: list = field(default_factory=list)     # [(tick, mode, switched, reason)] — маршрут
 
     @classmethod
     def from_config(cls, cfg: NpcConfig, node: int | None = None) -> NpcState:
@@ -67,7 +89,10 @@ class NpcState:
                 "needs": {k: round(v, 2) for k, v in self.needs.items()},
                 "emotion": {k: round(v, 2) for k, v in self.emotion.items()},
                 "emotion_target": dict(self.emotion_target),
-                "relationships": self.relationships, "memory_count": len(self.memory.items)}
+                "relationships": self.relationships, "memory_count": len(self.memory.items),
+                "plan": self.plan.view() if self.plan else None,
+                "engagement": round(self.engagement, 2),
+                "mode_history": self.mode_history[-24:]}
 
 
 @dataclass

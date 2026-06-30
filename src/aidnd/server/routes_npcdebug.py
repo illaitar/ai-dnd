@@ -121,8 +121,8 @@ async def npcdebug_tick(_: Owner, request: Request):
     scene, npc = _need()
     if not npc:
         return _err("сначала создай сцену")
-    ticks = int((await request.json()).get("ticks", 1))
-    res = advance(npc, scene, ticks=ticks)
+    b = await request.json()
+    res = advance(npc, scene, ticks=int(b.get("ticks", 1)), stim=b.get("stim"))
     return {"tick": res, "npc": npc.view(), "clock": scene.clock}
 
 

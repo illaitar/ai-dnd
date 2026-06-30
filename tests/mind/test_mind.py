@@ -108,3 +108,67 @@ def test_appraise_norm_resolves_anger(scene):
     appraise(npc, {"goal_impact": 0.5, "desert": 0.6, "norm": 0.8, "intent": "deliberate"}, source="npc:foe")
     assert npc.emotion["joy"] > 0
     assert npc.emotion["anger"] < 0.5                        # обида снята адресно
+
+
+# ------------------------------------------------------- граф состояний ----- #
+def _calm(npc, **over):
+    npc.needs.update(dict.fromkeys(npc.needs, 0.2))
+    npc.needs.update(over)
+
+
+def test_default_leisure(scene):
+    sc, npc = scene
+    _calm(npc)
+    advance(npc, sc, ticks=1)
+    assert npc.mode == "leisure"                             # мягкие нужды → досуг
+
+
+def test_threat_preempts(scene):
+    sc, npc = scene
+    _calm(npc)
+    npc.emotion["fear"] = 0.85
+    advance(npc, sc, ticks=1)
+    assert npc.mode == "threat"
+
+
+def test_strong_need_builds_routine(scene):
+    sc, npc = scene
+    _calm(npc, hunger=0.85)
+    advance(npc, sc, ticks=1)
+    assert npc.mode == "routine"
+    assert npc.plan and "голод" in npc.plan.goal             # план под доминирующую нужду
+
+
+def test_routine_holds_trivia_but_threat_interrupts(scene):
+    sc, npc = scene
+    _calm(npc, fatigue=0.9)                                  # важный план (importance 0.7)
+    advance(npc, sc, ticks=1)
+    assert npc.mode == "routine"
+    advance(npc, sc, ticks=1, stim={"addressed": True, "addresser_importance": 0.2})
+    assert npc.mode == "routine"                             # мелочь не сорвала рутину
+    npc.emotion["fear"] = 0.9
+    advance(npc, sc, ticks=1)
+    assert npc.mode == "threat"                              # угроза сорвала
+
+
+def test_addressed_enters_converse(scene):
+    sc, npc = scene
+    _calm(npc)
+    advance(npc, sc, ticks=1, stim={"addressed": True, "addresser_importance": 0.7})
+    assert npc.mode == "converse"
+
+
+def test_routine_plan_advances(scene):
+    sc, npc = scene
+    _calm(npc, hunger=0.85)
+    advance(npc, sc, ticks=1)                                # вход в routine, план 2 шага
+    assert npc.plan.cursor == 0
+    advance(npc, sc, ticks=2)
+    assert npc.plan.done()                                   # шаги выполнены
+
+
+def test_mode_history_is_route(scene):
+    sc, npc = scene
+    advance(npc, sc, ticks=4)
+    assert len(npc.mode_history) >= 4
+    assert all(len(h) == 4 for h in npc.mode_history)        # [tick, mode, switched, reason]

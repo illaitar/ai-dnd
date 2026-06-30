@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NPC — дебаг-стенд</title>
+<style>
+  :root { --bg:#11141a; --panel:#1b1f28; --line:#2a3040; --txt:#dfe5ef; --mut:#8b96ab; --acc:#5aa0ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:13px/1.45 system-ui, sans-serif; }
+  header { padding:8px 14px; background:#0d0f14; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:center; }
+  header h1 { font-size:14px; margin:0; } header a { margin-left:auto; color:var(--acc); text-decoration:none; }
+  .wrap { display:flex; height:calc(100vh - 39px); }
+  .col { overflow-y:auto; padding:10px; }
+  .left { width:290px; flex:none; background:var(--panel); border-right:1px solid var(--line); }
+  .mid { flex:1; display:flex; flex-direction:column; background:#0c0e13; min-width:380px; }
+  .right { width:360px; flex:none; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; }
+  h2 { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:12px 0 6px; border-bottom:1px solid var(--line); padding-bottom:3px; }
+  label.row { display:flex; align-items:center; gap:6px; margin:3px 0; }
+  label.row span.k { width:92px; color:var(--mut); font-size:12px; }
+  input[type=number], input[type=text], select { background:#0e1117; border:1px solid var(--line); color:var(--txt); border-radius:5px; padding:3px 6px; width:100%; }
+  input[type=range] { width:120px; }
+  .val { width:30px; text-align:right; color:var(--mut); font-size:11px; }
+  button { background:var(--acc); color:#06101f; border:0; border-radius:6px; padding:6px 10px; font-weight:600; cursor:pointer; }
+  button.alt { background:#2a3140; color:var(--txt); font-weight:500; }
+  button.s { padding:3px 8px; font-size:12px; }
+  svg { width:100%; height:auto; background:#0c0e13; flex:1; }
+  .timeline { padding:8px 12px; border-top:1px solid var(--line); display:flex; align-items:center; gap:10px; background:#0d0f14; }
+  .clock { font-size:15px; font-weight:600; }
+  .bar { height:7px; background:#222a38; border-radius:4px; overflow:hidden; margin:2px 0 5px; }
+  .bar > i { display:block; height:100%; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
+  #thoughts { flex:1; overflow-y:auto; border-top:1px solid var(--line); margin-top:6px; padding-top:6px; }
+  .th { background:#0e1117; border:1px solid var(--line); border-radius:6px; padding:6px 8px; margin-bottom:6px; font-size:12px; }
+  .th b { color:#9fd0ff; } .th .g { color:var(--mut); }
+  .pill { display:inline-block; background:#222a38; border-radius:4px; padding:1px 6px; margin:2px 3px 0 0; font-size:11px; }
+  .toolrow { display:flex; gap:5px; align-items:center; margin:3px 0; }
+  .toolrow input { flex:1; }
+  .hint { font-size:11px; color:var(--mut); }
+</style>
+</head>
+<body>
+<header><h1>🧠 NPC — дебаг-стенд</h1><span class="hint" id="sub">создай сцену</span><a href="/citydebug">карта-дебаг</a><a href="/">в игру</a></header>
+<div class="wrap">
+  <!-- ЛЕВО: настройки -->
+  <div class="col left">
+    <h2>Сцена</h2>
+    <label class="row"><span class="k">seed</span><input type="number" id="g-seed" value="7"></label>
+    <label class="row"><span class="k">ключевых</span><input type="number" id="g-key" value="10"></label>
+    <label class="row"><span class="k">река/стены</span><input type="checkbox" id="g-river" checked><input type="checkbox" id="g-walls" checked></label>
+    <h2>NPC</h2>
+    <label class="row"><span class="k">имя</span><input type="text" id="n-name" value="Тоблен"></label>
+    <label class="row"><span class="k">роль</span><input type="text" id="n-role" value="трактирщик"></label>
+    <label class="row"><span class="k">уровень/hp</span><input type="number" id="n-level" value="1" style="width:50px"><input type="number" id="n-hp" value="10" style="width:50px"></label>
+    <h2>Характер (черты)</h2><div id="traits"></div>
+    <h2>Характеристики</h2><div id="abilities" class="grid2"></div>
+    <h2>Нужды</h2><div id="needs"></div>
+    <h2>Эмоции</h2><div id="emotions"></div>
+    <div style="display:flex; gap:6px; margin-top:8px">
+      <button id="btn-new">Создать сцену</button>
+      <button class="alt" id="btn-apply">Применить</button>
+    </div>
+    <h2>Добавить воспоминание</h2>
+    <input type="text" id="mem-text" placeholder="текст воспоминания">
+    <div class="toolrow"><span class="k" style="width:auto">важность</span><input type="number" id="mem-imp" value="0.4" step="0.1" min="0" max="1" style="width:60px"><button class="alt s" id="btn-mem">+</button></div>
+  </div>
+
+  <!-- ЦЕНТР: карта + таймлайн -->
+  <div class="mid">
+    <svg id="map" viewBox="0 0 980 700"></svg>
+    <div class="timeline">
+      <button id="btn-tick">▶ тик</button>
+      <input type="number" id="tick-n" value="1" style="width:50px">
+      <span class="clock">тик <b id="clock">0</b></span>
+      <span class="hint">клик по перекрёстку/зданию — поставить NPC сюда</span>
+    </div>
+  </div>
+
+  <!-- ПРАВО: мысли + инструменты -->
+  <div class="col right">
+    <h2>Состояние</h2><div id="state" class="hint">—</div>
+    <h2>Инструменты</h2><div id="tools"></div>
+    <h2>Апрейзал (событие → эмоции)</h2>
+    <div class="grid2">
+      <label class="row"><span class="k">goal_impact</span><input type="number" id="a-gi" value="-0.4" step="0.1" style="width:60px"></label>
+      <label class="row"><span class="k">desert</span><input type="number" id="a-desert" value="-0.6" step="0.1" style="width:60px"></label>
+      <label class="row"><span class="k">harm</span><input type="number" id="a-harm" value="0" step="0.1" style="width:60px"></label>
+      <label class="row"><span class="k">norm</span><input type="number" id="a-norm" value="0" step="0.1" style="width:60px"></label>
+    </div>
+    <div class="toolrow"><label class="row"><input type="checkbox" id="a-intent" checked> умышленно</label><input type="text" id="a-src" placeholder="source id" value="npc:foe"><button class="alt s" id="btn-appraise">апрейз</button></div>
+    <h2>Мысли / лог</h2><div id="thoughts"></div>
+  </div>
+</div>
+<script>
+const NS="http://www.w3.org/2000/svg", $=id=>document.getElementById(id);
+function E(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+async function post(u,b){const r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})});return r.json();}
+let DATA=null, NPC=null, NX={}, SCHEMA=null;
+const WIND={"С":"север","СВ":"северо-восток","В":"восток","ЮВ":"юго-восток","Ю":"юг","ЮЗ":"юго-запад","З":"запад","СЗ":"северо-запад"};
+
+function slider(box,key,val){const l=document.createElement("label");l.className="row";
+  l.innerHTML=`<span class="k">${key}</span>`;
+  const i=document.createElement("input");i.type="range";i.min=0;i.max=1;i.step=0.05;i.value=val;i.dataset.k=key;
+  const v=document.createElement("span");v.className="val";v.textContent=(+val).toFixed(2);
+  i.oninput=()=>v.textContent=(+i.value).toFixed(2);
+  l.append(i,v);box.appendChild(l);return i;}
+function num(box,key,val){const l=document.createElement("label");l.className="row";
+  l.innerHTML=`<span class="k">${key}</span>`;const i=document.createElement("input");i.type="number";i.value=val;i.dataset.k=key;i.style.width="55px";l.append(i);box.appendChild(l);return i;}
+function collect(box){const o={};box.querySelectorAll("[data-k]").forEach(i=>o[i.dataset.k]=+i.value);return o;}
+
+function buildSettings(){
+  $("traits").innerHTML="";$("abilities").innerHTML="";$("needs").innerHTML="";$("emotions").innerHTML="";
+  SCHEMA.traits.forEach(t=>slider($("traits"),t, t==="bravery"?0.6:0.5));
+  SCHEMA.abilities.forEach(a=>num($("abilities"),a,10));
+  SCHEMA.needs.forEach(n=>slider($("needs"),n,0.2));
+  SCHEMA.emotions.forEach(e=>slider($("emotions"),e,0));
+}
+
+async function newScene(){
+  const body={seed:+$("g-seed").value,key:+$("g-key").value,river:$("g-river").checked,walls:$("g-walls").checked,
+    name:$("n-name").value,role:$("n-role").value,level:+$("n-level").value,max_hp:+$("n-hp").value,
+    traits: SCHEMA?collect($("traits")):undefined, abilities: SCHEMA?collect($("abilities")):undefined};
+  const d=await post("/api/npcdebug/new",body);
+  if(d.error){$("sub").textContent="ошибка: "+(d.detail||d.error);return;}
+  DATA=d.graph;NPC=d.npc;SCHEMA=d.schema;
+  if(!$("traits").children.length) buildSettings();
+  buildTools(d.tools);renderMap();renderState();$("clock").textContent=d.clock;$("sub").textContent="сцена готова";
+  log("сцена","NPC "+NPC.name+" ("+NPC.role+") на узле "+NPC.node);
+}
+async function applyConfig(){
+  const d=await post("/api/npcdebug/config",{name:$("n-name").value,role:$("n-role").value,
+    traits:collect($("traits")),abilities:collect($("abilities")),needs:collect($("needs")),emotion:collect($("emotions"))});
+  if(d.npc){NPC=d.npc;renderState();log("настройки","применены");}
+}
+
+function renderMap(){
+  const svg=$("map");svg.innerHTML="";svg.setAttribute("viewBox",`0 0 ${DATA.size.w} ${DATA.size.h}`);
+  NX={};DATA.nodes.forEach(n=>NX[n.id]=n);
+  const g={edges:E("g",{},svg),cross:E("g",{},svg),keys:E("g",{},svg),npc:E("g",{},svg)};
+  DATA.edges.forEach(e=>{const a=NX[e.a],b=NX[e.b];E("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:e.kind==="road"?"#5b6478":"#c46bff","stroke-width":e.kind==="road"?1:1.4,opacity:.8},g.edges);});
+  DATA.nodes.forEach(n=>{if(n.kind==="crossroad"||n.kind==="bridge"||n.kind==="gate"){
+    const c=E("circle",{cx:n.x,cy:n.y,r:3,fill:"#cfd6e2",stroke:"#222"},g.cross);c.style.cursor="pointer";c.onclick=()=>place(n.id);}});
+  DATA.key_buildings.forEach(kb=>{const c=E("circle",{cx:kb.x,cy:kb.y,r:5,fill:"#ff5050",stroke:"#fff","stroke-width":1.2},g.keys);
+    c.style.cursor="pointer";c.onclick=()=>place(kb.node);E("text",{x:kb.x+7,y:kb.y+4,fill:"#ffd0d0","font-size":10},g.keys).textContent=kb.name;});
+  drawNpc();
+}
+function drawNpc(){const g=$("map").lastChild;g.innerHTML="";if(NPC&&NPC.node!=null&&NX[NPC.node]){const p=NX[NPC.node];
+  E("circle",{cx:p.x,cy:p.y,r:8,fill:"none",stroke:"#37e06a","stroke-width":3},g);
+  E("circle",{cx:p.x,cy:p.y,r:3.5,fill:"#37e06a"},g);}}
+
+async function place(node){const d=await post("/api/npcdebug/place",{node});if(d.npc){NPC=d.npc;drawNpc();renderState();log("разместил","узел "+node);}}
+
+function renderState(){const n=NPC;if(!n){return;}
+  const bars=(obj,col)=>Object.entries(obj).map(([k,v])=>`<div style="font-size:11px">${k} <span class="g">${v.toFixed(2)}</span><div class="bar"><i style="width:${Math.round(v*100)}%;background:${col(k,v)}"></i></div></div>`).join("");
+  const ec=(k)=>({anger:"#e8593a",fear:"#b06bff",joy:"#37e06a",distress:"#5a9cff"}[k]||"#888");
+  $("state").innerHTML=`<b>${n.name}</b> · ${n.role} · режим ${n.mode} · hp ${n.hp} · узел ${n.node??"—"} · память ${n.memory_count}
+    <h2 style="margin-top:8px">нужды</h2>${bars(n.needs,()=> "#c79")}
+    <h2>эмоции</h2>${bars(n.emotion,ec)}
+    ${Object.keys(n.emotion_target).length?`<div class="hint">цель эмоции: ${Object.entries(n.emotion_target).map(([e,t])=>e+"→"+t).join(", ")}</div>`:""}`;
+}
+
+function buildTools(tools){const box=$("tools");box.innerHTML="";
+  tools.forEach(t=>{const row=document.createElement("div");row.className="toolrow";
+    let inp="";
+    if(t.name==="recall") inp=`<input id="p-recall" placeholder="вопрос"><label class="row" style="margin:0"><input type="checkbox" id="recall-llm"> LLM</label>`;
+    else if(t.name==="assess") inp=`<input id="p-assess" placeholder="entity id">`;
+    else if(t.name==="locate"||t.name==="move") inp=`<input id="p-${t.name}" placeholder="key:N / имя / узел">`;
+    row.innerHTML=`<button class="alt s" data-t="${t.name}">${t.name}</button>${inp}<span class="g">${t.cls}</span>`;
+    box.appendChild(row);
+    row.querySelector("button").onclick=()=>runTool(t.name);});
+}
+async function runTool(name){
+  let params={},rerank=false;
+  if(name==="recall"){params={query:$("p-recall").value};rerank=$("recall-llm").checked;}
+  else if(name==="assess")params={entity:$("p-assess").value};
+  else if(name==="locate"||name==="move")params={target:$(`p-${name}`).value};
+  const d=await post("/api/npcdebug/tool",{name,params,rerank});
+  if(d.npc){NPC=d.npc;drawNpc();renderState();}
+  logTool(name,d.result);
+}
+function logTool(name,r){
+  let html=`<b>${name}</b>`;
+  if(name==="recall") html+=` <span class="g">«${r.query}»</span><br>`+(r.memories.length?r.memories.map((m,i)=>`${i+1}. ${m.text} <span class="g">[${m.importance}]</span>`).join("<br>"):"<span class=g>пусто</span>");
+  else if(name==="perceive") html+=`<br>узел ${r.node} (${r.kind}) · present: ${r.present.join(", ")||"—"}<br>выходы: `+r.exits.map(e=>e.kind==="road"?(WIND[e.heading]||e.heading):e.kind+(e.name?":"+e.name:"")).join(", ");
+  else if(name==="assess") html+=` <span class="g">${r.entity}</span><br>отношение: trust ${r.relationship.trust}, affinity ${r.relationship.affinity}, fear ${r.relationship.fear}<br>факты: `+(r.facts.length?r.facts.map(f=>`<div>• ${f}</div>`).join(""):"—");
+  else if(name==="locate") html+= r.known? `<br>${r.found?"путь есть":"пути нет"} · ${r.length}px · направление <b>${WIND[r.bearing]||r.bearing||"—"}</b> · перекрёстков ${r.crossroads}<br>цель рядом с: ${r.near_target?r.near_target.name:"—"} · ориентиры: ${(r.landmarks||[]).join(", ")||"—"}`:" <span class=g>цель неизвестна</span>";
+  else if(name==="move") html+= r.moved? `<br>шаг (${r.step}${r.heading?", "+(WIND[r.heading]||r.heading):""}) → узел ${r.to}, осталось ${r.remaining}${r.arrived?" (прибыл)":""}`:` <span class=g>${r.reason}</span>`;
+  else html+="<br>"+JSON.stringify(r);
+  log("",html,true);
+}
+function log(tag,html,raw){const d=document.createElement("div");d.className="th";d.innerHTML=(tag?`<b>${tag}</b> `:"")+(raw?html:html);$("thoughts").prepend(d);}
+
+async function tick(){const d=await post("/api/npcdebug/tick",{ticks:+$("tick-n").value});if(d.npc){NPC=d.npc;renderState();$("clock").textContent=d.clock;log("тик","→ "+d.clock+" · нужды/эмоции обновлены");}}
+async function addMemory(){const t=$("mem-text").value.trim();if(!t)return;const d=await post("/api/npcdebug/memory",{text:t,importance:+$("mem-imp").value});$("mem-text").value="";if(d.memory_count!=null){NPC.memory_count=d.memory_count;renderState();log("память","+ «"+t+"» (всего "+d.memory_count+")");}}
+async function doAppraise(){const d=await post("/api/npcdebug/appraise",{source:$("a-src").value,dims:{goal_impact:+$("a-gi").value,desert:+$("a-desert").value,harm:+$("a-harm").value,norm:+$("a-norm").value,intent:$("a-intent").checked?"deliberate":"accidental"}});if(d.npc){NPC=d.npc;renderState();log("апрейзал","событие → "+Object.entries(d.appraise.emotion).map(([k,v])=>k+" "+v).join(", "));}}
+
+$("btn-new").onclick=newScene;$("btn-apply").onclick=applyConfig;$("btn-tick").onclick=tick;
+$("btn-mem").onclick=addMemory;$("btn-appraise").onclick=doAppraise;
+newScene();
+</script>
+</body>
+</html>

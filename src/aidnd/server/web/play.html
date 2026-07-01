@@ -34,7 +34,20 @@
   .cap{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);padding:11px 14px 6px}
   .map{flex:1;position:relative;margin:6px 10px 10px;border:1px solid var(--line);border-radius:9px;
     background:var(--panel2);overflow:hidden}
-  .map svg{width:100%;height:100%;display:block}
+  .map svg{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+  .map svg.drag{cursor:grabbing}
+  .zoom{position:absolute;left:8px;bottom:8px;display:flex;align-items:center;gap:2px;
+    background:rgba(15,17,22,.82);border:1px solid var(--line2);border-radius:8px;padding:2px}
+  .zoom button{background:transparent;border:0;color:var(--ink);font:500 16px var(--sans);
+    width:26px;height:24px;cursor:pointer;border-radius:6px}
+  .zoom button:hover{background:var(--raise);color:var(--gold)}
+  .zoom span{font-size:10.5px;color:var(--dim);min-width:34px;text-align:center;font-variant-numeric:tabular-nums}
+  #citybase{filter:brightness(.72) saturate(.86) contrast(1.03)}
+  #citybase .h{cursor:pointer;transition:fill .1s}
+  #citybase .h:hover{fill:#ffdf87}
+  .kmark{fill:#f4eddb;font-weight:600;paint-order:stroke;stroke:#140d04;stroke-width:.7px;
+    cursor:pointer;pointer-events:auto}
+  .kmark:hover{fill:#ffe6a8}
   .locard{margin:0 10px 10px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel2)}
   .locard .nm{font:500 14px var(--serif);color:var(--gold)}
   .locard .kd{font-size:12px;color:var(--dim);margin-top:1px}
@@ -111,8 +124,13 @@
 <div class="stage">
   <div class="col left">
     <div id="mapwrap">
-      <div class="cap">карта</div>
-      <div class="map"><svg viewBox="0 0 300 340" id="mapsvg"></svg></div>
+      <div class="cap">карта <span id="here-lbl" style="color:var(--gold)"></span></div>
+      <div class="map" id="mapbox"><svg id="mapsvg"></svg>
+        <div class="zoom"><button onclick="zoomBy(1/1.4)" aria-label="отдалить">&#8722;</button>
+          <span id="zlvl">100%</span>
+          <button onclick="zoomBy(1.4)" aria-label="приблизить">&#43;</button>
+          <button onclick="recenter()" title="к игроку" style="font-size:12px">&#9678;</button></div>
+      </div>
       <div class="locard">
         <div class="nm">Трактир</div><div class="kd">таверна</div>
         <div class="desc">…</div>
@@ -147,32 +165,56 @@ const thread=()=>$('thread');
 function push(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;
   thread().appendChild(d);thread().scrollTop=thread().scrollHeight;return d;}
 
-async function loadMap(){
-  const m=await api('/api/play/map');if(!m||!m.viewBox)return;
-  const s=$('mapsvg');s.setAttribute('viewBox',m.viewBox.join(' '));
-  const vw=m.viewBox[2],r=Math.max(2.2,vw*0.015),fs=Math.max(3.4,vw*0.021),lw=Math.max(.7,vw*0.006);
-  let g='';
-  m.edges.forEach(([a,b,c,d])=>g+=`<line x1="${a}" y1="${b}" x2="${c}" y2="${d}" stroke="#2a2f3c" stroke-width="${lw}" stroke-linecap="round"/>`);
-  m.keys.forEach(k=>{
-    g+=`<g style="cursor:pointer" onclick="moveTo('${k.id}')">
-      <circle cx="${k.x}" cy="${k.y}" r="${r}" fill="#242938" stroke="${k.here?'#d9a441':'#4a5162'}" stroke-width="${lw*0.9}"/>
-      <text x="${k.x}" y="${k.y-r-fs*0.35}" text-anchor="middle" font-size="${fs}" fill="#9aa0ad">${k.label}</text></g>`;});
-  g+=`<circle cx="${m.player.x}" cy="${m.player.y}" r="${r*0.55}" fill="#d9a441"/>
-    <circle cx="${m.player.x}" cy="${m.player.y}" r="${r*0.55}" fill="none" stroke="#d9a441" opacity=".4"><animate attributeName="r" values="${r*0.55};${r*1.5};${r*0.55}" dur="2.4s" repeatCount="indefinite"/><animate attributeName="opacity" values=".6;0;.6" dur="2.4s" repeatCount="indefinite"/></circle>`;
-  s.innerHTML=g;
+let MAP=null,BVB=[0,0,100,100],Z=1,CX=50,CY=50,PXY={x:50,y:50},PANNED=false;
+function applyVB(){const w=BVB[2]/Z,h=BVB[3]/Z;
+  $('mapsvg').setAttribute('viewBox',`${(CX-w/2).toFixed(1)} ${(CY-h/2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`);
+  $('zlvl').textContent=Math.round(Z*100)+'%';}
+function svgEl(m){
+  const W=BVB[2],rpl=W*0.0092,lw=W*0.0022,fs=W*0.015;
+  let g=`<g id="citybase">${m.svg||''}</g>`;
+  g+=`<rect x="0" y="0" width="${BVB[2]}" height="${BVB[3]}" fill="#0b1226" opacity=".22" pointer-events="none"/>`;
+  m.keys.forEach(k=>g+=`<text class="kmark" data-id="${k.cr}" x="${k.x}" y="${k.y-rpl*1.9}" font-size="${fs.toFixed(1)}" text-anchor="middle">${k.label}</text>`);
+  g+=`<g id="pmark" transform="translate(${PXY.x},${PXY.y})" pointer-events="none">
+      <circle r="${rpl}" fill="#d9a441" stroke="#241a08" stroke-width="${lw}"/>
+      <circle r="${rpl}" fill="none" stroke="#ffe6a8" opacity=".55"><animate attributeName="r" values="${rpl};${rpl*2.6};${rpl}" dur="2.2s" repeatCount="indefinite"/><animate attributeName="opacity" values=".7;0;.7" dur="2.2s" repeatCount="indefinite"/></circle></g>`;
+  return g;
 }
+function renderMap(){const s=$('mapsvg');s.innerHTML=svgEl(MAP);applyVB();
+  s.querySelectorAll('.kmark').forEach(e=>e.addEventListener('click',ev=>{
+    ev.stopPropagation();if(!PANNED)moveTo(+e.dataset.id);}));
+  s.querySelectorAll('#citybase .h').forEach(e=>e.addEventListener('click',ev=>{
+    ev.stopPropagation();if(PANNED)return;const cr=MAP.h2cr[e.dataset.id];if(cr!=null)moveTo(cr);}));}
+async function loadMap(){MAP=await api('/api/play/map');if(!MAP||!MAP.viewBox)return;
+  BVB=MAP.viewBox;PXY=MAP.player;CX=PXY.x;CY=PXY.y;Z=Math.max(1.5,BVB[2]/560);renderMap();}
+function zoomBy(f){Z=Math.min(20,Math.max(0.85,Z*f));applyVB();}
+function recenter(){CX=PXY.x;CY=PXY.y;Z=Math.max(Z,BVB[2]/560);applyVB();}
+function walk(path){return new Promise(res=>{if(!path||!path.length){res();return;}let i=0;
+  const step=()=>{const p=path[i];PXY={x:p[0],y:p[1]};const m=$('mapsvg').querySelector('#pmark');
+    if(m)m.setAttribute('transform','translate('+p[0]+','+p[1]+')');CX=p[0];CY=p[1];applyVB();
+    i++;if(i<path.length)setTimeout(step,Math.max(45,420/path.length));else res();};step();});}
 async function moveTo(id){
   if(mode==='dialogue')endTalk();
   const r=await api('/api/play/move',{to:id});
   if(r.error){push('sys',r.error);return;}
-  SCENE=r;renderAmb();
-  $('locname').textContent=r.location.name;
+  await walk(r.path);
+  MAP.loc=r.loc;SCENE=r;renderAmb();renderMap();
+  $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   document.querySelector('.locard .nm').textContent=r.location.name;
   document.querySelector('.locard .kd').textContent=r.location.kind;
   document.querySelector('.locard .desc').textContent=r.location.desc;
-  push('narr','Ты направляешься в «'+(r.moved||r.location.name)+'».');
-  loadMap();
+  push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'».');
 }
+(function(){const s=$('mapsvg');let drag=null;
+  s.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,cx:CX,cy:CY};PANNED=false;s.classList.add('drag');});
+  window.addEventListener('mousemove',e=>{if(!drag)return;const r=s.getBoundingClientRect();
+    if(Math.abs(e.clientX-drag.x)+Math.abs(e.clientY-drag.y)>3)PANNED=true;
+    CX=drag.cx-(e.clientX-drag.x)*(BVB[2]/Z)/r.width;CY=drag.cy-(e.clientY-drag.y)*(BVB[3]/Z)/r.height;applyVB();});
+  window.addEventListener('mouseup',()=>{if(drag){drag=null;s.classList.remove('drag');}});
+  s.addEventListener('wheel',e=>{e.preventDefault();const r=s.getBoundingClientRect(),w=BVB[2]/Z,h=BVB[3]/Z;
+    const mx=CX-w/2+(e.clientX-r.left)/r.width*w,my=CY-h/2+(e.clientY-r.top)/r.height*h;
+    const nz=Math.min(20,Math.max(0.85,Z*(e.deltaY<0?1.2:1/1.2)));
+    CX=mx+(CX-mx)*(Z/nz);CY=my+(CY-my)*(Z/nz);Z=nz;applyVB();},{passive:false});
+})();
 
 function renderAmb(){
   const a=SCENE.ambient||{};

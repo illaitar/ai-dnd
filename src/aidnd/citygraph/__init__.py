@@ -10,10 +10,10 @@
 
 from __future__ import annotations
 
-from .generate import generate
+from .generate import generate, visual
 from .graph import City
 from .model import Edge, House, KeyBuilding, Node, NodeKind, Route, Sign
 from .params import CityParams
 
-__all__ = ["generate", "City", "CityParams", "Route", "Sign",
+__all__ = ["generate", "visual", "City", "CityParams", "Route", "Sign",
            "Node", "Edge", "House", "KeyBuilding", "NodeKind"]

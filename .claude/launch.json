@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "aidnd",
+      "name": "aidnd-web",
       "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "aidnd", "serve"],
-      "autoPort": true
+      "runtimeArgs": ["-m", "uvicorn", "aidnd.server.app:app", "--host", "127.0.0.1", "--port", "8099", "--reload", "--reload-dir", "src"],
+      "port": 8099
     }
   ]
 }

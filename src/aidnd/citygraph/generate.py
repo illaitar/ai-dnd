@@ -75,3 +75,24 @@ def generate(params: CityParams) -> City:
     p = params.normalized()
     m = _citygen().build_city(p.seed, p.width, p.height, buildings=[], key_houses=[])
     return City(p, _extract(m, p))
+
+
+def visual(params: CityParams, chrome: bool = True, interactive: bool = False) -> dict:
+    """Богатый визуал города — ТОТ ЖЕ рендер, что на /citydebug (полные дома с крышами, река,
+    стены, мосты, площадь, районы). Тот же build_city(seed,W,H) → одна система координат 0 0 W H
+    с графом, поэтому интерактивный слой (фигура игрока) кладётся поверх без сдвигов.
+
+    interactive=True — каждый дом становится кликабельным полигоном `class="h" data-id="<house-id>"`
+    (по этому id граф отдаёт перекрёсток дома). Встроенный скрипт/стиль рендера при этом вырезаем —
+    клики навешивает фронт игры сам. Возвращает ВНУТРЕННЕЕ содержимое SVG + размеры холста W×H.
+    """
+    p = params.normalized()
+    cg = _citygen()
+    m = cg.build_city(p.seed, p.width, p.height, buildings=[], key_houses=[])
+    full = cg.render_svg(m, chrome=chrome, marks=False, interactive=interactive)
+    si = full.find("<style>.h{")                    # вырезать встроенный style+script интерактива
+    if si != -1:
+        se = full.find("</script>", si)
+        full = full[:si] + (full[se + 9:] if se != -1 else full[si:])
+    inner = full[full.index(">", full.index("<svg")) + 1: full.rindex("</svg>")]
+    return {"inner": inner, "W": int(m["W"]), "H": int(m["H"])}

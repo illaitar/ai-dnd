@@ -1,8 +1,8 @@
 """Бэкенд пилота /play на НОВОМ стеке: citygraph (город+карта) + play.populate (жители с мозгами
 mind) + LLM-озвучка (inference, офлайн-стаб). Процессная пилот-сессия (один мир, одна фигура игрока).
 
-Карта — РЕАЛЬНАЯ (граф citygraph): улицы + ключевые здания. Игрок ходит по зданиям, «кто здесь»
-зависит от локации. Карточка NPC — отношение/эмоция ИЗ МОЗГА; реплики — LLM в характере.
+Карта РЕАЛЬНАЯ и полная: все улицы+дома+река+стены; ходим по ключевым точкам (перекрёсткам) с
+пути-поиском (route). «Кто здесь» зависит от перекрёстка. Карточка NPC — отношение/эмоция ИЗ МОЗГА.
 """
 
 from __future__ import annotations
@@ -11,18 +11,20 @@ import random
 
 from fastapi import APIRouter, Request
 
-from ..citygraph import CityParams, generate
+from ..citygraph import CityParams, generate, visual
+from ..citygraph.model import NodeKind
 from ..mind import Body
 from ..mind import World as MWorld
 from ..mind import think
 from ..play import populate
+from ..play.population import KEY_ROLES
 
 router = APIRouter(tags=["play"])
 PLAYER = "pc"
-_S: dict = {"city": None, "people": None, "locof": None, "loc": None, "model": None}
+_S: dict = {"city": None, "people": None, "crof": None, "cr2b": None, "loc": None,
+            "geom": None, "model": None}
 
 _COLORS = ["#c98a52", "#6f8f6a", "#8a6fae", "#a86a6a", "#5f8296", "#b0894a"]
-# роль здания → (название места, тип, короткая метка на карте)
 _PLACE = {
     "трактирщик": ("Трактир «Пьяный вепрь»", "таверна · тепло, тесно, дымно", "трактир"),
     "кузнец": ("Кузница", "жар горна, звон молота", "кузница"),
@@ -32,8 +34,6 @@ _PLACE = {
     "знахарка": ("Дом знахарки", "пучки трав, склянки", "знахарка"),
     "бард": ("Помост", "здесь поют и судачат", "помост"),
     "мельник": ("Мельница", "мерный скрип у воды", "мельница"),
-    "дубильщик": ("Дубильня", "едкий дух кож", "дубильня"),
-    "сапожник": ("Сапожная", "запах кожи и вара", "сапоги"),
 }
 _TOPICS = {
     "трактирщик": ["слухи", "что налить", "заказ комнаты", "о дорогах"],
@@ -58,27 +58,53 @@ def _model():
 
 def _play():
     if _S["city"] is None:
-        city = generate(CityParams(seed=1, key_buildings=8, river=True, walls=True))
-        people = populate(city, seed=1, commoners=14, deviants=2)
-        keys = sorted(city.key_buildings)
-        rng = random.Random("loc|1")
-        locof = {}
-        for pid, p in people.items():                      # работник → своё здание; прочие → случайный «завсегдатай»
-            locof[pid] = p.work if (p.work in city.key_buildings) else rng.choice(keys)
-        start = next((p.work for p in people.values() if p.role == "трактирщик" and p.work in keys), keys[0])
-        _S.update(city=city, people=people, locof=locof, loc=start)
-    return _S["city"], _S["people"], _S["locof"], _S["loc"]
+        params = CityParams(seed=1, key_buildings=8, river=True, walls=True, segment=16)
+        city = generate(params)
+        vis = visual(params, interactive=True)             # богатый визуал + кликабельные дома
+        people = populate(city, seed=1, commoners=16, deviants=2)
+        xy = {n.id: (n.x, n.y) for n in city.nodes()}
+        door2cr = {h.node: h.crossroad for h in city.houses.values()}
+        keycr = {bid: kb.crossroad for bid, kb in city.key_buildings.items()}
+        kps = city.key_points()
+        rng = random.Random("spot|1")
+        crof = {}                                          # перекрёсток каждого жителя
+        for pid, p in people.items():
+            crof[pid] = keycr.get(p.work) or door2cr.get(p.home) or rng.choice(kps)
+        cr2b = {}                                          # перекрёсток → ключевое здание (для названия)
+        for bid, kb in city.key_buildings.items():
+            cr2b.setdefault(kb.crossroad, bid)
+        start = keycr.get(next((p.work for p in people.values()
+                                if p.role == "трактирщик" and p.work in keycr), None)) or kps[0]
+        _S.update(city=city, people=people, crof=crof, cr2b=cr2b, loc=start,
+                  geom=_build_geom(city, xy, kps, cr2b, vis))
+    return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]
 
 
-def _role_at(loc, people, locof):
-    return next((people[pid].role for pid, l in locof.items()
-                 if l == loc and people[pid].work == loc), None)
+def _build_geom(city, xy, kps, cr2b, vis) -> dict:
+    """Лёгкий интерактивный слой поверх богатого визуала: система координат — холст рендера 0 0 W H.
+    Дома/улицы/река/стены рисует сам SVG (vis['inner']); клик по любому дому → его перекрёсток
+    (h2cr). Метки ключевых зданий подписываем поверх; _xy — узел→xy для маршрута и фигуры игрока."""
+    h2cr = {h.id: h.crossroad for h in city.houses.values()}
+    keys = []
+    for i, (bid, kb) in enumerate(sorted(city.key_buildings.items())):
+        role = KEY_ROLES[i % len(KEY_ROLES)]
+        keys.append({"cr": kb.crossroad, "x": round(kb.x, 1), "y": round(kb.y, 1),
+                     "label": _PLACE.get(role, (None, None, "здание"))[2]})
+    return {"viewBox": [0, 0, vis["W"], vis["H"]], "svg": vis["inner"],
+            "h2cr": h2cr, "keys": keys,
+            "_xy": {n: [round(xy[n][0], 1), round(xy[n][1], 1)] for n in xy}}
 
 
-def _here(loc, people, locof):
-    ids = [pid for pid, l in locof.items() if l == loc]
-    ids.sort(key=lambda i: (people[i].work != loc, i))     # работник(и) впереди
-    return ids
+def _role_at(cr, people, crof, cr2b):
+    bid = cr2b.get(cr)
+    if not bid:
+        return None
+    return next((people[pid].role for pid, c in crof.items()
+                 if c == cr and people[pid].work == bid), None)
+
+
+def _here(cr, crof):
+    return [pid for pid, c in crof.items() if c == cr]
 
 
 def _emo(st) -> str:
@@ -88,6 +114,23 @@ def _emo(st) -> str:
         return "спокойное"
     return {"joy": "тёплое", "anger": "раздражённое", "fear": "настороженное",
             "distress": "подавленное"}.get(dom, "ровное")
+
+
+def _scene_dict(city, people, crof, cr2b, loc):
+    role = _role_at(loc, people, crof, cr2b)
+    name, kind, _ = _PLACE.get(role, ("Перекрёсток", "городская развилка", "перекрёсток"))
+    here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
+    return {
+        "loc": loc,
+        "location": {"name": name, "kind": kind,
+                     "desc": ("Обычное место фронтирного городка — идёт своя жизнь." if role
+                              else "Развилка городских улиц; мимо спешат прохожие.")},
+        "ambient": {"time": "вечер", "weather": "дождь", "mood": "оживлённо" if len(here) > 2 else "тихо",
+                    "event": "Народ занят своими делами." if here else "Пусто; лишь ветер гуляет меж домов."},
+        "here": [{"id": pid, "name": people[pid].name, "role": people[pid].role,
+                  "init": people[pid].name[0], "color": _COLORS[i % len(_COLORS)]}
+                 for i, pid in enumerate(here)],
+    }
 
 
 def _mind_scene(npc_id, people) -> MWorld:
@@ -114,73 +157,42 @@ def _voice(p, rel, kind, player_text=None) -> str:
     return (resp.get("content") if resp else "").strip() or f"{p.name} молчит."
 
 
-def _scene_dict(city, people, locof, loc):
-    role = _role_at(loc, people, locof)
-    name, kind, _ = _PLACE.get(role, ("Улица", "городская улица", "улица"))
-    here = _here(loc, people, locof)
-    return {
-        "location": {"name": name, "kind": kind, "desc": _S.get("desc_" + str(loc)) or
-                     "Обычное место фронтирного городка — здесь идёт своя жизнь."},
-        "ambient": {"time": "вечер", "weather": "дождь", "mood": "оживлённо" if len(here) > 2 else "тихо",
-                    "event": "Народ занят своими делами." if here else "Пусто; лишь ветер гуляет."},
-        "here": [{"id": pid, "name": people[pid].name, "role": people[pid].role,
-                  "init": people[pid].name[0], "color": _COLORS[i % len(_COLORS)]}
-                 for i, pid in enumerate(here)],
-    }
-
-
 @router.get("/api/play/scene")
 def scene():
-    city, people, locof, loc = _play()
-    return _scene_dict(city, people, locof, loc)
+    city, people, crof, cr2b, loc = _play()
+    return _scene_dict(city, people, crof, cr2b, loc)
 
 
 @router.get("/api/play/map")
 def game_map():
-    city, people, locof, loc = _play()
-    xy = city._xy                                          # noqa: SLF001 — новый контур, дебаг-доступ
-    xs = [p[0] for p in xy.values()]
-    ys = [p[1] for p in xy.values()]
-    minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
-    pad = max(6.0, (maxx - minx) * 0.06)
-    seen, edges = set(), []
-    for n, nbs in city._adj.items():                       # noqa: SLF001
-        for m in nbs:
-            k = (min(n, m), max(n, m))
-            if k in seen or n not in xy or m not in xy:
-                continue
-            seen.add(k)
-            edges.append([round(xy[n][0], 1), round(xy[n][1], 1), round(xy[m][0], 1), round(xy[m][1], 1)])
-    keys = []
-    for bid, kb in sorted(city.key_buildings.items()):
-        node = kb.node if kb.node in xy else kb.interior
-        if node not in xy:
-            continue
-        role = _role_at(bid, people, locof)
-        keys.append({"id": bid, "label": _PLACE.get(role, (None, None, "здание"))[2],
-                     "x": round(xy[node][0], 1), "y": round(xy[node][1], 1), "here": bid == loc})
-    pn = next((kb.node if kb.node in xy else kb.interior)
-              for b, kb in city.key_buildings.items() if b == loc)
-    return {"viewBox": [round(minx - pad, 1), round(miny - pad, 1),
-                        round(maxx - minx + 2 * pad, 1), round(maxy - miny + 2 * pad, 1)],
-            "edges": edges, "keys": keys, "player": {"x": round(xy[pn][0], 1), "y": round(xy[pn][1], 1)}}
+    city, people, crof, cr2b, loc = _play()
+    g = _S["geom"]
+    pxy = g["_xy"].get(loc, [0, 0])
+    return {"viewBox": g["viewBox"], "svg": g["svg"], "h2cr": g["h2cr"], "keys": g["keys"],
+            "loc": loc, "player": {"x": pxy[0], "y": pxy[1]}}
 
 
 @router.post("/api/play/move")
 async def move(request: Request):
-    city, people, locof, _loc = _play()
+    city, people, crof, cr2b, loc = _play()
     to = (await request.json()).get("to")
-    if to not in city.key_buildings:
+    try:
+        to = int(to)
+    except (TypeError, ValueError):
         return {"error": "туда нельзя"}
+    if to not in _S["geom"]["_xy"] or city.node_kind(to) not in (
+            NodeKind.CROSSROAD, NodeKind.GATE, NodeKind.BRIDGE):
+        return {"error": "туда нельзя"}
+    r = city.route(loc, to)
+    path = [_S["geom"]["_xy"][n] for n in r.nodes if n in _S["geom"]["_xy"]] if r.found else [_S["geom"]["_xy"][to]]
     _S["loc"] = to
-    role = _role_at(to, people, locof)
-    name = _PLACE.get(role, ("это место",))[0]
-    return {**_scene_dict(city, people, locof, to), "moved": name}
+    sc = _scene_dict(city, people, crof, cr2b, to)
+    return {**sc, "path": path, "moved": sc["location"]["name"]}
 
 
 @router.post("/api/play/talk")
 async def talk(request: Request):
-    _city, people, _locof, _loc = _play()
+    _city, people, _crof, _cr2b, _loc = _play()
     npc = (await request.json()).get("npc")
     if npc not in people:
         return {"error": "нет такого"}
@@ -197,7 +209,7 @@ async def talk(request: Request):
 
 @router.post("/api/play/say")
 async def say(request: Request):
-    _city, people, _locof, _loc = _play()
+    _city, people, _crof, _cr2b, _loc = _play()
     b = await request.json()
     npc = b.get("npc")
     if npc not in people:

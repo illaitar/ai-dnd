@@ -90,6 +90,8 @@ def propose_goals(state, world, percept) -> list:
 
     # социальный заход: поговорить с присутствующим — закрыть соц-нужду ЧЕРЕЗ человека (не ресурс).
     # Тянет sociability × соц-нужда × (симпатия + ОБАЯНИЕ цели). Красота (charisma) ≠ богатство (appearance).
+    # ТОЛПА у цели разбавляет тягу (все облепили «звезду» → остальные ищут собеседника рядом),
+    # ВЗАИМНОСТЬ (он сейчас говорит со МНОЙ) усиливает — так складываются устойчивые пары беседы.
     soc = state.needs.get("social", 0.0)
     socbl = tr.get("sociability", 0.5)
     if soc > 0.12:
@@ -98,6 +100,11 @@ def propose_goals(state, world, percept) -> list:
                 continue
             aff = (state.relationships.get(b.id) or {}).get("affinity", 0.0)
             draw = soc * (0.3 + socbl) * (0.3 + 0.5 * max(0.0, aff) + 0.6 * getattr(b, "charisma", 0.3))
+            suitors = sum(1 for ob in percept.present
+                          if ob.id not in (me.id, b.id) and getattr(ob, "talking_to", None) == b.id)
+            if getattr(b, "talking_to", None) == me.id:
+                draw *= 1.6
+            draw /= (1.0 + 0.5 * suitors)
             if draw > 0.12:
                 goals.append(Goal("converse", b.id, min(1.0, draw)))
 

@@ -36,6 +36,7 @@ def apply(action, state, world) -> dict:
     """Применить выбранный примитив к миру. Возвращает событие (для лога/апрейзала)."""
     me = world.bodies[state.config.id]
     ev = {"action": action.label()}
+    me.talking_to = None                                     # любой не-say ход выходит из разговора
     if action.kind == "move" and action.to:
         me.place = action.to
     elif action.kind == "attack" and action.target in world.bodies:
@@ -76,6 +77,7 @@ def apply(action, state, world) -> dict:
     elif action.kind == "say":
         ev["say"] = action.say
         if action.say in ("chat", "flatter", "ask") and action.target in world.bodies:
+            me.talking_to = action.target                    # «я сейчас говорю с ним» (видно всем в зале)
             state.needs["social"] = max(0.0, state.needs.get("social", 0.0) - 0.25)   # общение закрывает нужду
             r = state.rel(action.target)
             r["affinity"] = min(1.0, r["affinity"] + (0.06 if action.say == "flatter" else 0.04))

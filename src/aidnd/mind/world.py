@@ -37,6 +37,7 @@ class Body:
     carrying: list = field(default_factory=list)    # Item — на виду
     loot: list = field(default_factory=list)        # Item — добыча (кошель и т.п.)
     attacking: str | None = None                    # кого атакует прямо сейчас (для защиты союзника)
+    talking_to: str | None = None                   # с кем говорит прямо сейчас (пары; толпа у «звезды»)
     alive: bool = True
 
     def down(self) -> bool:

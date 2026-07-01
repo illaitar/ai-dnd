@@ -66,12 +66,22 @@
   .cont.op:hover{border-color:var(--gold);color:var(--gold)}
   .bag{padding:2px 12px 12px;display:flex;flex-direction:column;gap:7px;overflow:auto;max-height:32vh}
   .bagempty{font-size:12px;color:var(--faint);font-style:italic;padding:0 2px}
-  .bagitem{padding:8px 10px;border:1px solid var(--line2);border-radius:9px;background:var(--panel2);cursor:pointer;transition:.15s}
-  .bagitem:hover{border-color:var(--gold-dim)}
-  .bagitem .bn{font-size:13px;color:var(--ink)}
-  .bagitem .bw{font-size:11px;color:var(--faint);margin-top:2px}
-  .bagitem .bf{font-size:11.5px;color:var(--gold-dim);margin-top:4px;font-style:italic}
+  .bagitem2{padding:8px 10px;border:1px solid var(--line2);border-radius:9px;background:var(--panel2)}
+  .bagitem2 .bn{font-size:13px;color:var(--ink)}
+  .bagitem2 .bw{font-size:11px;color:var(--faint);margin-top:2px}
+  .bagitem2 .bf{font-size:11.5px;color:var(--gold-dim);margin-top:4px;font-style:italic}
+  .acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+  .acts button{font-size:11px;padding:3px 9px;border-radius:6px;background:transparent;
+    border:1px solid var(--line2);color:var(--dim);cursor:pointer;transition:.15s}
+  .acts button:hover{border-color:var(--gold-dim);color:var(--gold)}
+  .cond{font-weight:500}
+  .cond.ok{color:#6f9f6a}.cond.mid{color:#c9a24a}.cond.lo{color:#c98a52}.cond.br{color:var(--red)}
+  .imod{color:var(--violet)}
+  .iqual{color:var(--gold-dim)}
   .qm{color:var(--gold);font-weight:600;cursor:help}
+  .commission{margin-top:12px;width:100%;padding:9px;border-radius:9px;background:rgba(217,164,65,.12);
+    border:1px solid var(--gold-dim);color:var(--gold);font:500 13px var(--sans);cursor:pointer}
+  .commission:hover{background:rgba(217,164,65,.2)}
   #bagn{color:var(--dim);font-size:11px}
   .keys{display:flex;flex-wrap:wrap;gap:6px}
   .keychip{font-size:11.5px;padding:3px 9px;border-radius:6px;background:rgba(217,164,65,.1);
@@ -349,6 +359,7 @@ function renderNpc(n){
        <div class="keys">${n.keys.map(k=>`<span class="keychip">&#128273; ${esc(k)}</span>`).join('')}</div>`:''}
      <div class="subcap">темы разговора</div>
      <div class="topics">${(n.topics||[]).map(t=>`<span class="chip" onclick="say('${esc(t)}')">${esc(t)}</span>`).join('')}</div>
+     ${n.crafter?`<button class="commission" onclick="commission()">&#9874; заказать: ${esc(n.recipe)}</button>`:''}
      <button class="end" onclick="endTalk()">&#8592; завершить разговор</button>`;
 }
 
@@ -401,18 +412,43 @@ api('/api/play/scene').then(s=>{
 refreshInv();
 let INV=[];
 async function refreshInv(){const r=await api('/api/play/inventory');INV=(r&&r.items)||[];renderBag();}
+const condCls=c=>c.broken?'br':c.ratio<0.34?'lo':c.ratio<0.7?'mid':'ok';
+const qRU=q=>({crude:'грубый',plain:'простой',fine:'добротный',exquisite:'искусный'}[q]||q);
 function renderBag(){
   $('bagn').textContent=INV.length?('· '+INV.length):'';
-  $('bag').innerHTML=INV.length?INV.map(bagItem).join(''):'<div class="bagempty">пусто — обшарь ёмкости в локации</div>';
-  $('bag').querySelectorAll('.bagitem').forEach(e=>e.addEventListener('click',()=>inspectItem(e.dataset.id)));
+  $('bag').innerHTML=INV.length?INV.map(bagItem).join(''):'<div class="bagempty">пусто — обшарь ёмкости или закажи у мастера</div>';
 }
 function bagItem(it){
   const worth=(it.worth_known?'':'~')+it.worth+' зм';
   const q=it.unknown?` <span class="qm" title="есть неизведанное — осмотри/покажи знатоку">&#9679;${it.unknown>1?it.unknown:''}</span>`:'';
-  return `<div class="bagitem" data-id="${it.id}">
+  const qual=(it.quality&&it.quality!=='plain')?` · <span class="iqual">${qRU(it.quality)}</span>`:'';
+  const cond=it.condition?` · <span class="cond ${condCls(it.condition)}">${esc(it.condition.label)}</span>`:'';
+  const mk=(it.make&&it.make.mark)?` · клеймо «${esc(it.make.mark)}»`:'';
+  const mods=(it.mods&&it.mods.length)?` · <span class="imod">${it.mods.map(m=>esc(m.target)+(m.amount?('+'+m.amount):'')).join(' ')}</span>`:'';
+  const canRepair=it.condition&&it.condition.ratio<1&&mode==='dialogue'&&CARD&&CARD.crafter;
+  const acts=[`<button onclick="itemAct('${it.id}','inspect')">осмотреть</button>`];
+  if(it.condition)acts.push(`<button onclick="itemAct('${it.id}','use')">испытать</button>`);
+  if(canRepair)acts.push(`<button onclick="itemAct('${it.id}','repair')">починить</button>`);
+  return `<div class="bagitem2">
     <div class="bn">${esc(it.name)}${q}</div>
-    <div class="bw">${esc(it.kind)} · ${worth}</div>
-    ${(it.facts&&it.facts.length)?`<div class="bf">${it.facts.map(esc).join('; ')}</div>`:''}</div>`;
+    <div class="bw">${esc(it.kind)} · ${worth}${qual}${cond}${mk}${mods}</div>
+    ${(it.facts&&it.facts.length)?`<div class="bf">${it.facts.map(esc).join('; ')}</div>`:''}
+    <div class="acts">${acts.join('')}</div></div>`;
+}
+async function itemAct(id,act){
+  if(act==='inspect')return inspectItem(id);
+  if(act==='use'){const r=await api('/api/play/use',{item:id});if(r.error){push('sys',esc(r.error));return;}
+    const e=r.event;push(e.broke?'sys':'narr',e.broke?('«'+esc(r.item.name)+'» с треском ломается ('+esc(e.break_behavior)+')!'):('Ты пускаешь «'+esc(r.item.name)+'» в дело — '+esc(e.label)+'.'));await refreshInv();}
+  if(act==='repair'){const r=await api('/api/play/repair',{item:id,npc:cur});if(r.error){push('sys',esc(r.error));return;}
+    push('narr','«'+esc(byId(cur).name)+'» чинит «'+esc(r.item.name)+'»: '+esc(r.note)+'.');await refreshInv();}
+}
+async function commission(){
+  if(!cur)return;
+  const r=await api('/api/play/commission',{npc:cur});
+  if(r.error){push('sys',esc(r.error));return;}
+  const it=r.item,mk=(it.make&&it.make.mark)?(' с клеймом «'+esc(it.make.mark)+'»'):'';
+  push('narr','«'+esc(r.maker)+'» берётся за работу и вручает тебе «'+esc(it.name)+'»'+mk+' ('+qRU(it.quality)+').');
+  await refreshInv();
 }
 async function loot(name){
   const r=await api('/api/play/loot',{container:name});

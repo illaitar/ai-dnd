@@ -80,7 +80,8 @@ def norm_durability(d) -> dict | None:
     mx = max(1, _num(d.get("max", 10), 10))
     return {"max": mx, "current": min(mx, max(0, _num(d.get("current", mx), mx))),
             "break_behavior": _enum(d.get("break_behavior"), BREAK, "snap"),
-            "repair_dc": max(0, _num(d.get("repair_dc", 10), 10))}
+            "repair_dc": max(0, _num(d.get("repair_dc", 10), 10)),
+            "weak_at": round(min(0.9, max(0.0, _num(d.get("weak_at", 0.0), 0.0))), 2)}  # порог ранней поломки (брак)
 
 
 def normalize(d: dict) -> dict:

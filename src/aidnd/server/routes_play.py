@@ -15,8 +15,12 @@ from fastapi import APIRouter, Request
 
 from ..citygraph import CityParams, generate, visual
 from ..citygraph.model import NodeKind
-from ..items import Capability, ItemCtx, LLMSmith, StubSmith
+from ..items import Capability, ItemCtx, LLMSmith, Recipe, StubSmith
+from ..items import condition as item_condition
+from ..items import craft as item_craft
 from ..items import inspect as item_inspect
+from ..items import repair as item_repair
+from ..items import use as item_use
 from ..items import view as item_view
 from ..mind import Body, NpcConfig, NpcState
 from ..mind import World as MWorld
@@ -361,6 +365,7 @@ async def talk(request: Request):
             "sex": per.get("sex"), "age": per.get("age"), "origin": per.get("origin"),
             "look": (per.get("look") or {}).get("clothing") or None,
             "keys": [k["name"] for k in (p.keys or [])],
+            "crafter": p.role in _CRAFT, "recipe": (_CRAFT[p.role].name if p.role in _CRAFT else None),
             "topics": _TOPICS.get(p.role, _TOPICS["горожанин"]), "line": _voice(p, rel, "greet")}
 
 
@@ -415,7 +420,25 @@ def _forge(seed: str, kind: str, name_hint: str, source: str, band: str = "plain
 def _item_card(it: dict, known) -> dict:
     v = item_view(it, known)
     v["id"] = it["id"]
+    v["condition"] = item_condition(it)
+    v["make"] = it.get("make")
     return v
+
+
+# рецепт по ремеслу NPC — что он берётся сковать/сварить
+_CRAFT = {
+    "кузнец": Recipe("weapon", "нож", "anvil", 8, 40, 10, "main_hand", "attack"),
+    "знахарка": Recipe("consumable", "целебный отвар", "cauldron", 12, 6, 11, "none", "special:heal"),
+    "сапожник": Recipe("armor", "сапоги", "bench", 14, 50, 11, "body", "social:appearance"),
+    "дубильщик": Recipe("armor", "кожаный жилет", "tannery", 10, 45, 11, "body", "defense"),
+    "лавочник": Recipe("trinket", "затейливая безделица", "bench", 6, 20, 12, "worn", ""),
+    "трактирщик": Recipe("consumable", "кружка крепкого", "cauldron", 2, 4, 8, "none", ""),
+    "мельник": Recipe("material", "мешок доброй муки", "bench", 3, 10, 9, "none", ""),
+}
+
+
+def _known(iid: str) -> set:
+    return next((set(r["known"]) for r in _store().inventory(PLAY_WORLD) if r["item_id"] == iid), set())
 
 
 @router.post("/api/play/loot")
@@ -469,3 +492,57 @@ def inventory():
         if it:
             out.append(_item_card(it, set(r["known"])))
     return {"items": out}
+
+
+# --------------------------------------------- КРАФТ / ПРОЧНОСТЬ (срез 2) - #
+@router.post("/api/play/commission")
+async def commission(request: Request):
+    """Заказать вещь у NPC-ремесленника: его МАСТЕРСТВО решает исход (качество/клеймо/брак/прочность)."""
+    _city, people, _crof, _cr2b, _loc = _play()
+    npc = (await request.json()).get("npc")
+    if npc not in people:
+        return {"error": "нет такого"}
+    p = people[npc]
+    rec = _CRAFT.get(p.role)
+    if not rec:
+        return {"error": f"{p.name} не берётся за ремесло"}
+    n = len(_store().inventory(PLAY_WORLD))
+    rep = random.Random(f"skill|{npc}").randint(-1, 3)     # у каждого мастера своя рука (мир разнороден)
+    it = item_craft(_npc_cap(p), rec, seed=f"{npc}|{rec.name}|{n}",
+                    maker={"id": npc, "name": p.name}, reputation=rep)
+    it["id"] = "it:" + hashlib.md5(f"comm|{npc}|{n}".encode()).hexdigest()[:10]
+    _store().save_item(it)
+    _store().inv_add(PLAY_WORLD, it["id"])
+    return {"item": _item_card(it, set()), "maker": p.name, "recipe": rec.name}
+
+
+@router.post("/api/play/repair")
+async def repair_item(request: Request):
+    _city, people, _crof, _cr2b, _loc = _play()
+    b = await request.json()
+    iid, npc = b.get("item"), b.get("npc")
+    it = _store().get_item(iid)
+    if not it:
+        return {"error": "нет предмета"}
+    p = people.get(npc)
+    if not p or p.role not in _CRAFT:
+        return {"error": "он не мастер"}
+    if not it.get("durability"):
+        return {"error": "чинить нечего"}
+    res = item_repair(it, _npc_cap(p), seed=f"rep|{iid}|{npc}", station=_CRAFT[p.role].station)
+    _store().save_item(it)
+    return {"item": _item_card(it, _known(iid)), "note": res.get("note"), "by": p.name}
+
+
+@router.post("/api/play/use")
+async def use_item(request: Request):
+    _play()
+    iid = (await request.json()).get("item")
+    it = _store().get_item(iid)
+    if not it:
+        return {"error": "нет предмета"}
+    if not it.get("durability"):
+        return {"error": "нечего испытывать"}
+    ev = item_use(it, 1)
+    _store().save_item(it)
+    return {"item": _item_card(it, _known(iid)), "event": ev}

@@ -26,8 +26,7 @@ from ..mind import (
     NpcState,
     World,
     perceive,
-    propose_goals,
-    score,
+    think,
 )
 from .routes_citydebug import Owner
 
@@ -119,30 +118,17 @@ def _build(b: dict):
 def _decide(b: dict) -> dict:
     st, w, here = _build(b)
     p = perceive(st, w)
-    goals = propose_goals(st, w, p)
-    ranked = score(st, w, p)
-    seen = {}
-    for a, g, u in ranked:                                # лучшая цель на каждое действие уже в ranked
-        seen.setdefault(a.label(), (a, g, u))
-    top = ranked[0]
-    return {
-        "state": {"needs": {k: round(v, 2) for k, v in st.needs.items()},
-                  "emotion": {k: round(v, 2) for k, v in st.emotion.items()},
-                  "traits": st.config.traits},
-        "perceived": {
-            "here": [{"id": bd.id, "power": bd.power, "appearance": round(bd.appearance, 2),
-                      "attention": round(bd.attention, 2), "faction": bd.faction,
-                      "attacking": bd.attacking, "loot": [i.name for i in bd.loot],
-                      "rel": st.relationships.get(bd.id)} for bd in p.present],
-            "nearby": [{"id": bd.id, "power": bd.power, "appearance": round(bd.appearance, 2)} for bd in p.nearby],
-            "exits": p.exits, "items": [i.name for i in w.ground.get(here, [])]},
-        "goals": [{"kind": g.kind, "target": g.target, "value": round(g.value, 3),
-                   "agenda": g.meta.get("agenda")} for g in goals],
-        "ranked": [{"action": a.label(), "kind": a.kind, "target": a.target,
-                    "goal": (g.kind if g else "idle"), "u": round(u, 3)} for a, g, u in ranked[:16]],
-        "chosen": {"action": top[0].label(), "goal": (top[1].kind if top[1] else "idle"),
-                   "u": round(top[2], 3)},
-    }
+    brain = think(st, w, p, modulate=bool(b.get("modulate", True)))     # граф-мозг: трасса+модуляторы
+    brain["perceived"] = {
+        "here": [{"id": bd.id, "power": bd.power, "appearance": round(bd.appearance, 2),
+                  "attention": round(bd.attention, 2), "faction": bd.faction,
+                  "attacking": bd.attacking, "loot": [i.name for i in bd.loot],
+                  "rel": st.relationships.get(bd.id)} for bd in p.present],
+        "nearby": [{"id": bd.id, "power": bd.power, "appearance": round(bd.appearance, 2)} for bd in p.nearby],
+        "exits": p.exits, "items": [i.name for i in w.ground.get(here, [])]}
+    brain["state"] = {"needs": {k: round(v, 2) for k, v in st.needs.items()},
+                      "emotion": {k: round(v, 2) for k, v in st.emotion.items()}, "traits": st.config.traits}
+    return brain
 
 
 _SCENE_SYS = (

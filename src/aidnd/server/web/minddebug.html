@@ -59,6 +59,23 @@
   .arr{text-align:center;color:var(--line);font-size:16px;margin:-8px 0}
   .st{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:6px}
   .st span b{color:var(--txt)}
+  /* шина модуляторов */
+  .modbar{display:grid;grid-template-columns:120px 1fr 34px;align-items:center;gap:8px;margin:3px 0}
+  .modbar .ml{font-size:11px;color:var(--dim)}
+  .modbar .mt{height:12px;background:var(--panel2);border-radius:6px;position:relative;overflow:hidden}
+  .modbar .mf{position:absolute;top:0;bottom:0;left:0;background:#8e6fc0;border-radius:6px}
+  .modbar .mid{position:absolute;top:0;bottom:0;left:50%;width:1px;background:#4a5162}
+  .modbar .mv{font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:var(--txt)}
+  /* путь по графу */
+  .path{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+  .nchip{padding:3px 8px;border-radius:6px;font-size:11px;border:1px solid var(--line);background:#171b22;color:#6f7683}
+  .nchip.on{color:#e9ebef;border-color:#3a4a5e;background:#1c2634}
+  .nchip.llm.on{border-color:#1f6f63;background:#123a36;color:#8fe0d0}
+  .nchip .sp{color:#5fd0bd;font-size:9px}
+  .nsep{color:var(--line)}
+  .tracelog{font-size:11px;color:var(--dim);line-height:1.7;margin-top:2px}
+  .tracelog b{color:var(--txt)} .tracelog .imp{color:#f0a020}
+  .tog{float:right;font-size:11px;cursor:pointer;color:var(--acc)}
 </style>
 </head>
 <body>
@@ -95,6 +112,12 @@
   <!-- ГРАФ РЕШЕНИЯ -->
   <div class="col">
     <div class="flow">
+      <div class="stage"><div class="cap">Шина модуляторов <span class="tog" id="modtog">модуляция: ON</span></div>
+        <div id="mods"></div></div>
+      <div class="arr">↓</div>
+      <div class="stage"><div class="cap">Путь по графу мозга</div><div class="path" id="brainpath">—</div>
+        <div class="tracelog" id="tracelog"></div></div>
+      <div class="arr">↓</div>
       <div class="stage"><div class="cap">Восприятие</div><div class="perc" id="perc">—</div>
         <div class="st" id="stne"></div></div>
       <div class="arr">↓</div>
@@ -111,7 +134,9 @@
 const GC={harm:'#e5484d',acquire:'#f76808',safe:'#3b9eff',protect:'#46a758',need:'#6b7280',
   affiliate:'#8e4ec6',trade:'#12a594',inform:'#0ea5e9',idle:'#3f434d'};
 const $=id=>document.getElementById(id);
-let SCHEMA=null, ARCH={}, ENTS=[], SELF={power:1,appearance:0.2};
+let SCHEMA=null, ARCH={}, ENTS=[], SELF={power:1,appearance:0.2}, MODULATE=true;
+const MODLBL={arousal:'arousal (нетерпёж)',valence:'valence (настрой)',dominance:'dominance (власть)',
+  resolution:'resolution (точность)',selection_threshold:'threshold (упорство)',securing:'securing (вниман.)'};
 
 function slider(box, key, val){
   const r=document.createElement('div');r.className='row';
@@ -137,6 +162,7 @@ async function boot(){
   ['name'].forEach(id=>$(id).addEventListener('input',decide));
   ['exits','items'].forEach(id=>$(id).addEventListener('input',decide));
   $('addent').onclick=()=>{ENTS.push({id:'кто-то',faction:'town',power:1,appearance:.2,attention:.7,attacking:'',ally:false,loot:''});renderEnts();decide();};
+  $('modtog').onclick=()=>{MODULATE=!MODULATE;$('modtog').textContent='модуляция: '+(MODULATE?'ON':'OFF');decide();};
   $('parse').onclick=parseText;
   buildPresets();
   applyArch(Object.keys(ARCH)[0]);
@@ -197,12 +223,22 @@ async function doDecide(){
   const scene={here:ENTS.map(entToScene),exits:$('exits').value.split(',').map(s=>s.trim()).filter(Boolean),
     items:parseItems($('items').value),extra_goals:EXTRA};
   const body={name:$('name').value,traits:collect($('traits')),needs:collect($('needs')),
-    emotion:collect($('emotions')),self:SELF,scene};
+    emotion:collect($('emotions')),self:SELF,scene,modulate:MODULATE};
   const r=await (await fetch('/api/minddebug/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(r.error){$('chosen').textContent='ошибка: '+r.error;return;} render(r);
 }
 
 function render(r){
+  // шина модуляторов (6 баров)
+  $('mods').innerHTML=Object.keys(MODLBL).map(k=>{const v=(r.modulators||{})[k]??0.5;
+    return `<div class="modbar"><span class="ml">${MODLBL[k]}</span><span class="mt"><span class="mid"></span>`+
+      `<span class="mf" style="width:${Math.round(v*100)}%"></span></span><span class="mv">${(+v).toFixed(2).replace(/^0/,'')}</span></div>`;}).join('');
+  // путь по графу мозга (узлы-чипы, активные горят, ✦ = LLM)
+  $('brainpath').innerHTML=(r.trace||[]).map((n,i)=>
+    `${i?'<span class="nsep">›</span>':''}<span class="nchip ${n.llm?'llm':''} ${n.active?'on':''}" title="${(n.content||'').replace(/"/g,'&quot;')}">${n.llm?'<span class="sp">✦</span> ':''}${n.label}</span>`).join(' ');
+  // трасса-лог (только активные узлы)
+  $('tracelog').innerHTML=(r.trace||[]).filter(n=>n.active).map(n=>`<div>${n.llm?'✦ ':''}<b>${n.label}</b>: ${n.content}</div>`).join('')
+    +(r.impasse?'<div class="imp">⟹ импасс: близкие варианты → поднялся бы S2 (LLM lookahead)</div>':'');
   const p=r.perceived;
   const who=p.here.map(b=>`<b>${b.id}</b>${b.attacking?'⚔'+b.attacking:''}${b.rel&&b.rel.affinity>.2?'(друг)':''}`).join(', ')||'никого';
   $('perc').innerHTML=`Здесь: ${who}. ${p.nearby.length?'Рядом: '+p.nearby.map(b=>b.id).join(', ')+'. ':''}`+

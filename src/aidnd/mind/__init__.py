@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 from .act import Action, decide, enumerate_actions, score
+from .brain import modulate_ranked, think
+from .modulators import modulators, urges
 from .agenda import (
     Agenda,
     Milestone,
@@ -38,4 +40,6 @@ __all__ = ["NpcConfig", "NpcState", "Plan", "Scene", "MemoryStore", "Memory", "R
            "Percept", "perceive", "apply", "tick",
            # долгосрочные цели (агенды)
            "Agenda", "Milestone", "advance_agendas", "StubPlanner",
-           "wealth_agenda", "courtship_agenda", "revenge_agenda", "predation_agenda"]
+           "wealth_agenda", "courtship_agenda", "revenge_agenda", "predation_agenda",
+           # граф-мозг: урджи + шина модуляторов + трассировка
+           "urges", "modulators", "think", "modulate_ranked"]

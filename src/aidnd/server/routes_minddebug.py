@@ -95,9 +95,9 @@ def _build(b: dict):
 
     def add(e, place):
         w.add(Body(id=e["id"], place=place, power=float(e.get("power", 1)),
-                   appearance=float(e.get("appearance", .2)), attention=float(e.get("attention", .7)),
-                   faction=e.get("faction", "town"), attacking=e.get("attacking") or None,
-                   loot=[_item(i) for i in (e.get("loot") or [])]))
+                   appearance=float(e.get("appearance", .2)), charisma=float(e.get("charisma", .3)),
+                   attention=float(e.get("attention", .7)), faction=e.get("faction", "town"),
+                   attacking=e.get("attacking") or None, loot=[_item(i) for i in (e.get("loot") or [])]))
         if e.get("ally"):
             st.relationships[e["id"]] = {"trust": .5, "affinity": .8, "fear": 0.0}
         if e.get("fear"):

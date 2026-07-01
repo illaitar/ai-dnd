@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .goals import propose_goals
 from .value import idle_floor, utility
 
-SAY_ACTS = ("threat", "flatter", "ask", "counter", "accept")
+SAY_ACTS = ("chat", "threat", "flatter", "ask", "counter", "accept")
 
 
 @dataclass

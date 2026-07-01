@@ -300,6 +300,21 @@ def _u_inform(a, g, state, world, percept, me) -> float:
     return -_eff(a)
 
 
+def _u_converse(a, g, state, world, percept, me) -> float:
+    """Поговорить с человеком (закрыть соц-нужду). Реализует: say(chat/flatter/ask) со-локально;
+    позиционирует: move к нему. Так NPC ОСТАЁТСЯ и заговаривает, а не уходит к ресурсу-застолью."""
+    tb = world.bodies.get(g.target)
+    if not tb or tb.id == me.id:
+        return -_eff(a)
+    pay = g.value
+    if me.place == tb.place and a.kind == "say" and a.target == g.target and a.say in ("chat", "flatter", "ask"):
+        return pay - _eff(a)
+    reach = _approach(a, tb.place, me, world)
+    if reach is not None:
+        return gamma(state) * pay * reach - _eff(a) - _risk(a, world, state)
+    return -_eff(a)
+
+
 def _u_need(a, g, state, world, percept, me) -> float:
     """Удовлетворить нужду (g.target=имя нужды, g.meta.source=место). РЕАЛИЗУЕТ: use ресурса,
     помеченного этой нуждой (очаг→comfort, горн→purpose, похлёбка→hunger); ПОЗИЦИОНИРУЕТ: move к месту.
@@ -318,4 +333,5 @@ def _u_need(a, g, state, world, percept, me) -> float:
 _GOAL = {
     "acquire": _u_acquire, "harm": _u_harm, "safe": _u_safe, "trade": _u_trade,
     "affiliate": _u_affiliate, "protect": _u_protect, "inform": _u_inform, "need": _u_need,
+    "converse": _u_converse,
 }

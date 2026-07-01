@@ -88,6 +88,19 @@ def propose_goals(state, world, percept) -> list:
         if malice > 0.6 and not b.down():                   # хищность — отдельная цель, не из жадности
             goals.append(Goal("harm", b.id, malice))
 
+    # социальный заход: поговорить с присутствующим — закрыть соц-нужду ЧЕРЕЗ человека (не ресурс).
+    # Тянет sociability × соц-нужда × (симпатия + ОБАЯНИЕ цели). Красота (charisma) ≠ богатство (appearance).
+    soc = state.needs.get("social", 0.0)
+    socbl = tr.get("sociability", 0.5)
+    if soc > 0.12:
+        for b in percept.present:
+            if b.id == me.id or hostility(state, me, b) > 0.3 or b.down():
+                continue
+            aff = (state.relationships.get(b.id) or {}).get("affinity", 0.0)
+            draw = soc * (0.3 + socbl) * (0.3 + 0.5 * max(0.0, aff) + 0.6 * getattr(b, "charisma", 0.3))
+            if draw > 0.12:
+                goals.append(Goal("converse", b.id, min(1.0, draw)))
+
     # защита союзника: со-локация — союзник рядом, которого атакуют
     for b in percept.present:
         if not _is_ally(state, b):

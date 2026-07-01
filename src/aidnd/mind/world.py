@@ -30,7 +30,8 @@ class Body:
     hp: int = 10
     max_hp: int = 10
     power: float = 1.0          # боевая сила
-    appearance: float = 0.2     # видимое богатство [0..1] (богатая одежда)
+    appearance: float = 0.2     # видимое БОГАТСТВО [0..1] (богатая одежда → мишень для хищника)
+    charisma: float = 0.3       # привлекательность/обаяние [0..1] (тянет ОБЩАТЬСЯ, не грабить)
     attention: float = 0.7      # бдительность [0..1] (низкая → легко обокрасть)
     faction: str = "town"
     carrying: list = field(default_factory=list)    # Item — на виду

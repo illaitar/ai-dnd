@@ -75,6 +75,16 @@ def apply(action, state, world) -> dict:
             ev["satisfied"] = nd
     elif action.kind == "say":
         ev["say"] = action.say
+        if action.say in ("chat", "flatter", "ask") and action.target in world.bodies:
+            state.needs["social"] = max(0.0, state.needs.get("social", 0.0) - 0.25)   # общение закрывает нужду
+            r = state.rel(action.target)
+            r["affinity"] = min(1.0, r["affinity"] + (0.06 if action.say == "flatter" else 0.04))
+            vs = world.npc_minds.get(action.target) if hasattr(world, "npc_minds") else None
+            if vs is not None:                                    # взаимная симпатия крепнет
+                vs.needs["social"] = max(0.0, vs.needs.get("social", 0.0) - 0.12)
+                rr = vs.rel(me.id)
+                rr["affinity"] = min(1.0, rr["affinity"] + 0.04)
+            ev["talked"] = action.target
     return ev
 
 

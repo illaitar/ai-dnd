@@ -103,7 +103,7 @@
     <h2>Пресеты</h2>
     <div class="chips" id="presets"></div>
     <h2>Кто рядом / вокруг</h2>
-    <table class="ent"><thead><tr><th>кто</th><th>фракц.</th><th>сил</th><th>бог</th><th>вним</th><th>атак.</th><th>друг</th><th>лут</th><th></th></tr></thead><tbody id="ents"></tbody></table>
+    <table class="ent"><thead><tr><th>кто</th><th>фракц.</th><th>сил</th><th>бог</th><th>обаян</th><th>вним</th><th>атак.</th><th>друг</th><th>лут</th><th></th></tr></thead><tbody id="ents"></tbody></table>
     <div class="row" style="margin-top:6px"><button id="addent">+ существо</button></div>
     <label class="f">Выходы (через запятую — куда можно уйти)</label><input type="text" id="exits" placeholder="прочь">
     <label class="f">Предметы на месте (имя:нужда, напр. похлёбка:hunger)</label><input type="text" id="items" placeholder="похлёбка:hunger">
@@ -161,7 +161,7 @@ async function boot(){
   $('s_app').oninput=e=>{SELF.appearance=+e.target.value;$('s_app_v').textContent=(+e.target.value).toFixed(2).replace(/^0/,'');decide();};
   ['name'].forEach(id=>$(id).addEventListener('input',decide));
   ['exits','items'].forEach(id=>$(id).addEventListener('input',decide));
-  $('addent').onclick=()=>{ENTS.push({id:'кто-то',faction:'town',power:1,appearance:.2,attention:.7,attacking:'',ally:false,loot:''});renderEnts();decide();};
+  $('addent').onclick=()=>{ENTS.push({id:'кто-то',faction:'town',power:1,appearance:.2,charisma:.3,attention:.7,attacking:'',ally:false,loot:''});renderEnts();decide();};
   $('modtog').onclick=()=>{MODULATE=!MODULATE;$('modtog').textContent='модуляция: '+(MODULATE?'ON':'OFF');decide();};
   $('parse').onclick=parseText;
   buildPresets();
@@ -184,6 +184,7 @@ const PRESETS={
  'Союзник в беде':{ents:[{id:'друг',faction:'town',power:1,appearance:.3,attention:.7,attacking:'',ally:true,loot:''},{id:'бандит',faction:'outlaw',power:2,appearance:.2,attention:.7,attacking:'друг',ally:false,loot:''}],exits:'прочь',items:''},
  'Голод и еда':{ents:[],exits:'',items:'похлёбка:hunger',need:{hunger:.9}},
  'Сделка':{ents:[{id:'купец',faction:'town',power:1,appearance:.5,attention:.7,attacking:'',ally:false,loot:''}],exits:'',items:'',trade:'купец'},
+ 'Красотка в таверне':{ents:[{id:'девушка',faction:'town',power:1,appearance:.2,charisma:.75,attention:.7,attacking:'',ally:false,loot:''}],exits:'улица',items:'',need:{social:.6}},
 };
 function buildPresets(){const box=$('presets');Object.keys(PRESETS).forEach(n=>{
   const b=document.createElement('button');b.textContent=n;b.onclick=()=>applyPreset(n);box.appendChild(b);});}
@@ -199,22 +200,23 @@ function renderEnts(){const tb=$('ents');tb.innerHTML='';ENTS.forEach((e,i)=>{
    <td><select>${['town','monster','outlaw','watch'].map(f=>`<option ${f===e.faction?'selected':''}>${f}</option>`).join('')}</select></td>
    <td><input type="number" min="1" max="8" value="${e.power}" style="width:38px"></td>
    <td><input type="number" min="0" max="1" step="0.1" value="${e.appearance}" style="width:44px"></td>
+   <td><input type="number" min="0" max="1" step="0.1" value="${e.charisma??.3}" style="width:44px"></td>
    <td><input type="number" min="0" max="1" step="0.1" value="${e.attention}" style="width:44px"></td>
    <td><input type="text" value="${e.attacking||''}" style="width:52px"></td>
    <td style="text-align:center"><input type="checkbox" ${e.ally?'checked':''}></td>
    <td><input type="text" value="${e.loot||''}" style="width:56px"></td>
    <td><span class="x">✕</span></td>`;
-  const [id,fac,pw,ap,at,atk,ally,loot]=tr.querySelectorAll('input,select');
+  const [id,fac,pw,ap,ch,at,atk,ally,loot]=tr.querySelectorAll('input,select');
   const sync=()=>{Object.assign(e,{id:id.value,faction:fac.value,power:+pw.value,appearance:+ap.value,
-    attention:+at.value,attacking:atk.value,ally:ally.checked,loot:loot.value});decide();};
+    charisma:+ch.value,attention:+at.value,attacking:atk.value,ally:ally.checked,loot:loot.value});decide();};
   tr.querySelectorAll('input,select').forEach(x=>x.addEventListener('input',sync));
   tr.querySelector('.x').onclick=()=>{ENTS.splice(i,1);renderEnts();decide();};
   tb.appendChild(tr);});}
 
 function parseItems(s){return s.split(',').map(x=>x.trim()).filter(Boolean).map(x=>{
   const[name,sat]=x.split(':');return{name:name.trim(),satisfies:(sat||'').trim()||null,value:sat?0.05:0.3};});}
-function entToScene(e){const o={id:e.id,power:+e.power,appearance:+e.appearance,attention:+e.attention,
-  faction:e.faction,ally:!!e.ally};if(e.attacking)o.attacking=e.attacking;
+function entToScene(e){const o={id:e.id,power:+e.power,appearance:+e.appearance,charisma:+(e.charisma??.3),
+  attention:+e.attention,faction:e.faction,ally:!!e.ally};if(e.attacking)o.attacking=e.attacking;
   if(e.loot)o.loot=e.loot.split(',').map(x=>({name:x.trim(),value:0.5}));return o;}
 
 let T=null;

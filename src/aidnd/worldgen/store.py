@@ -30,6 +30,10 @@ class WorldStore:
             # привязка людей к конкретному миру (кто где стоит) — стейт, персист
             c.execute("CREATE TABLE IF NOT EXISTS placements (world_id INT, npc_id TEXT, node INT, "
                       "home INT, work TEXT, PRIMARY KEY(world_id, npc_id))")
+            # выкованные предметы (фактшит) + инвентарь игрока (что держит + что вскрыто про предмет)
+            c.execute("CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, data TEXT)")
+            c.execute("CREATE TABLE IF NOT EXISTS inventory (world_id INT, item_id TEXT, holder TEXT, "
+                      "known TEXT, PRIMARY KEY(world_id, item_id))")
 
     def _conn(self):
         c = sqlite3.connect(self.path, timeout=30)
@@ -127,6 +131,33 @@ class WorldStore:
     def placements_for(self, world_id: int) -> list:
         with self._conn() as c:
             return [dict(r) for r in c.execute("SELECT * FROM placements WHERE world_id=?", (world_id,))]
+
+    # ---------------------------------------------------- предметы -------- #
+    def save_item(self, item: dict) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO items (id,data) VALUES (?,?)",
+                      (item["id"], json.dumps(item, ensure_ascii=False)))
+
+    def get_item(self, item_id: str) -> dict | None:
+        with self._conn() as c:
+            r = c.execute("SELECT data FROM items WHERE id=?", (item_id,)).fetchone()
+        return json.loads(r["data"]) if r else None
+
+    def inv_add(self, world_id: int, item_id: str, holder: str = "pc", known=None) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR IGNORE INTO inventory (world_id,item_id,holder,known) VALUES (?,?,?,?)",
+                      (world_id, item_id, holder, json.dumps(list(known or []), ensure_ascii=False)))
+
+    def inv_set_known(self, world_id: int, item_id: str, known) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE inventory SET known=? WHERE world_id=? AND item_id=?",
+                      (json.dumps(list(known or []), ensure_ascii=False), world_id, item_id))
+
+    def inventory(self, world_id: int, holder: str = "pc") -> list:
+        with self._conn() as c:
+            rows = c.execute("SELECT item_id,known FROM inventory WHERE world_id=? AND holder=?",
+                             (world_id, holder)).fetchall()
+        return [{"item_id": r["item_id"], "known": json.loads(r["known"])} for r in rows]
 
 
 def _person(r) -> dict:

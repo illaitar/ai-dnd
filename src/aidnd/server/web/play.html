@@ -62,6 +62,17 @@
   .conts{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
   .cont{font-size:11px;padding:2px 8px;border-radius:6px;background:#171a22;border:1px solid var(--line2);color:var(--dim)}
   .cont.lk{color:var(--gold-dim);border-color:var(--gold-dim)}
+  .cont.op{cursor:pointer}
+  .cont.op:hover{border-color:var(--gold);color:var(--gold)}
+  .bag{padding:2px 12px 12px;display:flex;flex-direction:column;gap:7px;overflow:auto;max-height:32vh}
+  .bagempty{font-size:12px;color:var(--faint);font-style:italic;padding:0 2px}
+  .bagitem{padding:8px 10px;border:1px solid var(--line2);border-radius:9px;background:var(--panel2);cursor:pointer;transition:.15s}
+  .bagitem:hover{border-color:var(--gold-dim)}
+  .bagitem .bn{font-size:13px;color:var(--ink)}
+  .bagitem .bw{font-size:11px;color:var(--faint);margin-top:2px}
+  .bagitem .bf{font-size:11.5px;color:var(--gold-dim);margin-top:4px;font-style:italic}
+  .qm{color:var(--gold);font-weight:600;cursor:help}
+  #bagn{color:var(--dim);font-size:11px}
   .keys{display:flex;flex-wrap:wrap;gap:6px}
   .keychip{font-size:11.5px;padding:3px 9px;border-radius:6px;background:rgba(217,164,65,.1);
     border:1px solid var(--gold-dim);color:var(--gold)}
@@ -170,6 +181,8 @@
     <div class="cap" id="rightcap">сцена</div>
     <div class="amb" id="amb"></div>
     <div class="miniscene hidden" id="mini"></div>
+    <div class="cap" style="margin-top:4px">сумка <span id="bagn"></span></div>
+    <div class="bag" id="bag"></div>
   </div>
 </div>
 
@@ -385,12 +398,46 @@ api('/api/play/scene').then(s=>{
   if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
   push('narr','Десяток лиц скользят по тебе взглядами и возвращаются к кружкам.');
 });
+refreshInv();
+let INV=[];
+async function refreshInv(){const r=await api('/api/play/inventory');INV=(r&&r.items)||[];renderBag();}
+function renderBag(){
+  $('bagn').textContent=INV.length?('· '+INV.length):'';
+  $('bag').innerHTML=INV.length?INV.map(bagItem).join(''):'<div class="bagempty">пусто — обшарь ёмкости в локации</div>';
+  $('bag').querySelectorAll('.bagitem').forEach(e=>e.addEventListener('click',()=>inspectItem(e.dataset.id)));
+}
+function bagItem(it){
+  const worth=(it.worth_known?'':'~')+it.worth+' зм';
+  const q=it.unknown?` <span class="qm" title="есть неизведанное — осмотри/покажи знатоку">&#9679;${it.unknown>1?it.unknown:''}</span>`:'';
+  return `<div class="bagitem" data-id="${it.id}">
+    <div class="bn">${esc(it.name)}${q}</div>
+    <div class="bw">${esc(it.kind)} · ${worth}</div>
+    ${(it.facts&&it.facts.length)?`<div class="bf">${it.facts.map(esc).join('; ')}</div>`:''}</div>`;
+}
+async function loot(name){
+  const r=await api('/api/play/loot',{container:name});
+  if(r.error){push('sys',esc(r.error));return;}
+  push('narr','Ты обшариваешь «'+esc(name)+'»'+((r.items&&r.items.length)?': '+r.items.map(i=>'«'+esc(i.name)+'»').join(', '):' — пусто')+'.');
+  await refreshInv();
+}
+async function inspectItem(id){
+  const npc=(mode==='dialogue'&&cur)?cur:null;
+  const vias=npc?['expert']:['handle','appraise'];
+  let rev=[],hint=false;
+  for(const via of vias){const r=await api('/api/play/inspect',{item:id,via,npc});
+    if(r.error){push('sys',esc(r.error));return;}
+    if(r.revealed)rev.push(...r.revealed); if(r.hints&&r.hints.length)hint=true;}
+  if(rev.length)push('narr',(npc?('«'+esc(byId(npc).name)+'» разглядывает: '):'Ты осматриваешь предмет: ')+rev.map(esc).join('; ')+'.');
+  else if(hint)push('sys','что-то не так с предметом — покажи знатоку с нужным глазом.');
+  else push('sys',(npc?'«'+esc(byId(npc).name)+'» пожимает плечами':'ничего нового ты не замечаешь')+'.');
+  await refreshInv();
+}
 function renderLoc(loc){
   document.querySelector('.locard .nm').textContent=loc.name;
   document.querySelector('.locard .kd').textContent=loc.kind;
   const cs=(loc.containers||[]);
   document.querySelector('.locard .desc').innerHTML=esc(loc.desc||'')+(cs.length?
-    `<div class="conts">${cs.map(c=>`<span class="cont${c.locked?' lk':''}" title="${esc(c.where||'')}">${c.locked?'&#128274;':'&#9642;'} ${esc(c.name)}</span>`).join('')}</div>`:'');
+    `<div class="conts">${cs.map(c=>`<span class="cont${c.locked?' lk':' op'}" data-n="${esc(c.name)}" ${c.locked?'':'onclick="loot(this.dataset.n)"'} title="${esc(c.where||'')}${c.locked?' · заперто':' · обшарить'}">${c.locked?'&#128274;':'&#9642;'} ${esc(c.name)}</span>`).join('')}</div>`:'');
 }
 </script>
 </body>

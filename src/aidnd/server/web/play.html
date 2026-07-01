@@ -59,6 +59,12 @@
   .locard .nm{font:500 14px var(--serif);color:var(--gold)}
   .locard .kd{font-size:12px;color:var(--dim);margin-top:1px}
   .locard .desc{font-size:12.5px;color:var(--dim);margin-top:7px;line-height:1.55}
+  .conts{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+  .cont{font-size:11px;padding:2px 8px;border-radius:6px;background:#171a22;border:1px solid var(--line2);color:var(--dim)}
+  .cont.lk{color:var(--gold-dim);border-color:var(--gold-dim)}
+  .keys{display:flex;flex-wrap:wrap;gap:6px}
+  .keychip{font-size:11.5px;padding:3px 9px;border-radius:6px;background:rgba(217,164,65,.1);
+    border:1px solid var(--gold-dim);color:var(--gold)}
   .npc{flex:1;display:flex;flex-direction:column;padding:0 12px 12px;overflow:auto}
   .portrait{width:100%;height:210px;flex:0 0 210px;border-radius:9px;border:1px solid var(--line2);
     background:radial-gradient(120% 100% at 50% 0%,#2a2f3e,#171a22);position:relative;overflow:hidden;
@@ -268,9 +274,7 @@ async function go(){
   hideDest();PEND=null;
   MAP.loc=r.loc;SCENE=r;renderAmb();
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
-  document.querySelector('.locard .nm').textContent=r.location.name;
-  document.querySelector('.locard .kd').textContent=r.location.kind;
-  document.querySelector('.locard .desc').textContent=r.location.desc;
+  renderLoc(r.location);
   push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'» ('+fmtClock(GT).split(', ')[1]+').');
 }
 (function(){const s=$('mapsvg');let drag=null;
@@ -328,6 +332,8 @@ function renderNpc(n){
      ${sub?`<div class="npcsub">${esc(sub)}</div>`:''}
      <div id="meters">${meters(n)}</div>
      <div class="emo">настроение: <b id="emo">${esc(n.emotion)}</b></div>
+     ${(n.keys&&n.keys.length)?`<div class="subcap">при себе ключи</div>
+       <div class="keys">${n.keys.map(k=>`<span class="keychip">&#128273; ${esc(k)}</span>`).join('')}</div>`:''}
      <div class="subcap">темы разговора</div>
      <div class="topics">${(n.topics||[]).map(t=>`<span class="chip" onclick="say('${esc(t)}')">${esc(t)}</span>`).join('')}</div>
      <button class="end" onclick="endTalk()">&#8592; завершить разговор</button>`;
@@ -376,12 +382,16 @@ loadMap();
 push('narr','Дверь трактира захлопывается за твоей спиной, отрезая шум дождя. Внутри тепло, пахнет элем и подгоревшим луком.');
 api('/api/play/scene').then(s=>{
   SCENE=s;renderAmb();
-  if(s.location){$('locname').textContent=s.location.name;
-    document.querySelector('.locard .nm').textContent=s.location.name;
-    document.querySelector('.locard .kd').textContent=s.location.kind;
-    document.querySelector('.locard .desc').textContent=s.location.desc;}
+  if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
   push('narr','Десяток лиц скользят по тебе взглядами и возвращаются к кружкам.');
 });
+function renderLoc(loc){
+  document.querySelector('.locard .nm').textContent=loc.name;
+  document.querySelector('.locard .kd').textContent=loc.kind;
+  const cs=(loc.containers||[]);
+  document.querySelector('.locard .desc').innerHTML=esc(loc.desc||'')+(cs.length?
+    `<div class="conts">${cs.map(c=>`<span class="cont${c.locked?' lk':''}" title="${esc(c.where||'')}">${c.locked?'&#128274;':'&#9642;'} ${esc(c.name)}</span>`).join('')}</div>`:'');
+}
 </script>
 </body>
 </html>

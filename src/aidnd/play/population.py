@@ -52,6 +52,7 @@ class Townsperson:
     state: NpcState = field(default=None)
     persona: dict = None            # богатая персона из пула (worldgen) — None у голого населения
     portraits: dict = None          # {эмоция: путь-к-портрету} из пула
+    keys: list = None               # ключи от закрытых ёмкостей своего здания (владелец) — рантайм
 
     def view(self) -> dict:
         return {"id": self.id, "name": self.name, "role": self.role, "home": self.home,

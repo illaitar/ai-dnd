@@ -76,9 +76,31 @@ def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
     r = random.Random(row["id"])                           # лёгкий фон нужд, детерминированно
     for n in st.needs:
         st.needs[n] = round(r.uniform(0.1, 0.35), 2)
-    return Townsperson(id=row["id"], name=row["name"], role=row["role"], home=home, work=work,
-                       charisma=row["charisma"], appearance=row["appearance"], state=st,
-                       persona=row.get("persona"), portraits=row.get("portraits") or {})
+    tp = Townsperson(id=row["id"], name=row["name"], role=row["role"], home=home, work=work,
+                     charisma=row["charisma"], appearance=row["appearance"], state=st,
+                     persona=row.get("persona"), portraits=row.get("portraits") or {})
+    if work:                                               # владелец здания → ключи от его закрытых ёмкостей
+        tp.keys = _building_keys(work)
+    return tp
+
+
+def _building_keys(bid: str) -> list:
+    """Ключи-открывашки от LOCKED-ёмкостей здания (для владельца)."""
+    bd = _store().get_building(PLAY_WORLD, bid)
+    if not bd:
+        return []
+    return [{"name": c["key"]["name"], "opens": c["name"], "where": c.get("where", "")}
+            for c in (bd["data"].get("containers") or [])
+            if c.get("access") == "locked" and c.get("key")]
+
+
+def _building_containers(bid: str) -> list:
+    """Ёмкости здания для сцены (без содержимого — вскрывается взаимодействием)."""
+    bd = _store().get_building(PLAY_WORLD, bid)
+    if not bd:
+        return []
+    return [{"name": c["name"], "kind": c["kind"], "where": c.get("where", ""),
+             "locked": c.get("access") == "locked"} for c in (bd["data"].get("containers") or [])]
 
 
 def _fill_from_pool(city, keynode, kps):
@@ -218,11 +240,13 @@ def _scene_dict(city, people, crof, cr2b, loc):
     else:
         name, kind = "Улица", "мостовая меж домов"
     here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
+    bid = cr2b.get(loc)
     return {
         "loc": loc,
         "location": {"name": name, "kind": kind,
                      "desc": ("Обычное место фронтирного городка — идёт своя жизнь." if role
-                              else "Мимо спешат редкие прохожие; в лужах дрожит свет окон.")},
+                              else "Мимо спешат редкие прохожие; в лужах дрожит свет окон."),
+                     "containers": _building_containers(bid) if bid else []},
         "ambient": {"time": "вечер", "weather": "дождь", "mood": "оживлённо" if len(here) > 2 else "тихо",
                     "event": "Народ занят своими делами." if here else "Пусто; лишь ветер гуляет меж домов."},
         "here": [{"id": pid, "name": people[pid].name, "role": people[pid].role,
@@ -332,6 +356,7 @@ async def talk(request: Request):
             "portrait": _portrait_url(p, emo), "portraits": ports,
             "sex": per.get("sex"), "age": per.get("age"), "origin": per.get("origin"),
             "look": (per.get("look") or {}).get("clothing") or None,
+            "keys": [k["name"] for k in (p.keys or [])],
             "topics": _TOPICS.get(p.role, _TOPICS["горожанин"]), "line": _voice(p, rel, "greet")}
 
 

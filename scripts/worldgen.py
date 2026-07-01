@@ -42,13 +42,14 @@ def main() -> None:
     ap.add_argument("--fresh", action="store_true", help="очистить мир в БД перед насыщением")
     ap.add_argument("--no-river", action="store_true")
     ap.add_argument("--no-walls", action="store_true")
+    ap.add_argument("--segment", type=float, default=None, help="длина отрезка улицы (мельче = гуще узлы)")
     ap.add_argument("--concurrency", type=int, default=0, help="макс. одновременных промптов (0=авто)")
     ap.add_argument("--stub", action="store_true", help="без LLM (детерминированная заглушка)")
     ap.add_argument("--out", default="-", help="JSON-дамп (- = не писать, основное хранилище — БД)")
     args = ap.parse_args()
 
     city = generate(CityParams(seed=args.seed, key_buildings=args.key,
-                               river=not args.no_river, walls=not args.no_walls))
+                               river=not args.no_river, walls=not args.no_walls, segment=args.segment))
     n_all = sum(1 for h in city.houses.values() if not h.building) + len(city.key_buildings)
     n_targets = len(city.key_buildings) if args.enrich == "keys" else n_all
     print(f"город seed={args.seed}: {city.stats()['nodes']} узлов, {len(city.houses)} домов, "

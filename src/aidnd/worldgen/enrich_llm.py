@@ -24,6 +24,9 @@ PROSPERITY = ("struggling", "stable", "thriving")
 REPUTATION = ("respected", "neutral", "dubious", "shady")
 ROOM_KINDS = ("cellar", "backroom", "attic", "quarters", "hidden")
 ROOM_ACCESS = ("public", "staff", "locked", "hidden")
+CONTAINER_KINDS = ("chest", "cupboard", "crate", "barrel", "strongbox", "lockbox",
+                   "cabinet", "cache", "shelf", "sack")
+CONTAINER_ACCESS = ("public", "locked")
 
 
 @dataclass
@@ -50,11 +53,15 @@ _BUILD_SYS = (
     "reputation (respected|neutral|dubious|shady); notable (одна короткая деталь места); "
     "secret ({what, where, gate} или null); valuables (массив — что украсть); rumors (массив коротких зацепок); "
     "sub_rooms (массив {name, kind:(cellar|backroom|attic|quarters|hidden), access:(public|staff|locked|hidden), "
-    "features:[...], contents:[...]}; 0-4, у жилого дома 0-1).\n"
+    "features:[...], contents:[...]}; 0-4, у жилого дома 0-1); "
+    "containers (массив ЁМКОСТЕЙ 0-5: {name, kind:(chest|cupboard|crate|barrel|strongbox|lockbox|cabinet|cache|"
+    "shelf|sack), where:(где стоит), access:(public|locked), contents:[что внутри], key:{name, note}}; "
+    "PUBLIC открыты всем; LOCKED ОБЯЗАТЕЛЬНО с key — предметом-открывашкой (именной ключ/замо́к хозяина), "
+    "в locked держат ценное/личное).\n"
     "ВАЖНО ПРО ЯЗЫК: энум-поля (tier/size/age/condition/lighting/foot_traffic/prosperity/reputation/services, "
-    "kind/access у помещений) — строго АНГЛ. ключи из списков выше. ВСЁ остальное (type, features, smells, sounds, "
-    "wares, occupants_kind, notable, secret, valuables, rumors, имена помещений) — НА РУССКОМ, короткими "
-    "естественными фразами, БЕЗ snake_case и англицизмов."
+    "kind/access у помещений и ёмкостей) — строго АНГЛ. ключи из списков выше. ВСЁ остальное (type, features, "
+    "smells, sounds, wares, occupants_kind, notable, secret, valuables, rumors, имена помещений/ёмкостей/ключей, "
+    "where, contents) — НА РУССКОМ, короткими естественными фразами, БЕЗ snake_case и англицизмов."
 )
 
 
@@ -84,6 +91,22 @@ def _list(v):
     if isinstance(v, str) and v.strip():
         return [v.strip()]
     return []
+
+
+def _container(c) -> dict | None:
+    """Ёмкость здания. Для LOCKED гарантируем key — предмет-открывашку (иначе синтезируем именной ключ)."""
+    if not isinstance(c, dict) or not str(c.get("name") or "").strip():
+        return None
+    name = str(c["name"]).strip()
+    access = _enum(c.get("access"), CONTAINER_ACCESS, "public")
+    key = None
+    if access == "locked":
+        k = c.get("key") if isinstance(c.get("key"), dict) else {}
+        key = {"name": str(k.get("name") or "").strip() or f"ключ от «{name}»",
+               "note": str(k.get("note") or "").strip()}
+    return {"name": name, "kind": _enum(c.get("kind"), CONTAINER_KINDS, "chest"),
+            "where": str(c.get("where") or "").strip(), "access": access,
+            "contents": _list(c.get("contents")), "key": key}
 
 
 def _norm_building(d: dict) -> dict:
@@ -121,6 +144,7 @@ def _norm_building(d: dict) -> dict:
         "secret": ({"what": str(secret.get("what", "")), "where": str(secret.get("where", "")),
                     "gate": str(secret.get("gate", ""))} if secret else None),
         "valuables": _list(d.get("valuables")), "rumors": _list(d.get("rumors")), "sub_rooms": subs,
+        "containers": [x for x in (_container(c) for c in (d.get("containers") or [])[:6]) if x],
     }
 
 
@@ -144,6 +168,13 @@ class StubEnricher(Enricher):
             "secret": ({"what": "тайник под полом", "where": "подвал", "gate": "доверие"} if sig else None),
             "sub_rooms": ([{"name": "Подвал", "kind": "cellar", "access": "locked",
                             "features": ["бочки"], "contents": ["припасы"]}] if sig else []),
+            "containers": ([{"name": "Сундук у стойки", "kind": "chest", "where": "за стойкой",
+                             "access": "locked", "contents": ["выручка", "долговая книга"],
+                             "key": {"name": "латунный ключ на шнурке", "note": "носит хозяин"}},
+                            {"name": "Полка с кружками", "kind": "shelf", "where": "у очага",
+                             "access": "public", "contents": ["кружки", "миски"]}] if sig
+                           else [{"name": "Сундук в углу", "kind": "chest", "where": "у лежанки",
+                                  "access": "public", "contents": ["одежда", "мелочь"]}]),
         })
 
 

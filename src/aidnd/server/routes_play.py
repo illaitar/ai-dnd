@@ -63,48 +63,50 @@ def _play():
         vis = visual(params, interactive=True)             # богатый визуал + кликабельные дома
         people = populate(city, seed=1, commoners=16, deviants=2)
         xy = {n.id: (n.x, n.y) for n in city.nodes()}
-        door2cr = {h.node: h.crossroad for h in city.houses.values()}
-        keycr = {bid: kb.crossroad for bid, kb in city.key_buildings.items()}
+        keynode = {bid: kb.node for bid, kb in city.key_buildings.items()}   # здание → БЛИЖАЙШАЯ точка (дверь), не перекрёсток
         kps = city.key_points()
         rng = random.Random("spot|1")
-        crof = {}                                          # перекрёсток каждого жителя
+        spot = {}                                          # где стоит житель — ближайшая точка дома/работы
         for pid, p in people.items():
-            crof[pid] = keycr.get(p.work) or door2cr.get(p.home) or rng.choice(kps)
-        cr2b = {}                                          # перекрёсток → ключевое здание (для названия)
+            spot[pid] = keynode.get(p.work) or p.home or rng.choice(kps)
+        n2b = {}                                           # узел-точка → ключевое здание (название/сцена)
         for bid, kb in city.key_buildings.items():
-            cr2b.setdefault(kb.crossroad, bid)
-        start = keycr.get(next((p.work for p in people.values()
-                                if p.role == "трактирщик" and p.work in keycr), None)) or kps[0]
-        _S.update(city=city, people=people, crof=crof, cr2b=cr2b, loc=start,
-                  geom=_build_geom(city, xy, kps, cr2b, vis))
+            n2b.setdefault(kb.node, bid)
+        start = keynode.get(next((p.work for p in people.values()
+                                  if p.role == "трактирщик" and p.work in keynode), None)) or kps[0]
+        _S.update(city=city, people=people, crof=spot, cr2b=n2b, loc=start,
+                  geom=_build_geom(city, xy, n2b, vis))
     return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]
 
 
-def _build_geom(city, xy, kps, cr2b, vis) -> dict:
+def _build_geom(city, xy, n2b, vis) -> dict:
     """Лёгкий интерактивный слой поверх богатого визуала: система координат — холст рендера 0 0 W H.
-    Дома/улицы/река/стены рисует сам SVG (vis['inner']); клик по любому дому → его перекрёсток
-    (h2cr). Метки ключевых зданий подписываем поверх; _xy — узел→xy для маршрута и фигуры игрока."""
-    h2cr = {h.id: h.crossroad for h in city.houses.values()}
+    Дома/улицы/река/стены рисует сам SVG (vis['inner']); клик по дому → его БЛИЖАЙШАЯ точка дороги
+    (h2n = h.node, НЕ перекрёсток). Метки зданий подписываем поверх; _xy — узел→xy для маршрута."""
+    h2n = {h.id: h.node for h in city.houses.values()}
+    road = (NodeKind.CROSSROAD, NodeKind.POINT, NodeKind.BRIDGE, NodeKind.GATE)
+    points = [{"id": n, "x": round(xy[n][0], 1), "y": round(xy[n][1], 1)}  # ВСЕ узлы дорог (не только перекрёстки)
+              for n in xy if city.node_kind(n) in road]
     keys = []
     for i, (bid, kb) in enumerate(sorted(city.key_buildings.items())):
         role = KEY_ROLES[i % len(KEY_ROLES)]
-        keys.append({"cr": kb.crossroad, "x": round(kb.x, 1), "y": round(kb.y, 1),
+        keys.append({"node": kb.node, "x": round(kb.x, 1), "y": round(kb.y, 1),
                      "label": _PLACE.get(role, (None, None, "здание"))[2]})
     return {"viewBox": [0, 0, vis["W"], vis["H"]], "svg": vis["inner"],
-            "h2cr": h2cr, "keys": keys,
+            "h2n": h2n, "points": points, "keys": keys,
             "_xy": {n: [round(xy[n][0], 1), round(xy[n][1], 1)] for n in xy}}
 
 
-def _role_at(cr, people, crof, cr2b):
-    bid = cr2b.get(cr)
+def _role_at(node, people, spot, n2b):
+    bid = n2b.get(node)
     if not bid:
         return None
-    return next((people[pid].role for pid, c in crof.items()
-                 if c == cr and people[pid].work == bid), None)
+    return next((people[pid].role for pid, s in spot.items()
+                 if s == node and people[pid].work == bid), None)
 
 
-def _here(cr, crof):
-    return [pid for pid, c in crof.items() if c == cr]
+def _here(node, spot):
+    return [pid for pid, s in spot.items() if s == node]
 
 
 def _emo(st) -> str:
@@ -118,13 +120,18 @@ def _emo(st) -> str:
 
 def _scene_dict(city, people, crof, cr2b, loc):
     role = _role_at(loc, people, crof, cr2b)
-    name, kind, _ = _PLACE.get(role, ("Перекрёсток", "городская развилка", "перекрёсток"))
+    if role:
+        name, kind, _ = _PLACE[role]
+    elif city.node_kind(loc) == NodeKind.CROSSROAD:
+        name, kind = "Перекрёсток", "городская развилка"
+    else:
+        name, kind = "Улица", "мостовая меж домов"
     here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
     return {
         "loc": loc,
         "location": {"name": name, "kind": kind,
                      "desc": ("Обычное место фронтирного городка — идёт своя жизнь." if role
-                              else "Развилка городских улиц; мимо спешат прохожие.")},
+                              else "Мимо спешат редкие прохожие; в лужах дрожит свет окон.")},
         "ambient": {"time": "вечер", "weather": "дождь", "mood": "оживлённо" if len(here) > 2 else "тихо",
                     "event": "Народ занят своими делами." if here else "Пусто; лишь ветер гуляет меж домов."},
         "here": [{"id": pid, "name": people[pid].name, "role": people[pid].role,
@@ -168,7 +175,8 @@ def game_map():
     city, people, crof, cr2b, loc = _play()
     g = _S["geom"]
     pxy = g["_xy"].get(loc, [0, 0])
-    return {"viewBox": g["viewBox"], "svg": g["svg"], "h2cr": g["h2cr"], "keys": g["keys"],
+    return {"viewBox": g["viewBox"], "svg": g["svg"], "h2n": g["h2n"],
+            "points": g["points"], "keys": g["keys"],
             "loc": loc, "player": {"x": pxy[0], "y": pxy[1]}}
 
 
@@ -181,7 +189,7 @@ async def move(request: Request):
     except (TypeError, ValueError):
         return {"error": "туда нельзя"}
     if to not in _S["geom"]["_xy"] or city.node_kind(to) not in (
-            NodeKind.CROSSROAD, NodeKind.GATE, NodeKind.BRIDGE):
+            NodeKind.CROSSROAD, NodeKind.POINT, NodeKind.GATE, NodeKind.BRIDGE):
         return {"error": "туда нельзя"}
     r = city.route(loc, to)
     path = [_S["geom"]["_xy"][n] for n in r.nodes if n in _S["geom"]["_xy"]] if r.found else [_S["geom"]["_xy"][to]]

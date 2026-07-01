@@ -42,9 +42,16 @@
     width:26px;height:24px;cursor:pointer;border-radius:6px}
   .zoom button:hover{background:var(--raise);color:var(--gold)}
   .zoom span{font-size:10.5px;color:var(--dim);min-width:34px;text-align:center;font-variant-numeric:tabular-nums}
-  #citybase{filter:brightness(.72) saturate(.86) contrast(1.03)}
-  #citybase .h{cursor:pointer;transition:fill .1s}
+  .gobtn{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);background:var(--gold);
+    border:0;color:#1a1408;font:600 13px var(--sans);padding:8px 20px;border-radius:22px;cursor:pointer;
+    box-shadow:0 4px 14px rgba(0,0,0,.45);animation:rise .2s ease;white-space:nowrap}
+  .gobtn:hover{filter:brightness(1.08)}
+  .gobtn span{opacity:.72;font-weight:500}
+  #citybase{filter:brightness(.72) saturate(.86) contrast(1.03);pointer-events:none;transition:filter 1s ease}
+  #skyrect{transition:fill 1s ease,opacity 1s ease}
+  #citybase .h{pointer-events:auto;cursor:pointer;transition:fill .1s}
   #citybase .h:hover{fill:#ffdf87}
+  #citybase .h.sel{fill:#ffd23f}
   .kmark{fill:#f4eddb;font-weight:600;paint-order:stroke;stroke:#140d04;stroke-width:.7px;
     cursor:pointer;pointer-events:auto}
   .kmark:hover{fill:#ffe6a8}
@@ -118,7 +125,7 @@
 <div class="top">
   <span class="brand">&#10022; AI-DnD</span>
   <span class="loc"><b id="locname">Трактир</b><span class="sep">·</span><span id="locdist">рыночный квартал</span></span>
-  <span class="right"><span>вечер, 19:40</span><span>дождь</span><span>&#9829; 18/18</span><span>12 зм</span></span>
+  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span>&#9829; 18/18</span><span>12 зм</span></span>
 </div>
 
 <div class="stage">
@@ -130,6 +137,7 @@
           <span id="zlvl">100%</span>
           <button onclick="zoomBy(1.4)" aria-label="приблизить">&#43;</button>
           <button onclick="recenter()" title="к игроку" style="font-size:12px">&#9678;</button></div>
+        <button id="gobtn" class="gobtn hidden" onclick="go()">&#9654; идти <span id="goeta"></span></button>
       </div>
       <div class="locard">
         <div class="nm">Трактир</div><div class="kd">таверна</div>
@@ -166,43 +174,100 @@ function push(cls,html){const d=document.createElement('div');d.className='msg '
   thread().appendChild(d);thread().scrollTop=thread().scrollHeight;return d;}
 
 let MAP=null,BVB=[0,0,100,100],Z=1,CX=50,CY=50,PXY={x:50,y:50},PANNED=false;
+let CRXY={},PEND=null,SELEL=null,MINPERSTEP=5,GT=19*60+40;   // игровые минуты; +5 за каждый шаг пути
+const STEP_MS=240;                                          // реальная длительность одного шага анимации
+function fmtClock(t){t=((t%1440)+1440)%1440;const h=Math.floor(t/60),m=t%60;
+  const per=h<5?'ночь':h<11?'утро':h<17?'день':h<22?'вечер':'ночь';
+  return per+', '+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');}
+// палитра суточного цикла: контрольные точки по часам → фильтр карты + цвет неба-подложки
+const SKY=[
+  {h:0, br:.46,sat:.70,ov:[10,16,46], oo:.52},   // глухая ночь — синь
+  {h:5, br:.50,sat:.72,ov:[18,24,56], oo:.46},   // предрассветье
+  {h:7, br:.80,sat:.94,ov:[74,60,84], oo:.20},   // рассвет — прохладно-розовый
+  {h:10,br:1.00,sat:1.0,ov:[255,246,214],oo:.05},// утро
+  {h:13,br:1.03,sat:1.0,ov:[255,242,206],oo:.02},// полдень — ярко и тепло
+  {h:17,br:.94,sat:1.05,ov:[176,104,44],oo:.14}, // предвечерье — золото
+  {h:19,br:.78,sat:1.07,ov:[126,60,30], oo:.26}, // закат — оранжево-тёплый
+  {h:21,br:.60,sat:.90,ov:[52,34,66],  oo:.36},  // сумерки — фиолетовый
+  {h:23,br:.50,sat:.74,ov:[14,20,56],  oo:.46},  // ночь
+  {h:24,br:.46,sat:.70,ov:[10,16,46],  oo:.52},
+];
+function applySky(){const t=((GT/60)%24+24)%24;let a=SKY[0],b=SKY[SKY.length-1];
+  for(let i=0;i<SKY.length-1;i++){if(t>=SKY[i].h&&t<=SKY[i+1].h){a=SKY[i];b=SKY[i+1];break;}}
+  const f=(b.h-a.h)?(t-a.h)/(b.h-a.h):0,L=(x,y)=>x+(y-x)*f;
+  const base=$('mapsvg').querySelector('#citybase');
+  if(base)base.style.filter=`brightness(${L(a.br,b.br).toFixed(3)}) saturate(${L(a.sat,b.sat).toFixed(3)}) contrast(1.03)`;
+  const rect=$('mapsvg').querySelector('#skyrect');
+  if(rect){rect.style.fill=`rgb(${[0,1,2].map(k=>Math.round(L(a.ov[k],b.ov[k]))).join(',')})`;
+    rect.style.opacity=L(a.oo,b.oo).toFixed(3);}}
+function setClock(){const c=$('clock');if(c)c.textContent=fmtClock(GT);applySky();}
 function applyVB(){const w=BVB[2]/Z,h=BVB[3]/Z;
   $('mapsvg').setAttribute('viewBox',`${(CX-w/2).toFixed(1)} ${(CY-h/2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`);
   $('zlvl').textContent=Math.round(Z*100)+'%';}
 function svgEl(m){
   const W=BVB[2],rpl=W*0.0092,lw=W*0.0022,fs=W*0.015;
   let g=`<g id="citybase">${m.svg||''}</g>`;
-  g+=`<rect x="0" y="0" width="${BVB[2]}" height="${BVB[3]}" fill="#0b1226" opacity=".22" pointer-events="none"/>`;
-  m.keys.forEach(k=>g+=`<text class="kmark" data-id="${k.cr}" x="${k.x}" y="${k.y-rpl*1.9}" font-size="${fs.toFixed(1)}" text-anchor="middle">${k.label}</text>`);
+  g+=`<rect id="skyrect" x="0" y="0" width="${BVB[2]}" height="${BVB[3]}" fill="#0b1226" opacity=".22" pointer-events="none"/>`;
+  m.keys.forEach(k=>g+=`<text class="kmark" data-id="${k.node}" x="${k.x}" y="${k.y-rpl*1.9}" font-size="${fs.toFixed(1)}" text-anchor="middle">${k.label}</text>`);
+  g+=`<g id="destmark" pointer-events="none" style="display:none">
+      <circle fill="none" stroke="#e5372a" stroke-width="${lw}"><animate attributeName="r" values="${rpl*0.5};${rpl*1.9};${rpl*0.5}" dur="1.05s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0;1" dur="1.05s" repeatCount="indefinite"/></circle>
+      <circle r="${rpl*0.5}" fill="#e5372a" stroke="#3a0d08" stroke-width="${lw*0.5}"><animate attributeName="r" values="${rpl*0.42};${rpl*0.58};${rpl*0.42}" dur="1.05s" repeatCount="indefinite"/></circle></g>`;
   g+=`<g id="pmark" transform="translate(${PXY.x},${PXY.y})" pointer-events="none">
       <circle r="${rpl}" fill="#d9a441" stroke="#241a08" stroke-width="${lw}"/>
       <circle r="${rpl}" fill="none" stroke="#ffe6a8" opacity=".55"><animate attributeName="r" values="${rpl};${rpl*2.6};${rpl}" dur="2.2s" repeatCount="indefinite"/><animate attributeName="opacity" values=".7;0;.7" dur="2.2s" repeatCount="indefinite"/></circle></g>`;
   return g;
 }
+function showDest(x,y){const d=$('mapsvg').querySelector('#destmark');
+  if(d){d.setAttribute('transform','translate('+x+','+y+')');d.style.display='';}}
+function hideDest(){const d=$('mapsvg').querySelector('#destmark');if(d)d.style.display='none';}
 function renderMap(){const s=$('mapsvg');s.innerHTML=svgEl(MAP);applyVB();
   s.querySelectorAll('.kmark').forEach(e=>e.addEventListener('click',ev=>{
-    ev.stopPropagation();if(!PANNED)moveTo(+e.dataset.id);}));
+    ev.stopPropagation();if(!PANNED)selectDest(+e.dataset.id,null);}));
   s.querySelectorAll('#citybase .h').forEach(e=>e.addEventListener('click',ev=>{
-    ev.stopPropagation();if(PANNED)return;const cr=MAP.h2cr[e.dataset.id];if(cr!=null)moveTo(cr);}));}
+    ev.stopPropagation();if(PANNED)return;const nd=MAP.h2n[e.dataset.id];if(nd!=null)selectDest(nd,e);}));
+  applySky();}
 async function loadMap(){MAP=await api('/api/play/map');if(!MAP||!MAP.viewBox)return;
-  BVB=MAP.viewBox;PXY=MAP.player;CX=PXY.x;CY=PXY.y;Z=Math.max(1.5,BVB[2]/560);renderMap();}
+  BVB=MAP.viewBox;PXY=MAP.player;CX=PXY.x;CY=PXY.y;Z=Math.max(1.5,BVB[2]/560);
+  CRXY={};(MAP.points||[]).forEach(p=>CRXY[p.id]=[p.x,p.y]);setClock();renderMap();}
 function zoomBy(f){Z=Math.min(20,Math.max(0.85,Z*f));applyVB();}
 function recenter(){CX=PXY.x;CY=PXY.y;Z=Math.max(Z,BVB[2]/560);applyVB();}
-function walk(path){return new Promise(res=>{if(!path||!path.length){res();return;}let i=0;
-  const step=()=>{const p=path[i];PXY={x:p[0],y:p[1]};const m=$('mapsvg').querySelector('#pmark');
-    if(m)m.setAttribute('transform','translate('+p[0]+','+p[1]+')');CX=p[0];CY=p[1];applyVB();
-    i++;if(i<path.length)setTimeout(step,Math.max(45,420/path.length));else res();};step();});}
-async function moveTo(id){
+function clientToWorld(cx,cy){const s=$('mapsvg'),r=s.getBoundingClientRect(),w=BVB[2]/Z,h=BVB[3]/Z;
+  return [CX-w/2+(cx-r.left)/r.width*w, CY-h/2+(cy-r.top)/r.height*h];}
+function nearestCr(x,y){let best=null,bd=1e18;(MAP.points||[]).forEach(p=>{
+  const d=(p.x-x)**2+(p.y-y)**2;if(d<bd){bd=d;best=p;}});return best;}
+function clearSel(){const b=$('mapsvg').querySelector('#citybase');
+  if(b)b.querySelectorAll('.h.sel').forEach(x=>x.classList.remove('sel'));SELEL=null;PEND=null;hideDest();$('gobtn').classList.add('hidden');}
+function selectDest(cr,houseEl){
+  if(cr==null)return;
+  const b=$('mapsvg').querySelector('#citybase');
+  if(b)b.querySelectorAll('.h.sel').forEach(x=>x.classList.remove('sel'));
+  SELEL=houseEl||null;if(houseEl)houseEl.classList.add('sel');
+  PEND=cr;const c=CRXY[cr];if(c)showDest(c[0],c[1]);
+  $('goeta').textContent='';$('gobtn').classList.remove('hidden');
+}
+function walk(path){return new Promise(res=>{if(!path||!path.length){res();return;}let i=1;
+  const pm=$('mapsvg').querySelector('#pmark');
+  const step=()=>{const p=path[i];PXY={x:p[0],y:p[1]};
+    if(pm)pm.setAttribute('transform','translate('+p[0]+','+p[1]+')');
+    CX=p[0];CY=p[1];applyVB();GT+=MINPERSTEP;setClock();
+    i++;if(i<path.length)setTimeout(step,STEP_MS);else res();};
+  setTimeout(step,STEP_MS);});}
+async function go(){
+  if(PEND==null)return;const id=PEND;
   if(mode==='dialogue')endTalk();
+  $('gobtn').classList.add('hidden');
   const r=await api('/api/play/move',{to:id});
-  if(r.error){push('sys',r.error);return;}
-  await walk(r.path);
-  MAP.loc=r.loc;SCENE=r;renderAmb();renderMap();
+  if(r.error){push('sys',r.error);clearSel();return;}
+  const path=r.path||[];
+  if(path.length){const d=path[path.length-1];showDest(d[0],d[1]);}
+  await walk(path);
+  hideDest();PEND=null;
+  MAP.loc=r.loc;SCENE=r;renderAmb();
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   document.querySelector('.locard .nm').textContent=r.location.name;
   document.querySelector('.locard .kd').textContent=r.location.kind;
   document.querySelector('.locard .desc').textContent=r.location.desc;
-  push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'».');
+  push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'» ('+fmtClock(GT).split(', ')[1]+').');
 }
 (function(){const s=$('mapsvg');let drag=null;
   s.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,cx:CX,cy:CY};PANNED=false;s.classList.add('drag');});
@@ -210,6 +275,10 @@ async function moveTo(id){
     if(Math.abs(e.clientX-drag.x)+Math.abs(e.clientY-drag.y)>3)PANNED=true;
     CX=drag.cx-(e.clientX-drag.x)*(BVB[2]/Z)/r.width;CY=drag.cy-(e.clientY-drag.y)*(BVB[3]/Z)/r.height;applyVB();});
   window.addEventListener('mouseup',()=>{if(drag){drag=null;s.classList.remove('drag');}});
+  s.addEventListener('click',e=>{                       // клик по дороге/фону → ближайшая точка
+    if(PANNED||e.target.closest('.h,.kmark'))return;
+    const [wx,wy]=clientToWorld(e.clientX,e.clientY);const p=nearestCr(wx,wy);
+    if(p)selectDest(p.id,null);});
   s.addEventListener('wheel',e=>{e.preventDefault();const r=s.getBoundingClientRect(),w=BVB[2]/Z,h=BVB[3]/Z;
     const mx=CX-w/2+(e.clientX-r.left)/r.width*w,my=CY-h/2+(e.clientY-r.top)/r.height*h;
     const nz=Math.min(20,Math.max(0.85,Z*(e.deltaY<0?1.2:1/1.2)));

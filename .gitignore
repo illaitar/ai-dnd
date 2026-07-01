@@ -30,6 +30,9 @@ docs/_build/
 .secrets/
 *.key
 
+# портреты NPC (Flux, тяжёлые — на прод через rsync, НЕ в гит)
+data/portraits/
+
 # артефакты симуляции города
 citysim.gif
 citysim.mp4

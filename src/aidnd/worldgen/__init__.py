@@ -9,10 +9,13 @@ from __future__ import annotations
 
 from .enrich_llm import BuildingCtx, Enricher, LLMEnricher, StubEnricher
 from .enrichment import Building, Enrichment, building_ctx, enrich_city, store_world
-from .imagegen import ImageGen, build_prompt, get_imagegen
+from .imagegen import EMOTIONS, FluxImageGen, ImageGen, build_prompt, get_imagegen, portrait_prompt
+from .persona_llm import LLMPersona, PersonaCtx, PersonaEnricher, StubPersona
 from .progress import Progress
 from .store import WorldStore
 
 __all__ = ["enrich_city", "store_world", "building_ctx", "Enrichment", "Building",
            "Enricher", "LLMEnricher", "StubEnricher", "BuildingCtx", "Progress",
-           "WorldStore", "ImageGen", "get_imagegen", "build_prompt"]
+           "WorldStore", "ImageGen", "FluxImageGen", "get_imagegen", "build_prompt",
+           "portrait_prompt", "EMOTIONS",
+           "PersonaCtx", "PersonaEnricher", "LLMPersona", "StubPersona"]

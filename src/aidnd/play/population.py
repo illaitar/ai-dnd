@@ -57,9 +57,11 @@ class Townsperson:
                 "appearance": round(self.appearance, 2)}
 
 
-def _name(rng: random.Random) -> str:
-    first = rng.choice(_MALE if rng.random() < 0.5 else _FEMALE)
-    return f"{first} {rng.choice(_SURN)}"
+def _name(rng: random.Random) -> tuple[str, str]:
+    """Имя + пол (согласованы: пол выбираем ПЕРВЫМ, имя — из пула этого пола)."""
+    sex = "m" if rng.random() < 0.5 else "f"
+    first = rng.choice(_MALE if sex == "m" else _FEMALE)
+    return f"{first} {rng.choice(_SURN)}", sex
 
 
 def _traits(role: str, rng: random.Random) -> dict:
@@ -72,7 +74,7 @@ def _traits(role: str, rng: random.Random) -> dict:
 
 
 def _person(pid: str, role: str, home: int, work: str | None, rng: random.Random) -> Townsperson:
-    name = _name(rng)
+    name, _sex = _name(rng)
     cfg = NpcConfig(id=pid, name=name, role=role, traits=_traits(role, rng))
     st = NpcState.from_config(cfg)
     for n in st.needs:                              # лёгкий фон нужд
@@ -80,6 +82,16 @@ def _person(pid: str, role: str, home: int, work: str | None, rng: random.Random
     cha = min(1.0, max(0.1, _CHA.get(role, 0.3) + rng.uniform(-0.1, 0.1)))
     app = min(1.0, max(0.1, _WEALTH.get(role, 0.25) + rng.uniform(-0.08, 0.08)))
     return Townsperson(pid, name, role, home, work, cha, app, st)
+
+
+def person_core(role: str, rng: random.Random) -> dict:
+    """Механическое ядро NPC для ПУЛА (без места): имя, 11 черт, обаяние, богатство. Тот же генератор,
+    что у населения → банк и populate дают согласованную механику."""
+    cha = min(1.0, max(0.1, _CHA.get(role, 0.3) + rng.uniform(-0.1, 0.1)))
+    app = min(1.0, max(0.1, _WEALTH.get(role, 0.25) + rng.uniform(-0.08, 0.08)))
+    name, sex = _name(rng)
+    return {"name": name, "sex": sex, "traits": _traits(role, rng),
+            "charisma": round(cha, 2), "appearance": round(app, 2)}
 
 
 def populate(city, seed: int = 1, commoners: int = 12, deviants: int = 2) -> dict:

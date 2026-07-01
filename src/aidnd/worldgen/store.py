@@ -23,6 +23,13 @@ class WorldStore:
                       "key_buildings INT, river INT, walls INT, segment REAL, created TEXT)")
             c.execute("CREATE TABLE IF NOT EXISTS buildings (world_id INT, building_id TEXT, is_key INT, "
                       "node INT, sign TEXT, data TEXT, PRIMARY KEY(world_id, building_id))")
+            # ПУЛ NPC — мир-агностичный банк готовых людей (персона+инвентарь+портреты-пути)
+            c.execute("CREATE TABLE IF NOT EXISTS people (id TEXT PRIMARY KEY, role TEXT, name TEXT, "
+                      "charisma REAL, appearance REAL, mech TEXT, persona TEXT, portraits TEXT, "
+                      "seed INT, created TEXT)")
+            # привязка людей к конкретному миру (кто где стоит) — стейт, персист
+            c.execute("CREATE TABLE IF NOT EXISTS placements (world_id INT, npc_id TEXT, node INT, "
+                      "home INT, work TEXT, PRIMARY KEY(world_id, npc_id))")
 
     def _conn(self):
         c = sqlite3.connect(self.path, timeout=30)
@@ -74,6 +81,58 @@ class WorldStore:
     def clear_world(self, world_id: int) -> None:
         with self._conn() as c:
             c.execute("DELETE FROM buildings WHERE world_id=?", (world_id,))
+
+    # ------------------------------------------------------ пул NPC ------- #
+    def save_person(self, pid: str, role: str, name: str, charisma: float, appearance: float,
+                    mech: dict, persona: dict, portraits: dict, seed: int) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO people (id,role,name,charisma,appearance,mech,persona,"
+                      "portraits,seed,created) VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))",
+                      (pid, role, name, float(charisma), float(appearance),
+                       json.dumps(mech, ensure_ascii=False), json.dumps(persona, ensure_ascii=False),
+                       json.dumps(portraits, ensure_ascii=False), int(seed)))
+
+    def get_person(self, pid: str) -> dict | None:
+        with self._conn() as c:
+            r = c.execute("SELECT * FROM people WHERE id=?", (pid,)).fetchone()
+        return _person(r) if r else None
+
+    def person_ids(self) -> set:
+        with self._conn() as c:
+            return {r[0] for r in c.execute("SELECT id FROM people")}
+
+    def people_count(self) -> int:
+        with self._conn() as c:
+            return c.execute("SELECT COUNT(*) FROM people").fetchone()[0]
+
+    def list_people(self, limit: int = 50, role: str | None = None) -> list:
+        q = "SELECT * FROM people" + (" WHERE role=?" if role else "") + " LIMIT ?"
+        args = ((role, limit) if role else (limit,))
+        with self._conn() as c:
+            return [_person(r) for r in c.execute(q, args)]
+
+    def free_people(self, world_id: int, role: str | None = None, limit: int = 32) -> list:
+        """Люди из банка, ещё НЕ привязанные к этому миру (для наполнения толпы). Опц. по роли."""
+        q = ("SELECT p.* FROM people p WHERE p.id NOT IN (SELECT npc_id FROM placements WHERE world_id=?)"
+             + (" AND p.role=?" if role else "") + " LIMIT ?")
+        args = ((world_id, role, limit) if role else (world_id, limit))
+        with self._conn() as c:
+            return [_person(r) for r in c.execute(q, args)]
+
+    def place_person(self, world_id: int, npc_id: str, node: int, home: int, work: str | None) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO placements (world_id,npc_id,node,home,work) VALUES (?,?,?,?,?)",
+                      (world_id, npc_id, node, home, work))
+
+    def placements_for(self, world_id: int) -> list:
+        with self._conn() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM placements WHERE world_id=?", (world_id,))]
+
+
+def _person(r) -> dict:
+    return {"id": r["id"], "role": r["role"], "name": r["name"], "charisma": r["charisma"],
+            "appearance": r["appearance"], "mech": json.loads(r["mech"]),
+            "persona": json.loads(r["persona"]), "portraits": json.loads(r["portraits"]), "seed": r["seed"]}
 
 
 def _row(r) -> dict:

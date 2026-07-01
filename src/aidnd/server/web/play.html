@@ -147,6 +147,12 @@
   .person .go{margin-left:auto;color:var(--faint);font-size:17px}
   .person:hover .go{color:var(--gold)}
   .event{font:italic 12.5px/1.55 var(--serif);color:var(--dim);border-left:2px solid var(--line2);padding-left:11px}
+  .lfeed{display:flex;flex-direction:column;gap:7px;max-height:34vh;overflow:auto}
+  .lf{font:12px/1.5 var(--serif);color:var(--dim)}
+  .lf b{color:var(--ink);font-weight:500}
+  .lf .lfto{color:var(--faint);font-size:11px}
+  .lf.lfd{color:var(--faint)}
+  .lf.lfq{font-style:italic;color:var(--faint)}
   .hidden{display:none}
   .miniscene{padding:2px 12px 12px;display:flex;flex-direction:column;gap:10px}
 </style>
@@ -295,7 +301,7 @@ async function go(){
   if(path.length){const d=path[path.length-1];showDest(d[0],d[1]);}
   await walk(path);
   hideDest();PEND=null;
-  MAP.loc=r.loc;SCENE=r;renderAmb();
+  MAP.loc=r.loc;SCENE=r;LIVEF=[];renderAmb();setTimeout(pollLive,800);
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   renderLoc(r.location);
   push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'» ('+fmtClock(GT).split(', ')[1]+').');
@@ -325,8 +331,28 @@ function renderAmb(){
          `<div class="person" onclick="talk('${n.id}')"><span class="av" style="background:${n.color}">${av(n)}</span>
            <span><div class="pn">${esc(n.name)}</div><div class="pr">${esc(n.role)}</div></span>
            <span class="go">&#8250;</span></div>`).join('')}</div></div>
-     ${a.event?`<div class="event">${esc(a.event)}</div>`:''}`;
+     <div><div class="subcap" style="margin:2px 0 6px">вокруг</div><div class="lfeed" id="lfeed"></div></div>`;
+  renderFeed();
 }
+let LIVEF=[],LIVEBUSY=false;
+function renderFeed(){const el=$('lfeed');if(!el)return;
+  el.innerHTML=LIVEF.length?LIVEF.slice(-14).map(f=>
+    f.k==='speech'?`<div class="lf"><b>${esc(f.who)}</b> <span class="lfto">→ ${esc(f.to)}</span>: «${esc(f.text)}»</div>`
+                  :`<div class="lf lfd">${esc(f.who)} · <i>${esc(f.text)}</i></div>`).join('')
+    :'<div class="lf lfq">тихо — слышен лишь шум места</div>';
+  el.scrollTop=el.scrollHeight;}
+async function pollLive(){
+  if(mode!=='explore'||LIVEBUSY)return;
+  LIVEBUSY=true;
+  try{const r=await api('/api/play/live',{});
+    (r.feed||[]).forEach(f=>LIVEF.push(f));
+    if(r.feed&&r.feed.length)renderFeed();
+    (r.address||[]).forEach(a=>{
+      const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);
+      el.style.cursor='pointer';el.title='ответить — начать разговор';el.onclick=()=>talk(a.npc);});
+  }catch(e){}finally{LIVEBUSY=false;}
+}
+setInterval(pollLive,15000);
 function renderMini(){
   const a=SCENE.ambient||{};
   $('mini').innerHTML=`<div class="amchips"><span class="amchip">${esc(a.time||'вечер')}</span></div>
@@ -408,6 +434,7 @@ api('/api/play/scene').then(s=>{
   SCENE=s;renderAmb();
   if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
   push('narr','Десяток лиц скользят по тебе взглядами и возвращаются к кружкам.');
+  setTimeout(pollLive,600);
 });
 refreshInv();
 let INV=[];

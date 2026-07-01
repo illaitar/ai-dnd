@@ -23,8 +23,12 @@ from ..items import repair as item_repair
 from ..items import use as item_use
 from ..items import view as item_view
 from ..mind import Body, NpcConfig, NpcState
+from ..mind import Item as MItem
 from ..mind import World as MWorld
+from ..mind import perceive as mind_perceive
 from ..mind import think
+from ..mind.llm_agent import apply_actions, decide_hybrid
+from ..mind.tick import _decay_emotion, _decay_needs
 from ..play import populate
 from ..play.population import KEY_ROLES, Townsperson
 from ..worldgen import WorldStore
@@ -73,6 +77,18 @@ def _model():
         from ..inference import ModelManager
         _S["model"] = ModelManager()
     return _S["model"]
+
+
+def _evening_draw(people, spot) -> None:
+    """Вечерняя тяга (сессионная, placements не трогаем): часть незанятых работой стягивается в
+    трактир — зал живёт. Прообраз распорядка дня; днём эти же люди будут по своим делам."""
+    tav = next((spot[pid] for pid, p in people.items() if p.role == "трактирщик"), None)
+    if tav is None:
+        return
+    rng = random.Random("evening|1")
+    idle = sorted(pid for pid, p in people.items() if not p.work)
+    for pid in rng.sample(idle, min(4, len(idle))):
+        spot[pid] = tav
 
 
 def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
@@ -179,6 +195,7 @@ def _play():
         n2b = {}                                           # узел-точка → ключевое здание (название/сцена)
         for bid, kb in city.key_buildings.items():
             n2b.setdefault(kb.node, bid)
+        _evening_draw(people, spot)                        # вечер: часть незанятых тянется в трактир
         start = next((spot[pid] for pid, p in people.items() if p.role == "трактирщик"),
                      keynode.get(sorted(city.key_buildings)[0]) if city.key_buildings else kps[0])
         _S.update(city=city, people=people, crof=spot, cr2b=n2b, loc=start,
@@ -257,8 +274,11 @@ def _scene_dict(city, people, crof, cr2b, loc):
                      "containers": _building_containers(bid) if bid else []},
         "ambient": {"time": "вечер", "weather": "дождь", "mood": "оживлённо" if len(here) > 2 else "тихо",
                     "event": "Народ занят своими делами." if here else "Пусто; лишь ветер гуляет меж домов."},
-        "here": [{"id": pid, "name": people[pid].name, "role": people[pid].role,
-                  "init": people[pid].name[0], "color": _COLORS[i % len(_COLORS)],
+        "here": [{"id": pid,
+                  "name": _display(pid, people),        # незнакомец — дескриптором, имя после знакомства
+                  "role": (people[pid].role if (pid in _S.get("met", set()) or people[pid].work)
+                           else "кто-то из горожан"),   # роль очевидна лишь у занятого делом (работник места)
+                  "init": _display(pid, people)[0].upper(), "color": _COLORS[i % len(_COLORS)],
                   "portrait": _portrait_url(people[pid], _emo(people[pid].state))}
                  for i, pid in enumerate(here)],
     }
@@ -350,6 +370,7 @@ async def talk(request: Request):
     if npc not in people:
         return {"error": "нет такого"}
     p = people[npc]
+    _S.setdefault("met", set()).add(npc)               # заговорил = познакомился (имя открыто)
     st = p.state
     st.needs["social"] = max(st.needs.get("social", 0.0), 0.4)
     think(st, _mind_scene(npc, people), None)
@@ -546,3 +567,158 @@ async def use_item(request: Request):
     ev = item_use(it, 1)
     _store().save_item(it)
     return {"item": _item_card(it, _known(iid)), "event": ev}
+
+
+# ------------------------------------------- ЖИВАЯ ЛОКАЦИЯ (mind + LLM) --- #
+# NPC текущей локации живут по-настоящему: каждый тик КАЖДЫЙ решает ходом гибридного мозга
+# (механика даёт побуждения → LLM выбирает В ХАРАКТЕРЕ, пишет реплику и описание). Действия
+# реальны (apply_actions мутирует мир и память), фид — то, что игрок видит/слышит; незнакомцы
+# обезличены дескриптором, имя открывается знакомством (talk).
+_LIVE_GAP = 6.0                                    # мин. сек между тиками (защита от бури поллов)
+
+
+def _descriptor(p) -> str:
+    per = p.persona or {}
+    sex = "женщина" if per.get("sex") == "f" else "мужчина"
+    cloth = ((per.get("look") or {}).get("clothing") or "").split(",")[0].strip()
+    return f"{sex} ({cloth})" if cloth else sex
+
+
+def _display(pid: str, people) -> str:
+    if pid == PLAYER:
+        return "ты"
+    p = people.get(pid)
+    if not p:
+        return pid
+    return p.name if pid in _S.setdefault("met", set()) else _descriptor(p)
+
+
+def _live_affordances(bid) -> list:
+    """Чем локация закрывает нужды — из фактшита здания (services/features). Улица — суета."""
+    if not bid:
+        return [MItem("уличная суета", 0.15, satisfies="novelty")]
+    data = ((_store().get_building(PLAY_WORLD, bid) or {}).get("data")) or {}
+    sv, out = data.get("services") or [], []
+    for s, (nm, val, need) in {"eat": ("похлёбка", 0.3, "hunger"), "drink": ("кружка эля", 0.25, "comfort"),
+                               "lodging": ("тюфяк наверху", 0.25, "fatigue"), "pray": ("алтарь", 0.25, "purpose"),
+                               "heal": ("травяной отвар", 0.2, "comfort")}.items():
+        if s in sv:
+            out.append(MItem(nm, val, satisfies=need))
+    if any("очаг" in f for f in (data.get("features") or [])):
+        out.append(MItem("место у очага", 0.2, satisfies="fatigue"))
+    if sv:
+        out.append(MItem("работа по хозяйству", 0.2, satisfies="purpose"))
+    return out or [MItem("уличная суета", 0.15, satisfies="novelty")]
+
+
+def _live_build(city, people, crof, cr2b, loc) -> None:
+    role = _role_at(loc, people, crof, cr2b)
+    place = _PLACE[role][0] if role else "улица"
+    bid = cr2b.get(loc)
+    data = ((_store().get_building(PLAY_WORLD, bid) or {}).get("data")) if bid else {}
+    w = MWorld()
+    w.link(place, "улица")
+    w.ground[place] = _live_affordances(bid)
+    names, roles = {PLAYER: "чужак"}, {PLAYER: "недавно вошедший незнакомец"}
+    rng = random.Random(f"live|{loc}")
+    for pid in _here(loc, crof):
+        p = people[pid]
+        w.add(Body(id=pid, place=place, charisma=p.charisma, appearance=p.appearance,
+                   attention=round(rng.uniform(0.45, 0.85), 2),
+                   loot=[MItem("кошель", round(0.2 + p.appearance * 0.6, 2), kind="coin",
+                               amount=round(3 + p.appearance * 30))] if p.appearance >= 0.3 else []))
+        names[pid], roles[pid] = p.name, p.role
+    w.add(Body(id=PLAYER, place=place, charisma=0.45, appearance=0.35, attention=0.85,
+               loot=[MItem("кошель", 0.4, kind="coin", amount=12)]))
+    w.npc_minds = {pid: people[pid].state for pid in _here(loc, crof)}
+    w.aliases = {v.lower(): k for k, v in names.items()}
+    personas = {}
+    for pid in _here(loc, crof):                            # глубина: манера/причуда/стремления из банка
+        per = people[pid].persona or {}
+        bits = []
+        if per.get("origin"):
+            bits.append(per["origin"])
+        if per.get("voice"):
+            bits.append("говоришь " + _VOICE.get(per["voice"], "обычно"))
+        if per.get("speech"):
+            bits.append("манера: " + "; ".join(per["speech"][:2]))
+        if per.get("quirk"):
+            bits.append("причуда: " + per["quirk"])
+        if per.get("wants"):
+            bits.append("хочешь: " + "; ".join(per["wants"][:2]))
+        if per.get("stance"):
+            bits.append("к чужакам — " + _STANCE.get(per["stance"], "нейтрально"))
+        if people[pid].work:
+            bits.append("ты здесь НА РАБОТЕ — твой пост тут")
+        if bits:
+            personas[pid] = ". ".join(bits)
+    _S["live"] = {"world": w, "loc": loc, "place": place, "clock": 0, "ts": 0.0,
+                  "last": {}, "hist": {}, "names": names, "roles": roles, "personas": personas,
+                  "pdesc": ((data or {}).get("notable") or "")}
+
+
+def _live_tick(people) -> tuple:
+    lv, mgr = _S["live"], _model()
+    w = lv["world"]
+    order = [pid for pid in w.npc_minds
+             if not w.bodies[pid].down() and w.bodies[pid].place == lv["place"]]
+    random.Random(f"tick|{lv['clock']}").shuffle(order)
+    ctx = {"roles": lv["roles"], "names": lv["names"], "last_actions": lv["last"],
+           "history": lv["hist"], "clock": lv["clock"], "place_desc": {lv["place"]: lv["pdesc"]},
+           "personas": lv.get("personas", {})}
+
+    def think_one(pid):                                     # решения параллельно, снимок мира один
+        st = w.npc_minds[pid]
+        _decay_needs(st)
+        _decay_emotion(st)
+        return pid, decide_hybrid(st, w, mind_perceive(st, w), mgr, ctx)
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        decisions = dict(ex.map(think_one, order))
+
+    feed, address = [], []
+    for pid in order:                                       # применяем последовательно (честный порядок)
+        d = decisions[pid]
+        st = w.npc_minds[pid]
+        evs = apply_actions(d.get("actions") or [], st, w, lv["clock"])
+        lv["last"][pid] = "; ".join(evs)[:80] or "—"
+        lv["hist"].setdefault(pid, []).append("; ".join(evs)[:60])
+        who = _display(pid, people)
+        said = False
+        for a in d.get("actions") or []:
+            if isinstance(a, dict) and a.get("tool") == "say" and str(a.get("text") or "").strip():
+                tgt = str(a.get("to") or "")
+                tid = (w.aliases or {}).get(tgt.strip().lower(), tgt)
+                txt = str(a["text"])[:180]
+                said = True
+                if tid == PLAYER:
+                    address.append({"npc": pid, "who": who, "text": txt})
+                else:
+                    feed.append({"k": "speech", "who": who,
+                                 "to": _display(tid, people) if tid in people else tgt, "text": txt})
+        does = (d.get("does") or "").strip()
+        if does and not said:                               # реплика сама несёт момент — не дублируем
+            feed.append({"k": "deed", "who": who, "text": does[:150]})
+    lv["clock"] += 1
+    return feed, address
+
+
+@router.post("/api/play/live")
+async def live(request: Request):
+    """Пульс живой локации: один тик мира (все NPC ходят гибридным мозгом). Клиент поллит."""
+    import time as _time
+    city, people, crof, cr2b, loc = _play()
+    lv = _S.get("live")
+    if not lv or lv["loc"] != loc:
+        _live_build(city, people, crof, cr2b, loc)
+        lv = _S["live"]
+    now = _time.monotonic()
+    if now - lv["ts"] < _LIVE_GAP:
+        return {"feed": [], "address": [], "clock": lv["clock"]}
+    lv["ts"] = now
+    try:
+        feed, address = _live_tick(people)
+    except Exception as exc:                               # noqa: BLE001 — пульс не должен ронять клиент
+        return {"feed": [], "address": [], "clock": lv["clock"], "error": str(exc)[:160]}
+    return {"feed": feed, "address": address, "clock": lv["clock"]}

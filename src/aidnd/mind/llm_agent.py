@@ -100,12 +100,17 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     me = percept.me
     cfg = state.config
     roles = ctx.get("roles", {})
+    names = ctx.get("names", {})                   # id → человеческое имя (читаемые промпты и цели say/attack)
+    nm = lambda i: names.get(i, i)                 # noqa: E731
     last = ctx.get("last_actions", {})
     place_desc = ctx.get("place_desc", {})
 
     lines = [f"ВРЕМЯ: ход {ctx.get('clock', 0)}.", ""]
     lines.append(f"ТЫ — {cfg.name}, {roles.get(cfg.id, cfg.role)}. HP {me.hp}/{me.max_hp}.")
     lines.append(f"Черты: {_traits_line(cfg.traits)}.")
+    persona = ctx.get("personas", {}).get(cfg.id)  # богатая персона из пула: манера/причуда/стремления
+    if persona:
+        lines.append(f"КТО ТЫ: {persona}")
     lines.append(f"Нужды: {_needs_line(state.needs)}.")
     lines.append(f"Эмоции: {_emo_line(state.emotion, state.emotion_target)}.")
 
@@ -125,13 +130,13 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
             wealth = "богато одет" if b.appearance >= .6 else "прилично" if b.appearance >= .4 else "простак"
             st = "повержен" if b.down() else f"HP {b.hp}"
             act = last.get(b.id, "—")
-            lines.append(f"  • {b.id} ({roles.get(b.id, '?')}, {wealth}, {st}). "
+            lines.append(f"  • {nm(b.id)} ({roles.get(b.id, '?')}, {wealth}, {st}). "
                          f"Прошлый ход: {act}. Твоё отношение: {_rel_line(state, b.id)}.")
     if percept.nearby:
         lines.append("")
         lines.append("ВИДишь ПОБЛИЗОСТИ (соседние места):")
         for b in percept.nearby:
-            lines.append(f"  • {b.id} ({roles.get(b.id, '?')}) — в «{b.place}». "
+            lines.append(f"  • {nm(b.id)} ({roles.get(b.id, '?')}) — в «{b.place}». "
                          f"Прошлый ход: {last.get(b.id, '—')}.")
 
     hist = ctx.get("history", {}).get(cfg.id, [])
@@ -278,7 +283,9 @@ def _find_body(world, name):
     for b in world.bodies.values():
         if b.id.lower() == low:
             return b
-    return None
+    aliases = getattr(world, "aliases", None) or {}         # человеческое имя → id (живая локация)
+    bid = aliases.get(low)
+    return world.bodies.get(bid) if bid else None
 
 
 def _find_item(items, name):

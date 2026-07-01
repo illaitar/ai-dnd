@@ -17,6 +17,7 @@ from .routes_auth import router as _auth_router
 from .routes_citydebug import router as _citydebug_router
 from .routes_minddebug import router as _minddebug_router
 from .routes_npcdebug import router as _npcdebug_router
+from .routes_play import router as _play_router
 from .routes_usage import router as _usage_router
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
@@ -26,6 +27,7 @@ app.include_router(_usage_router)
 app.include_router(_citydebug_router)
 app.include_router(_npcdebug_router)
 app.include_router(_minddebug_router)
+app.include_router(_play_router)
 
 
 @app.on_event("startup")
@@ -57,6 +59,13 @@ def index() -> HTMLResponse:
         "mind + citygraph + worldgen.</p>"
         "<p>Дебаг: <a style='color:#3b9eff' href='/minddebug'>/minddebug</a> · "
         "<a style='color:#3b9eff' href='/citydebug'>/citydebug</a></p></body>")
+
+
+@app.get("/play")
+def play_pilot() -> HTMLResponse:
+    """Пилот нового игрового интерфейса (динамическая раскладка, пока на заглушках)."""
+    with open(os.path.join(WEB_DIR, "play.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
 
 
 @app.get("/login")

@@ -34,6 +34,11 @@ class WorldStore:
             c.execute("CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, data TEXT)")
             c.execute("CREATE TABLE IF NOT EXISTS inventory (world_id INT, item_id TEXT, holder TEXT, "
                       "known TEXT, PRIMARY KEY(world_id, item_id))")
+            # состояние игрока-агента (память + отношения) — «игрок такой же агент, как NPC»
+            c.execute("CREATE TABLE IF NOT EXISTS pc_state (world_id INT PRIMARY KEY, data TEXT)")
+            # живое состояние placed NPC (память/отношения/нужды) — переживает рестарт
+            c.execute("CREATE TABLE IF NOT EXISTS npc_state (world_id INT, npc_id TEXT, data TEXT, "
+                      "PRIMARY KEY(world_id, npc_id))")
 
     def _conn(self):
         c = sqlite3.connect(self.path, timeout=30)
@@ -158,6 +163,28 @@ class WorldStore:
             rows = c.execute("SELECT item_id,known FROM inventory WHERE world_id=? AND holder=?",
                              (world_id, holder)).fetchall()
         return [{"item_id": r["item_id"], "known": json.loads(r["known"])} for r in rows]
+
+    def save_npc_state(self, world_id: int, npc_id: str, data: dict) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO npc_state (world_id,npc_id,data) VALUES (?,?,?)",
+                      (world_id, npc_id, json.dumps(data, ensure_ascii=False)))
+
+    def get_npc_state(self, world_id: int, npc_id: str) -> dict | None:
+        with self._conn() as c:
+            r = c.execute("SELECT data FROM npc_state WHERE world_id=? AND npc_id=?",
+                          (world_id, npc_id)).fetchone()
+        return json.loads(r["data"]) if r else None
+
+    # ---------------------------------------------------- игрок-агент ----- #
+    def save_pc(self, world_id: int, data: dict) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO pc_state (world_id,data) VALUES (?,?)",
+                      (world_id, json.dumps(data, ensure_ascii=False)))
+
+    def get_pc(self, world_id: int) -> dict | None:
+        with self._conn() as c:
+            r = c.execute("SELECT data FROM pc_state WHERE world_id=?", (world_id,)).fetchone()
+        return json.loads(r["data"]) if r else None
 
 
 def _person(r) -> dict:

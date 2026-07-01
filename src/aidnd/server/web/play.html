@@ -100,6 +100,8 @@
   .npc .who .name{font:500 17px var(--serif);color:var(--ink)}
   .npc .who .role{font-size:12px;color:var(--dim)}
   .npcsub{font-size:11.5px;color:var(--faint);margin:3px 2px 0}
+  .known{display:flex;flex-direction:column;gap:4px}
+  .kn{font:italic 11.5px/1.45 var(--serif);color:var(--dim);border-left:2px solid var(--line2);padding-left:8px}
   .meter{display:grid;grid-template-columns:58px 1fr 30px;align-items:center;gap:8px;margin:7px 2px 0}
   .meter .ml{font-size:11px;color:var(--dim)}
   .meter .mv{font-size:11px;color:var(--faint);text-align:right;font-variant-numeric:tabular-nums}
@@ -301,6 +303,7 @@ async function go(){
   if(path.length){const d=path[path.length-1];showDest(d[0],d[1]);}
   await walk(path);
   hideDest();PEND=null;
+  if(r.gt!=null){GT=r.gt;setClock();}
   MAP.loc=r.loc;SCENE=r;LIVEF=[];renderAmb();setTimeout(pollLive,800);
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   renderLoc(r.location);
@@ -345,6 +348,7 @@ async function pollLive(){
   if(mode!=='explore'||LIVEBUSY)return;
   LIVEBUSY=true;
   try{const r=await api('/api/play/live',{});
+    if(r.gt!=null){GT=r.gt;setClock();}
     (r.feed||[]).forEach(f=>LIVEF.push(f));
     if(r.feed&&r.feed.length)renderFeed();
     (r.address||[]).forEach(a=>{
@@ -381,6 +385,8 @@ function renderNpc(n){
      ${sub?`<div class="npcsub">${esc(sub)}</div>`:''}
      <div id="meters">${meters(n)}</div>
      <div class="emo">настроение: <b id="emo">${esc(n.emotion)}</b></div>
+     ${(n.known&&n.known.length)?`<div class="subcap">ты о нём знаешь</div>
+       <div class="known">${n.known.map(k=>`<div class="kn">${esc(k)}</div>`).join('')}</div>`:''}
      ${(n.keys&&n.keys.length)?`<div class="subcap">при себе ключи</div>
        <div class="keys">${n.keys.map(k=>`<span class="keychip">&#128273; ${esc(k)}</span>`).join('')}</div>`:''}
      <div class="subcap">темы разговора</div>
@@ -397,6 +403,7 @@ async function talk(id){
   renderMini();push('sys','— ты заговариваешь с '+esc(byId(id).name)+' —');
   const n=await api('/api/play/talk',{npc:id});
   if(n.error){push('sys',esc(n.error));return;}
+  if(n.gt!=null){GT=n.gt;setClock();}
   CARD=n;renderNpc(n);
   push('npc',`<div class="sp">${esc(n.name)}</div><div class="tx">${esc(n.line)}</div>`);
 }
@@ -412,6 +419,7 @@ async function converse(text){
   const el=push('npc',`<div class="sp">${esc(byId(id).name)}</div><div class="tx"><span style="color:var(--faint)">…</span></div>`);
   const r=await api('/api/play/say',{npc:id,text});
   if(r.error){el.querySelector('.tx').textContent=r.error;return;}
+  if(r.gt!=null){GT=r.gt;setClock();}
   el.querySelector('.tx').textContent=r.line;
   if(CARD){Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
     if($('meters'))$('meters').innerHTML=meters(CARD);if($('emo'))$('emo').textContent=r.emotion;
@@ -431,7 +439,7 @@ $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
 loadMap();
 push('narr','Дверь трактира захлопывается за твоей спиной, отрезая шум дождя. Внутри тепло, пахнет элем и подгоревшим луком.');
 api('/api/play/scene').then(s=>{
-  SCENE=s;renderAmb();
+  SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}renderAmb();
   if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
   push('narr','Десяток лиц скользят по тебе взглядами и возвращаются к кружкам.');
   setTimeout(pollLive,600);

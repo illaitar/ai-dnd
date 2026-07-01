@@ -27,7 +27,8 @@ from ..mind import Item as MItem
 from ..mind import World as MWorld
 from ..mind import perceive as mind_perceive
 from ..mind import think
-from ..mind.llm_agent import apply_actions, decide_hybrid
+from ..mind import StubPlanner, advance_agendas
+from ..mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
 from ..mind.tick import _decay_emotion, _decay_needs
 from ..play import populate
 from ..play.population import KEY_ROLES, Townsperson
@@ -37,6 +38,32 @@ router = APIRouter(tags=["play"])
 PLAYER = "pc"
 PLAY_WORLD = 1                       # id пилотного мира для привязок пула (placements)
 _STORE: WorldStore | None = None
+_GT0 = 19 * 60 + 40                  # старт: вечер 19:40
+
+
+def _gt() -> int:
+    v = _S.get("gt")
+    if v is None:
+        v = _S["gt"] = _GT0
+    return v
+
+
+def _gt_add(minutes: int) -> int:
+    _S["gt"] = _gt() + max(0, int(minutes))
+    return _S["gt"]
+
+
+def _mt() -> int:
+    return _gt() // 10               # такт памяти (halflife ретривы 144 такта ≈ сутки)
+
+
+def _phase(gt: int | None = None) -> str:
+    h = ((gt if gt is not None else _gt()) // 60) % 24
+    return "night" if h < 6 else "morning" if h < 11 else "day" if h < 17 else \
+        "evening" if h < 22 else "night"
+
+
+_PHASE_RU = {"morning": "утро", "day": "день", "evening": "вечер", "night": "ночь"}
 
 
 def _store() -> WorldStore:
@@ -44,6 +71,54 @@ def _store() -> WorldStore:
     if _STORE is None:
         _STORE = WorldStore()
     return _STORE
+
+
+# ------------------------------------------------ ИГРОК-АГЕНТ (pc_state) -- #
+def _pc() -> NpcState:
+    """Игрок — такой же агент: NpcState с памятью и отношениями. Персист в store."""
+    if _S.get("pc") is None:
+        st = NpcState.from_config(NpcConfig(id=PLAYER, name="ты", role="странник"))
+        row = _store().get_pc(PLAY_WORLD)
+        if row:
+            st.relationships = row.get("relationships") or {}
+            for m in row.get("memory") or []:
+                mm = st.memory.add(m["text"], m["t"], m.get("importance", 0.3),
+                                   kind=m.get("kind", "observation"), about=m.get("about") or [])
+                mm.last_access = m.get("last_access", m["t"])
+            _S["gt"] = row.get("gt", _GT0)
+        _S["pc"] = st
+    return _S["pc"]
+
+
+def _pc_save() -> None:
+    st = _pc()
+    _store().save_pc(PLAY_WORLD, {
+        "gt": _gt(), "relationships": st.relationships,
+        "memory": [{"text": m.text, "t": m.t, "importance": m.importance,
+                    "last_access": m.last_access, "kind": m.kind, "about": m.about}
+                   for m in st.memory.items[-400:]]})      # хвост — журнал не разрастается бесконечно
+
+
+def _met() -> set:
+    return set(_pc().relationships)
+
+
+def _pc_remember(text: str, importance: float = 0.3, about=None, kind: str = "observation") -> None:
+    _pc().memory.add(text, _mt(), importance, kind=kind, about=list(about or []))
+    _pc_save()
+
+
+def _npc_save(pid: str) -> None:
+    """Прожитое NPC (память/отношения/нужды) → БД: переживает рестарт сервера."""
+    p = (_S.get("people") or {}).get(pid)
+    if not p:
+        return
+    st = p.state
+    _store().save_npc_state(PLAY_WORLD, pid, {
+        "relationships": st.relationships, "needs": st.needs,
+        "memory": [{"text": m.text, "t": m.t, "importance": m.importance,
+                    "last_access": m.last_access, "kind": m.kind, "about": m.about}
+                   for m in st.memory.items[-200:]]})
 _S: dict = {"city": None, "people": None, "crof": None, "cr2b": None, "loc": None,
             "geom": None, "model": None}
 
@@ -79,16 +154,44 @@ def _model():
     return _S["model"]
 
 
-def _evening_draw(people, spot) -> None:
-    """Вечерняя тяга (сессионная, placements не трогаем): часть незанятых работой стягивается в
-    трактир — зал живёт. Прообраз распорядка дня; днём эти же люди будут по своим делам."""
-    tav = next((spot[pid] for pid, p in people.items() if p.role == "трактирщик"), None)
-    if tav is None:
+def _routine_spot(pid: str, p, phase: str, day: int, keynode: dict, kps: list, tavern) -> int:
+    """Где человек в эту фазу суток. Детерминировано на (человек, фаза, день) — мир меняется,
+    пока игрока нет, но воспроизводимо."""
+    rng = random.Random(f"rout|{pid}|{phase}|{day}")
+    if p.role in ("бродяга", "головорез"):                  # лихой люд: днём по углам, вечером к людям
+        if phase in ("evening", "night") and tavern is not None and rng.random() < 0.4:
+            return tavern
+        return rng.choice(kps) if kps else p.home
+    if p.work:                                              # работник: пост днём, вечером трактир/дом
+        wn = keynode.get(p.work, p.home)
+        if phase in ("morning", "day"):
+            return wn
+        if phase == "evening":
+            if p.role == "трактирщик":
+                return wn                                   # трактирщик вечером на посту
+            return tavern if (tavern is not None and rng.random() < 0.5) else p.home
+        return p.home
+    if phase == "morning":                                  # горожанин
+        return p.home if rng.random() < 0.5 else (rng.choice(kps) if kps else p.home)
+    if phase == "day":
+        return rng.choice(kps) if kps else p.home
+    if phase == "evening":
+        return tavern if (tavern is not None and rng.random() < 0.45) else p.home
+    return p.home
+
+
+def _apply_routine() -> None:
+    """Пересчитать споты всех жителей при смене фазы суток (дёшево — ключ по фазе+дню)."""
+    key = (_phase(), _gt() // 1440)
+    if _S.get("routine_key") == key or not _S.get("people"):
         return
-    rng = random.Random("evening|1")
-    idle = sorted(pid for pid, p in people.items() if not p.work)
-    for pid in rng.sample(idle, min(4, len(idle))):
-        spot[pid] = tav
+    _S["routine_key"] = key
+    people, crof = _S["people"], _S["crof"]
+    keynode, kps = _S.get("keynode") or {}, _S.get("kps") or []
+    tavern = next((keynode.get(p.work) for p in people.values()
+                   if p.role == "трактирщик" and p.work), None)
+    for pid, p in people.items():
+        crof[pid] = _routine_spot(pid, p, key[0], key[1], keynode, kps, tavern)
 
 
 def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
@@ -100,6 +203,14 @@ def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
     r = random.Random(row["id"])                           # лёгкий фон нужд, детерминированно
     for n in st.needs:
         st.needs[n] = round(r.uniform(0.1, 0.35), 2)
+    saved = _store().get_npc_state(PLAY_WORLD, row["id"])  # прожитое переживает рестарт
+    if saved:
+        st.relationships = saved.get("relationships") or {}
+        st.needs.update(saved.get("needs") or {})
+        for m in saved.get("memory") or []:
+            mm = st.memory.add(m["text"], m["t"], m.get("importance", 0.3),
+                               kind=m.get("kind", "observation"), about=m.get("about") or [])
+            mm.last_access = m.get("last_access", m["t"])
     tp = Townsperson(id=row["id"], name=row["name"], role=row["role"], home=home, work=work,
                      charisma=row["charisma"], appearance=row["appearance"], state=st,
                      persona=row.get("persona"), portraits=row.get("portraits") or {})
@@ -195,11 +306,11 @@ def _play():
         n2b = {}                                           # узел-точка → ключевое здание (название/сцена)
         for bid, kb in city.key_buildings.items():
             n2b.setdefault(kb.node, bid)
-        _evening_draw(people, spot)                        # вечер: часть незанятых тянется в трактир
-        start = next((spot[pid] for pid, p in people.items() if p.role == "трактирщик"),
-                     keynode.get(sorted(city.key_buildings)[0]) if city.key_buildings else kps[0])
+        start = next((keynode.get(p.work) for p in people.values()
+                      if p.role == "трактирщик" and p.work), None) or kps[0]
         _S.update(city=city, people=people, crof=spot, cr2b=n2b, loc=start,
-                  geom=_build_geom(city, xy, n2b, vis))
+                  geom=_build_geom(city, xy, n2b, vis), keynode=keynode, kps=kps)
+    _apply_routine()                                       # споты = f(время): распорядок дня
     return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]
 
 
@@ -272,11 +383,12 @@ def _scene_dict(city, people, crof, cr2b, loc):
                      "desc": ("Обычное место фронтирного городка — идёт своя жизнь." if role
                               else "Мимо спешат редкие прохожие; в лужах дрожит свет окон."),
                      "containers": _building_containers(bid) if bid else []},
-        "ambient": {"time": "вечер", "weather": "дождь", "mood": "оживлённо" if len(here) > 2 else "тихо",
+        "ambient": {"time": _PHASE_RU[_phase()], "weather": "дождь",
+                    "mood": "оживлённо" if len(here) > 2 else "тихо",
                     "event": "Народ занят своими делами." if here else "Пусто; лишь ветер гуляет меж домов."},
         "here": [{"id": pid,
                   "name": _display(pid, people),        # незнакомец — дескриптором, имя после знакомства
-                  "role": (people[pid].role if (pid in _S.get("met", set()) or people[pid].work)
+                  "role": (people[pid].role if (pid in _met() or people[pid].work)
                            else "кто-то из горожан"),   # роль очевидна лишь у занятого делом (работник места)
                   "init": _display(pid, people)[0].upper(), "color": _COLORS[i % len(_COLORS)],
                   "portrait": _portrait_url(people[pid], _emo(people[pid].state))}
@@ -320,9 +432,20 @@ def _voice(p, rel, kind, player_text=None) -> str:
         bits.append(f"К чужаку держишься {_STANCE.get(per.get('stance'), 'нейтрально')}.")
         if per.get("secret"):
             bits.append(f"У тебя есть тайна (НЕ выдавай без веской причины): {per['secret'].get('what', '')}.")
+    lv = _S.get("live") or {}
+    just = (lv.get("last") or {}).get(p.id)
+    if just and just != "—":
+        bits.append(f"Ты в «{lv.get('place', 'этом месте')}»; только что ты: {just}.")
+    mems = p.state.memory.recall(player_text or "разговор с чужаком-игроком", now=_mt(), k=5)
+    if mems:                                               # непрерывность: NPC помнит вас и прошлое
+        bits.append("ТЫ ПОМНИШЬ: " + "; ".join(m.text for m in mems) + ".")
     bits.append(f"Симпатия к собеседнику {rel.get('affinity', 0):.2f} (низкая — суше/настороже, высокая — теплее). "
-                "Отвечай В ХАРАКТЕРЕ, живой разговорной речью, 1-2 фразы, без ремарок-описаний.")
-    user = ("К тебе подошёл незнакомец и заговорил — брось первую реплику." if kind == "greet"
+                "Отвечай В ХАРАКТЕРЕ, живой разговорной речью, 1-2 фразы, без ремарок-описаний. "
+                "Помнишь собеседника — покажи это естественно, не пересказывай память дословно.")
+    acquainted = any(PLAYER in (m.about or []) for m in p.state.memory.items)
+    user = (("К тебе снова подошёл тот самый человек, которого ты помнишь, — поприветствуй его "
+             "КАК ЗНАКОМОГО, опираясь на то, что помнишь." if acquainted else
+             "К тебе подошёл незнакомец и заговорил — брось первую реплику.") if kind == "greet"
             else f"Он говорит: «{player_text}». Ответь.")
     resp = mgr.call("narrator", [{"role": "system", "content": " ".join(bits)},
                                  {"role": "user", "content": user}], options={"temperature": 0.85})
@@ -332,7 +455,7 @@ def _voice(p, rel, kind, player_text=None) -> str:
 @router.get("/api/play/scene")
 def scene():
     city, people, crof, cr2b, loc = _play()
-    return _scene_dict(city, people, crof, cr2b, loc)
+    return {**_scene_dict(city, people, crof, cr2b, loc), "gt": _gt()}
 
 
 @router.get("/api/play/map")
@@ -359,8 +482,10 @@ async def move(request: Request):
     r = city.route(loc, to)
     path = [_S["geom"]["_xy"][n] for n in r.nodes if n in _S["geom"]["_xy"]] if r.found else [_S["geom"]["_xy"][to]]
     _S["loc"] = to
+    _gt_add(5 * max(1, len(path) - 1))                     # шаг пути = 5 игровых минут (серверно)
+    _apply_routine()                                       # за дорогу мир мог перейти в другую фазу
     sc = _scene_dict(city, people, crof, cr2b, to)
-    return {**sc, "path": path, "moved": sc["location"]["name"]}
+    return {**sc, "path": path, "moved": sc["location"]["name"], "gt": _gt()}
 
 
 @router.post("/api/play/talk")
@@ -370,15 +495,23 @@ async def talk(request: Request):
     if npc not in people:
         return {"error": "нет такого"}
     p = people[npc]
-    _S.setdefault("met", set()).add(npc)               # заговорил = познакомился (имя открыто)
+    first = npc not in _met()
+    _pc().rel(npc)                                     # заговорил = познакомился (имя открыто)
+    _gt_add(2)
     st = p.state
     st.needs["social"] = max(st.needs.get("social", 0.0), 0.4)
     think(st, _mind_scene(npc, people), None)
+    if first:                                          # знакомство ложится в память ОБОИМ
+        st.memory.add("незнакомец (игрок) подошёл и заговорил со мной", _mt(), 0.4, about=[PLAYER])
+        _pc_remember(f"я познакомился с {p.name} ({p.role})", 0.45, about=[npc])
+        _npc_save(npc)
     rel = st.relationships.get(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     per = p.persona or {}
     emo = _emo(st)
     ports = {e: "/portraits/" + path for e, path in (p.portraits or {}).items()
              if os.path.exists(os.path.join(_PORT_DIR, path))}
+    known = [m.text for m in _pc().memory.recall(f"{p.name} {p.role}", now=_mt(), k=3)
+             if npc in (m.about or [])]                    # что игрок ЗНАЕТ об этом человеке
     return {"name": p.name, "role": p.role, "init": p.name[0], "color": "#8a6fae",
             "aff": round(rel.get("affinity", 0), 2), "trust": round(rel.get("trust", 0), 2),
             "fear": round(rel.get("fear", 0), 2), "emotion": emo,
@@ -387,6 +520,7 @@ async def talk(request: Request):
             "look": (per.get("look") or {}).get("clothing") or None,
             "keys": [k["name"] for k in (p.keys or [])],
             "crafter": p.role in _CRAFT, "recipe": (_CRAFT[p.role].name if p.role in _CRAFT else None),
+            "known": known, "gt": _gt(),
             "topics": _TOPICS.get(p.role, _TOPICS["горожанин"]), "line": _voice(p, rel, "greet")}
 
 
@@ -400,10 +534,17 @@ async def say(request: Request):
     p = people[npc]
     rel = p.state.relationships.setdefault(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     rel["affinity"] = min(1.0, rel["affinity"] + 0.04)
-    line = _voice(p, rel, "reply", str(b.get("text", "")))
+    text = str(b.get("text", ""))
+    _gt_add(2)
+    line = _voice(p, rel, "reply", text)
+    p.state.memory.add(f"игрок сказал мне: «{text[:100]}», я ответил(а): «{line[:100]}»",
+                       _mt(), 0.4, about=[PLAYER])         # диалог остаётся в памяти NPC
+    _pc_remember(f"{p.name} на «{text[:60]}» ответил(а): «{line[:90]}»", 0.35, about=[npc])
+    _npc_save(npc)
     emo = _emo(p.state)
     return {"line": line, "aff": round(rel["affinity"], 2), "trust": round(rel.get("trust", 0), 2),
-            "fear": round(rel.get("fear", 0), 2), "emotion": emo, "portrait": _portrait_url(p, emo)}
+            "fear": round(rel.get("fear", 0), 2), "emotion": emo, "portrait": _portrait_url(p, emo),
+            "gt": _gt()}
 
 
 # --------------------------------------------------- ПРЕДМЕТЫ (срез 1) ---- #
@@ -590,7 +731,7 @@ def _display(pid: str, people) -> str:
     p = people.get(pid)
     if not p:
         return pid
-    return p.name if pid in _S.setdefault("met", set()) else _descriptor(p)
+    return p.name if pid in _met() else _descriptor(p)
 
 
 def _live_affordances(bid) -> list:
@@ -652,9 +793,36 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             bits.append("ты здесь НА РАБОТЕ — твой пост тут")
         if bits:
             personas[pid] = ". ".join(bits)
+    here = _here(loc, crof)
+    mgr = _model()
+    todo = [pid for pid in here if not (people[pid].state.agendas or [])][:4]
+    if todo:                                                # долгая цель для placed NPC (редкий вызов)
+        def plan_one(pid):
+            st = people[pid].state
+            ag = (plan_agenda(st, w, {"roles": roles}, mgr) if mgr.available()
+                  else StubPlanner().plan(st, w))
+            if ag:
+                st.agendas.append(ag)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            list(ex.map(plan_one, todo))
     _S["live"] = {"world": w, "loc": loc, "place": place, "clock": 0, "ts": 0.0,
+                  "who": frozenset(here),
                   "last": {}, "hist": {}, "names": names, "roles": roles, "personas": personas,
                   "pdesc": ((data or {}).get("notable") or "")}
+
+
+def _gossip(actor_st, actor_name: str, target_st) -> None:
+    """Разговор NPC↔NPC переносит яркое воспоминание — сплетни ходят, репутация возникает сама."""
+    juicy = [m for m in actor_st.memory.items
+             if m.importance >= 0.4 and (PLAYER in (m.about or []) or m.importance >= 0.6)]
+    if not juicy:
+        return
+    m = juicy[-1]
+    tale = f"{actor_name} рассказал(а) мне: {m.text}"
+    if any(x.text == tale for x in target_st.memory.items[-30:]):
+        return                                              # эту сплетню уже слышал
+    target_st.memory.add(tale, _mt(), max(0.25, m.importance - 0.15), kind="gossip", about=m.about)
 
 
 def _live_tick(people) -> tuple:
@@ -671,6 +839,7 @@ def _live_tick(people) -> tuple:
         st = w.npc_minds[pid]
         _decay_needs(st)
         _decay_emotion(st)
+        advance_agendas(st, w)                              # долгие цели двигаются
         return pid, decide_hybrid(st, w, mind_perceive(st, w), mgr, ctx)
 
     from concurrent.futures import ThreadPoolExecutor
@@ -678,6 +847,7 @@ def _live_tick(people) -> tuple:
         decisions = dict(ex.map(think_one, order))
 
     feed, address = [], []
+    pc = _pc()
     for pid in order:                                       # применяем последовательно (честный порядок)
         d = decisions[pid]
         st = w.npc_minds[pid]
@@ -694,13 +864,22 @@ def _live_tick(people) -> tuple:
                 said = True
                 if tid == PLAYER:
                     address.append({"npc": pid, "who": who, "text": txt})
+                    pc.memory.add(f"{who} обратился ко мне: «{txt[:100]}»", _mt(), 0.4, about=[pid])
                 else:
                     feed.append({"k": "speech", "who": who,
                                  "to": _display(tid, people) if tid in people else tgt, "text": txt})
+                    pc.memory.add(f"слышал в «{lv['place']}»: {who} — {txt[:90]}",
+                                  _mt(), 0.18, kind="heard", about=[pid])
+                    if tid in w.npc_minds:                  # сплетня перетекает собеседнику
+                        _gossip(st, lv["names"].get(pid, pid), w.npc_minds[tid])
         does = (d.get("does") or "").strip()
         if does and not said:                               # реплика сама несёт момент — не дублируем
             feed.append({"k": "deed", "who": who, "text": does[:150]})
     lv["clock"] += 1
+    _gt_add(3)                                              # тик мира = 3 игровые минуты
+    _pc_save()
+    for pid in order:                                       # прожитое переживает рестарт
+        _npc_save(pid)
     return feed, address
 
 
@@ -710,15 +889,15 @@ async def live(request: Request):
     import time as _time
     city, people, crof, cr2b, loc = _play()
     lv = _S.get("live")
-    if not lv or lv["loc"] != loc:
-        _live_build(city, people, crof, cr2b, loc)
+    if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
+        _live_build(city, people, crof, cr2b, loc)         # локация сменилась ИЛИ распорядок сменил людей
         lv = _S["live"]
     now = _time.monotonic()
     if now - lv["ts"] < _LIVE_GAP:
-        return {"feed": [], "address": [], "clock": lv["clock"]}
+        return {"feed": [], "address": [], "clock": lv["clock"], "gt": _gt()}
     lv["ts"] = now
     try:
         feed, address = _live_tick(people)
     except Exception as exc:                               # noqa: BLE001 — пульс не должен ронять клиент
-        return {"feed": [], "address": [], "clock": lv["clock"], "error": str(exc)[:160]}
-    return {"feed": feed, "address": address, "clock": lv["clock"]}
+        return {"feed": [], "address": [], "clock": lv["clock"], "gt": _gt(), "error": str(exc)[:160]}
+    return {"feed": feed, "address": address, "clock": lv["clock"], "gt": _gt()}

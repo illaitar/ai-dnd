@@ -77,6 +77,11 @@ def login_page() -> HTMLResponse:
 if os.path.isdir(WEB_DIR):
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
+# портреты NPC из пула (worldgen) — файлы в data/portraits (в гит не идут, на прод rsync)
+_PORTRAITS = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "portraits")
+if os.path.isdir(_PORTRAITS):
+    app.mount("/portraits", StaticFiles(directory=_PORTRAITS), name="portraits")
+
 
 def run(host: str = "127.0.0.1", port: int | None = None) -> None:
     import uvicorn

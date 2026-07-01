@@ -60,15 +60,19 @@
   .locard .kd{font-size:12px;color:var(--dim);margin-top:1px}
   .locard .desc{font-size:12.5px;color:var(--dim);margin-top:7px;line-height:1.55}
   .npc{flex:1;display:flex;flex-direction:column;padding:0 12px 12px;overflow:auto}
-  .portrait{width:100%;height:150px;flex:0 0 150px;border-radius:9px;border:1px solid var(--line2);
+  .portrait{width:100%;height:210px;flex:0 0 210px;border-radius:9px;border:1px solid var(--line2);
     background:radial-gradient(120% 100% at 50% 0%,#2a2f3e,#171a22);position:relative;overflow:hidden;
     display:flex;align-items:flex-end;justify-content:center}
+  .portrait img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 22%;
+    border-radius:9px;transition:opacity .25s}
   .portrait .frame{position:absolute;inset:0;border-radius:9px;box-shadow:inset 0 0 0 1px rgba(217,164,65,.25)}
-  .portrait .badge{position:absolute;top:8px;right:8px;font-size:10px;color:var(--gold-dim);
-    background:rgba(0,0,0,.35);border:1px solid var(--gold-dim);border-radius:20px;padding:2px 8px}
+  .portrait .badge{position:absolute;top:8px;right:8px;font-size:10px;color:var(--gold-dim);z-index:1;
+    background:rgba(0,0,0,.45);border:1px solid var(--gold-dim);border-radius:20px;padding:2px 8px}
+  .av img{width:100%;height:100%;object-fit:cover;object-position:center 20%;border-radius:8px}
   .npc .who{display:flex;align-items:baseline;gap:8px;margin:10px 2px 2px}
   .npc .who .name{font:500 17px var(--serif);color:var(--ink)}
   .npc .who .role{font-size:12px;color:var(--dim)}
+  .npcsub{font-size:11.5px;color:var(--faint);margin:3px 2px 0}
   .meter{display:grid;grid-template-columns:58px 1fr 30px;align-items:center;gap:8px;margin:7px 2px 0}
   .meter .ml{font-size:11px;color:var(--dim)}
   .meter .mv{font-size:11px;color:var(--faint);text-align:right;font-variant-numeric:tabular-nums}
@@ -291,7 +295,7 @@ function renderAmb(){
     `<div class="amchips">${[a.time,a.weather,a.mood].filter(Boolean).map(x=>`<span class="amchip">${esc(x)}</span>`).join('')}</div>
      <div><div class="subcap" style="margin:2px 0 6px">кто здесь</div>
        <div class="here">${SCENE.here.map(n=>
-         `<div class="person" onclick="talk('${n.id}')"><span class="av" style="background:${n.color}">${esc(n.init)}</span>
+         `<div class="person" onclick="talk('${n.id}')"><span class="av" style="background:${n.color}">${av(n)}</span>
            <span><div class="pn">${esc(n.name)}</div><div class="pr">${esc(n.role)}</div></span>
            <span class="go">&#8250;</span></div>`).join('')}</div></div>
      ${a.event?`<div class="event">${esc(a.event)}</div>`:''}`;
@@ -301,21 +305,27 @@ function renderMini(){
   $('mini').innerHTML=`<div class="amchips"><span class="amchip">${esc(a.time||'вечер')}</span></div>
     <div><div class="subcap" style="margin:2px 0 6px">рядом</div>
     <div class="here">${SCENE.here.filter(x=>x.id!==cur).map(n=>
-      `<div class="person" onclick="talk('${n.id}')"><span class="av" style="background:${n.color}">${esc(n.init)}</span>
+      `<div class="person" onclick="talk('${n.id}')"><span class="av" style="background:${n.color}">${av(n)}</span>
         <span><div class="pn">${esc(n.name)}</div></span></div>`).join('')}</div></div>`;
 }
+const av=n=>n.portrait?`<img src="${encodeURI(n.portrait)}" alt="">`:esc(n.init);
 const bar=(v,c)=>`<div class="track"><i style="width:${Math.round((+v||0)*100)}%;background:${c}"></i></div>`;
 function meters(n){return `<div class="meter"><span class="ml">симпатия</span>${bar(n.aff,'var(--green)')}<span class="mv">${(+n.aff).toFixed(2)}</span></div>
   <div class="meter"><span class="ml">доверие</span>${bar(n.trust,'var(--blue)')}<span class="mv">${(+n.trust).toFixed(2)}</span></div>
   <div class="meter"><span class="ml">страх</span>${bar(n.fear,'var(--red)')}<span class="mv">${(+n.fear).toFixed(2)}</span></div>`;}
 function renderNpc(n){
   const col=byId(cur).color||n.color||'#8a6fae';
+  const face=n.portrait
+    ? `<img id="npcimg" src="${encodeURI(n.portrait)}" alt="">`
+    : `<svg width="96" height="118" viewBox="0 0 96 118"><circle cx="48" cy="42" r="26" fill="${col}" opacity=".9"/>
+         <path d="M8 118 C8 82 30 74 48 74 C66 74 88 82 88 118 Z" fill="${col}" opacity=".9"/></svg>`;
+  const sub=[n.age&&({young:'молодой',adult:'взрослый',middle:'в годах',old:'пожилой',elder:'старый'}[n.age]),
+             n.origin].filter(Boolean).join(' · ');
   $('npcwrap').innerHTML=
     `<div class="cap" style="padding:11px 2px 8px">собеседник</div>
-     <div class="portrait"><div class="frame"></div><span class="badge">портрет · генерится</span>
-       <svg width="96" height="118" viewBox="0 0 96 118"><circle cx="48" cy="42" r="26" fill="${col}" opacity=".9"/>
-         <path d="M8 118 C8 82 30 74 48 74 C66 74 88 82 88 118 Z" fill="${col}" opacity=".9"/></svg></div>
+     <div class="portrait">${face}<div class="frame"></div><span class="badge" id="pbadge">${esc(n.emotion||'')}</span></div>
      <div class="who"><span class="name">${esc(n.name)}</span><span class="role">${esc(n.role)}</span></div>
+     ${sub?`<div class="npcsub">${esc(sub)}</div>`:''}
      <div id="meters">${meters(n)}</div>
      <div class="emo">настроение: <b id="emo">${esc(n.emotion)}</b></div>
      <div class="subcap">темы разговора</div>
@@ -348,7 +358,9 @@ async function converse(text){
   if(r.error){el.querySelector('.tx').textContent=r.error;return;}
   el.querySelector('.tx').textContent=r.line;
   if(CARD){Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
-    if($('meters'))$('meters').innerHTML=meters(CARD);if($('emo'))$('emo').textContent=r.emotion;}
+    if($('meters'))$('meters').innerHTML=meters(CARD);if($('emo'))$('emo').textContent=r.emotion;
+    if(r.portrait&&$('npcimg'))$('npcimg').src=encodeURI(r.portrait);
+    if($('pbadge'))$('pbadge').textContent=r.emotion;}
 }
 function say(t){push('me',`<div class="tx">${esc(t)}</div>`);converse(t);}
 function submit(){

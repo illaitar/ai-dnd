@@ -147,15 +147,31 @@ const thread=()=>$('thread');
 function push(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;
   thread().appendChild(d);thread().scrollTop=thread().scrollHeight;return d;}
 
-function drawMap(){
-  const s=$('mapsvg');let g='<rect width="300" height="340" fill="#1a1d26"/>';
-  [[20,90,280,90],[20,200,280,200],[90,20,90,320],[210,20,210,320],[20,90,90,200],[210,200,280,300]]
-    .forEach(([a,b,c,d])=>g+=`<line x1="${a}" y1="${b}" x2="${c}" y2="${d}" stroke="#2a2f3c" stroke-width="7" stroke-linecap="round"/>`);
-  [[120,55],[150,120],[55,150],[235,120],[150,245],[60,250],[240,250]].forEach(([x,y],i)=>{
-    g+=`<rect x="${x-13}" y="${y-13}" width="26" height="26" rx="3" fill="#242938" stroke="#353b4a"/>`;
-    if(i===1)g+=`<rect x="${x-13}" y="${y-13}" width="26" height="26" rx="3" fill="none" stroke="#d9a441" stroke-width="1.5"/>`;});
-  g+=`<circle cx="150" cy="120" r="6" fill="#d9a441"/><circle cx="150" cy="120" r="6" fill="none" stroke="#d9a441" opacity=".4"><animate attributeName="r" values="6;13;6" dur="2.4s" repeatCount="indefinite"/><animate attributeName="opacity" values=".5;0;.5" dur="2.4s" repeatCount="indefinite"/></circle>`;
+async function loadMap(){
+  const m=await api('/api/play/map');if(!m||!m.viewBox)return;
+  const s=$('mapsvg');s.setAttribute('viewBox',m.viewBox.join(' '));
+  const vw=m.viewBox[2],r=Math.max(2.2,vw*0.015),fs=Math.max(3.4,vw*0.021),lw=Math.max(.7,vw*0.006);
+  let g='';
+  m.edges.forEach(([a,b,c,d])=>g+=`<line x1="${a}" y1="${b}" x2="${c}" y2="${d}" stroke="#2a2f3c" stroke-width="${lw}" stroke-linecap="round"/>`);
+  m.keys.forEach(k=>{
+    g+=`<g style="cursor:pointer" onclick="moveTo('${k.id}')">
+      <circle cx="${k.x}" cy="${k.y}" r="${r}" fill="#242938" stroke="${k.here?'#d9a441':'#4a5162'}" stroke-width="${lw*0.9}"/>
+      <text x="${k.x}" y="${k.y-r-fs*0.35}" text-anchor="middle" font-size="${fs}" fill="#9aa0ad">${k.label}</text></g>`;});
+  g+=`<circle cx="${m.player.x}" cy="${m.player.y}" r="${r*0.55}" fill="#d9a441"/>
+    <circle cx="${m.player.x}" cy="${m.player.y}" r="${r*0.55}" fill="none" stroke="#d9a441" opacity=".4"><animate attributeName="r" values="${r*0.55};${r*1.5};${r*0.55}" dur="2.4s" repeatCount="indefinite"/><animate attributeName="opacity" values=".6;0;.6" dur="2.4s" repeatCount="indefinite"/></circle>`;
   s.innerHTML=g;
+}
+async function moveTo(id){
+  if(mode==='dialogue')endTalk();
+  const r=await api('/api/play/move',{to:id});
+  if(r.error){push('sys',r.error);return;}
+  SCENE=r;renderAmb();
+  $('locname').textContent=r.location.name;
+  document.querySelector('.locard .nm').textContent=r.location.name;
+  document.querySelector('.locard .kd').textContent=r.location.kind;
+  document.querySelector('.locard .desc').textContent=r.location.desc;
+  push('narr','Ты направляешься в «'+(r.moved||r.location.name)+'».');
+  loadMap();
 }
 
 function renderAmb(){
@@ -233,7 +249,7 @@ function submit(){
 $('send').onclick=submit;
 $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
 
-drawMap();
+loadMap();
 push('narr','Дверь трактира захлопывается за твоей спиной, отрезая шум дождя. Внутри тепло, пахнет элем и подгоревшим луком.');
 api('/api/play/scene').then(s=>{
   SCENE=s;renderAmb();

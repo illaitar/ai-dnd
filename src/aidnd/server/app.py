@@ -26,6 +26,7 @@ from .db import SessionLocal
 from .routes_auth import router as _auth_router
 from .routes_citydebug import router as _citydebug_router
 from .routes_games import router as _games_router
+from .routes_minddebug import router as _minddebug_router
 from .routes_npcdebug import router as _npcdebug_router
 from .routes_usage import router as _usage_router
 
@@ -36,6 +37,7 @@ app.include_router(_games_router)
 app.include_router(_usage_router)
 app.include_router(_citydebug_router)
 app.include_router(_npcdebug_router)
+app.include_router(_minddebug_router)
 
 
 @app.on_event("startup")

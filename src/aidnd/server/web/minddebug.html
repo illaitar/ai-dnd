@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разум NPC — стенд</title>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2a2f3a;--txt:#e6e8ec;--dim:#9aa0aa;--acc:#3b9eff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.45 -apple-system,Segoe UI,Roboto,sans-serif}
+  h1{font-size:15px;margin:0;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+  h1 small{color:var(--dim);font-weight:400;font-size:12px;margin-left:8px}
+  .grid{display:grid;grid-template-columns:290px 320px 1fr;gap:0;height:calc(100vh - 42px)}
+  .col{overflow:auto;padding:12px;border-right:1px solid var(--line)}
+  .col:last-child{border-right:0}
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:16px 0 8px}
+  h2:first-child{margin-top:0}
+  select,input[type=text],input[type=number]{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:6px;padding:6px 8px;font:inherit;width:100%}
+  label.f{display:block;color:var(--dim);font-size:11px;margin:8px 0 3px}
+  .row{display:flex;align-items:center;gap:8px;margin:3px 0}
+  .row .nm{flex:0 0 96px;color:var(--dim);font-size:11px;text-transform:capitalize}
+  .row input[type=range]{flex:1;accent-color:var(--acc)}
+  .row .v{flex:0 0 30px;text-align:right;font-variant-numeric:tabular-nums;color:var(--txt)}
+  button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;
+    padding:6px 10px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--acc)}
+  button.p{background:#20303f;border-color:#2b4a63}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  .chips button{padding:4px 8px;font-size:12px}
+  textarea{width:100%;height:60px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:6px;padding:7px;font:inherit;resize:vertical}
+  table.ent{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}
+  table.ent th{color:var(--dim);font-weight:500;text-align:left;padding:2px 3px}
+  table.ent td{padding:1px 2px}
+  table.ent input{padding:3px 4px;font-size:11px}
+  table.ent input[type=text]{width:100%}
+  .x{cursor:pointer;color:#e5484d;padding:0 4px}
+  /* граф решения */
+  .flow{display:flex;flex-direction:column;gap:14px}
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+  .stage .cap{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-bottom:8px}
+  .chosen{font-size:16px;font-weight:600;display:flex;align-items:center;gap:10px}
+  .chosen .tag{font-size:12px;font-weight:500;padding:2px 8px;border-radius:20px;color:#fff}
+  .chosen .u{margin-left:auto;color:var(--dim);font-size:13px;font-weight:400}
+  .gchips{display:flex;flex-wrap:wrap;gap:6px}
+  .gchip{padding:3px 9px;border-radius:20px;font-size:11px;color:#fff;display:flex;gap:6px;align-items:center}
+  .gchip b{font-weight:600}.gchip i{opacity:.8;font-style:normal}
+  .abar{display:grid;grid-template-columns:150px 1fr 46px;align-items:center;gap:8px;margin:4px 0}
+  .abar .al{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .abar .track{height:16px;background:var(--panel2);border-radius:4px;overflow:hidden;position:relative}
+  .abar .fill{height:100%;border-radius:4px;min-width:2px}
+  .abar .un{text-align:right;font-variant-numeric:tabular-nums;font-size:12px;color:var(--dim)}
+  .abar.top .al{font-weight:700}
+  .abar.top .un{color:var(--txt)}
+  .neg .fill{opacity:.35}
+  .perc{font-size:12px;color:var(--dim);line-height:1.6}
+  .perc b{color:var(--txt)}
+  .arr{text-align:center;color:var(--line);font-size:16px;margin:-8px 0}
+  .st{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:6px}
+  .st span b{color:var(--txt)}
+</style>
+</head>
+<body>
+<h1>Разум NPC — интерактивный стенд <small>выбери архетип или крути черты · опиши ситуацию · смотри граф решения</small></h1>
+<div class="grid">
+
+  <!-- ХАРАКТЕР -->
+  <div class="col">
+    <h2>Архетип</h2>
+    <select id="arch"></select>
+    <label class="f">Имя</label><input type="text" id="name" value="NPC">
+    <div class="row"><span class="nm">сила</span><input type="range" id="s_power" min="1" max="4" step="1" value="1"><span class="v" id="s_power_v">1</span></div>
+    <div class="row"><span class="nm">богатство</span><input type="range" id="s_app" min="0" max="1" step="0.05" value="0.2"><span class="v" id="s_app_v">.2</span></div>
+    <h2>Черты</h2><div id="traits"></div>
+    <h2>Нужды</h2><div id="needs"></div>
+    <h2>Эмоции</h2><div id="emotions"></div>
+  </div>
+
+  <!-- СИТУАЦИЯ -->
+  <div class="col">
+    <h2>Ситуация словами</h2>
+    <textarea id="txt" placeholder="напр.: в глухом переулке к тебе один подходит богато одетый пьяный купец"></textarea>
+    <div class="row" style="margin-top:6px"><button class="p" id="parse">Разобрать в сцену (LLM)</button></div>
+    <div id="perr" style="color:#e5484d;font-size:11px"></div>
+    <h2>Пресеты</h2>
+    <div class="chips" id="presets"></div>
+    <h2>Кто рядом / вокруг</h2>
+    <table class="ent"><thead><tr><th>кто</th><th>фракц.</th><th>сил</th><th>бог</th><th>вним</th><th>атак.</th><th>друг</th><th>лут</th><th></th></tr></thead><tbody id="ents"></tbody></table>
+    <div class="row" style="margin-top:6px"><button id="addent">+ существо</button></div>
+    <label class="f">Выходы (через запятую — куда можно уйти)</label><input type="text" id="exits" placeholder="прочь">
+    <label class="f">Предметы на месте (имя:нужда, напр. похлёбка:hunger)</label><input type="text" id="items" placeholder="похлёбка:hunger">
+  </div>
+
+  <!-- ГРАФ РЕШЕНИЯ -->
+  <div class="col">
+    <div class="flow">
+      <div class="stage"><div class="cap">Восприятие</div><div class="perc" id="perc">—</div>
+        <div class="st" id="stne"></div></div>
+      <div class="arr">↓</div>
+      <div class="stage"><div class="cap">Цели (что ценно сейчас)</div><div class="gchips" id="goals"></div></div>
+      <div class="arr">↓</div>
+      <div class="stage"><div class="cap">Utility по примитивам</div><div id="acts"></div></div>
+      <div class="arr">↓</div>
+      <div class="stage"><div class="cap">Выбор</div><div class="chosen" id="chosen">—</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const GC={harm:'#e5484d',acquire:'#f76808',safe:'#3b9eff',protect:'#46a758',need:'#6b7280',
+  affiliate:'#8e4ec6',trade:'#12a594',inform:'#0ea5e9',idle:'#3f434d'};
+const $=id=>document.getElementById(id);
+let SCHEMA=null, ARCH={}, ENTS=[], SELF={power:1,appearance:0.2};
+
+function slider(box, key, val){
+  const r=document.createElement('div');r.className='row';
+  r.innerHTML=`<span class="nm">${key}</span><input type="range" min="0" max="1" step="0.05" value="${val}"><span class="v"></span>`;
+  const inp=r.querySelector('input'), out=r.querySelector('.v');
+  const upd=()=>{out.textContent=(+inp.value).toFixed(2).replace(/^0/,'');};
+  inp.dataset.key=key; upd(); inp.addEventListener('input',()=>{upd();decide();});
+  box.appendChild(r); return inp;
+}
+function collect(box){const o={};box.querySelectorAll('input[type=range]').forEach(i=>o[i.dataset.key]=+i.value);return o;}
+function setSliders(box, vals, def){box.querySelectorAll('input[type=range]').forEach(i=>{
+  i.value=(vals&&vals[i.dataset.key]!=null)?vals[i.dataset.key]:def; i.dispatchEvent(new Event('input'));});}
+
+async function boot(){
+  SCHEMA=await (await fetch('/api/minddebug/schema')).json(); ARCH=SCHEMA.archetypes;
+  SCHEMA.traits.forEach(t=>slider($('traits'),t,0.5));
+  SCHEMA.needs.forEach(n=>slider($('needs'),n,0.2));
+  SCHEMA.emotions.forEach(e=>slider($('emotions'),e,0.0));
+  const sel=$('arch'); Object.keys(ARCH).forEach(n=>sel.add(new Option(n,n)));
+  sel.onchange=()=>applyArch(sel.value);
+  $('s_power').oninput=e=>{SELF.power=+e.target.value;$('s_power_v').textContent=e.target.value;decide();};
+  $('s_app').oninput=e=>{SELF.appearance=+e.target.value;$('s_app_v').textContent=(+e.target.value).toFixed(2).replace(/^0/,'');decide();};
+  ['name'].forEach(id=>$(id).addEventListener('input',decide));
+  ['exits','items'].forEach(id=>$(id).addEventListener('input',decide));
+  $('addent').onclick=()=>{ENTS.push({id:'кто-то',faction:'town',power:1,appearance:.2,attention:.7,attacking:'',ally:false,loot:''});renderEnts();decide();};
+  $('parse').onclick=parseText;
+  buildPresets();
+  applyArch(Object.keys(ARCH)[0]);
+}
+
+function applyArch(name){
+  const a=ARCH[name]; if(!a)return;
+  setSliders($('traits'),a.traits,0.5);
+  SELF.power=a.power; $('s_power').value=a.power; $('s_power_v').textContent=a.power;
+  SELF.appearance=a.appearance; $('s_app').value=a.appearance; $('s_app_v').textContent=a.appearance.toFixed(2).replace(/^0/,'');
+  $('name').value=name; decide();
+}
+
+const PRESETS={
+ 'Богач наедине':{ents:[{id:'богач',faction:'town',power:1,appearance:.9,attention:.8,attacking:'',ally:false,loot:'кошель'}],exits:'прочь',items:''},
+ 'Богач в толпе':{ents:[{id:'богач',faction:'town',power:1,appearance:.9,attention:.8,attacking:'',ally:false,loot:'кошель'},{id:'зевака1',faction:'town',power:1,appearance:.2,attention:.7,attacking:'',ally:false,loot:''},{id:'зевака2',faction:'town',power:1,appearance:.2,attention:.7,attacking:'',ally:false,loot:''}],exits:'прочь',items:''},
+ 'Ротозей':{ents:[{id:'ротозей',faction:'town',power:1,appearance:.5,attention:.2,attacking:'',ally:false,loot:'монеты'}],exits:'',items:''},
+ 'Угроза в лицо':{ents:[{id:'тролль',faction:'monster',power:6,appearance:.1,attention:.7,attacking:'',ally:false,loot:''}],exits:'прочь',items:''},
+ 'Союзник в беде':{ents:[{id:'друг',faction:'town',power:1,appearance:.3,attention:.7,attacking:'',ally:true,loot:''},{id:'бандит',faction:'outlaw',power:2,appearance:.2,attention:.7,attacking:'друг',ally:false,loot:''}],exits:'прочь',items:''},
+ 'Голод и еда':{ents:[],exits:'',items:'похлёбка:hunger',need:{hunger:.9}},
+ 'Сделка':{ents:[{id:'купец',faction:'town',power:1,appearance:.5,attention:.7,attacking:'',ally:false,loot:''}],exits:'',items:'',trade:'купец'},
+};
+function buildPresets(){const box=$('presets');Object.keys(PRESETS).forEach(n=>{
+  const b=document.createElement('button');b.textContent=n;b.onclick=()=>applyPreset(n);box.appendChild(b);});}
+let EXTRA=[];
+function applyPreset(n){const p=PRESETS[n];ENTS=p.ents.map(e=>({...e}));$('exits').value=p.exits;$('items').value=p.items;
+  EXTRA = p.trade? [{kind:'trade',target:p.trade,value:0.6,meta:{concession:0.3,prob_concede:0.7}}] : [];
+  if(p.need){for(const k in p.need){const s=[...$('needs').querySelectorAll('input')].find(i=>i.dataset.key===k);if(s){s.value=p.need[k];s.dispatchEvent(new Event('input'));}}}
+  renderEnts();decide();}
+
+function renderEnts(){const tb=$('ents');tb.innerHTML='';ENTS.forEach((e,i)=>{
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input type="text" value="${e.id}"></td>
+   <td><select>${['town','monster','outlaw','watch'].map(f=>`<option ${f===e.faction?'selected':''}>${f}</option>`).join('')}</select></td>
+   <td><input type="number" min="1" max="8" value="${e.power}" style="width:38px"></td>
+   <td><input type="number" min="0" max="1" step="0.1" value="${e.appearance}" style="width:44px"></td>
+   <td><input type="number" min="0" max="1" step="0.1" value="${e.attention}" style="width:44px"></td>
+   <td><input type="text" value="${e.attacking||''}" style="width:52px"></td>
+   <td style="text-align:center"><input type="checkbox" ${e.ally?'checked':''}></td>
+   <td><input type="text" value="${e.loot||''}" style="width:56px"></td>
+   <td><span class="x">✕</span></td>`;
+  const [id,fac,pw,ap,at,atk,ally,loot]=tr.querySelectorAll('input,select');
+  const sync=()=>{Object.assign(e,{id:id.value,faction:fac.value,power:+pw.value,appearance:+ap.value,
+    attention:+at.value,attacking:atk.value,ally:ally.checked,loot:loot.value});decide();};
+  tr.querySelectorAll('input,select').forEach(x=>x.addEventListener('input',sync));
+  tr.querySelector('.x').onclick=()=>{ENTS.splice(i,1);renderEnts();decide();};
+  tb.appendChild(tr);});}
+
+function parseItems(s){return s.split(',').map(x=>x.trim()).filter(Boolean).map(x=>{
+  const[name,sat]=x.split(':');return{name:name.trim(),satisfies:(sat||'').trim()||null,value:sat?0.05:0.3};});}
+function entToScene(e){const o={id:e.id,power:+e.power,appearance:+e.appearance,attention:+e.attention,
+  faction:e.faction,ally:!!e.ally};if(e.attacking)o.attacking=e.attacking;
+  if(e.loot)o.loot=e.loot.split(',').map(x=>({name:x.trim(),value:0.5}));return o;}
+
+let T=null;
+function decide(){clearTimeout(T);T=setTimeout(doDecide,120);}
+async function doDecide(){
+  const scene={here:ENTS.map(entToScene),exits:$('exits').value.split(',').map(s=>s.trim()).filter(Boolean),
+    items:parseItems($('items').value),extra_goals:EXTRA};
+  const body={name:$('name').value,traits:collect($('traits')),needs:collect($('needs')),
+    emotion:collect($('emotions')),self:SELF,scene};
+  const r=await (await fetch('/api/minddebug/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  if(r.error){$('chosen').textContent='ошибка: '+r.error;return;} render(r);
+}
+
+function render(r){
+  const p=r.perceived;
+  const who=p.here.map(b=>`<b>${b.id}</b>${b.attacking?'⚔'+b.attacking:''}${b.rel&&b.rel.affinity>.2?'(друг)':''}`).join(', ')||'никого';
+  $('perc').innerHTML=`Здесь: ${who}. ${p.nearby.length?'Рядом: '+p.nearby.map(b=>b.id).join(', ')+'. ':''}`+
+    `Выходы: ${p.exits.join(', ')||'нет'}. Предметы: ${p.items.join(', ')||'нет'}.`;
+  const ne=r.state;
+  $('stne').innerHTML=Object.entries(ne.needs).filter(([,v])=>v>=.35).map(([k,v])=>`<span>${k} <b>${v}</b></span>`).join('')
+    +Object.entries(ne.emotion).filter(([,v])=>v>=.15).map(([k,v])=>`<span>${k} <b>${v}</b></span>`).join('');
+  // цели
+  $('goals').innerHTML=r.goals.map(g=>{const c=GC[g.kind]||'#555';
+    return `<span class="gchip" style="background:${c}"><b>${g.kind}</b>${g.target?'<i>→'+g.target+'</i>':''} ${g.value}${g.agenda?' ⚑':''}</span>`;}).join('')||'—';
+  // действия (бары)
+  const mx=Math.max(0.01,...r.ranked.map(a=>Math.abs(a.u)));
+  $('acts').innerHTML=r.ranked.map((a,i)=>{const c=GC[a.goal]||'#555';const w=Math.max(2,Math.abs(a.u)/mx*100);
+    return `<div class="abar ${i===0?'top':''} ${a.u<0?'neg':''}"><span class="al">${a.action}</span>
+      <span class="track"><span class="fill" style="width:${w}%;background:${c}"></span></span>
+      <span class="un">${a.u>0?'+':''}${a.u.toFixed(2)}</span></div>`;}).join('');
+  // выбор
+  const c=GC[r.chosen.goal]||'#555';
+  $('chosen').innerHTML=`<span>${r.chosen.action}</span><span class="tag" style="background:${c}">${r.chosen.goal}</span><span class="u">u=${r.chosen.u.toFixed(2)}</span>`;
+}
+
+async function parseText(){
+  $('perr').textContent='';const text=$('txt').value.trim();if(!text)return;
+  $('parse').textContent='…';
+  const r=await (await fetch('/api/minddebug/scene_from_text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})})).json();
+  $('parse').textContent='Разобрать в сцену (LLM)';
+  if(r.error){$('perr').textContent=r.error;return;}
+  if(r.self){if(r.self.power)SELF.power=r.self.power;if(r.self.appearance!=null)SELF.appearance=r.self.appearance;
+    $('s_power').value=SELF.power;$('s_power_v').textContent=SELF.power;$('s_app').value=SELF.appearance;$('s_app_v').textContent=(+SELF.appearance).toFixed(2).replace(/^0/,'');}
+  const sc=r.scene||{};
+  ENTS=(sc.here||[]).map(e=>({id:e.id,faction:e.faction||'town',power:e.power||1,appearance:e.appearance||.2,
+    attention:e.attention||.7,attacking:e.attacking||'',ally:!!e.ally,loot:(e.loot||[]).map(l=>l.name).join(',')}));
+  (sc.nearby||[]).forEach(e=>ENTS.push({id:e.id,faction:'town',power:1,appearance:e.appearance||.2,attention:.7,attacking:'',ally:false,loot:''}));
+  $('exits').value=(sc.exits||[]).join(', ');
+  $('items').value=(sc.items||[]).map(i=>i.name+(i.satisfies?':'+i.satisfies:'')).join(', ');
+  EXTRA=sc.extra_goals||[];
+  renderEnts();decide();
+}
+boot();
+</script>
+</body>
+</html>

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from .memory import MemoryStore
 
 TRAITS = ("bravery", "greed", "honesty", "curiosity", "pride", "loyalty",
-          "sociability", "ambition", "lawful", "irritability")
+          "sociability", "ambition", "lawful", "irritability", "malice")
 ABILITIES = ("str", "dex", "con", "int", "wis", "cha")
 NEEDS = ("fatigue", "hunger", "social", "purpose", "wealth", "comfort", "novelty")
 EMOTIONS = ("anger", "fear", "joy", "distress")
@@ -63,6 +63,7 @@ class NpcState:
     plan: Plan | None = None                           # активный план (режим routine)
     engagement: float = 0.0                              # вовлечённость в диалог (hold для converse)
     mode_history: list = field(default_factory=list)     # [(tick, mode, switched, reason)] — маршрут
+    agendas: list = field(default_factory=list)          # долгосрочные цели (LLM-планировщик, mind/agenda)
 
     @classmethod
     def from_config(cls, cfg: NpcConfig, node: int | None = None) -> NpcState:

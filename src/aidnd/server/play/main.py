@@ -41,7 +41,7 @@ from ...play import populate
 from ...play.population import Townsperson
 from ...worldgen import WorldStore
 
-from .core import (PB, PLAYER, _COLORS, _DM_SYS, _PHASE_RU, _PORT_DIR, _S, _binfo, _city_name, _display, _emo, _gt, _gt_add, _here, _in_room, _mark_seen, _met, _model, _mt, _npc_save, _pc, _pc_hp, _pc_name, _pc_remember, _pc_save, _pc_set_name, _phase, _pool, _portrait_url, _role_at, _role_for_building, _seen, _spurns, _store, _tokens_ru, _topics_for, _wid, _witness_crime, router)
+from .core import (PB, PLAYER, _COLORS, _DM_SYS, _PHASE_RU, _PORT_DIR, _S, _binfo, _city_name, _display, _emo, _gt, _gt_add, _here, _in_room, _mark_seen, _met, _model, _mt, _npc_save, _pc, _pc_hp, _pc_name, _pc_remember, _pc_save, _pc_set_name, _phase, _pool, _portrait_url, _role_at, _role_for_building, _seen, _spurns, _store, _tokens_ru, _topics_for, _wanted, _wanted_add, _wanted_clear, _wid, _witness_crime, router)
 from .items import (_CRAFT, _PC_CAP, _cont_holder, _do_craft, _forge, _item_card, _known, _materialize_npc, _merchant_restock, _npc_cap, _npc_sees, _pc_coins, _pc_key_for, _seed_item_pool)
 from .contracts import (_board_ads, _board_npc_fulfill, _board_publish, _contract_offer, _contract_on_give, _contract_on_move, _contract_on_talk, _ct_cur, _ct_steps, _step_desc)
 from .combat import (_combat_wrapup, _combatant_from_npc, _guild_bid, _guild_board, _guild_gate, _guild_status, _lairs, _mint_badge, _npc_delves, _pc_badge, _pc_combatant)
@@ -53,6 +53,10 @@ def _routine_spot(pid: str, p, phase: str, day: int, keynode: dict, kps: list, t
     пока игрока нет, но воспроизводимо. Питейных может быть несколько — каждый выбирает свою."""
     rng = random.Random(f"rout|{pid}|{phase}|{day}")
     tavern = rng.choice(taverns) if taverns else None       # своя питейная на вечер
+    if p.role == "стражник" and kps:                        # СТРАЖА патрулирует город днём и вечером
+        if phase in ("day", "evening"):
+            return kps[(hash((pid, phase, day)) % len(kps))]   # обход перекрёстков (детерминир.)
+        return keynode.get(p.work, p.home) if p.work else p.home
     if p.role in ("бродяга", "головорез"):                  # лихой люд: днём по углам, вечером к людям
         if phase in ("evening", "night") and tavern is not None and rng.random() < PB["eve_rogue"]:
             return tavern
@@ -82,6 +86,8 @@ def _apply_routine() -> None:
         return
     _S["routine_key"] = key
     if key[0] == "morning":                                # утро: смелые идут по заказам доски
+        if _wanted() > 0:                                  # розыск остывает со временем (память не вечна)
+            _wanted_add(-PB["wanted_decay"])
         try:
             news = _npc_delves()
             if news:
@@ -438,7 +444,22 @@ def _scene_dict(city, people, crof, cr2b, loc):
     if plaza is not None and loc == plaza and not inside:  # у столба — объявления горожан
         d["board_ads"] = _board_ads()
         d["board_news"] = _S.get("board_news") or []
+    wc = _watch_check(people, crof, loc)                   # стража при высоком розыске
+    if wc:
+        d["watch"] = wc
     return d
+
+
+def _watch_check(people, crof, loc):
+    """Стража вяжет: если розыск ≥ порога И на локации есть стражник — конфронтация."""
+    if _wanted() < PB["wanted_confront"]:
+        return None
+    guard = next((pid for pid in _here(loc, crof) if people[pid].role == "стражник"), None)
+    if not guard:
+        return None
+    crimes = (_store().flag_get(_wid(), "crimes|pc") or "тёмные дела").split("; ")
+    return {"guard": guard, "name": people[guard].name, "wanted": _wanted(),
+            "crimes": ", ".join(crimes[-2:]), "fine": _wanted() * PB["watch_fine_per_pt"]}
 
 
 def _mind_scene(npc_id, people) -> MWorld:
@@ -1026,6 +1047,7 @@ async def steal(request: Request):
             _npc_save(w)
         _pc_remember(f"попался на краже у {p.name} — при {len(wit)} свидетелях", 0.7, about=[npc])
         _npc_save(npc)
+        _wanted_add(PB["crime_pickpocket"] + min(3, len(wit)), "попался на карманной краже")
         return {"caught": True, "witnesses": len(wit),
                 "line": _voice(p, rel, "reply", "(Ты поймал этого человека за руку в своём кармане!)"),
                 "gt": _gt()}
@@ -1189,10 +1211,10 @@ def _attempt(intent: dict, sc: dict) -> dict:
                 _store().purse_add(_wid(), npc, -take)
                 _store().purse_add(_wid(), "pc", take)
                 p.state.rel(PLAYER)["fear"] = max(p.state.rel(PLAYER)["fear"], 0.8)
-                w = _witness_crime(people, crof, loc, npc, "силой отнял у меня кошель")
+                w = _witness_crime(people, crof, loc, npc, "силой отнял у меня кошель", weight=PB["crime_rob"])
                 out["narr"].append(f"Ты вытрясаешь из {p.name} {take} зм. Свидетелей: {w}. Город такое помнит.")
             else:
-                w = _witness_crime(people, crof, loc, npc, "пытался отнять моё силой")
+                w = _witness_crime(people, crof, loc, npc, "пытался отнять моё силой", weight=PB["crime_pickpocket"])
                 out["narr"].append(f"{p.name} вырывается и поднимает крик! Свидетелей: {w}.")
             out["refresh"] = True
             return out
@@ -1205,7 +1227,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         roll = random.Random(f"steal|{npc}|{n}").randint(1, 20)
         _gt_add(PB["act_min"])
         if roll + _PC_CAP.mod("dex") < PB["steal_dc_base"] + round(att * PB["steal_dc_att"]):
-            w = _witness_crime(people, crof, loc, npc, "лез мне в карман")
+            w = _witness_crime(people, crof, loc, npc, "лез мне в карман", weight=PB["crime_pickpocket"])
             rel = p.state.relationships.get(PLAYER, {})
             out["narr"].append(f"Тебя ловят за руку! Свидетелей: {w}.")
             out["line"] = {"who": p.name, "npc": npc,
@@ -1314,7 +1336,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         enc = Encounter([_pc_combatant()], [foe], seed=f"duel|{npc}|{_mt()}", w=9, h=7)
         _S["combat"] = {"enc": enc, "npc": npc, "loc": loc,
                         "head": {"name": f"Стычка: {p.name}", "sub": _binfo(cr2b.get(loc))["name"] if cr2b.get(loc) else "улица"}}
-        _witness_crime(people, crof, loc, npc, "бросился на меня с оружием")
+        _witness_crime(people, crof, loc, npc, "бросился на меня с оружием", weight=PB["crime_assault"])
         out["combat"] = True
         out["narr"].append(f"Ты бросаешься на {p.name}. Назад дороги нет.")
         return out
@@ -1726,6 +1748,63 @@ async def exit_building(request: Request):
     t = _world_tick()
     return {**_scene_dict(city, people, crof, cr2b, loc), **t, "gt": _gt(), "coins": _pc_coins(),
             "hp": _pc_hp(), "city": _city_name()}
+
+
+@router.post("/api/play/surrender")
+async def surrender(request: Request):
+    """Сдаться страже: заплатить виру (розыск×тариф) → чист; нечем — ночь в холодной + всё серебро."""
+    city, people, crof, cr2b, loc = _play()
+    wc = _watch_check(people, crof, loc)
+    if not wc:
+        return {"error": "стражи рядом нет"}
+    fine = wc["fine"]
+    if _pc_coins() >= fine:
+        _store().purse_add(_wid(), "pc", -fine)
+        narr = [f"Ты платишь виру — {fine} зм. «Гляди у меня», — цедит {wc['name']}, и отпускает."]
+    else:
+        got = _pc_coins()
+        _store().purse_add(_wid(), "pc", -got)
+        cur = _gt()
+        target = ((cur // 1440) + 1) * 1440 + PB["watch_jail_h"] * 60   # до утра следующего дня
+        _gt_add(max(PB["step_min"], target - cur))
+        narr = [f"Платить нечем. Ночь в холодной, из кошеля выгребают {got} зм. Утром выпускают."]
+    _wanted_clear()
+    _pc_remember("рассчитался со стражей за свои дела", 0.5)
+    _apply_routine()
+    return {**_scene_dict(city, people, crof, cr2b, loc), "narr": narr,
+            "coins": _pc_coins(), "gt": _gt()}
+
+
+@router.post("/api/play/watch_flee")
+async def watch_flee(request: Request):
+    """Бежать от стражи: Dex против ловкости стражника. Ушёл — розыск ↑, ты в другом конце города;
+    попался — страж вяжет (бой)."""
+    city, people, crof, cr2b, loc = _play()
+    wc = _watch_check(people, crof, loc)
+    if not wc:
+        return {"error": "не от кого бежать"}
+    guard = people[wc["guard"]]
+    gdex = (guard.state.config.abilities.get("dex", 10) - 10) // 2
+    roll = random.Random(f"wflee|{loc}|{_gt()}").randint(1, 20)
+    total, dc = roll + _PC_CAP.mod("dex"), PB["watch_flee_dc"] + gdex
+    dice = {"die": 20, "roll": roll, "mod": _PC_CAP.mod("dex"), "total": total, "dc": dc,
+            "ok": total >= dc, "label": "Побег (Dex) от стражи"}
+    if total >= dc:
+        _wanted_add(1, "сбежал от стражи")                 # погоня усердствует
+        nb = random.Random(f"wfleeto|{loc}|{_gt()}").choice(_S["kps"])
+        _S["loc"], _S["inside"], _S["room"] = nb, None, None
+        _gt_add(PB["step_min"] * 2)
+        _apply_routine()
+        return {**_scene_dict(city, people, crof, cr2b, nb), "dice": dice,
+                "narr": ["Ты ныряешь в переулки и отрываешься. Но теперь ищут ещё усерднее."],
+                "gt": _gt(), "coins": _pc_coins()}
+    foe = _combatant_from_npc(wc["guard"], guard)
+    foe.side = "foes"
+    enc = Encounter([_pc_combatant()], [foe], seed=f"watchfight|{wc['guard']}|{_mt()}", w=9, h=7)
+    _S["combat"] = {"enc": enc, "npc": wc["guard"], "loc": loc,
+                    "head": {"name": f"Стража: {guard.name}", "sub": "бегство сорвалось"}}
+    return {"dice": dice, "combat": True,
+            "narr": [f"{guard.name} перехватывает тебя. Дерись или сдавайся."]}
 
 
 @router.post("/api/play/look")

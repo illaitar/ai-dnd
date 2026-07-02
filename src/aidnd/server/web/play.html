@@ -539,6 +539,7 @@ function applyWorld(r){
     ADS=r.board_ads?{ads:r.board_ads,news:r.board_news}:null;
     renderAmb();renderLoc(r.location);renderWays();
     $('locname').textContent=r.location.name;}
+  if(r.watch)renderWatch(r.watch);
 }
 const ROOM_KD={cellar:'подвал',backroom:'задняя комната',attic:'чердак',quarters:'жильё',hidden:'тайник'};
 function renderWays(){
@@ -715,6 +716,7 @@ api('/api/play/scene').then(s=>{
   const a0=s.ambient||{};
   push('narr',s.location.name+'. '+[a0.time,a0.weather,a0.mood].filter(Boolean).join(', ')+'. '
     +((s.looked|0)<1?'Стоит осмотреться.':(s.here&&s.here.length?('Здесь: '+s.here.length+' чел.'):'Никого.')));
+  if(s.watch)renderWatch(s.watch);
 });
 refreshInv();renderJobs();
 let INV=[];
@@ -877,6 +879,22 @@ async function takeAd(id){
   if(r.error){push('sys',esc(r.error));return;}
   push('narr','Ты снимаешь объявление со столба. Оно теперь в «делах».');
   renderJobs();const s=await api('/api/play/scene');ADS=s.board_ads?{ads:s.board_ads,news:s.board_news}:null;renderLoc(s.location);
+}
+function renderWatch(w){
+  push('sys',`<div class="ctcard" style="border-color:var(--red)"><b>&#9888; Стража!</b>
+    ${esc(w.name)}: «Стой! Ты в розыске (${w.wanted}) — ${esc(w.crimes)}.»
+    <div class="acts" style="justify-content:center;margin-top:6px">
+      <button onclick="surrender()">сдаться (${w.fine} зм)</button>
+      <button onclick="watchFlee()">бежать</button>
+      <button onclick="freeAct('нападаю на ${esc(w.name)}')">драться</button></div></div>`);
+}
+async function surrender(){applyWorld(await api('/api/play/surrender',{}));}
+async function watchFlee(){
+  const r=await api('/api/play/watch_flee',{});
+  if(r.dice)showDice(r.dice);
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  applyWorld(r);
+  if(r.combat){const st=await api('/api/play/combat');if(st.active)openCombat(st.combat,st.head);}
 }
 function renderBoard(){
   const el=document.querySelector('.locard .desc');

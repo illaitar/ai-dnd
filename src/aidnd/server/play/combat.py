@@ -41,7 +41,7 @@ from ...play import populate
 from ...play.population import Townsperson
 from ...worldgen import WorldStore
 
-from .core import (PB, PLAYER, _GT0, _S, _SESS, _binfo, _gt, _gt_add, _here, _mt, _npc_save, _pc_hp, _pc_name, _pc_remember, _pc_save, _store, _wid, router)
+from .core import (PB, PLAYER, _GT0, _S, _SESS, _binfo, _gt, _gt_add, _here, _mt, _npc_save, _pc_hp, _pc_name, _pc_remember, _pc_save, _store, _wid, router, _wanted_add)
 from .items import (_PC_CAP, _merchant_restock, _pc_coins, _pool_add_new, _pool_draw, _put_item, _rar_tag)
 from .contracts import (_ct_advance, _ct_cur)
 
@@ -299,6 +299,8 @@ def _duel_wrapup(enc, cb) -> dict:
         _S["crof"].pop(pid, None)
         _S["people"].pop(pid, None)
         _pc_remember(f"убил {p.name}", 0.95, about=[pid])
+        if wit:                                            # УБИЙСТВО при свидетелях — тяжкий розыск
+            _wanted_add(PB["crime_murder"] + min(4, len(wit)), f"убил {p.name}")
         out["narr"].append(f"{p.name} мёртв. Его добро — твоё. Свидетелей: {len(wit)}."
                            + (f" {done}" if done else ""))
     elif st == "lost" and p:

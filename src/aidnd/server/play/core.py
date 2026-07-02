@@ -113,6 +113,10 @@ PB = {
     "caravan_chance": 0.35,                               # шанс каравана с товаром за утро
     "path_event_dc": 0.7,                                 # порог эмоции NPC, прерывающий путь
     "say_cap_per_tick": 3,                                # не больше стольких реплик за живой тик
+    # СТРАЖА / РОЗЫСК: вес преступлений (очки), порог задержания, спад/сутки, штраф, побег
+    "crime_pickpocket": 1, "crime_rob": 3, "crime_assault": 4, "crime_murder": 8,
+    "wanted_confront": 5, "wanted_decay": 2, "watch_fine_per_pt": 3, "watch_flee_dc": 12,
+    "watch_jail_h": 7,                                     # не заплатил — «отсидка» до утра
     "craft_skill_dc": 12, "craft_fail_min": 15,           # незнакомое ремесло: бросок Int / цена провала
     "guild_float": 120, "guild_reward_per_cr": 8, "guild_mark_fine": 15,
     # NPC-зачистки: шанс утреннего похода смелой пары
@@ -425,8 +429,26 @@ def _tokens_ru(s: str) -> set:
     return {w[:5] for w in str(s).lower().replace("«", " ").replace("»", " ").split() if len(w) >= 4}
 
 
-def _witness_crime(people, crof, loc, npc, what: str) -> int:
-    """Преступление на глазах: жертва в гневе, свидетели пишут память (сплетни разнесут)."""
+def _wanted() -> int:
+    return int(_store().flag_get(_wid(), "wanted|pc") or 0)
+
+
+def _wanted_add(pts: int, reason: str = "") -> None:
+    """Очки розыска: копятся от засвидетельствованных преступлений, спадают со временем."""
+    _store().flag_set(_wid(), "wanted|pc", str(max(0, _wanted() + int(pts))))
+    if reason and pts > 0:                                 # хроника — для реплики стражи
+        prior = _store().flag_get(_wid(), "crimes|pc") or ""
+        _store().flag_set(_wid(), "crimes|pc", ((prior + "; " + reason) if prior else reason)[-240:])
+
+
+def _wanted_clear() -> None:
+    _store().flag_set(_wid(), "wanted|pc", "0")
+    _store().flag_set(_wid(), "crimes|pc", "")
+
+
+def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
+    """Преступление на глазах: жертва в гневе, свидетели пишут память (сплетни разнесут),
+    очки розыска растут (жертва доносит + чем больше глаз, тем жарче)."""
     p = people[npc]
     rel = p.state.rel(PLAYER)
     rel["affinity"] = min(rel["affinity"], -0.5)
@@ -438,6 +460,7 @@ def _witness_crime(people, crof, loc, npc, what: str) -> int:
         people[w].state.memory.add(f"видел(а): чужак {what} ({p.name})", _mt(), 0.6, about=[PLAYER, npc])
         _npc_save(w)
     _npc_save(npc)
+    _wanted_add(weight + min(3, len(wit)), what)           # жертва + очевидцы → розыск
     return len(wit)
 
 

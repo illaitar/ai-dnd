@@ -288,6 +288,10 @@ def _fill_from_pool(city, keynode, kps):
         return None
     people, spot = {}, {}
     placed = {pl["npc_id"]: pl for pl in store.placements_for(PLAY_WORLD)}
+    if placed and not all(pl["node"] in city._xy and pl["home"] in city._xy   # noqa: SLF001
+                          for pl in placed.values()):
+        store.clear_placements(PLAY_WORLD)                 # граф города изменился — узлы протухли
+        placed = {}                                        # пере-размещаем заново (память NPC цела)
     if placed:                                             # уже наполнен — восстановить тех же людей
         for pid, pl in placed.items():
             row = store.get_person(pid)

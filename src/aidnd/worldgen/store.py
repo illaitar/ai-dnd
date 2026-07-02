@@ -137,6 +137,11 @@ class WorldStore:
         with self._conn() as c:
             return [dict(r) for r in c.execute("SELECT * FROM placements WHERE world_id=?", (world_id,))]
 
+    def clear_placements(self, world_id: int) -> None:
+        """Сброс привязок мира (напр., граф города изменился и старые узлы протухли)."""
+        with self._conn() as c:
+            c.execute("DELETE FROM placements WHERE world_id=?", (world_id,))
+
     # ---------------------------------------------------- предметы -------- #
     def save_item(self, item: dict) -> None:
         with self._conn() as c:

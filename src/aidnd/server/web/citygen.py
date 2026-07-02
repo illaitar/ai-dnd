@@ -67,6 +67,32 @@ def longest_edge(p):
             bl, bi = l, i
     return [p[bi], p[(bi + 1) % len(p)]]
 
+def pt_in_poly(q, poly):
+    x, y, inside, n = q[0], q[1], False, len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+def inscribe_rect(poly):
+    """Вписать в участок ОРИЕНТИРОВАННЫЙ прямоугольник (вдоль длинной кромки): часть домов —
+    прямые коробки вместо кривых полигонов. None, если по-человечески не влезает."""
+    c = centroid(poly)
+    a, b = longest_edge(poly)
+    d = norm([b[0] - a[0], b[1] - a[1]])
+    nx, ny = -d[1], d[0]
+    hu = max(abs((q[0] - c[0]) * d[0] + (q[1] - c[1]) * d[1]) for q in poly)
+    hv = max(abs((q[0] - c[0]) * nx + (q[1] - c[1]) * ny) for q in poly)
+    for al in (0.74, 0.62, 0.52):
+        u, v = hu * al, hv * al
+        rect = [[c[0] + d[0] * su * u + nx * sv * v, c[1] + d[1] * su * u + ny * sv * v]
+                for su, sv in ((1, 1), (-1, 1), (-1, -1), (1, -1))]
+        if area(rect) >= 18 and all(pt_in_poly(q, poly) for q in rect):
+            return rect
+    return None
+
 def clip_half(poly, P, nx, ny, pos):
     out = []
     def sd(q):
@@ -535,6 +561,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Ф�
 
     # дома по кварталам
     wards, marks, hits = [], [], []
+    courtyards = []                                        # центры дворов → узлы движения (спицы к улице)
     near_river_b = lambda p: dist_to_polyline(p, river_pts) < river_w * 1.15
     # центры районов (мегакварталов) для цветовой гаммы крыш (отдельный rng — не сдвигает раскладку)
     rng_d = mulberry32((seed ^ 0x1B873593) & 0xFFFFFFFF)
@@ -599,14 +626,27 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Ф�
             inset = shrink(pl, 0.82)
             if area(inset) < 18:
                 continue
-            if near_river_b(centroid(inset)) and area(inset) < 70:
-                continue                                   # мелочь у воды убираем — полосу закрасим набережной
+            if near_river_b(centroid(inset)):
+                continue                                   # прибрежную полосу НЕ застраиваем (набережной-заплатки больше нет)
             is_lm = bool(lm) and pl is key_plot
             if not is_lm and not on_ward_boundary(pl, ward):
-                continue                                   # центральные участки не застраиваем — пустой двор
+                r_c = rng()                                # внутренний двор: сад / пусто / застроить
+                if r_c < 0.35:
+                    houses.append({'garden': True, 'poly': inset, 'court': True})
+                    if area(inset) >= 40:
+                        courtyards.append(centroid(inset))     # точка движения — во двор можно зайти
+                    continue
+                if r_c < 0.60:
+                    continue                               # двор остаётся пустым
+                courtyards.append(centroid(inset))         # застроенный двор тоже достижим
             if not is_lm and rng() < 0.07:
                 houses.append({'garden': True, 'poly': inset})
                 continue
+            boxy = False
+            if not is_lm and rng() < 0.4:                  # часть домов — прямые коробки
+                rect = inscribe_rect(inset)
+                if rect is not None:
+                    inset, boxy = rect, True
             cc = centroid(inset)
             hid = f"house:{seed}:{round(cc[0])}_{round(cc[1])}"
             promo = key_map.get(hid) if not is_lm else None
@@ -623,7 +663,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Ф�
             a, b = longest_edge(inset)
             d = norm([b[0] - a[0], b[1] - a[1]])
             Lr = math.sqrt(area(inset)) * 0.42
-            houses.append({'garden': False, 'poly': inset, 'roof': roof, 'cc': cc,
+            houses.append({'garden': False, 'poly': inset, 'roof': roof, 'cc': cc, 'rect': boxy,
                            'ridge': [[cc[0] - d[0] * Lr, cc[1] - d[1] * Lr], [cc[0] + d[0] * Lr, cc[1] + d[1] * Lr]],
                            'key': key, 'id': (key['id'] if key else hid)})
             r = max(7, math.sqrt(area(inset)) * 0.55)
@@ -636,6 +676,20 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Ф�
                 hits.append({'x': cc[0], 'y': cc[1], 'r': r, 'id': hid, 'kind': 'home', 'house': True})
         wards.append({'ward': ward, 'fill': '#cdb585',     # единый цвет двора — без цветной подложки под landmark
                       'houses': houses, 'lm': lm, 'roof': c['roof']})
+
+    # дворы входят в граф движения: узел в центре двора + спица к ближайшему уличному узлу
+    for cyc in courtyards:
+        best, bd = None, 1e18
+        for i, nd in enumerate(nodes):
+            d2 = (nd[0] - cyc[0]) ** 2 + (nd[1] - cyc[1]) ** 2
+            if d2 < bd:
+                bd, best = d2, i
+        j = nid(cyc)
+        if best is not None and best != j:
+            if best not in adj[j]:
+                adj[j].append(best)
+            if j not in adj[best]:
+                adj[best].append(j)
 
     # мегакварталы = цветовые районы. Группируем кварталы по ближайшему dseed, одна надпись на район.
     groups = {}
@@ -763,6 +817,14 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
         for h in w['houses']:
             if h['garden']:
                 e.append(f'<path d="{_poly_d(h["poly"])}" fill="#9fae6e" stroke="rgba(60,80,40,.4)" stroke-width="0.7"/>')
+                if h.get('court'):                          # сад во дворе: пара крон (детерминированно от центра)
+                    gc = centroid(h['poly'])
+                    tr = mulberry32((int(gc[0] * 7 + gc[1] * 13)) & 0xFFFFFFFF)
+                    rr = math.sqrt(area(h['poly']))
+                    for _ in range(2 + int(tr() * 2)):
+                        e.append(f'<circle cx="{gc[0] + (tr() - .5) * rr * .7:.1f}" '
+                                 f'cy="{gc[1] + (tr() - .5) * rr * .7:.1f}" r="{2.2 + tr() * 1.8:.1f}" '
+                                 f'fill="#5f7d42" opacity=".85"/>')
                 continue
             d = _poly_d(h['poly'])
             # крыша (в интерактиве — кликабельный полигон дома с id); статус меняет цвет
@@ -787,13 +849,10 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
         g += 9
     e.append('</g>')
     e.append(f'<circle cx="{sc[0]:.1f}" cy="{sc[1]:.1f}" r="5" fill="#7a6238"/><circle cx="{sc[0]:.1f}" cy="{sc[1]:.1f}" r="2.4" fill="#3a2c18"/>')
-    # река: вода в каналах между берегами (над землёй, под стенами)
+    # река: вода в каналах между берегами (над землёй, под стенами). Набережной-заплатки нет —
+    # прибрежная полоса просто не застраивается (дома отбракованы в build_city).
     rp, rw = m['river_pts'], m['river_w']
     rd = "M%.1f %.1f " % (rp[0][0], rp[0][1]) + " ".join("L%.1f %.1f" % (q[0], q[1]) for q in rp[1:])
-    # НАБЕРЕЖНАЯ-ДОРОГА: прибрежную полосу города форсированно красим цветом дороги (закрывает фон кварталов от убранных домов)
-    cityd = "".join(_poly_d(c['poly']) for c in m['city'])
-    e.append(f'<clipPath id="cityclip"><path d="{cityd}"/></clipPath>')
-    e.append(f'<path d="{rd}" fill="none" stroke="#caa46a" stroke-width="{rw*2.2:.1f}" stroke-linecap="round" stroke-linejoin="round" clip-path="url(#cityclip)"/>')
     e.append(f'<path d="{rd}" fill="none" stroke="#cdb98f" stroke-width="{rw:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')   # песчаный берег у воды
     e.append(f'<path d="{rd}" fill="none" stroke="#37607c" stroke-width="{rw*0.66+2:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')
     e.append(f'<path d="{rd}" fill="none" stroke="#4a7ba0" stroke-width="{rw*0.6:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')   # вода уже русла

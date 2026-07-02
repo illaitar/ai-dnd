@@ -139,11 +139,14 @@ class Encounter:
         t = self.units.get(target_id)
         if not t or t.down() or t.side == c.side:
             return "не цель"
-        if self.dist(c, t) > c.reach:
+        if self.dist(c, t) > c.range:
             return "не дотянуться"
         self.acted = True
+        # дальнобой в упор (враг вплотную) — стрелять несподручно: помеха
+        crowded = c.range > 1 and any(u.side != c.side and not u.down() and self.dist(c, u) <= 1
+                                      for u in self.units.values())
         r1 = self.rng.randint(1, 20)
-        roll = min(r1, self.rng.randint(1, 20)) if t.dodging else r1
+        roll = min(r1, self.rng.randint(1, 20)) if (t.dodging or crowded) else r1
         total = roll + c.to_hit
         if roll == 1 or (roll != 20 and total < t.ac):
             self._log(f"{c.name} атакует: промах ({total} против AC {t.ac} у {t.name}).")
@@ -202,28 +205,63 @@ class Encounter:
                     self.end_turn()
                     return
         t = min(foes, key=lambda u: self.dist(c, u))
-        if self.dist(c, t) > c.reach:                       # подойти
-            best, bd = None, self.dist(c, t)
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    steps = 0
-                    x, y = c.x, c.y
-                    while steps < c.speed:
-                        nx, ny = x + dx, y + dy
-                        if not (0 <= nx < self.w and 0 <= ny < self.h) \
-                                or (nx, ny) in self.obstacles or self._occupied(nx, ny, ignore=c.id):
-                            break
-                        x, y, steps = nx, ny, steps + 1
-                        nd = max(abs(x - t.x), abs(y - t.y))
-                        if nd < bd:
-                            best, bd = (x, y), nd
-                        if nd <= c.reach:
-                            break
-            if best:
-                c.x, c.y = best
-        if self.dist(c, t) <= c.reach:
+        if c.range > 1:                                     # ДАЛЬНОБОЙ: держать дистанцию, стрелять
+            if any(self.dist(c, u) <= 1 for u in foes):     # кто-то в упор — отойти (кайт)
+                spot = self._kite(c, min(foes, key=lambda u: self.dist(c, u)))
+                if spot:
+                    c.x, c.y = spot
+            elif self.dist(c, t) > c.range:                 # цель дальше выстрела — сблизиться
+                spot = self._approach(c, t, c.range)
+                if spot:
+                    c.x, c.y = spot
+        elif self.dist(c, t) > c.range:                     # ближний: подойти вплотную
+            spot = self._approach(c, t, c.range)
+            if spot:
+                c.x, c.y = spot
+        if self.dist(c, t) <= c.range:
             self.act_attack(c, t.id)
         self.end_turn()
+
+    def _approach(self, c: Combatant, t: Combatant, stop: int):
+        """Клетка в пределах хода, приближающая к t (стоп при dist ≤ stop). None если некуда."""
+        best, bd = None, self.dist(c, t)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if not (dx or dy):
+                    continue
+                steps, x, y = 0, c.x, c.y
+                while steps < c.speed:
+                    nx, ny = x + dx, y + dy
+                    if not (0 <= nx < self.w and 0 <= ny < self.h) \
+                            or (nx, ny) in self.obstacles or self._occupied(nx, ny, ignore=c.id):
+                        break
+                    x, y, steps = nx, ny, steps + 1
+                    nd = max(abs(x - t.x), abs(y - t.y))
+                    if nd < bd:
+                        best, bd = (x, y), nd
+                    if nd <= stop:
+                        break
+        return best
+
+    def _kite(self, c: Combatant, foe: Combatant):
+        """Отойти от foe (до 3 клеток), максимизируя дистанцию. None если зажат."""
+        best, bd, lim = None, self.dist(c, foe), min(c.speed, 3)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if not (dx or dy):
+                    continue
+                steps, x, y = 0, c.x, c.y
+                while steps < lim:
+                    nx, ny = x + dx, y + dy
+                    if not (0 <= nx < self.w and 0 <= ny < self.h) \
+                            or (nx, ny) in self.obstacles or self._occupied(nx, ny, ignore=c.id):
+                        break
+                    x, y, steps = nx, ny, steps + 1
+                if steps:
+                    nd = max(abs(x - foe.x), abs(y - foe.y))
+                    if nd > bd:
+                        best, bd = (x, y), nd
+        return best
 
     def view(self) -> dict:
         cur = self.current()

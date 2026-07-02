@@ -75,3 +75,37 @@ def test_pick_encounter_env_and_budget():
     assert sum(u.cr for u in units) <= 1.0 + 0.5
     units2 = pick_encounter(1.0, "Forest", seed="e1")
     assert [u.ref for u in units] == [u.ref for u in units2]   # детерминизм
+
+
+def test_ranged_reaches_far_and_melee_cannot():
+    """Лучник бьёт с дистанции; ближнее оружие с той же клетки — «не дотянуться»."""
+    arch = from_pc({"str": 10, "dex": 16}, 18, 18, weapon={"name": "длинный лук", "quality": "fine"})
+    melee = from_pc({"str": 16, "dex": 10}, 18, 18, weapon={"name": "меч", "quality": "fine"})
+    assert arch.range >= 10 and melee.range == 1
+    e = Encounter([arch], [_goblin("g0")], seed="r1")
+    a, g = e.units["pc"], e.units["g0"]
+    a.x, a.y, g.x, g.y = 0, 0, 9, 0                     # 9 клеток между ними
+    e.acted = False
+    assert e.act_attack(a, "g0") is None                # выстрел долетает
+    e.acted = False
+    b = Encounter([melee], [_goblin("g1")], seed="r2")
+    m, g2 = b.units["pc"], b.units["g1"]
+    m.x, m.y, g2.x, g2.y = 0, 0, 9, 0
+    assert b.act_attack(m, "g1") == "не дотянуться"      # мечом — никак
+
+
+def test_ranged_disadvantage_when_adjacent():
+    """Дальнобой в упор бьёт с помехой (min из двух d20) — статистически слабее."""
+    def hits(seed, adjacent):
+        arch = from_pc({"str": 10, "dex": 20}, 18, 18, weapon={"name": "лук", "quality": "fine"})
+        e = Encounter([arch], [_goblin("g0")], seed=seed)
+        a, g = e.units["pc"], e.units["g0"]
+        a.x, a.y = 0, 0
+        g.x, g.y = (1, 0) if adjacent else (8, 0)
+        e.acted, g.hp = False, 999                       # не убить, только фиксируем попадание
+        before = g.hp
+        e.act_attack(a, "g0")
+        return g.hp < before
+    far = sum(hits(f"far{i}", False) for i in range(60))
+    near = sum(hits(f"near{i}", True) for i in range(60))
+    assert near < far                                    # помеха у стрельбы в упор снижает попадания

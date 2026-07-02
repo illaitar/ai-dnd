@@ -339,7 +339,7 @@
       <button onclick="cbAct({type:'flee'})">бежать</button>
       <button onclick="cbAct({type:'end'})">конец хода</button>
     </div>
-    <div class="cbsub">клик по клетке — шаг · клик по врагу — удар</div>
+    <div class="cbsub" id="cbhint">клик по клетке — шаг · клик по врагу — удар</div>
   </div>
 </div>
 
@@ -912,6 +912,10 @@ function renderCombat(){
   svg.querySelectorAll('.cbu').forEach(e=>e.addEventListener('click',ev=>{ev.stopPropagation();
     const u=CB.units.find(x=>x.id===e.dataset.id);
     if(u&&u.side==='foes')cbAct({type:'attack',target:u.id});}));
+  const me=CB.units.find(u=>u.id==='pc');
+  $('cbhint').textContent=(me&&me.range>1)
+    ? ('клик по клетке — шаг · клик по врагу — выстрел (дальность '+me.range+')')
+    : 'клик по клетке — шаг · клик по врагу — удар';
 }
 async function cbAct(a){
   if(!CB)return;

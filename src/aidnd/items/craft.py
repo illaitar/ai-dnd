@@ -44,6 +44,8 @@ ROLE_RECIPES = {
     "лавочник": Recipe("trinket", "затейливая безделица", "bench", 6, 20, 12, "worn", ""),
     "трактирщик": Recipe("consumable", "кружка крепкого", "cauldron", 2, 4, 8, "none", ""),
     "мельник": Recipe("material", "мешок доброй муки", "bench", 3, 10, 9, "none", ""),
+    "охотник": Recipe("weapon", "охотничий лук", "bench", 12, 45, 11, "main_hand", "attack"),
+    "оружейник": Recipe("weapon", "тугой арбалет", "anvil", 18, 50, 12, "main_hand", "attack"),
 }
 
 

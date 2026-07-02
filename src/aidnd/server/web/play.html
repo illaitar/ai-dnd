@@ -248,6 +248,43 @@
     background:rgba(217,164,65,.07);color:var(--ink);margin-top:6px}
   .boardjob button{margin-left:8px;font-size:11px;padding:2px 9px;border-radius:6px;cursor:pointer;
     border:1px solid var(--gold-dim);background:transparent;color:var(--gold)}
+  /* ── магия (М-5): круг из глифов, мана-полоса, гримуар, наставник ── */
+  .magwin{background:var(--panel);border:1px solid var(--line2);border-radius:14px;width:min(720px,94vw);
+    max-height:90vh;overflow:auto;padding:18px 20px;box-shadow:0 18px 60px rgba(0,0,0,.6)}
+  .magwin h3{margin:0 0 4px;font:600 16px var(--serif);color:var(--gold);display:flex;align-items:center;gap:8px}
+  .magwin h3 .x{margin-left:auto;cursor:pointer;color:var(--faint);font-weight:400}
+  .manabar{height:16px;border-radius:9px;background:var(--panel2);border:1px solid var(--line2);
+    overflow:hidden;position:relative;margin:6px 0 2px}
+  .manafill{height:100%;background:linear-gradient(90deg,#8a6f34,#d9a441,#ffe6a8);transition:width .35s}
+  .manatxt{font-size:11px;color:var(--dim);margin-bottom:10px}
+  .fatline{font-size:11.5px;color:#c98a4a;margin:-4px 0 8px}
+  .magsec{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);margin:12px 0 5px}
+  .gtiles{display:flex;flex-wrap:wrap;gap:6px}
+  .gtile{padding:6px 11px;border-radius:9px;border:1px solid var(--line2);background:var(--panel2);
+    color:var(--ink);font-size:12.5px;cursor:pointer;user-select:none;transition:.12s}
+  .gtile:hover{border-color:var(--gold-dim);color:var(--gold)}
+  .gtile.elem{border-color:#7a4a4a}
+  .gtile.locked{opacity:.4;cursor:not-allowed;filter:grayscale(1)}
+  .gtile.locked:hover{border-color:var(--line2);color:var(--ink)}
+  .circle{min-height:44px;border:1px dashed var(--gold-dim);border-radius:11px;background:rgba(217,164,65,.05);
+    padding:9px 11px;margin:6px 0;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .circle .ph{color:var(--faint);font-size:12px}
+  .cchip{padding:5px 10px;border-radius:8px;background:rgba(217,164,65,.14);border:1px solid var(--gold-dim);
+    color:var(--gold);font-size:12.5px;cursor:pointer}
+  .cchip:hover{background:rgba(194,84,80,.18);border-color:#c25450;color:#e88}
+  .magrow{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+  .magrow select{background:var(--panel2);color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:7px 9px}
+  .castbtn{padding:9px 20px;border-radius:10px;border:1px solid var(--gold-dim);background:rgba(217,164,65,.12);
+    color:var(--gold);font:600 13px var(--serif);cursor:pointer}
+  .castbtn:hover{background:rgba(217,164,65,.22)}
+  .castbtn:disabled{opacity:.4;cursor:not-allowed}
+  .hint{font-size:11.5px;color:var(--faint)}
+  .hint.wild{color:#c25450}.hint.clean{color:#5db07a}
+  .lawrow,.teachrow{font-size:12.5px;padding:7px 10px;border:1px solid var(--line);border-radius:9px;
+    background:var(--panel2);margin-top:5px;display:flex;align-items:center;gap:8px;cursor:pointer}
+  .lawrow:hover,.teachrow:hover{border-color:var(--gold-dim)}
+  .lawrow b{color:var(--gold)}.lawrow .cmp{color:var(--faint);font-size:11px;margin-left:auto}
+  .teachrow .price{margin-left:auto;color:var(--gold)}
 </style>
 </head>
 <body class="explore">
@@ -255,7 +292,7 @@
 <div class="top">
   <span class="brand">&#10022; AI-DnD</span>
   <span class="loc"><b id="locname">Трактир</b><span class="sep">·</span><span id="locdist"></span></span>
-  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="coins">12 зм</span></span>
+  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="mana" title="мана" style="cursor:pointer;color:var(--gold)" onclick="openMagic()">&#10022; 12/14</span><span id="coins">12 зм</span></span>
 </div>
 
 <div class="stage">
@@ -313,6 +350,37 @@
     <div class="invgrid" id="invgrid"></div>
   </div>
 </div>
+<div id="magicwrap" class="overlay hidden" onclick="if(event.target===this)closeMagic()">
+  <div class="magwin">
+    <h3>&#10022; Круг чар <span class="x" onclick="closeMagic()">✕</span></h3>
+    <div class="manabar"><div class="manafill" id="magfill" style="width:0%"></div></div>
+    <div class="manatxt" id="magmana">мана —</div>
+    <div class="fatline" id="magfat" style="display:none"></div>
+
+    <div class="magsec">круг</div>
+    <div class="circle" id="magcircle"><span class="ph">кликай глифы ниже — собери круг</span></div>
+    <div class="magrow">
+      <span class="hint" id="maghint"></span>
+      <span id="magtargetwrap" style="display:none">цель: <select id="magtarget"></select></span>
+      <button class="castbtn" id="magcast" onclick="doCast()">замкнуть круг</button>
+      <button class="gtile" onclick="clearCircle()">сброс</button>
+    </div>
+
+    <div class="magsec">стихии</div>
+    <div class="gtiles" id="magelems"></div>
+    <div class="magsec">глифы</div>
+    <div class="gtiles" id="magglyphs"></div>
+
+    <div id="magteachwrap" style="display:none">
+      <div class="magsec">наставник рядом</div>
+      <div id="magteach"></div>
+    </div>
+
+    <div class="magsec">гримуар <span id="magrimn" style="color:var(--faint)"></span></div>
+    <div id="magrim"><span class="hint">пока пусто — сотвори чистый круг, и закон впишется сюда</span></div>
+  </div>
+</div>
+
 <div id="deathwrap" class="overlay hidden">
   <div style="text-align:center;max-width:460px;padding:0 24px">
     <div style="font:600 40px var(--serif);color:#7a1f1f;letter-spacing:.08em;margin-bottom:14px">✝</div>
@@ -336,6 +404,7 @@
     <div class="cblog" id="cblog"></div>
     <div class="cbbtns">
       <button onclick="cbAct({type:'dodge'})">защита</button>
+      <button onclick="openMagic()" style="color:var(--gold);border-color:var(--gold-dim)">&#10022; чары</button>
       <button onclick="cbAct({type:'flee'})">бежать</button>
       <button onclick="cbAct({type:'end'})">конец хода</button>
     </div>
@@ -390,6 +459,12 @@ function applySky(){const t=((GT/60)%24+24)%24;let a=SKY[0],b=SKY[SKY.length-1];
 function setClock(){const c=$('clock');if(c)c.textContent=fmtClock(GT);applySky();}
 function setCoins(v){if(v==null)return;const c=$('coins');if(c)c.textContent=v+' зм';}
 function setHp(v,mx){if(v==null)return;const c=$('hp');if(c)c.textContent='\u2665 '+v+'/'+(mx||PBMAXHP);}
+let MANA=null,MANACAP=null,FAT=0;
+function setMana(v,cap,fat){
+  if(v!=null)MANA=v; if(cap!=null)MANACAP=cap; if(fat!=null)FAT=fat;
+  const c=$('mana');if(c&&MANA!=null)c.textContent='\u2726 '+(Math.round(MANA*10)/10)+'/'+(Math.round(MANACAP)||'?');
+  if($('magicwrap')&&!$('magicwrap').classList.contains('hidden'))renderMana();
+}
 let PBMAXHP=18;
 function applyVB(){const w=BVB[2]/Z,h=BVB[3]/Z;
   $('mapsvg').setAttribute('viewBox',`${(CX-w/2).toFixed(1)} ${(CY-h/2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`);
@@ -458,7 +533,7 @@ async function go(){
   (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
   (r.address||[]).forEach(a=>{const el=npcMsg(a.npc,a.text,'— тебе');el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
   MAP.loc=r.loc;SCENE=r;LIVEF=[];BOARD=null;renderAmb();renderWays();
-  api('/api/play/scene').then(s2=>{SCENE=s2;if(s2.guild_board)BOARD={jobs:s2.guild_board,news:s2.guild_news};renderLoc(s2.location);renderWays();setHp(s2.hp,s2.max_hp);});
+  api('/api/play/scene').then(s2=>{SCENE=s2;if(s2.guild_board)BOARD={jobs:s2.guild_board,news:s2.guild_news};renderLoc(s2.location);renderWays();setHp(s2.hp,s2.max_hp);setMana(s2.mana,s2.mana_cap,s2.fatigue);});
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   renderLoc(r.location);
   if(r.stopped==='sign'){
@@ -708,7 +783,7 @@ loadMap();
 api('/api/play/scene').then(s=>{
   SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}setCoins(s.coins);
   if(s.hero&&s.hero!=='Странник')document.title=(s.city||'AI-DnD')+' · '+s.hero;
-  if(s.max_hp)PBMAXHP=s.max_hp;setHp(s.hp,s.max_hp);
+  if(s.max_hp)PBMAXHP=s.max_hp;setHp(s.hp,s.max_hp);setMana(s.mana,s.mana_cap,s.fatigue);
   if(s.guild_board)BOARD={jobs:s.guild_board,news:s.guild_news};
   renderAmb();renderWays();
   if(s.city){document.title=s.city+' — AI-DnD';$('locdist').textContent=s.city;}
@@ -1032,6 +1107,110 @@ function showDeath(d){
   $('deathcause').textContent=(d&&d.cause)||'';
   $('deathdays').textContent='Прожито дней: '+((d&&d.days)||0);
   $('deathwrap').classList.remove('hidden');
+}
+// ── магия (М-5): собрать круг кликами, замкнуть; гримуар и обучение ──────────
+let MAG={meta:{},known:new Set(),circle:[],laws:[]};
+function openMagic(){
+  $('magicwrap').classList.remove('hidden');
+  Promise.all([api('/api/play/glyphs'),api('/api/play/grimoire'),api('/api/play/teachers')])
+    .then(([g,gr,t])=>{
+      MAG.meta={};(g.elements||[]).concat(g.glyphs||[]).forEach(x=>MAG.meta[x.id]=x);
+      MAG.known=new Set(g.known||[]);
+      setMana(g.mana,g.mana_cap,g.fatigue);
+      renderPalette(g);renderGrimoire(gr.laws||[]);renderTeachers(t.teachers||[]);
+      renderCircle();renderMana();renderTarget();
+    });
+}
+function closeMagic(){$('magicwrap').classList.add('hidden');}
+function renderMana(){
+  const pct=MANACAP?Math.max(0,Math.min(100,100*MANA/MANACAP)):0;
+  $('magfill').style.width=pct+'%';
+  $('magmana').textContent='мана '+(Math.round(MANA*10)/10)+' / '+(Math.round(MANACAP)||'?')+' (реген от Инт+Мдр)';
+  const f=$('magfat');if(FAT>0){f.style.display='';f.textContent='усталость: −'+FAT+' ко всем характеристикам (отдохни — отойдёт)';}else f.style.display='none';
+}
+function renderPalette(g){
+  const tile=x=>`<div class="gtile ${x.axis==='element'?'elem':''} ${x.known?'':'locked'}" `
+    +`title="${esc(x.flavor||x.axis)}" onclick="${x.known?`addGlyph('${x.id}')`:''}">`
+    +`${esc(x.ru)}${x.known?'':' 🔒'}</div>`;
+  $('magelems').innerHTML=(g.elements||[]).map(tile).join('');
+  $('magglyphs').innerHTML=(g.glyphs||[]).map(tile).join('');
+}
+function addGlyph(id){MAG.circle.push(id);renderCircle();}
+function clearCircle(){MAG.circle=[];renderCircle();}
+function removeChip(i){MAG.circle.splice(i,1);renderCircle();}
+function classifyLocal(c){
+  const m=id=>MAG.meta[id]||{};
+  const el=c.filter(x=>m(x).axis==='element'),forms=c.filter(x=>m(x).axis==='form');
+  const verbs=c.filter(x=>m(x).axis==='verb');
+  if(!el.length&&!verbs.length)return{k:'empty',t:'нужна стихия или глагол'};
+  if(forms.length>=2)return{k:'wild',t:'две формы — круг рвётся'};
+  const es=new Set(el);let opp=null;
+  el.forEach(x=>{const o=m(x).opposes;if(o&&es.has(o))opp=x;});
+  if(opp)return{k:'wild',t:'противоположные стихии — вразнос'};
+  if(verbs.includes('исцелить')&&el.some(x=>x!=='свет'))return{k:'wild',t:'исцеление с губящей стихией — вразнос'};
+  return{k:'clean',t:'чистый круг'};
+}
+function renderCircle(){
+  const box=$('magcircle');
+  if(!MAG.circle.length){box.innerHTML='<span class="ph">кликай глифы ниже — собери круг</span>';}
+  else box.innerHTML=MAG.circle.map((id,i)=>`<span class="cchip" onclick="removeChip(${i})">${esc((MAG.meta[id]||{}).ru||id)} ✕</span>`).join('');
+  const cl=classifyLocal(MAG.circle);
+  const h=$('maghint');h.textContent=MAG.circle.length?cl.t:'';h.className='hint '+(MAG.circle.length?cl.k:'');
+  $('magcast').disabled=!MAG.circle.length||cl.k==='empty';
+}
+function renderTarget(){
+  const inCombat=CB&&!$('combat').classList.contains('hidden');
+  const wrap=$('magtargetwrap'),sel=$('magtarget');
+  if(inCombat){
+    const foes=CB.units.filter(u=>u.side==='foes'&&u.alive&&!u.fled);
+    if(foes.length){wrap.style.display='';sel.innerHTML=foes.map(u=>`<option value="${u.id}">${esc(u.name)} [${u.hp}/${u.max_hp}]</option>`).join('');return;}
+  }
+  wrap.style.display='none';
+}
+async function doCast(){
+  if(!MAG.circle.length)return;
+  const body={glyphs:MAG.circle.slice()};
+  const inCombat=CB&&!$('combat').classList.contains('hidden');
+  if(inCombat&&$('magtargetwrap').style.display!=='none')body.target=$('magtarget').value;
+  $('magcast').disabled=true;
+  const r=await api('/api/play/cast',body);
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  if(r.dice)showDice(r.dice);
+  if(r.mana!=null)setMana(r.mana,r.mana_cap,r.fatigue);
+  if(r.hp!=null)setHp(r.hp);
+  if(r.gt!=null){GT=r.gt;setClock();}
+  if(r.combat){CB=r.combat;renderCombat();renderTarget();}
+  if(r.refresh)loadMap();
+  MAG.circle=[];renderCircle();
+  api('/api/play/grimoire').then(gr=>renderGrimoire(gr.laws||[]));
+}
+function showDice(d){try{const t=$('dtxt');if(t)t.textContent=(d.label||'бросок')+': '+d.roll+'+'+d.mod+'='+d.total+' / Сл '+d.dc+(d.ok?' ✓':' ✗');}catch(e){}}
+function renderGrimoire(laws){
+  MAG.laws=laws;$('magrimn').textContent=laws.length?('('+laws.length+')'):'';
+  if(!laws.length){$('magrim').innerHTML='<span class="hint">пока пусто — сотвори чистый круг, и закон впишется сюда</span>';return;}
+  $('magrim').innerHTML=laws.map((l,i)=>`<div class="lawrow" onclick="loadLaw(${i})"><b>${esc(l.name)}</b>`
+    +`${l.flavor?' — '+esc(l.flavor):''}<span class="cmp">${esc((l.comp||[]).join(' + '))} · ×${l.casts}</span></div>`).join('');
+}
+function loadLaw(i){const l=MAG.laws[i];if(!l)return;MAG.circle=(l.comp||[]).slice();renderCircle();}
+function renderTeachers(ts){
+  const wrap=$('magteachwrap');
+  const rows=[];
+  (ts||[]).forEach(t=>{(t.teaches||[]).forEach(gid=>{
+    const meta=MAG.meta[gid]||{};const w=meta.weight||1;
+    rows.push(`<div class="teachrow" onclick="learnGlyph('${gid}','${t.id}')">`
+      +`<b style="color:var(--gold)">${esc(meta.ru||gid)}</b> <span class="hint">у ${esc(t.name)} (${esc(t.role)})</span>`
+      +`<span class="price">${6+5*w} зм</span></div>`);
+  });});
+  if(!rows.length){wrap.style.display='none';return;}
+  wrap.style.display='';$('magteach').innerHTML=rows.join('');
+}
+async function learnGlyph(gid,teacher){
+  const r=await api('/api/play/learn',{glyph:gid,teacher});
+  if(r.error){push('sys','<span style="color:var(--red)">'+esc(r.error)+'</span>');return;}
+  push('narr',(r.line?esc(r.line)+' ':'')+'Ты выучил глиф «'+esc(r.ru)+'».');
+  if(r.coins!=null)setCoins(r.coins);
+  if(r.gt!=null){GT=r.gt;setClock();}
+  openMagic();  // перерисовать палитру/наставника с новым знанием
 }
 // возобновить бой после перезагрузки страницы
 api('/api/play/combat').then(r=>{if(r.active)openCombat(r.combat,{name:r.lair.name,sub:r.lair.env+' · CR '+r.lair.cr});});

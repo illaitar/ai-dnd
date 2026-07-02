@@ -7,10 +7,12 @@ from __future__ import annotations
 from .engine import Encounter
 
 
-def resolve(party: list, foes: list, seed: str) -> dict:
-    enc = Encounter(party, foes, seed)
+def resolve(party: list, foes: list, seed: str, obstacles=None, waves=None) -> dict:
+    enc = Encounter(party, foes, seed, obstacles=obstacles, waves=waves)
     guard = 0
     while enc.status() == "active" and guard < 600:
+        if enc.foes_cleared() and enc.next_wave():         # текущий накат зачищен — следующий
+            continue
         c = enc.current()
         if c is None:
             break

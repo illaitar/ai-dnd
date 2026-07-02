@@ -23,10 +23,12 @@ def roll_dice(spec: str, rng: Random) -> int:
 
 
 class Encounter:
-    def __init__(self, party: list, foes: list, seed: str, w: int = 12, h: int = 9):
+    def __init__(self, party: list, foes: list, seed: str, w: int = 12, h: int = 9,
+                 obstacles: set | None = None, waves: list | None = None):
         self.rng = Random(f"enc|{seed}")
         self.w, self.h = w, h
-        self.obstacles = self._gen_obstacles()
+        self.obstacles = obstacles if obstacles is not None else self._gen_obstacles()
+        self.pending_waves = list(waves or [])             # накаты 2..n (первый — уже в foes)
         self.units: dict[str, Combatant] = {}
         for i, c in enumerate(party):
             c.side = "party"
@@ -43,6 +45,23 @@ class Encounter:
         self.moved: int = 0                                # клетки, потраченные в текущем ходу
         self.acted: bool = False
         self._log(f"Инициатива: {', '.join(self.units[i].name for i in self.order)}.")
+
+    def foes_cleared(self) -> bool:
+        return not any(u.side == "foes" and not u.down() for u in self.units.values())
+
+    def next_wave(self) -> bool:
+        """Если текущие враги повержены, а накаты остались — выпустить следующий у дальней стены."""
+        if not self.pending_waves or not self.foes_cleared():
+            return False
+        wave = self.pending_waves.pop(0)
+        base = len(self.units)
+        for i, c in enumerate(wave):
+            c.side = "foes"
+            c.id = f"{c.id}:w{len(self.pending_waves)}:{i}"    # уникальный id в накате
+            self._spawn(c, left=False, slot=base + i)
+            self.order.append(c.id)
+        self._log(f"Из темноты накатывает подмога врага: {', '.join(c.name for c in wave)}.")
+        return True
 
     # ------------------------------------------------------------ сетап --- #
     def _gen_obstacles(self) -> set:

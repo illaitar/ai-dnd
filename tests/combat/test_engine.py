@@ -109,3 +109,25 @@ def test_ranged_disadvantage_when_adjacent():
     far = sum(hits(f"far{i}", False) for i in range(60))
     near = sum(hits(f"near{i}", True) for i in range(60))
     assert near < far                                    # помеха у стрельбы в упор снижает попадания
+
+
+def test_dungeon_obstacles_traversable():
+    from aidnd.combat import dungeon
+    obs = dungeon.obstacles(12, 9, "Swamp", "s1")
+    assert 4 <= len(obs) <= 30                              # структура есть, но не сплошная стена
+    assert all(y != 4 for _x, y in obs)                    # сквозной коридор чист
+    assert all(2 <= x <= 9 for x, _y in obs)               # края спавна свободны
+    assert obs == dungeon.obstacles(12, 9, "Swamp", "s1")  # детерминизм
+
+
+def test_dungeon_waves_and_spawn():
+    from aidnd.combat import dungeon, Encounter
+    wv = dungeon.waves(1.5, "Forest", "s2", n=2)
+    assert 1 <= len(wv) <= 3 and all(wv)
+    e = Encounter([_pc()], wv[0], seed="w", waves=wv[1:])
+    for u in list(e.units.values()):                       # перебить первую волну
+        if u.side == "foes":
+            u.alive = False
+    assert e.foes_cleared()
+    assert e.next_wave() is True                            # накат подмоги
+    assert not e.foes_cleared()                             # снова есть живые враги

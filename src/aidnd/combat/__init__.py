@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
+from . import dungeon
 from .auto import resolve
 from .encounters import lair_name, pick_encounter
 from .engine import Encounter, roll_dice
 from .model import Combatant, bestiary, from_monster, from_npc, from_pc
 
 __all__ = ["Combatant", "Encounter", "bestiary", "from_monster", "from_npc", "from_pc",
-           "pick_encounter", "lair_name", "resolve", "roll_dice"]
+           "pick_encounter", "lair_name", "resolve", "roll_dice", "dungeon"]

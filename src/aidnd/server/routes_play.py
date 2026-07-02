@@ -17,7 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .. import config
 from ..citygraph import CityParams, generate, visual
-from ..combat import Encounter, from_monster, from_npc, from_pc, lair_name, pick_encounter, resolve
+from ..combat import (Encounter, dungeon, from_monster, from_npc, from_pc, lair_name,
+                      pick_encounter, resolve)
 from ..citygraph.model import NodeKind
 from ..items import Capability, ItemCtx, LLMSmith, StubSmith
 from ..items.craft import ROLE_RECIPES
@@ -104,6 +105,7 @@ PB = {
     "pc_max_hp": 18, "lairs": 5, "lair_cr_near": 0.8, "lair_cr_far": 3.0,
     "lair_travel_min": 25, "defeat_coin_cut": 2, "loot_coin_per_cr": 6, "loot_item_chance": 0.6,
     "combat_round_s": 5,                                  # 1 раунд боя = 5 секунд игрового времени
+    "dungeon_waves": 2,                                   # логово = столько накатов врага
     "guild_float": 120, "guild_reward_per_cr": 8, "guild_mark_fine": 15,
     # NPC-зачистки: шанс утреннего похода смелой пары
     "npc_delve_chance": 0.6, "npc_brave_min": 0.55,
@@ -2661,10 +2663,12 @@ async def delve(request: Request):
         if gate and gate.get("error"):
             return {"error": gate["error"], "dice": gate.get("dice")}
     _gt_add(PB["lair_travel_min"])
-    foes = pick_encounter(l["cr"] + 0.01, l["env"], seed=f"lair|{lid.split(':')[1]}")
-    enc = Encounter([_pc_combatant()], foes, seed=f"fight|{lid}|{_mt()}")
+    lseed = lid.split(":")[1]
+    wv = dungeon.waves(l["cr"] + 0.01, l["env"], seed=lseed, n=PB["dungeon_waves"])
+    obs = dungeon.obstacles(12, 9, l["env"], seed=lseed)   # процедурная раскладка логова
+    enc = Encounter([_pc_combatant()], wv[0], seed=f"fight|{lid}|{_mt()}", obstacles=obs, waves=wv[1:])
     _S["combat"] = {"enc": enc, "lair": l,
-                    "head": {"name": l["name"], "sub": f"{l['env']} · CR {l['cr']}"}}
+                    "head": {"name": l["name"], "sub": f"{l['env']} · CR {l['cr']} · накатов {len(wv)}"}}
     guard = 0
     while enc.status() == "active" and guard < 50:          # докрутить ИИ до хода игрока
         c0 = enc.current()
@@ -2855,7 +2859,11 @@ async def combat_act(request: Request):
         if a in ("attack", "dodge", "flee"):
             enc.end_turn()
     guard = 0
-    while enc.status() == "active" and guard < 50:          # крутим ИИ до хода игрока
+    while guard < 80:                                       # крутим ИИ до хода игрока; накаты по пути
+        if enc.foes_cleared() and enc.next_wave():          # текущий накат зачищен — следующий
+            continue
+        if enc.status() != "active":
+            break
         c = enc.current()
         if c is None or c.id == "pc":
             break
@@ -2888,8 +2896,10 @@ def _npc_delves() -> list:
     job = jobs[0]
     l = next(x for x in _lairs() if x["id"] == job["lair"])
     party = [_combatant_from_npc(pid, p) for pid, p in duo]
-    foes = pick_encounter(l["cr"] + 0.01, l["env"], seed=f"lair|{l['id'].split(':')[1]}")
-    r = resolve(party, foes, seed=f"npcdelve|{day}")
+    lseed = l["id"].split(":")[1]
+    wv = dungeon.waves(l["cr"] + 0.01, l["env"], seed=lseed, n=PB["dungeon_waves"])
+    obs = dungeon.obstacles(12, 9, l["env"], seed=lseed)
+    r = resolve(party, wv[0], seed=f"npcdelve|{day}", obstacles=obs, waves=wv[1:])
     names = " и ".join(p.name for _pid, p in duo)
     if r["status"] == "won":
         _store().flag_set(_wid(), f"cleared|{l['id']}")

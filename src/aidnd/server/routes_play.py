@@ -191,10 +191,21 @@ def _pc_hp(delta: int = 0, set_to: int | None = None) -> int:
     return v
 
 
+def _pc_name() -> str:
+    v = _S.get("pc_name")
+    if v is None:
+        v = _S["pc_name"] = ((_store().get_pc(_wid()) or {}).get("name") or "Странник").strip() or "Странник"
+    return v
+
+
+def _pc_set_name(name: str) -> None:
+    _S["pc_name"] = (str(name or "").strip()[:24] or "Странник")
+
+
 def _pc_save() -> None:
     st = _pc()
     _store().save_pc(_wid(), {
-        "gt": _gt(), "hp": _pc_hp(), "relationships": st.relationships,
+        "gt": _gt(), "hp": _pc_hp(), "name": _pc_name(), "relationships": st.relationships,
         "memory": [{"text": m.text, "t": m.t, "importance": m.importance,
                     "last_access": m.last_access, "kind": m.kind, "about": m.about}
                    for m in st.memory.items[-400:]]})      # хвост — журнал не разрастается бесконечно
@@ -999,8 +1010,19 @@ def _voice(p, rel, kind, player_text=None) -> str:
 def scene():
     city, people, crof, cr2b, loc = _play()
     out = {**_scene_dict(city, people, crof, cr2b, loc), "gt": _gt(), "coins": _pc_coins(),
-           "hp": _pc_hp(), "max_hp": PB["pc_max_hp"], "city": _city_name()}
+           "hp": _pc_hp(), "max_hp": PB["pc_max_hp"], "city": _city_name(), "hero": _pc_name()}
     return out                                             # доска/ранг гильдии — из _scene_dict
+
+
+@router.post("/api/play/hero")
+async def set_hero(request: Request):
+    """Задать имя героя (с лендинга) — один раз для нового мира; не перетирать уже названного."""
+    _play()
+    name = (await request.json()).get("name")
+    if name and _pc_name() == "Странник":
+        _pc_set_name(name)
+        _pc_save()
+    return {"hero": _pc_name()}
 
 
 @router.get("/api/play/map")
@@ -2336,7 +2358,9 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     w = MWorld()
     w.link(place, "улица")
     w.ground[place] = _live_affordances(bid)
-    names, roles = {PLAYER: "чужак"}, {PLAYER: "недавно вошедший незнакомец"}
+    hero = _pc_name()
+    names = {PLAYER: hero if hero != "Странник" else "чужак"}   # NPC зовут по имени, если знают
+    roles = {PLAYER: "недавно вошедший незнакомец"}
     rng = random.Random(f"live|{loc}")
     npc_map: dict = {}                                     # pid → {имя вещи: item_id} (кражи реальны)
     here_all = _here(loc, crof)
@@ -2890,7 +2914,9 @@ def _pc_combatant():
             for r in _store().inventory(_wid(), "pc")]
     weapons = [it for _i, it in rows if it and it["kind"] == "weapon"]
     weapon = max(weapons, key=lambda w: w["worth"], default=None)
-    return from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon=weapon)
+    combatant = from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon=weapon)
+    combatant.name = _pc_name()                            # имя героя (с лендинга), не «Странник»
+    return combatant
 
 
 _TIER_QUALITY = {"poor": "crude", "modest": "plain", "comfortable": "fine", "wealthy": "exquisite"}

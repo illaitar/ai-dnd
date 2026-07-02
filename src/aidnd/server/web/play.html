@@ -702,8 +702,11 @@ $('send').onclick=submit;
 $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
 
 loadMap();
+(async()=>{const hn=(localStorage.getItem('hero_name')||'').trim();
+  if(hn)await api('/api/play/hero',{name:hn});})();   // имя героя с лендинга — раз на новый мир
 api('/api/play/scene').then(s=>{
   SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}setCoins(s.coins);
+  if(s.hero&&s.hero!=='Странник')document.title=(s.city||'AI-DnD')+' · '+s.hero;
   if(s.max_hp)PBMAXHP=s.max_hp;setHp(s.hp,s.max_hp);
   if(s.guild_board)BOARD={jobs:s.guild_board,news:s.guild_news};
   renderAmb();renderWays();

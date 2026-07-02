@@ -34,6 +34,8 @@ TOOLSPEC = """ДОСТУПНЫЕ ИНСТРУМЕНТЫ (верни послед
   attack {"target": "<имя>"}                    — напасть (ранить/убить)
   give   {"item": "<предмет>", "to": "<имя>"}   — отдать свой предмет
   say    {"to": "<имя>", "text": "<реплика>"}   — сказать вслух РАДИ ЦЕЛИ (узнать/сторговаться/запугать)
+  know   {"query": "<что вспоминаешь о городе/людях>"} — вспомнить факт мира (где что, кто есть кто);
+                                                 ответ ляжет в память к следующему ходу
   feel   {"emotion": "anger|fear|joy|distress", "value": 0.0-1.0} — изменить свою эмоцию
   need   {"need": "hunger|fatigue|social|purpose|wealth|comfort|novelty", "value": 0.0-1.0} — свою нужду
   note   {"text": "<мысль/намерение>"}          — записать замысел в память (увидишь в след. ходы)
@@ -363,6 +365,15 @@ def apply_actions(actions, state, world, clock: int) -> list:
                 log.append(f"💬{tb.id}:«{txt[:40]}»")
             else:
                 log.append(f"💬:«{txt[:40]}»")
+        elif tool == "know":
+            q = str(a.get("query") or "")[:80]
+            fn = getattr(world, "lookup", None)             # резолвер знания мира вешает хозяин мира
+            if fn and q:
+                info = str(fn(q))[:220]
+                state.memory.add(f"вспомнил: {info}", clock, 0.45, kind="fact")
+                log.append(f"🧠{q[:32]}")
+            else:
+                log.append("know✗")
         elif tool == "use":
             it = _find_item(world.ground.get(me.place, []) + me.carrying, a.get("item"))
             if it and it.satisfies and it.satisfies in state.needs:

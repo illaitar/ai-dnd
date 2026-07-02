@@ -215,7 +215,7 @@ function push(cls,html){const d=document.createElement('div');d.className='msg '
   thread().appendChild(d);thread().scrollTop=thread().scrollHeight;return d;}
 
 let MAP=null,BVB=[0,0,100,100],Z=1,CX=50,CY=50,PXY={x:50,y:50},PANNED=false;
-let CRXY={},PEND=null,SELEL=null,MINPERSTEP=5,GT=19*60+40;   // игровые минуты; +5 за каждый шаг пути
+let CRXY={},PEND=null,SELEL=null,MINPERSTEP=1,GT=19*60+40;   // игровые минуты; +1 за шаг (густой граф)
 const STEP_MS=240;                                          // реальная длительность одного шага анимации
 function fmtClock(t){t=((t%1440)+1440)%1440;const h=Math.floor(t/60),m=t%60;
   const per=h<5?'ночь':h<11?'утро':h<17?'день':h<22?'вечер':'ночь';

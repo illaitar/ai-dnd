@@ -131,6 +131,11 @@ class Encounter:
         c = self.current()
         if c:
             c.dodging = False if self.acted or self.moved else c.dodging
+            for k in list(c.status):                       # статусы тают на исходе СВОЕГО хода
+                if c.status[k] > 0:
+                    c.status[k] -= 1
+                if c.status[k] <= 0:
+                    del c.status[k]
         self.ti += 1
         self.moved, self.acted = 0, False
         if self.ti % len(self.order) == 0:
@@ -178,6 +183,8 @@ class Encounter:
         elif c.dmg_type in t.resist:
             dmg //= 2
         t.hp -= dmg
+        if dmg > 0 and t.status.pop("asleep", 0):          # удар будит спящего
+            self._log(f"{t.name} просыпается от удара.")
         crit = " (крит!)" if roll == 20 else ""
         if t.hp <= 0:
             t.alive = False
@@ -205,9 +212,22 @@ class Encounter:
 
     # ------------------------------------------------------------ ИИ ------ #
     def ai_turn(self, c: Combatant) -> None:
-        """Простая тактика: мораль → бегство; иначе к ближайшему врагу и бить."""
+        """Простая тактика: мораль → бегство; иначе к ближайшему врагу и бить.
+        Статусы: связан/спит — ход пропущен; напуган — держится подальше, не атакует."""
         foes = [u for u in self.units.values() if u.side != c.side and not u.down()]
         if not foes:
+            self.end_turn()
+            return
+        if c.incapacitated():
+            self._log(f"{c.name} {'связан' if c.status.get('bound') else 'спит'} — ход потерян.")
+            self.end_turn()
+            return
+        if c.status.get("afraid", 0) > 0:                   # напуган: пятится к краю, не бьёт
+            nearest = min(foes, key=lambda u: self.dist(c, u))
+            spot = self._kite(c, nearest)
+            if spot:
+                c.x, c.y = spot
+            self._log(f"{c.name} в ужасе пятится прочь.")
             self.end_turn()
             return
         if c.kind == "monster" and c.cr < 2 and c.hp < c.max_hp * MORALE_HP \

@@ -82,14 +82,20 @@ class Combatant:
     alive: bool = True
     dodging: bool = False
     fled: bool = False
+    status: dict = field(default_factory=dict)   # {bound|asleep|afraid: раундов_осталось}
 
     def down(self) -> bool:
         return not self.alive or self.fled
+
+    def incapacitated(self) -> bool:
+        """Связан или спит — хода нет (afraid ходит, но избегает боя)."""
+        return self.status.get("bound", 0) > 0 or self.status.get("asleep", 0) > 0
 
     def view(self) -> dict:
         return {"id": self.id, "name": self.name, "side": self.side, "x": self.x, "y": self.y,
                 "hp": self.hp, "max_hp": self.max_hp, "ac": self.ac, "speed": self.speed,
                 "alive": self.alive, "fled": self.fled, "dodging": self.dodging,
+                "status": {k: v for k, v in self.status.items() if v > 0},
                 "kind": self.kind, "ref": self.ref, "reach": self.reach, "range": self.range}
 
 

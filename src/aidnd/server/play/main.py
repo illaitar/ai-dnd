@@ -42,7 +42,7 @@ from ...play import populate
 from ...play.population import Townsperson
 from ...worldgen import WorldStore
 
-from .core import (PB, PLAYER, _COLORS, _DM_SYS, _PHASE_RU, _PORT_DIR, _S, _binfo, _city_name, _display, _emo, _fat_add, _fatigue, _grimoire_get, _grimoire_list, _grimoire_put, _gt, _gt_add, _here, _in_room, _inscriber, _mana, _mana_cap, _mana_grow, _mana_spend, _mark_seen, _met, _model, _mt, _npc_save, _pc, _pc_cap_eff, _pc_hp, _pc_name, _pc_remember, _pc_save, _pc_set_name, _phase, _pool, _portrait_url, _role_at, _role_for_building, _seen, _spurns, _store, _tokens_ru, _topics_for, _wanted, _wanted_add, _wanted_clear, _wid, _witness_crime, router, _PC_CAP)
+from .core import (PB, PLAYER, TEACHER_ROLES, _COLORS, _DM_SYS, _PHASE_RU, _PORT_DIR, _S, _binfo, _city_name, _display, _emo, _fat_add, _fatigue, _glyph_learn, _glyphs_known, _grimoire_get, _grimoire_list, _grimoire_put, _gt, _gt_add, _here, _in_room, _inscriber, _mana, _mana_cap, _mana_grow, _mana_spend, _mark_seen, _met, _model, _mt, _npc_save, _pc, _pc_cap_eff, _pc_hp, _pc_name, _pc_remember, _pc_save, _pc_set_name, _phase, _pool, _portrait_url, _role_at, _role_for_building, _seen, _spurns, _store, _tokens_ru, _topics_for, _wanted, _wanted_add, _wanted_clear, _wid, _witness_crime, router, _PC_CAP)
 from .items import (_CRAFT, _cont_holder, _do_craft, _forge, _item_card, _known, _materialize_npc, _merchant_restock, _npc_cap, _npc_sees, _pc_coins, _pc_key_for, _seed_item_pool)
 from .contracts import (_board_ads, _board_npc_fulfill, _board_publish, _contract_offer, _contract_on_give, _contract_on_move, _contract_on_talk, _ct_cur, _ct_steps, _step_desc)
 from .combat import (_combat_wrapup, _combatant_from_npc, _guild_bid, _guild_board, _guild_gate, _guild_status, _lairs, _mint_badge, _npc_delves, _pc_badge, _pc_combatant)
@@ -1809,8 +1809,25 @@ async def watch_flee(request: Request):
             "narr": [f"{guard.name} перехватывает тебя. Дерись или сдавайся."]}
 
 
+def _spell_hit(t, dmg: dict, out: dict, tag: str) -> None:
+    """Нанести урон-по-типу одному бойцу (резисты/иммунитеты бестиария), разбудить спящего."""
+    n = roll_dice(dmg["dice"], random.Random(f"spelldmg|{_mt()}|{tag}"))
+    if dmg["type"] in t.immune:
+        n = 0
+    elif dmg["type"] in t.resist:
+        n //= 2
+    t.hp -= n
+    if n > 0 and t.status.pop("asleep", 0):
+        out["narr"].append(f"{t.name} просыпается от удара.")
+    if t.hp <= 0:
+        t.alive = False
+    fell = " — падает!" if not t.alive else f" [{t.hp}/{t.max_hp}]"
+    out["narr"].append(f"{dmg['dice']} → {t.name}: {n} урона{fell}")
+
+
 def _apply_spell(spec: dict, target, out: dict, people, crof, loc) -> None:
-    """Механическое исполнение чистого круга (М-2: урон-цель/исцеление/явить; статусы+AoE — М-4)."""
+    """Механическое исполнение чистого круга: исцеление/явить/отпереть вне боя; урон (одиночный/AoE),
+    статусы (bound/asleep/afraid) — в бою по грид-клеткам с резистами бестиария."""
     cb = _S.get("combat")
     if spec.get("heal"):
         before = _pc_hp()
@@ -1822,26 +1839,47 @@ def _apply_spell(spec: dict, target, out: dict, people, crof, loc) -> None:
         out["refresh"] = True
     if spec.get("unlock"):
         out["narr"].append("Незримый ключ поворачивается — что заперто, поддаётся.")
+
+    enc = cb["enc"] if cb else None
+    t = enc.units.get(target) if (enc and target) else None
+    area = spec.get("area") or {}
     dmg = spec.get("damage")
-    if dmg:
-        if cb and target and cb["enc"].units.get(target):
-            t = cb["enc"].units[target]
-            if t.side == "foes" and not t.down():
-                n = roll_dice(dmg["dice"], random.Random(f"spelldmg|{_mt()}|{target}"))
-                if dmg["type"] in t.immune:
-                    n = 0
-                elif dmg["type"] in t.resist:
-                    n //= 2
-                t.hp -= n
-                if t.hp <= 0:
-                    t.alive = False
-                fell = " — падает!" if not t.alive else f" [{t.hp}/{t.max_hp}]"
-                out["narr"].append(f"{spec['elements'][0].capitalize()} {dmg['dice']} → {t.name}: {n} урона{fell}")
-                out["combat_refresh"] = True
+    if dmg and enc:
+        foes = [u for u in enc.units.values() if u.side == "foes" and not u.down()]
+        if area.get("shape") in ("burst", "cloud") and t:   # AoE вокруг клетки цели
+            r = area.get("radius", 1)
+            hit = [u for u in foes if max(abs(u.x - t.x), abs(u.y - t.y)) <= r]
+            out["narr"].append(f"{spec['elements'][0].capitalize()} накрывает {len(hit)} цел(и):")
+            for u in hit:
+                _spell_hit(u, dmg, out, u.id)
+            out["combat_refresh"] = True
+        elif area.get("shape") == "cone":                   # конус от героя к ближайшим врагам
+            pc_u = enc.units.get("pc")
+            length = area.get("length", 2)
+            hit = [u for u in foes if pc_u and enc.dist(pc_u, u) <= length] if pc_u else foes[:3]
+            out["narr"].append(f"{spec['elements'][0].capitalize()} веером бьёт {len(hit)} цел(и):")
+            for u in hit:
+                _spell_hit(u, dmg, out, u.id)
+            out["combat_refresh"] = True
+        elif t and t.side == "foes" and not t.down():        # одиночный снаряд
+            out["narr"].append(f"{spec['elements'][0].capitalize()}:")
+            _spell_hit(t, dmg, out, target)
+            out["combat_refresh"] = True
         else:
-            out["narr"].append("Заряд собран, но метать не в кого — врагов рядом нет.")
-    if spec.get("status") and not (cb and target):
-        out["narr"].append("Путы сплетены, но некого вязать (нужна цель в бою).")
+            out["narr"].append("Заряд собран, но метать не в кого — цель не указана.")
+    elif dmg:
+        out["narr"].append("Заряд собран, но метать не в кого — врагов рядом нет.")
+
+    st = spec.get("status")
+    if st:
+        kind, turns = st.get("kind", "bound"), st.get("turns", 1)
+        if enc and t and t.side == "foes" and not t.down():
+            t.status[kind] = max(t.status.get(kind, 0), turns)
+            word = {"bound": "спутан", "asleep": "усыплён", "afraid": "объят ужасом"}.get(kind, kind)
+            out["narr"].append(f"{t.name} {word} ({turns} р.).")
+            out["combat_refresh"] = True
+        else:
+            out["narr"].append("Путы сплетены, но некого вязать (нужна цель в бою).")
 
 
 _ELEM_DMG = {"огонь": "fire", "лёд": "cold", "яд": "poison",
@@ -1913,14 +1951,38 @@ def _inscribe_law(comp, spec: dict):
     return entry, True
 
 
+def _taboo(people, crof, loc, out: dict) -> int:
+    """Открытая боевая/дикая магия среди горожан = ведьмовство → розыск (М-4, лёгкая версия;
+    отдельный орден/инквизиция — второй срез). В бою (логово вне города) свидетелей нет."""
+    if _S.get("combat"):
+        return 0
+    wit = [w for w in _here(loc, crof) if people[w].role not in ("маг", "писец")]
+    if not wit:
+        return 0
+    for w in wit:
+        people[w].state.memory.add("видел(а): чужак колдовал прямо у всех на виду", _mt(), 0.6, about=[PLAYER])
+        _npc_save(w)
+    _wanted_add(PB["taboo_witness"] + min(2, len(wit)), "колдовал у всех на виду")
+    out["narr"].append("Люди вокруг отшатываются и крестятся — ведьмовство не забудут.")
+    return len(wit)
+
+
 @router.post("/api/play/cast")
 async def cast(request: Request):
-    """Сотворить круг из глифов (М-2: ввод составом; drag-холст — М-5). Тратит ману, растит потолок,
-    даёт усталость; чистый круг применяется, дикая магия/осечка — пока грубый откат (LLM в М-3)."""
+    """Сотворить круг из глифов (ввод составом; drag-холст — М-5). Тратит ману, растит потолок, даёт
+    усталость; чистый круг вписывается законом (М-3), дикая магия/осечка — непредсказуемый LLM-исход.
+    Гейт: только выученные глифы (М-4); боевая магия на людях = ведьмовство → розыск."""
     city, people, crof, cr2b, loc = _play()
     body = await request.json()
     comp = [str(x) for x in (body.get("glyphs") or [])]
     target = body.get("target")
+    known = set(_glyphs_known())
+    locked = [c for c in comp if c in known_ids() and c not in known]
+    if locked:
+        g = magic_load()
+        names = ", ".join(g["all"][c].get("ru", c) for c in locked)
+        return {"cast": {"kind": "locked"}, "narr": [f"Ты не владеешь глифом: {names}. Выучи у наставника."],
+                "mana": _mana(), "gt": _gt()}
     cls = classify(comp)
     out = {"narr": [], "cast": {"kind": cls["kind"]}}
     if cls["kind"] == "empty":
@@ -1942,6 +2004,7 @@ async def cast(request: Request):
     if cls["kind"] == "wild" or total < dc:               # дикая магия / осечка → непредсказуемый LLM-исход
         reason = cls["reason"] if cls["kind"] == "wild" else "рука дрогнула, круг сорвался"
         _apply_wild(comp, reason, out)
+        _taboo(people, crof, loc, out)                     # дикий выброс на людях — ведьмовство
         _pc_remember(f"круг ушёл вразнос ({', '.join(comp)})", 0.4)
         _pc_save()
         res = {**out, "mana": _mana(), "mana_cap": _mana_cap(), "hp": _pc_hp(),
@@ -1950,6 +2013,8 @@ async def cast(request: Request):
             res["combat"] = _S["combat"]["enc"].view()
         return res
     _apply_spell(spec, target, out, people, crof, loc)     # чистый круг — по спеку
+    if spec.get("damage") or spec.get("status"):           # боевой круг на людях — ведьмовство
+        _taboo(people, crof, loc, out)
     law, fresh = _inscribe_law(comp, spec)                 # вписать/подтвердить закон в гримуаре
     law["casts"] = law.get("casts", 0) + 1
     _grimoire_put(law["hash"], law)
@@ -1973,12 +2038,79 @@ async def cast(request: Request):
 
 @router.get("/api/play/glyphs")
 def glyphs_list():
-    """Словарь известных игроку глифов (М-2: пока весь базис; гейт-обучение — М-4)."""
+    """Палитра магии: весь базис + пометка known (владеет игрок) vs заперто (учить у мага/писца)."""
     _play()
     g = magic_load()
-    return {"elements": list(g["elements"].values()), "glyphs": list(g["glyphs"].values()),
-            "known": sorted(known_ids()), "mana": _mana(), "mana_cap": _mana_cap(),
-            "fatigue": _fatigue()}
+    known = set(_glyphs_known())
+    elems = [{**e, "known": e["id"] in known} for e in g["elements"].values()]
+    glyphs = [{**s, "known": s["id"] in known} for s in g["glyphs"].values()]
+    return {"elements": elems, "glyphs": glyphs, "known": sorted(known),
+            "mana": _mana(), "mana_cap": _mana_cap(), "fatigue": _fatigue()}
+
+
+def _teachable(role: str) -> set:
+    """Что учит наставник: маг — стихии/формы/моды; писец — глаголы/моды (не огонь)."""
+    g = magic_load()
+    axes = {"маг": {"element", "form", "mod"}}.get(role, {"verb", "mod"})
+    return {gid for gid, e in g["all"].items() if e.get("axis") in axes}
+
+
+@router.post("/api/play/learn")
+async def learn_glyph(request: Request):
+    """Выучить глиф у наставника (маг в башне / писец). Гейт: симпатия ≥ порога; цена монетами по весу,
+    при высокой симпатии — даром. Наставник должен быть здесь и уметь это преподать."""
+    _city, people, crof, _cr2b, loc = _play()
+    b = await request.json()
+    gid, teacher = str(b.get("glyph") or ""), b.get("teacher")
+    g = magic_load()
+    if gid not in g["all"]:
+        return {"error": "нет такого глифа"}
+    if teacher not in people or teacher not in _here(loc, crof):
+        return {"error": "наставника нет рядом"}
+    p = people[teacher]
+    if p.role not in TEACHER_ROLES:
+        return {"error": f"{p.name} не учит магии"}
+    if gid not in _teachable(p.role):
+        kind = "стихиям и формам — ищи мага в башне" if p.role != "маг" else "глаголам письма — это к писцу"
+        return {"error": f"{p.name} не обучает этому ({kind})"}
+    if gid in _glyphs_known():
+        return {"error": "ты уже владеешь этим глифом"}
+    rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
+    aff = rel.get("affinity", 0.0)
+    if aff < PB["learn_aff_min"]:
+        return {"error": f"{p.name} не станет тебя учить — сперва заслужи доверие"}
+    weight = g["all"][gid].get("weight", 1)
+    price = 0 if aff >= PB["learn_aff_free"] else PB["learn_base"] + PB["learn_per_weight"] * weight
+    if price > _store().purse_get(_wid(), "pc"):
+        return {"error": f"нужно {price} зм за урок — не хватает"}
+    if price:
+        _store().purse_add(_wid(), "pc", -price)
+        _store().purse_add(_wid(), teacher, price)
+    _glyph_learn(gid)
+    _gt_add(PB["talk_min"])
+    ru = g["all"][gid].get("ru", gid)
+    p.state.memory.add(f"обучил игрока глифу «{ru}»", _mt(), 0.4, about=[PLAYER])
+    _pc_remember(f"выучил глиф «{ru}» у {p.name}", 0.5, about=[teacher])
+    _npc_save(teacher)
+    _pc_save()
+    line = _voice(p, rel, "reply",
+                  f"(Ты обучил игрока чертить глиф «{ru}»{' за ' + str(price) + ' зм' if price else ' безвозмездно, по дружбе'}. "
+                  f"Скажи что-нибудь наставническое, по своему характеру.)")
+    return {"learned": gid, "ru": ru, "price": price, "line": line,
+            "coins": _store().purse_get(_wid(), "pc"), "known": sorted(_glyphs_known()), "gt": _gt()}
+
+
+@router.get("/api/play/teachers")
+def teachers_here():
+    """Кто на локации способен учить магии (для UI: подсветить наставника)."""
+    _city, people, crof, _cr2b, loc = _play()
+    out = []
+    for pid in _here(loc, crof):
+        p = people[pid]
+        if p.role in TEACHER_ROLES and (pid in _met() or p.work):
+            out.append({"id": pid, "name": p.name, "role": p.role,
+                        "teaches": sorted(_teachable(p.role) - set(_glyphs_known()))})
+    return {"teachers": out}
 
 
 @router.get("/api/play/grimoire")

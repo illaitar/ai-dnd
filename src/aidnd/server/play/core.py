@@ -121,6 +121,9 @@ PB = {
     "mana_start": 12.0, "mana_cap_start": 14.0, "mana_hardcap_per_int": 8,  # потолок ≤ Int×8
     "mana_regen_base": 1.0, "mana_grow_frac": 0.1, "cast_skill_dc": 10,
     "fatigue_div": 8, "fatigue_min_per_pt": 24,           # усталость: 1+спалено/8 на статы, отходит
+    # обучение глифам у мага/писца: цена = base + вес·k; ниже симпатии — не учит; высокая → даром
+    "learn_base": 6, "learn_per_weight": 5, "learn_aff_min": -0.15, "learn_aff_free": 0.5,
+    "taboo_witness": 2,                                    # атакующая магия при свидетелях → розыск
     "craft_skill_dc": 12, "craft_fail_min": 15,           # незнакомое ремесло: бросок Int / цена провала
     "guild_float": 120, "guild_reward_per_cr": 8, "guild_mark_fine": 15,
     # NPC-зачистки: шанс утреннего похода смелой пары
@@ -277,6 +280,28 @@ def _fat_add(spent: float) -> None:
     _S["fat_until"] = _gt() + pts * PB["fatigue_min_per_pt"]
 
 
+# стартовый набор глифов игрока (§М1e): хватает на огненную стрелу и лечение; остальное — учить
+_STARTER_GLYPHS = ("огонь", "свет", "стрела", "исцелить", "больше")
+
+
+def _glyphs_known() -> list:
+    """Глифы, которыми ВЛАДЕЕТ игрок (персист в pc_state); прочие надо выучить у мага."""
+    if _S.get("glyphs") is None:
+        row = _store().get_pc(_wid()) or {}
+        g = row.get("glyphs")
+        _S["glyphs"] = list(dict.fromkeys(g if g is not None else _STARTER_GLYPHS))
+    return list(_S["glyphs"])
+
+
+def _glyph_learn(gid: str) -> bool:
+    """Добавить глиф в арсенал игрока. True — впервые выучен, False — уже знал."""
+    known = _glyphs_known()
+    if gid in known:
+        return False
+    _S["glyphs"] = known + [gid]
+    return True
+
+
 def _pc_cap_eff():
     """Способности игрока С УЧЁТОМ усталости (для новых бросков/каста) — все статы просажены."""
     fat = _fatigue()
@@ -294,6 +319,7 @@ def _pc_save() -> None:
         "gt": _gt(), "hp": _pc_hp(), "name": _pc_name(), "relationships": st.relationships,
         "mana": round(_S["mana"], 2), "mana_cap": round(_S["mana_cap"], 2), "mana_gt": _S["mana_gt"],
         "fat": _S.get("fat", 0), "fat_until": _S.get("fat_until", 0),
+        "glyphs": _glyphs_known(),
         "memory": [{"text": m.text, "t": m.t, "importance": m.importance,
                     "last_access": m.last_access, "kind": m.kind, "about": m.about}
                    for m in st.memory.items[-400:]]})      # хвост — журнал не разрастается бесконечно
@@ -387,10 +413,16 @@ def _binfo(bid: str | None) -> dict:
 _TYPE_ROLE = (("таверн", "трактирщик"), ("трактир", "трактирщик"), ("постоял", "трактирщик"),
               ("оружейн", "оружейник"), ("лавк", "лавочник"), ("склад", "лавочник"), ("кузн", "кузнец"),
               ("храм", "жрец"), ("свят", "жрец"), ("часовн", "жрец"),
+              ("башн", "маг"), ("магич", "маг"), ("колдун", "маг"), ("чароде", "маг"),
+              ("аркан", "маг"), ("обсерватор", "маг"),
+              ("писц", "писец"), ("писар", "писец"), ("фолиант", "писец"), ("свиток", "писец"),
               ("целебн", "знахарка"), ("знахар", "знахарка"), ("травн", "знахарка"),
               ("мельниц", "мельник"), ("пекарн", "трактирщик"), ("мастерск", "сапожник"),
               ("кожевн", "дубильщик"), ("дубильн", "дубильщик"), ("конюшн", "горожанин"),
               ("усадьб", "горожанин"), ("гильди", "стражник"))
+
+# роли, что учат магии (§М-4): маг в башне — стихиям и глифам; писец — «глаголам» письма
+TEACHER_ROLES = ("маг", "писец", "писарь")
 
 
 def _role_for_building(bid: str) -> str:

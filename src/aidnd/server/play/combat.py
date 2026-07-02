@@ -401,7 +401,10 @@ async def combat_act(request: Request):
     b = await request.json()
     cur = enc.current()
     err = None
-    if cur and cur.id == "pc":
+    if cur and cur.id == "pc" and cur.incapacitated():      # связан/спит — ход героя потерян
+        enc._log(f"{cur.name} {'связан' if cur.status.get('bound') else 'спит'} — ход потерян.")
+        enc.end_turn()
+    elif cur and cur.id == "pc":
         a = b.get("type")
         if a == "move":
             err = enc.act_move(cur, int(b.get("x", cur.x)), int(b.get("y", cur.y)))

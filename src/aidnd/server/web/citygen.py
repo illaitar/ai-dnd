@@ -730,11 +730,41 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Ф�
                        'id': m['id'], 'x': m['c'][0], 'y': m['c'][1], 'status': m.get('status', 'open')})
 
     Rcity = min(W, H) * 0.40
+    # поля с зерном и хутора ЗА городом (визуальный слой; в граф движения не входят)
+    fields = []
+    rng_f = mulberry32((seed ^ 0x51ED270B) & 0xFFFFFFFF)
+    for c in cells:
+        if c['city'] or len(c['poly']) < 3:
+            continue
+        d0 = dist(c['site'], [CX, CY])
+        if not (Rcity * 1.02 < d0 < Rcity * 1.85):
+            continue                                       # пояс предместий вокруг стен
+        if dist_to_polyline(c['site'], river_pts) < river_w * 1.8:
+            continue                                       # поле поперёк реки — нелепо
+        if rng_f() >= 0.24 or len(fields) >= 9:
+            continue
+        fp = shrink(c['poly'], 0.78)
+        if area(fp) < 300:
+            continue
+        fa, fb = longest_edge(fp)
+        dv = norm([fb[0] - fa[0], fb[1] - fa[1]])
+        nv = [-dv[1], dv[0]]
+        cc0 = centroid(fp)
+        rr = math.sqrt(area(fp))
+        hx = cc0[0] + nv[0] * rr * 0.45 + (rng_f() - .5) * 8   # хутор у кромки поля
+        hy = cc0[1] + nv[1] * rr * 0.45 + (rng_f() - .5) * 8
+        hw, hh = 5.5 + rng_f() * 2.5, 3.6 + rng_f() * 1.6
+        house = [[hx + dv[0] * su * hw + nv[0] * sv * hh, hy + dv[1] * su * hw + nv[1] * sv * hh]
+                 for su, sv in ((1, 1), (-1, 1), (-1, -1), (1, -1))]
+        fields.append({'poly': fp, 'dir': dv, 'c': cc0, 'house': house,
+                       'hridge': [[hx - dv[0] * hw * 0.85, hy - dv[1] * hw * 0.85],
+                                  [hx + dv[0] * hw * 0.85, hy + dv[1] * hw * 0.85]]})
+        c['field'] = True
     return {'W': W, 'H': H, 'CX': CX, 'CY': CY, 'seed': seed, 'title': title,
             'cells': cells, 'city': city, 'square': square, 'wards': wards,
             'wall_poly': wall_poly, 'marks': marks, 'legend': legend, 'hits': hits,
             'streets': streets, 'river_pts': river_pts, 'river_w': river_w, 'Rcity': Rcity,
-            'bridges': bridges, 'dist_labels': dist_labels,
+            'bridges': bridges, 'dist_labels': dist_labels, 'fields': fields,
             'gate_edges': gate_edges, 'roads_out': roads_out}
 
 
@@ -779,13 +809,35 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
              '</radialGradient></defs>')
     # фон
     e.append(f'<rect width="{W}" height="{H}" fill="#a9b878"/>')
-    # лес (кочки на не-городских клетках)
+    # лес (кочки на не-городских клетках; поля не зарастают)
     e.append('<g fill="#5f7d42">')
     for c in m['cells']:
-        if not c['city'] and rngf() < 0.55:
+        if not c['city'] and not c.get('field') and rngf() < 0.55:
             r = 3 + rngf() * 3
             e.append(f'<circle cx="{c["site"][0]:.1f}" cy="{c["site"][1]:.1f}" r="{r:.1f}"/>')
     e.append('</g>')
+    # поля с зерном и хутора за городом
+    for fi, f in enumerate(m.get('fields', [])):
+        fd = _poly_d(f['poly'])
+        e.append(f'<path d="{fd}" fill="#d3b862" stroke="rgba(90,66,34,.45)" stroke-width="0.8"/>')
+        e.append(f'<clipPath id="fld{fi}"><path d="{fd}"/></clipPath>')
+        cc0, dv = f['c'], f['dir']
+        nv = [-dv[1], dv[0]]
+        L = math.sqrt(area(f['poly'])) * 0.95
+        e.append(f'<g clip-path="url(#fld{fi})" stroke="rgba(122,94,38,.5)" stroke-width="0.7">')
+        g0 = -L
+        while g0 < L:                                       # рядки вдоль длинной кромки
+            e.append(f'<line x1="{cc0[0] + nv[0]*g0 - dv[0]*L:.1f}" y1="{cc0[1] + nv[1]*g0 - dv[1]*L:.1f}" '
+                     f'x2="{cc0[0] + nv[0]*g0 + dv[0]*L:.1f}" y2="{cc0[1] + nv[1]*g0 + dv[1]*L:.1f}"/>')
+            g0 += 3.4
+        e.append('</g>')
+        th = mulberry32((int(cc0[0] * 11 + cc0[1] * 17)) & 0xFFFFFFFF)
+        for _ in range(1 + int(th() * 2)):                  # стога
+            e.append(f'<circle cx="{cc0[0] + (th() - .5) * L * .9:.1f}" cy="{cc0[1] + (th() - .5) * L * .9:.1f}" '
+                     f'r="{1.8 + th() * 1.4:.1f}" fill="#c9a34b" stroke="#8a6a2c" stroke-width="0.6"/>')
+        e.append(f'<path d="{_poly_d(f["house"])}" fill="#8a6a3c" stroke="#2c2113" stroke-width="1"/>')
+        e.append(f'<line x1="{f["hridge"][0][0]:.1f}" y1="{f["hridge"][0][1]:.1f}" '
+                 f'x2="{f["hridge"][1][0]:.1f}" y2="{f["hridge"][1][1]:.1f}" stroke="rgba(0,0,0,.25)" stroke-width="0.8"/>')
     # дороги снаружи в город (casing + центр) — рисуем до земли города, чтобы внутренний конец ушёл под кварталы
     for road in m.get('roads_out', []):
         dd = "M%.1f %.1f L%.1f %.1f L%.1f %.1f" % (road[0][0], road[0][1], road[1][0], road[1][1], road[2][0], road[2][1])
@@ -850,13 +902,16 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
     e.append('</g>')
     e.append(f'<circle cx="{sc[0]:.1f}" cy="{sc[1]:.1f}" r="5" fill="#7a6238"/><circle cx="{sc[0]:.1f}" cy="{sc[1]:.1f}" r="2.4" fill="#3a2c18"/>')
     # река: вода в каналах между берегами (над землёй, под стенами). Набережной-заплатки нет —
-    # прибрежная полоса просто не застраивается (дома отбракованы в build_city).
+    # прибрежная полоса просто не застраивается. КЛИП по холсту: за краем карты реки нет.
     rp, rw = m['river_pts'], m['river_w']
     rd = "M%.1f %.1f " % (rp[0][0], rp[0][1]) + " ".join("L%.1f %.1f" % (q[0], q[1]) for q in rp[1:])
+    e.append(f'<clipPath id="mapclip"><rect x="0" y="0" width="{W}" height="{H}"/></clipPath>')
+    e.append('<g clip-path="url(#mapclip)">')
     e.append(f'<path d="{rd}" fill="none" stroke="#cdb98f" stroke-width="{rw:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')   # песчаный берег у воды
     e.append(f'<path d="{rd}" fill="none" stroke="#37607c" stroke-width="{rw*0.66+2:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')
-    e.append(f'<path d="{rd}" fill="none" stroke="#4a7ba0" stroke-width="{rw*0.6:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')   # вода уже русла
+    e.append(f'<path d="{rd}" fill="none" stroke="#4a7ba0" stroke-width="{rw*0.6:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')
     e.append(f'<path d="{rd}" fill="none" stroke="rgba(150,200,225,.4)" stroke-width="2" stroke-linejoin="round"/>')
+    e.append('</g>')
     near_river = lambda p: dist_to_polyline(p, rp) < rw * 0.95
     # стены по контуру wall_poly — РАЗРЫВ точно в точке пересечения ребра с рекой (проём-водяные-ворота)
     wp, nw = m['wall_poly'], len(m['wall_poly'])

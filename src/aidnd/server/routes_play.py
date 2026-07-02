@@ -2368,15 +2368,38 @@ def _contract_on_death(pid: str) -> str | None:
     return None
 
 
+_EPITAPHS = (
+    "Здесь и оборвалась дорога.",
+    "Ни имени на камне, ни венка — только тишина.",
+    "Так закончился этот путь, без песен и без могилы.",
+    "Город переживёт и это. Тебя — нет.",
+    "Дорога забрала своё.",
+)
+
+
+def _death(cause: str) -> dict:
+    """ПЕРМАСМЕРТЬ: мир юзера стирается целиком, сессия выбрасывается. Следующий заход в
+    /play создаст новый город с нуля (новый seed из монотонного счётчика)."""
+    days = max(0, (_gt() - _GT0) // 1440)
+    epitaph = _EPITAPHS[(_gt() // 137) % len(_EPITAPHS)]    # варьируем без Random-состояния
+    wid = _wid()
+    _store().destroy_world(wid)
+    _SESS.pop(wid, None)                                    # выкинуть мир из памяти (дев переиздаст с нуля)
+    return {"status": "lost", "narr": [cause],
+            "death": {"text": epitaph, "days": int(days), "cause": cause}}
+
+
 def _duel_wrapup(enc, cb) -> dict:
     """Итог стычки с человеком: смерть реальна, мир видел, добро — победителю."""
     st = enc.status()
     pid = cb["npc"]
     p = _S["people"].get(pid)
+    if st == "lost":                                       # герой пал в дуэли — мир кончился
+        return _death(f"{p.name if p else 'Противник'} валит тебя наземь. Ты не встаёшь.")
     pc_u = enc.units.get("pc")
     out = {"status": st, "narr": []}
     if pc_u:
-        _pc_hp(set_to=max(1, pc_u.hp) if st != "lost" else 1)
+        _pc_hp(set_to=max(1, pc_u.hp))
     if st == "won" and p:
         _store().flag_set(_wid(), f"dead|{pid}")
         for r in _store().inventory(_wid(), pid):       # труп обобран
@@ -2425,10 +2448,12 @@ def _combat_wrapup(enc, cb) -> dict:
         return _duel_wrapup(enc, cb)
     l = cb["lair"] if isinstance(cb, dict) and "lair" in cb else cb
     st = enc.status()
+    if st == "lost":                                       # герой пал в логове — мир кончился
+        return _death(f"Тьма смыкается в {l['name']}. Отсюда ты уже не выйдешь.")
     pc_u = enc.units.get("pc")
     out = {"status": st, "narr": []}
     if pc_u:
-        _pc_hp(set_to=max(1, pc_u.hp) if st != "lost" else 1)
+        _pc_hp(set_to=max(1, pc_u.hp))
     if st == "won":
         _store().flag_set(_wid(), f"cleared|{l['id']}")
         coins = max(1, round(l["cr"] * PB["loot_coin_per_cr"]))

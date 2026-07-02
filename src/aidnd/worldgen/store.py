@@ -118,14 +118,33 @@ class WorldStore:
         return (int(r[0]), int(r[1])) if r else None
 
     def user_world_create(self, user_id: str) -> tuple:
-        """Выделить пользователю НОВЫЙ мир (свой id и свой seed города)."""
+        """Выделить пользователю НОВЫЙ мир. id/seed берём из МОНОТОННОГО счётчика (flags[0]),
+        а не MAX(world_id): после пермасмерти строка юзера удаляется, и MAX бы переиспользовал
+        тот же id/seed → тот же город. Счётчик только растёт — новый мир всегда другой."""
         with self._conn() as c:
-            m = c.execute("SELECT COALESCE(MAX(world_id), 0) FROM user_worlds").fetchone()[0]
-            wid = int(m) + 1
-            seed = wid                                    # свой город каждому (граф детерминирован)
+            r = c.execute("SELECT val FROM flags WHERE world_id=0 AND key='world_seq'").fetchone()
+            cur = int(r[0]) if r else 0
+            mx = c.execute("SELECT COALESCE(MAX(world_id), 0) FROM user_worlds").fetchone()[0]
+            seq = max(cur, int(mx)) + 1                   # переживает миграцию со старой MAX-логики
+            c.execute("INSERT OR REPLACE INTO flags (world_id, key, val) VALUES (0, 'world_seq', ?)",
+                      (str(seq),))
             c.execute("INSERT OR REPLACE INTO user_worlds (user_id, world_id, seed) VALUES (?,?,?)",
-                      (str(user_id), wid, seed))
-        return wid, seed
+                      (str(user_id), seq, seq))
+        return seq, seq
+
+    def destroy_world(self, world_id: int) -> None:
+        """Пермасмерть: стереть ВЕСЬ рантайм мира и освободить юзера (при заходе получит новый).
+        world_id=0 (глобальные флаги/счётчики) не трогаем — стираем только реальные миры (≥1)."""
+        if int(world_id) < 1:
+            return
+        with self._conn() as c:
+            for iid in [row[0] for row in
+                        c.execute("SELECT item_id FROM inventory WHERE world_id=?", (world_id,))]:
+                c.execute("DELETE FROM items WHERE id=?", (iid,))   # предмет живёт в одном мире
+            for t in ("buildings", "placements", "inventory", "pc_state",
+                      "purse", "flags", "contracts", "npc_state"):
+                c.execute(f"DELETE FROM {t} WHERE world_id=?", (world_id,))
+            c.execute("DELETE FROM user_worlds WHERE world_id=?", (world_id,))
 
     def pool_save_building(self, bid: str, kind: str, btype: str, data: dict) -> None:
         with self._conn() as c:

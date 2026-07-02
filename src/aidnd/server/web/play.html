@@ -313,6 +313,18 @@
     <div class="invgrid" id="invgrid"></div>
   </div>
 </div>
+<div id="deathwrap" class="overlay hidden">
+  <div style="text-align:center;max-width:460px;padding:0 24px">
+    <div style="font:600 40px var(--serif);color:#7a1f1f;letter-spacing:.08em;margin-bottom:14px">✝</div>
+    <div id="deathtext" style="font:italic 20px var(--serif);color:#e9e6dd;line-height:1.5"></div>
+    <div id="deathcause" style="font:14px var(--sans);color:var(--dim);margin-top:14px"></div>
+    <div id="deathdays" style="font:13px var(--sans);color:var(--faint);margin-top:8px"></div>
+    <button onclick="location.reload()" style="margin-top:26px;padding:11px 28px;border-radius:10px;
+      border:1px solid var(--gold-dim);background:rgba(217,164,65,.12);color:var(--gold);
+      font:500 14px var(--sans);cursor:pointer">начать заново</button>
+    <div style="font:12px var(--sans);color:var(--faint);margin-top:12px">этот мир погас навсегда</div>
+  </div>
+</div>
 <div id="combat" class="hidden">
   <div class="cbleft">
     <div class="cbhead" id="cbname">Бой</div>
@@ -837,6 +849,7 @@ async function delve(lair){
   if(r.error){push('sys',esc(r.error));return;}
   if(r.gt!=null){GT=r.gt;setClock();}
   openCombat(r.combat,{name:r.lair.name,sub:r.lair.env+' · CR '+r.lair.cr});
+  if(r.over)handleOver(r.over);          // погиб на подкрутке ИИ до своего хода
 }
 function renderLoc(loc){
   document.querySelector('.locard .nm').textContent=loc.name;
@@ -907,11 +920,21 @@ async function cbAct(a){
   if(r.combat){CB=r.combat;renderCombat();}
   if(r.hp!=null)setHp(r.hp);
   if(r.gt!=null){GT=r.gt;setClock();}
-  if(r.over){
-    (r.over.narr||[]).forEach(t=>push('narr',esc(t)));
-    setHp(r.over.hp);setCoins(r.over.coins);
-    setTimeout(closeCombat, 1200);
-  }
+  if(r.over)handleOver(r.over);
+}
+function handleOver(over){
+  if(!over)return;
+  (over.narr||[]).forEach(t=>push('narr',esc(t)));
+  if(over.hp!=null)setHp(over.hp);
+  if(over.coins!=null)setCoins(over.coins);
+  if(over.death){closeCombat();showDeath(over.death);return;}
+  setTimeout(closeCombat, 1200);
+}
+function showDeath(d){
+  $('deathtext').textContent=(d&&d.text)||'Тьма.';
+  $('deathcause').textContent=(d&&d.cause)||'';
+  $('deathdays').textContent='Прожито дней: '+((d&&d.days)||0);
+  $('deathwrap').classList.remove('hidden');
 }
 // возобновить бой после перезагрузки страницы
 api('/api/play/combat').then(r=>{if(r.active)openCombat(r.combat,{name:r.lair.name,sub:r.lair.env+' · CR '+r.lair.cr});});

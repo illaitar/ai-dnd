@@ -43,6 +43,9 @@ _BUILD_SYS = (
     "По краткой подсказке верни ТОЛЬКО JSON-фактшит — КОРОТКО, теги/энумы/короткие фразы, БЕЗ прозы и "
     "абзацев-описаний (прозу соберёт нарратор). ОБЕЗЛИЧЕННО: не выдумывай и не называй людей (NPC отдельно), "
     "роли — в occupants_kind. Поля:\n"
+    "name — ИМЯ-ВЫВЕСКА места (для значимого — собственное, вроде «Трактир „Пьяный вепрь“», «Кузница у моста»; "
+    "для жилого дома — короткое нарицательное, «Дом кожевника»); "
+    "atmosphere — вид одной строкой («таверна · тепло, тесно, дымно»); "
     "type — тип; tier (poor|modest|comfortable|wealthy); size (small|medium|large); floors (число 1-3); "
     "age (new|established|old|ancient); condition (pristine|sound|worn|dilapidated); "
     "materials {walls, roof}; features (массив коротких факт-тегов: дверь/очаг/балки/ставни…); "
@@ -125,6 +128,8 @@ def _norm_building(d: dict) -> dict:
     except (TypeError, ValueError):
         floors = 1
     return {
+        "name": str(d.get("name") or "").strip(),
+        "atmosphere": str(d.get("atmosphere") or "").strip(),
         "type": str(d.get("type") or "").strip(),
         "tier": _enum(d.get("tier"), TIERS, "modest"), "size": _enum(d.get("size"), SIZES, "small"),
         "floors": floors, "age": _enum(d.get("age"), AGES, "established"),
@@ -159,6 +164,7 @@ class StubEnricher(Enricher):
     def describe_building(self, ctx: BuildingCtx) -> dict:
         sig = "значим" in ctx.role_hint
         return _norm_building({
+            "name": ctx.name_hint, "atmosphere": f"{ctx.name_hint.lower()} · обычное место",
             "type": ctx.name_hint.lower(), "tier": "modest", "size": "small",
             "condition": "sound", "materials": {"walls": "брёвна", "roof": "солома"},
             "features": ["низкая дверь", "ставни"], "smells": ["дым"], "sounds": ["тишина"],

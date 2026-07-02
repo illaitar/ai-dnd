@@ -16,7 +16,8 @@ from fastapi import APIRouter, Request
 
 from ..citygraph import CityParams, generate, visual
 from ..citygraph.model import NodeKind
-from ..items import Capability, ItemCtx, LLMSmith, Recipe, StubSmith
+from ..items import Capability, ItemCtx, LLMSmith, StubSmith
+from ..items.craft import ROLE_RECIPES
 from ..items import condition as item_condition
 from ..items import normalize as item_normalize
 from ..items import craft as item_craft
@@ -33,14 +34,39 @@ from ..mind import StubPlanner, advance_agendas
 from ..mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
 from ..mind.tick import _decay_emotion, _decay_needs
 from ..play import populate
-from ..play.population import KEY_ROLES, Townsperson
+from ..play.population import Townsperson
 from ..worldgen import WorldStore
 
 router = APIRouter(tags=["play"])
 PLAYER = "pc"
 PLAY_WORLD = 1                       # id пилотного мира для привязок пула (placements)
 _STORE: WorldStore | None = None
-_GT0 = 19 * 60 + 40                  # старт: вечер 19:40
+
+# ЕДИНАЯ таблица баланса play-слоя (по образцу mind.value.BAL): все пороги/коэффициенты/времена
+# ИМЕНОВАНЫ и живут здесь — не россыпью по коду.
+PB = {
+    "start_gt": 19 * 60 + 40, "start_coins": 12,
+    "step_min": 1, "talk_min": 2, "loot_min": 2, "trade_min": 3, "act_min": 2, "live_tick_min": 3,
+    "live_gap_s": 6.0, "give_min": 1,
+    # цены: продать торговцу / купить у него (от ЕГО видения worth)
+    "sell_base": 0.55, "sell_aff": 0.15, "sell_greed": -0.2,
+    "buy_base": 1.35, "buy_greed": 0.25, "buy_aff": -0.15,
+    # гейты преступлений
+    "steal_dc_base": 9, "steal_dc_att": 8, "rob_dc_base": 10, "rob_dc_brav": 8,
+    "purse_cut": 2,                                        # кража уносит 1/N кошеля
+    "rob_cut_num": 2, "rob_cut_den": 3,                    # грабёж уносит num/den
+    # просьба ключа: bar = base + greed·k + honesty·k
+    "askkey_base": 0.5, "askkey_greed": 0.4, "askkey_honesty": -0.2,
+    # контракты
+    "contract_enemy_aff": -0.1, "contract_poor_purse": 5, "contract_reward_min": 2,
+    "complete_trust": 0.3, "complete_aff": 0.2, "befriend_aff": 0.25,
+    "merchant_float": 30,
+    # распорядок: вероятность вечерней тяги в трактир
+    "eve_worker": 0.5, "eve_commoner": 0.45, "eve_rogue": 0.4,
+    # подарок: прирост симпатии = min(cap, base + worth/div)
+    "gift_aff_base": 0.05, "gift_aff_div": 100, "gift_aff_cap": 0.25,
+}
+_GT0 = PB["start_gt"]
 
 
 def _gt() -> int:
@@ -125,28 +151,40 @@ _S: dict = {"city": None, "people": None, "crof": None, "cr2b": None, "loc": Non
             "geom": None, "model": None}
 
 _COLORS = ["#c98a52", "#6f8f6a", "#8a6fae", "#a86a6a", "#5f8296", "#b0894a"]
-_PLACE = {
-    "трактирщик": ("Трактир «Пьяный вепрь»", "таверна · тепло, тесно, дымно", "трактир"),
-    "кузнец": ("Кузница", "жар горна, звон молота", "кузница"),
-    "лавочник": ("Лавка", "полки со всякой всячиной", "лавка"),
-    "стражник": ("Караулка", "пост городской стражи", "стража"),
-    "жрец": ("Святилище", "тихо, пахнет ладаном", "храм"),
-    "знахарка": ("Дом знахарки", "пучки трав, склянки", "знахарка"),
-    "бард": ("Помост", "здесь поют и судачат", "помост"),
-    "мельник": ("Мельница", "мерный скрип у воды", "мельница"),
-}
-_TOPICS = {
-    "трактирщик": ["слухи", "что налить", "заказ комнаты", "о дорогах"],
-    "бард": ["спой что-нибудь", "новости с трактов", "кто тут кто"],
-    "лавочник": ["что на продажу", "цена", "редкости"],
-    "кузнец": ["почини снаряжение", "есть работа", "о железе"],
-    "жрец": ["благословение", "о богах", "исцеление"],
-    "знахарка": ["зелья", "травы", "о хворях"],
-    "стражник": ["что тут за место", "есть розыск", "о законе"],
-    "бродяга": ["чего пялишься", "есть работа?"],
-    "головорез": ["чего надо", "проваливай"],
-    "горожанин": ["как дела", "что нового", "о городе"],
-}
+def _binfo(bid: str | None) -> dict:
+    """Имя/вид/метка места — из ФАКТШИТА здания (enrichment генерит name/atmosphere/type),
+    не из кода. Фоллбэк — вывеска графа."""
+    bd = _store().get_building(PLAY_WORLD, bid) if bid else None
+    data = (bd or {}).get("data") or {}
+    name = data.get("name") or (bd or {}).get("sign") or "Здание"
+    kind = data.get("atmosphere") or data.get("type") or "постройка"
+    label = (data.get("type") or "дом").split(",")[0].split()[0][:12]
+    return {"name": name, "kind": kind, "label": label}
+
+
+# тип здания (из фактшита) → роль работника; таблица данных, порядок = приоритет совпадения
+_TYPE_ROLE = (("таверн", "трактирщик"), ("трактир", "трактирщик"), ("постоял", "трактирщик"),
+              ("лавк", "лавочник"), ("склад", "лавочник"), ("кузн", "кузнец"),
+              ("храм", "жрец"), ("свят", "жрец"), ("часовн", "жрец"),
+              ("целебн", "знахарка"), ("знахар", "знахарка"), ("травн", "знахарка"),
+              ("мельниц", "мельник"), ("пекарн", "трактирщик"), ("мастерск", "сапожник"),
+              ("кожевн", "дубильщик"), ("дубильн", "дубильщик"), ("конюшн", "горожанин"),
+              ("усадьб", "горожанин"), ("гильди", "лавочник"))
+
+
+def _role_for_building(bid: str) -> str:
+    """Роль работника — ИЗ ДАННЫХ здания (тип/имя из фактшита), не по порядковому кругу."""
+    info = _binfo(bid)
+    t = (info["kind"] + " " + info["name"]).lower()
+    return next((r for w, r in _TYPE_ROLE if w in t), "горожанин")
+
+
+def _topics_for(p) -> list:
+    """Темы разговора — из ПЕРСОНЫ (слухи/стремления), не из таблицы ролей."""
+    per = p.persona or {}
+    out = [t[:40] for t in (per.get("rumors") or [])[:2]] + \
+          [t[:40] for t in (per.get("wants") or [])[:1]]
+    return out or ["что нового?", "о городе", "о жизни здесь"]
 
 
 def _model():
@@ -161,7 +199,7 @@ def _routine_spot(pid: str, p, phase: str, day: int, keynode: dict, kps: list, t
     пока игрока нет, но воспроизводимо."""
     rng = random.Random(f"rout|{pid}|{phase}|{day}")
     if p.role in ("бродяга", "головорез"):                  # лихой люд: днём по углам, вечером к людям
-        if phase in ("evening", "night") and tavern is not None and rng.random() < 0.4:
+        if phase in ("evening", "night") and tavern is not None and rng.random() < PB["eve_rogue"]:
             return tavern
         return rng.choice(kps) if kps else p.home
     if p.work:                                              # работник: пост днём, вечером трактир/дом
@@ -171,14 +209,14 @@ def _routine_spot(pid: str, p, phase: str, day: int, keynode: dict, kps: list, t
         if phase == "evening":
             if p.role == "трактирщик":
                 return wn                                   # трактирщик вечером на посту
-            return tavern if (tavern is not None and rng.random() < 0.5) else p.home
+            return tavern if (tavern is not None and rng.random() < PB["eve_worker"]) else p.home
         return p.home
     if phase == "morning":                                  # горожанин
         return p.home if rng.random() < 0.5 else (rng.choice(kps) if kps else p.home)
     if phase == "day":
         return rng.choice(kps) if kps else p.home
     if phase == "evening":
-        return tavern if (tavern is not None and rng.random() < 0.45) else p.home
+        return tavern if (tavern is not None and rng.random() < PB["eve_commoner"]) else p.home
     return p.home
 
 
@@ -319,8 +357,8 @@ def _fill_from_pool(city, keynode, kps):
         spot[row["id"]] = node
         store.place_person(PLAY_WORLD, row["id"], node, node, work)
 
-    for i, (bid, kb) in enumerate(sorted(city.key_buildings.items())):
-        row = draw(KEY_ROLES[i % len(KEY_ROLES)])
+    for bid, kb in sorted(city.key_buildings.items()):
+        row = draw(_role_for_building(bid))               # роль работника — из типа здания
         if row:
             place(row, kb.node, bid)
     for _ in range(16):
@@ -370,10 +408,9 @@ def _build_geom(city, xy, n2b, vis) -> dict:
     points = [{"id": n, "x": round(xy[n][0], 1), "y": round(xy[n][1], 1)}  # ВСЕ узлы дорог (не только перекрёстки)
               for n in xy if city.node_kind(n) in road]
     keys = []
-    for i, (bid, kb) in enumerate(sorted(city.key_buildings.items())):
-        role = KEY_ROLES[i % len(KEY_ROLES)]
+    for bid, kb in sorted(city.key_buildings.items()):
         keys.append({"node": kb.node, "x": round(kb.x, 1), "y": round(kb.y, 1),
-                     "label": _PLACE.get(role, (None, None, "здание"))[2]})
+                     "label": _binfo(bid)["label"]})
     return {"viewBox": [0, 0, vis["W"], vis["H"]], "svg": vis["inner"],
             "h2n": h2n, "points": points, "keys": keys,
             "_xy": {n: [round(xy[n][0], 1), round(xy[n][1], 1)] for n in xy}}
@@ -416,14 +453,15 @@ def _portrait_url(p, emo: str | None = None) -> str | None:
 
 def _scene_dict(city, people, crof, cr2b, loc):
     role = _role_at(loc, people, crof, cr2b)
-    if role:
-        name, kind, _ = _PLACE[role]
+    bid = cr2b.get(loc)
+    if bid:
+        info = _binfo(bid)
+        name, kind = info["name"], info["kind"]
     elif city.node_kind(loc) == NodeKind.CROSSROAD:
         name, kind = "Перекрёсток", "городская развилка"
     else:
         name, kind = "Улица", "мостовая меж домов"
     here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
-    bid = cr2b.get(loc)
     return {
         "loc": loc,
         "location": {"name": name, "kind": kind,
@@ -548,7 +586,7 @@ async def move(request: Request):
     r = city.route(loc, to)
     path = [_S["geom"]["_xy"][n] for n in r.nodes if n in _S["geom"]["_xy"]] if r.found else [_S["geom"]["_xy"][to]]
     _S["loc"] = to
-    _gt_add(max(1, len(path) - 1))                         # шаг пути = 1 игровая минута (граф густой)
+    _gt_add(PB["step_min"] * max(1, len(path) - 1))       # время дороги: минут за шаг
     _apply_routine()                                       # за дорогу мир мог перейти в другую фазу
     ct_done = _contract_on_move(to)                        # visit-уговор: дошёл — исполнил
     sc = _scene_dict(city, people, crof, cr2b, to)
@@ -565,7 +603,7 @@ async def talk(request: Request):
     p = people[npc]
     first = npc not in _met()
     _pc().rel(npc)                                     # заговорил = познакомился (имя открыто)
-    _gt_add(2)
+    _gt_add(PB["talk_min"])
     st = p.state
     st.needs["social"] = max(st.needs.get("social", 0.0), 0.4)
     think(st, _mind_scene(npc, people), None)
@@ -595,7 +633,7 @@ async def talk(request: Request):
             "keys": [k["name"] for k in (p.keys or [])],
             "crafter": p.role in _CRAFT, "recipe": (_CRAFT[p.role].name if p.role in _CRAFT else None),
             "known": known, "gt": _gt(),
-            "topics": _TOPICS.get(p.role, _TOPICS["горожанин"]), "line": _voice(p, rel, "greet")}
+            "topics": _topics_for(p), "line": _voice(p, rel, "greet")}
 
 
 @router.post("/api/play/say")
@@ -609,7 +647,7 @@ async def say(request: Request):
     rel = p.state.relationships.setdefault(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     rel["affinity"] = min(1.0, rel["affinity"] + 0.04)
     text = str(b.get("text", ""))
-    _gt_add(2)
+    _gt_add(PB["talk_min"])
     line = _voice(p, rel, "reply", text)
     p.state.memory.add(f"игрок сказал мне: «{text[:100]}», я ответил(а): «{line[:100]}»",
                        _mt(), 0.4, about=[PLAYER])         # диалог остаётся в памяти NPC
@@ -697,14 +735,14 @@ def _materialize_npc(pid: str, layer: str = "visible") -> None:
             _put_item(f"npcinv|{pid}|p{i}", s, "misc", tier="poor", holder=pid)
         for i, s in enumerate((per.get("valuables") or [])[:3]):
             _put_item(f"npcinv|{pid}|v{i}", s, "valuable", tier="fine", holder=pid)
-        _store().purse_add(PLAY_WORLD, pid, int(c.get("coins") or 0) + (30 if p.work else 0))
+        _store().purse_add(PLAY_WORLD, pid, int(c.get("coins") or 0) + (PB["merchant_float"] if p.work else 0))
     _store().flag_set(PLAY_WORLD, f"mat|{pid}|{layer}")     # работнику — торговая наличность
 
 
 def _pc_coins() -> int:
     """Кошель игрока (настоящий). Первый доступ — стартовые 12 зм (как в шапке UI)."""
     if not _store().flag_get(PLAY_WORLD, "purse_init|pc"):
-        _store().purse_add(PLAY_WORLD, "pc", 12)
+        _store().purse_add(PLAY_WORLD, "pc", PB["start_coins"])
         _store().flag_set(PLAY_WORLD, "purse_init|pc")
     return _store().purse_get(PLAY_WORLD, "pc")
 
@@ -748,16 +786,7 @@ def _item_card(it: dict, known) -> dict:
     return v
 
 
-# рецепт по ремеслу NPC — что он берётся сковать/сварить
-_CRAFT = {
-    "кузнец": Recipe("weapon", "нож", "anvil", 8, 40, 10, "main_hand", "attack"),
-    "знахарка": Recipe("consumable", "целебный отвар", "cauldron", 12, 6, 11, "none", "special:heal"),
-    "сапожник": Recipe("armor", "сапоги", "bench", 14, 50, 11, "body", "social:appearance"),
-    "дубильщик": Recipe("armor", "кожаный жилет", "tannery", 10, 45, 11, "body", "defense"),
-    "лавочник": Recipe("trinket", "затейливая безделица", "bench", 6, 20, 12, "worn", ""),
-    "трактирщик": Recipe("consumable", "кружка крепкого", "cauldron", 2, 4, 8, "none", ""),
-    "мельник": Recipe("material", "мешок доброй муки", "bench", 3, 10, 9, "none", ""),
-}
+_CRAFT = ROLE_RECIPES                                  # рецепты — данные предметной системы
 
 
 def _known(iid: str) -> set:
@@ -788,7 +817,7 @@ async def loot(request: Request):
             _store().inv_add(PLAY_WORLD, it["id"], holder=holder)
         _store().flag_set(PLAY_WORLD, f"seeded|{holder}")
     rows = _store().inventory(PLAY_WORLD, holder)
-    _gt_add(2)
+    _gt_add(PB["loot_min"])
     if not rows:
         return {"container": name, "items": [], "empty": True, "unlocked": unlocked, "gt": _gt()}
     out = []
@@ -907,7 +936,7 @@ async def askkey(request: Request):
         return {"error": f"у {p.name} нет такого ключа при себе"}
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     tr = p.state.config.traits
-    bar = 0.5 + 0.4 * tr.get("greed", 0.5) - 0.2 * tr.get("honesty", 0.5)
+    bar = PB["askkey_base"] + PB["askkey_greed"] * tr.get("greed", 0.5) + PB["askkey_honesty"] * tr.get("honesty", 0.5)
     if rel.get("affinity", 0) + rel.get("trust", 0) < bar:
         line = _voice(p, rel, "reply", "Одолжи мне свой ключ.")
         p.state.memory.add("незнакомец просил у меня ключ — я не дал(а)", _mt(), 0.5, about=[PLAYER])
@@ -944,7 +973,7 @@ async def offer(request: Request):
     seen = _npc_sees(it, _npc_cap(p), npc)
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
-    price = max(0, round(seen["worth"] * (0.55 + 0.15 * rel.get("affinity", 0) - 0.2 * greed)))
+    price = max(0, round(seen["worth"] * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)))
     price = min(price, _store().purse_get(PLAY_WORLD, npc))
     line = _voice(p, rel, "reply",
                   f"(Я предлагаю тебе купить у меня «{it['name']}». Ты осмотрел вещь и даёшь {price} зм — "
@@ -965,12 +994,12 @@ async def sell(request: Request):
     seen = _npc_sees(it, _npc_cap(p), npc)
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
-    price = max(0, round(seen["worth"] * (0.55 + 0.15 * rel.get("affinity", 0) - 0.2 * greed)))
+    price = max(0, round(seen["worth"] * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)))
     price = min(price, _store().purse_get(PLAY_WORLD, npc))
     _store().inv_move(PLAY_WORLD, iid, npc)
     _store().purse_add(PLAY_WORLD, npc, -price)
     coins = _store().purse_add(PLAY_WORLD, "pc", price)
-    _gt_add(3)
+    _gt_add(PB["trade_min"])
     p.state.memory.add(f"купил(а) у игрока «{it['name']}» за {price} зм", _mt(), 0.4, about=[PLAYER])
     _pc_remember(f"продал {p.name} «{it['name']}» за {price} зм", 0.4, about=[npc])
     _npc_save(npc)
@@ -994,7 +1023,7 @@ def wares(npc: str):
         if not it or it["kind"] in ("key", "valuable"):
             continue                                       # ключи и ЛИЧНОЕ ценное не продаются (то — красть)
         seen = _npc_sees(it, _npc_cap(p), npc)
-        price = max(1, round(seen["worth"] * (1.35 + 0.25 * greed - 0.15 * rel.get("affinity", 0))))
+        price = max(1, round(seen["worth"] * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))))
         out.append({**_item_card(it, set()), "price": price})
     return {"items": out, "coins": _pc_coins()}
 
@@ -1011,13 +1040,13 @@ async def buy(request: Request):
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
     seen = _npc_sees(it, _npc_cap(p), npc)
-    price = max(1, round(seen["worth"] * (1.35 + 0.25 * greed - 0.15 * rel.get("affinity", 0))))
+    price = max(1, round(seen["worth"] * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))))
     if _pc_coins() < price:
         return {"error": f"не хватает монет (нужно {price})"}
     _store().inv_move(PLAY_WORLD, iid, "pc")
     coins = _store().purse_add(PLAY_WORLD, "pc", -price)
     _store().purse_add(PLAY_WORLD, npc, price)
-    _gt_add(3)
+    _gt_add(PB["trade_min"])
     p.state.memory.add(f"продал(а) игроку «{it['name']}» за {price} зм", _mt(), 0.4, about=[PLAYER])
     _pc_remember(f"купил у {p.name} «{it['name']}» за {price} зм", 0.4, about=[npc])
     _npc_save(npc)
@@ -1039,8 +1068,8 @@ async def steal(request: Request):
     lv = _S.get("live") or {}
     att = next((w.attention for w in [(lv.get("world") or MWorld()).bodies.get(npc)] if w), 0.65)
     roll = random.Random(f"steal|{npc}|{n}").randint(1, 20)
-    dc = 9 + round(att * 8)
-    _gt_add(2)
+    dc = PB["steal_dc_base"] + round(att * PB["steal_dc_att"])
+    _gt_add(PB["act_min"])
     if roll + _PC_CAP.mod("dex") < dc:                     # ПОЙМАН
         rel = p.state.rel(PLAYER)
         rel["affinity"] = min(rel["affinity"], -0.5)
@@ -1062,7 +1091,7 @@ async def steal(request: Request):
     loot_rows = [(iid, it) for iid, it in loot_rows if it and it["kind"] != "key"]
     coins_np = _store().purse_get(PLAY_WORLD, npc)
     if coins_np > 0 and (not loot_rows or roll % 2 == 0):  # тянем кошель или вещь
-        take = max(1, coins_np // 2)
+        take = max(1, coins_np // PB["purse_cut"])
         _store().purse_add(PLAY_WORLD, npc, -take)
         coins = _store().purse_add(PLAY_WORLD, "pc", take)
         _pc_remember(f"вытащил у {p.name} {take} зм", 0.6, about=[npc])
@@ -1094,14 +1123,18 @@ _CONTRACT_SYS = (
 def _contract_candidates(giver: str) -> list:
     """Реальные цели для контракта: содержимое ёмкостей зданий + ценное ДРУГИХ людей."""
     out = []
+    giver_work = (_S.get("people") or {}).get(giver)
+    giver_work = giver_work.work if giver_work else None
     for bid in list(_S.get("cr2b", {}).values()):
+        if bid == giver_work:
+            continue                                       # из СВОЕГО здания не просят — абсурд
         bd = _store().get_building(PLAY_WORLD, bid)
         if not bd:
             continue
-        sign = bd.get("sign") or "здание"
+        nm_b = _binfo(bid)["name"]
         for cnt in (bd["data"].get("containers") or []):
-            for s in (cnt.get("contents") or [])[:2]:
-                out.append({"name": s, "where": f"{cnt['name']} ({sign})"})
+            for it_s in (cnt.get("contents") or [])[:2]:
+                out.append({"name": it_s, "where": f"{cnt['name']} ({nm_b})"})
     for pid, p in sorted((_S.get("people") or {}).items()):
         if pid == giver:
             continue
@@ -1116,7 +1149,7 @@ def _contract_offer(npc: str) -> dict | None:
     if _store().flag_get(PLAY_WORLD, f"coffer|{npc}"):
         return None
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
-    if rel.get("affinity", 0) < -0.1:                      # с явным недругом дел не ведут
+    if rel.get("affinity", 0) < PB["contract_enemy_aff"]:                      # с явным недругом дел не ведут
         return None
     mgr = _model()
     if not mgr.available():
@@ -1130,7 +1163,7 @@ def _contract_offer(npc: str) -> dict | None:
     _materialize_npc(npc, "pockets")
     purse = _store().purse_get(PLAY_WORLD, npc)
     reward_item = None
-    if purse < 5:                                          # бедняк платит вещью, не монетой
+    if purse < PB["contract_poor_purse"]:                                          # бедняк платит вещью, не монетой
         rows = [(r["item_id"], _store().get_item(r["item_id"]))
                 for r in _store().inventory(PLAY_WORLD, npc)]
         rows = [(i, it) for i, it in rows if it and it["kind"] != "key"]
@@ -1163,7 +1196,7 @@ def _contract_offer(npc: str) -> dict | None:
     want, tgt = str(d.get("want") or "").strip(), str(d.get("target") or "").strip()
     data = {"giver": npc, "giver_name": p.name, "kind": kind, "want": None, "where": "",
             "target": None, "target_name": None,
-            "reward": (0 if reward_item else max(2, min(int(d.get("reward") or 5), purse))),
+            "reward": (0 if reward_item else max(PB["contract_reward_min"], min(int(d.get("reward") or 5), purse))),
             "reward_item": (reward_item[0] if reward_item else None),
             "reward_name": (reward_item[1]["name"] if reward_item else None),
             "pitch": str(d.get("pitch") or "")[:220], "why": getattr(ag, "summary", "")}
@@ -1215,8 +1248,8 @@ def _contract_complete(ct: dict) -> str:
         paid = f"{p.name} отсыпает тебе {reward} зм (кошель: {coins})"
     _store().save_contract(PLAY_WORLD, ct["id"], "done", {k: v for k, v in ct.items()
                                                           if k not in ("id", "status")})
-    p.state.rel(PLAYER)["trust"] = min(1.0, p.state.rel(PLAYER)["trust"] + 0.3)
-    p.state.rel(PLAYER)["affinity"] = min(1.0, p.state.rel(PLAYER)["affinity"] + 0.2)
+    p.state.rel(PLAYER)["trust"] = min(1.0, p.state.rel(PLAYER)["trust"] + PB["complete_trust"])
+    p.state.rel(PLAYER)["affinity"] = min(1.0, p.state.rel(PLAYER)["affinity"] + PB["complete_aff"])
     p.state.memory.add("чужак исполнил мою просьбу. Надёжный человек", _mt(), 0.85, about=[PLAYER])
     _pc_remember(f"исполнил просьбу {p.name} ({ct['kind']}: {ct.get('want') or ct.get('target_name')})",
                  0.6, about=[giver])
@@ -1252,7 +1285,7 @@ def _contract_on_talk(npc: str) -> str | None:
     for ct in _store().contracts(PLAY_WORLD, "active"):
         if ct.get("kind") == "befriend" and ct.get("target") == npc:
             rel = _S["people"][npc].state.relationships.get(PLAYER, {})
-            if rel.get("affinity", 0) >= 0.25:
+            if rel.get("affinity", 0) >= PB["befriend_aff"]:
                 return _contract_complete(ct)
     return None
 
@@ -1387,9 +1420,9 @@ def _attempt(intent: dict, sc: dict) -> dict:
             _store().flag_set(PLAY_WORLD, f"rob|{npc}", str(n))
             roll = random.Random(f"rob|{npc}|{n}").randint(1, 20)
             brav = p.state.config.traits.get("bravery", 0.5)
-            _gt_add(2)
-            if roll + _PC_CAP.mod("str") >= 10 + round(brav * 8):
-                take = max(1, _store().purse_get(PLAY_WORLD, npc) * 2 // 3)
+            _gt_add(PB["act_min"])
+            if roll + _PC_CAP.mod("str") >= PB["rob_dc_base"] + round(brav * PB["rob_dc_brav"]):
+                take = max(1, _store().purse_get(PLAY_WORLD, npc) * PB["rob_cut_num"] // PB["rob_cut_den"])
                 _store().purse_add(PLAY_WORLD, npc, -take)
                 _store().purse_add(PLAY_WORLD, "pc", take)
                 p.state.rel(PLAYER)["fear"] = max(p.state.rel(PLAYER)["fear"], 0.8)
@@ -1407,8 +1440,8 @@ def _attempt(intent: dict, sc: dict) -> dict:
         body = (lv.get("world").bodies.get(npc) if lv.get("world") else None)
         att = body.attention if body else 0.65
         roll = random.Random(f"steal|{npc}|{n}").randint(1, 20)
-        _gt_add(2)
-        if roll + _PC_CAP.mod("dex") < 9 + round(att * 8):
+        _gt_add(PB["act_min"])
+        if roll + _PC_CAP.mod("dex") < PB["steal_dc_base"] + round(att * PB["steal_dc_att"]):
             w = _witness_crime(people, crof, loc, npc, "лез мне в карман")
             rel = p.state.relationships.get(PLAYER, {})
             out["narr"].append(f"Тебя ловят за руку! Свидетелей: {w}.")
@@ -1420,7 +1453,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             rows = [(i, it) for i, it in rows if it and it["kind"] != "key"]
             coins_np = _store().purse_get(PLAY_WORLD, npc)
             if coins_np > 0 and (not rows or roll % 2 == 0):
-                take = max(1, coins_np // 2)
+                take = max(1, coins_np // PB["purse_cut"])
                 _store().purse_add(PLAY_WORLD, npc, -take)
                 _store().purse_add(PLAY_WORLD, "pc", take)
                 _pc_remember(f"вытащил у {p.name} {take} зм", 0.6, about=[npc])
@@ -1449,11 +1482,11 @@ def _attempt(intent: dict, sc: dict) -> dict:
         p = people[npc]
         _store().inv_move(PLAY_WORLD, iid, npc)
         rel = p.state.rel(PLAYER)
-        rel["affinity"] = min(1.0, rel["affinity"] + min(0.25, 0.05 + it["worth"] / 100))
+        rel["affinity"] = min(1.0, rel["affinity"] + min(PB["gift_aff_cap"], PB["gift_aff_base"] + it["worth"] / PB["gift_aff_div"]))
         p.state.memory.add(f"игрок подарил мне «{it['name']}»", _mt(), 0.55, about=[PLAYER])
         _pc_remember(f"подарил {p.name} «{it['name']}»", 0.4, about=[npc])
         _npc_save(npc)
-        _gt_add(1)
+        _gt_add(PB["give_min"])
         done = _contract_on_give(npc, it)
         out["narr"].append(f"«{it['name']}» переходит к {p.name}." + (f" {done}" if done else ""))
         out["refresh"] = True
@@ -1495,7 +1528,7 @@ async def act(request: Request):
 # (механика даёт побуждения → LLM выбирает В ХАРАКТЕРЕ, пишет реплику и описание). Действия
 # реальны (apply_actions мутирует мир и память), фид — то, что игрок видит/слышит; незнакомцы
 # обезличены дескриптором, имя открывается знакомством (talk).
-_LIVE_GAP = 6.0                                    # мин. сек между тиками (защита от бури поллов)
+_LIVE_GAP = PB["live_gap_s"]                                    # мин. сек между тиками (защита от бури поллов)
 
 
 def _world_lookup(query: str, from_node: int | None = None) -> str:
@@ -1505,10 +1538,11 @@ def _world_lookup(query: str, from_node: int | None = None) -> str:
     if city is None:
         return "не припомню"
     q, outs = query.lower(), []
-    for i, (bid, kb) in enumerate(sorted(city.key_buildings.items())):
-        role = KEY_ROLES[i % len(KEY_ROLES)]
-        nm = _PLACE.get(role, ("здание", "", ""))[0]
-        if role in q or any(w in q for w in nm.lower().replace("«", " ").replace("»", " ").split() if len(w) > 3):
+    for bid, kb in sorted(city.key_buildings.items()):
+        info = _binfo(bid)
+        nm = info["name"]
+        words = (nm + " " + info["kind"]).lower().replace("«", " ").replace("»", " ").split()
+        if any(w[:5] in q for w in words if len(w) > 3):
             if from_node is not None:
                 r = city.route(from_node, kb.node)
                 if r.found:
@@ -1518,9 +1552,7 @@ def _world_lookup(query: str, from_node: int | None = None) -> str:
     for pid, p in sorted(people.items()):
         first = p.name.split()[0].lower()
         if p.role in q or first in q or p.name.lower() in q:
-            place = next((_PLACE.get(KEY_ROLES[i % len(KEY_ROLES)], ("", "", ""))[0]
-                          for i, (bid, _kb) in enumerate(sorted(city.key_buildings.items()))
-                          if bid == p.work), None)
+            place = _binfo(p.work)["name"] if p.work else None
             outs.append(f"{p.name} — {p.role}" + (f", обычно в «{place}»" if place else ""))
         if len(outs) >= 3:
             break
@@ -1562,9 +1594,8 @@ def _live_affordances(bid) -> list:
 
 
 def _live_build(city, people, crof, cr2b, loc) -> None:
-    role = _role_at(loc, people, crof, cr2b)
-    place = _PLACE[role][0] if role else "улица"
     bid = cr2b.get(loc)
+    place = _binfo(bid)["name"] if bid else "улица"
     data = ((_store().get_building(PLAY_WORLD, bid) or {}).get("data")) if bid else {}
     w = MWorld()
     w.link(place, "улица")
@@ -1691,7 +1722,7 @@ def _live_tick(people) -> tuple:
             for nm in stolen:
                 if vid == PLAYER:
                     if nm == "кошель":
-                        take = max(1, _pc_coins() // 2)
+                        take = max(1, _pc_coins() // PB["purse_cut"])
                         _store().purse_add(PLAY_WORLD, "pc", -take)
                         _store().purse_add(PLAY_WORLD, pid, take)
                         feed.append({"k": "deed", "who": _display(pid, people),
@@ -1706,7 +1737,7 @@ def _live_tick(people) -> tuple:
                     st.memory.add(f"я обчистил(а) чужака: взял(а) {nm}", lv["clock"], 0.7, about=[PLAYER])
                 else:
                     if nm == "кошель":
-                        take = max(1, _store().purse_get(PLAY_WORLD, vid) // 2)
+                        take = max(1, _store().purse_get(PLAY_WORLD, vid) // PB["purse_cut"])
                         _store().purse_add(PLAY_WORLD, vid, -take)
                         _store().purse_add(PLAY_WORLD, pid, take)
                     elif nm in (lv.get("npc_map", {}).get(vid) or {}):
@@ -1744,7 +1775,7 @@ def _live_tick(people) -> tuple:
         if does and not said:                               # реплика сама несёт момент — не дублируем
             feed.append({"k": "deed", "who": who, "text": does[:150]})
     lv["clock"] += 1
-    _gt_add(3)                                              # тик мира = 3 игровые минуты
+    _gt_add(PB["live_tick_min"])                            # тик мира (игровые минуты)
     _pc_save()
     for pid in order:                                       # прожитое переживает рестарт
         _npc_save(pid)

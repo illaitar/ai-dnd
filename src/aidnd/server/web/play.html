@@ -402,7 +402,7 @@ function renderNpc(n){
      ${(n.keys&&n.keys.length)?`<div class="subcap">при себе ключи</div>
        <div class="keys">${n.keys.map(k=>`<span class="keychip" data-k="${esc(k)}" onclick="askKey(this.dataset.k)" title="попросить ключ">&#128273; ${esc(k)}</span>`).join('')}</div>`:''}
      <div class="subcap">темы разговора</div>
-     <div class="topics">${(n.topics||[]).map(t=>`<span class="chip" onclick="say('${esc(t)}')">${esc(t)}</span>`).join('')}</div>
+     <div class="topics">${(n.topics||[]).map(t=>`<span class="chip" data-t="${esc(t)}" onclick="say('Расскажи-ка: '+this.dataset.t)">${esc(t)}</span>`).join('')}</div>
      ${n.crafter?`<button class="commission" onclick="commission()">&#9874; заказать: ${esc(n.recipe)}</button>`:''}
      <div id="wares"></div>
      <button class="end" onclick="endTalk()">&#8592; завершить разговор</button>`;

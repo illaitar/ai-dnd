@@ -35,6 +35,18 @@ class Recipe:
     mod_target: str = ""             # что усиливает masterwork (attack | social:appearance | …)
 
 
+# что ремесленник какой роли берётся сделать — ДАННЫЕ предметной системы (не код игрового слоя)
+ROLE_RECIPES = {
+    "кузнец": Recipe("weapon", "нож", "anvil", 8, 40, 10, "main_hand", "attack"),
+    "знахарка": Recipe("consumable", "целебный отвар", "cauldron", 12, 6, 11, "none", "special:heal"),
+    "сапожник": Recipe("armor", "сапоги", "bench", 14, 50, 11, "body", "social:appearance"),
+    "дубильщик": Recipe("armor", "кожаный жилет", "tannery", 10, 45, 11, "body", "defense"),
+    "лавочник": Recipe("trinket", "затейливая безделица", "bench", 6, 20, 12, "worn", ""),
+    "трактирщик": Recipe("consumable", "кружка крепкого", "cauldron", 2, 4, 8, "none", ""),
+    "мельник": Recipe("material", "мешок доброй муки", "bench", 3, 10, 9, "none", ""),
+}
+
+
 def mastery(cap: Capability, station: str, reputation: int = 0, station_tier: int = 1) -> int:
     """Мастерство: профильная способность + намётанный глаз (компетенция) + станок + репутация."""
     ab = max((cap.mod(a) for a in _ABIL.get(station, ("dex",))), default=0)

@@ -461,8 +461,23 @@ async function go(){
   api('/api/play/scene').then(s2=>{SCENE=s2;if(s2.guild_board)BOARD={jobs:s2.guild_board,news:s2.guild_news};renderLoc(s2.location);renderWays();setHp(s2.hp,s2.max_hp);});
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   renderLoc(r.location);
-  push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'» ('+fmtClock(GT).split(', ')[1]+').');
+  if(r.stopped==='sign'){
+    push('narr','По пути тебе бросается в глаза вывеска.');
+    push('sys',`<div class="ctcard">Вывеска: <b>${esc(r.sign.name)}</b>. Занести на карту?
+      <div class="acts" style="justify-content:center;margin-top:6px">
+        <button onclick="signAck('${r.sign.bid}',true,${r.remaining})">на карту</button>
+        <button onclick="signAck('${r.sign.bid}',false,${r.remaining})">пройти мимо</button></div></div>`);
+  }else if(r.stopped==='event'){
+    push('narr',esc(r.event));
+    push('sys',`<div class="acts" style="justify-content:center">
+      <button onclick="push('sys','Ты задерживаешься посмотреть.')">вмешаться</button>
+      <button onclick="contMove(${r.remaining})">пройти мимо</button></div>`);
+  }else{
+    push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'» ('+fmtClock(GT).split(', ')[1]+').');
+  }
 }
+async function signAck(bid,record,to){await api('/api/play/sign_ack',{bid,record});contMove(to);}
+async function contMove(to){PEND=to;await go();}
 (function(){const s=$('mapsvg');let drag=null;
   s.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,cx:CX,cy:CY};PANNED=false;s.classList.add('drag');});
   window.addEventListener('mousemove',e=>{if(!drag)return;const r=s.getBoundingClientRect();

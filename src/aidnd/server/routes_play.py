@@ -445,13 +445,19 @@ def _weave_ties(people) -> None:
                 continue
             oid = rng.choice(cands)
             o = people[oid]
-            neg = any(w in tl for w in ("должен", "долг", "вражд", "боит", "подозр", "ненавид", "угрож"))
             ar, br = st.rel(oid), o.state.rel(pid)
-            if neg:
+            hostile = any(w in tl for w in ("вражд", "подозр", "ненавид", "угрож", "презир"))
+            debt = any(w in tl for w in ("должен", "долг", "задолж"))
+            fear = any(w in tl for w in ("боит", "страш", "опаса"))
+            if hostile:                                     # настоящая вражда — обоюдно негатив
                 ar["fear"] = max(ar["fear"], 0.3)
                 ar["affinity"] = min(ar["affinity"], -0.2)
                 br["affinity"] = min(br["affinity"], -0.1)
-            else:
+            elif debt:                                      # долг — обязательство, НЕ ненависть
+                ar["fear"] = max(ar["fear"], 0.2)           # должник слегка опасается кредитора
+            elif fear:                                      # страх без вражды — симпатия нейтральна
+                ar["fear"] = max(ar["fear"], 0.35)
+            else:                                           # доброе знакомство/родство
                 ar["affinity"] = max(ar["affinity"], 0.4)
                 ar["trust"] = max(ar["trust"], 0.3)
                 br["affinity"] = max(br["affinity"], 0.3)

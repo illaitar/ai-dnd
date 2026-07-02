@@ -2012,11 +2012,11 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         pc_map[best[1]["name"]] = best[0]
     w.add(Body(id=PLAYER, place=place, charisma=0.45, appearance=min(0.8, 0.25 + coins / 60),
                attention=0.85, loot=pc_loot))              # добыча игрока НАСТОЯЩАЯ (кража реальна)
-    w.npc_minds = {pid: people[pid].state for pid in _here(loc, crof)}
+    w.npc_minds = {pid: people[pid].state for pid in here_all}   # умы = те же, кто в телах (кэп LOD)
     w.aliases = {v.lower(): k for k, v in names.items()}
     w.lookup = lambda q: _world_lookup(q, loc)             # тулкол know: знание мира по запросу
     personas = {}
-    for pid in _here(loc, crof):                            # глубина: манера/причуда/стремления из банка
+    for pid in here_all:                                    # глубина: манера/причуда/стремления из банка
         per = people[pid].persona or {}
         bits = []
         if per.get("origin"):
@@ -2177,6 +2177,8 @@ def _world_tick() -> dict:
     try:
         feed, address = _live_tick(people)
     except Exception:                                      # noqa: BLE001 — тик не роняет действие
+        import logging
+        logging.getLogger("aidnd").warning("live tick failed", exc_info=True)
         return {"feed": [], "address": []}
     return {"feed": feed, "address": address}
 

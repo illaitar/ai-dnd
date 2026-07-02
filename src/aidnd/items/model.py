@@ -10,6 +10,11 @@ from dataclasses import dataclass, field
 KINDS = ("weapon", "armor", "tool", "trinket", "consumable", "key", "document", "valuable", "material", "misc")
 SLOTS = ("main_hand", "off_hand", "body", "head", "worn", "none")
 QUALITY = ("crude", "plain", "fine", "exquisite")
+# ОСЬ РЕДКОСТИ (отдельно от качества выделки): множитель цены и вес спавна из пула.
+# unique — единственный в мире: раз выпал, из пула больше не появляется.
+RARITY = ("common", "rare", "epic", "unique")
+RARITY_PRICE = {"common": 1.0, "rare": 2.2, "epic": 4.5, "unique": 9.0}
+RARITY_WEIGHT = {"common": 100, "rare": 22, "epic": 5, "unique": 1}
 GATE_VIA = ("glance", "handle", "appraise", "lore", "craft_eye", "tool", "context", "use", "expert")
 MOD_OP = ("add", "mul", "set", "grant", "advantage", "disadvantage")
 MOD_WHEN = ("passive", "equipped", "worn", "on_use", "conditional")
@@ -95,6 +100,7 @@ def normalize(d: dict) -> dict:
         "slot": _enum(d.get("slot"), SLOTS, "none"),
         "material": str(d.get("material") or "").strip(),
         "quality": _enum(d.get("quality"), QUALITY, "plain"),
+        "rarity": _enum(d.get("rarity"), RARITY, "common"),
         "weight": round(_num(d.get("weight", 0.5), 0.5), 2),
         "apparent_worth": app, "worth": max(worth, app if not d.get("hidden") else 0) if worth else app,
         "tags": _list(d.get("tags")),
@@ -103,3 +109,8 @@ def normalize(d: dict) -> dict:
         "durability": norm_durability(d.get("durability")),
         "make": (d.get("make") if isinstance(d.get("make"), dict) else None),
     }
+
+
+def rarity_price(worth: float, rarity: str) -> int:
+    """Цена с учётом ОСИ РЕДКОСТИ поверх базовой ценности выделки."""
+    return max(1, round(worth * RARITY_PRICE.get(rarity, 1.0)))

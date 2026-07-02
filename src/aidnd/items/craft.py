@@ -8,10 +8,47 @@
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
 from random import Random
 
 from .model import Capability, normalize
+
+_MATERIALS = None
+_MPATH = os.path.join(os.path.dirname(__file__), "materials.json")
+
+
+def materials_graph() -> dict:
+    global _MATERIALS
+    if _MATERIALS is None:
+        with open(_MPATH, encoding="utf-8") as f:
+            _MATERIALS = json.load(f)
+    return _MATERIALS
+
+
+def craft_path(have: set, want: str, graph: dict | None = None, _depth: int = 0) -> list | None:
+    """Путь по ГРАФУ материалов: список рёбер, ведущих от имеющегося (have) к want.
+    Узел готов, когда все его входы либо в have, либо достижимы своими рёбрами. None — недостижимо.
+    Каждое ребро несёт гейты: tool/place/skill/time (проверяет игровой слой)."""
+    have = set(have)
+    if want in have or _depth > 8:
+        return [] if want in have else None
+    edges = (graph or materials_graph())["edges"]
+    edge = next((e for e in edges if e["to"] == want), None)
+    if not edge:
+        return None
+    steps: list = []
+    for src in edge["from"]:                               # рекурсивно добыть каждый вход
+        sub = craft_path(have, src, graph, _depth + 1)
+        if sub is None:
+            return None
+        for s in sub:
+            if s not in steps:
+                steps.append(s)
+        have.add(src)                                      # вход добыт — доступен для следующих
+    steps.append(edge)
+    return steps
 
 STATIONS = ("anvil", "bench", "cauldron", "loom", "tannery")
 _ABIL = {"anvil": ("str", "dex"), "bench": ("dex",), "cauldron": ("int", "wis"),

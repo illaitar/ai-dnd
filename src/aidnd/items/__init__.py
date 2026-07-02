@@ -8,12 +8,14 @@
 
 from __future__ import annotations
 
-from .craft import Recipe, craft, mastery, repair
+from . import loot_pool
+from .craft import Recipe, craft, craft_path, mastery, materials_graph, repair
 from .durability import active_mods, condition, use
 from .inspect import inspect, view
-from .model import Capability, normalize
+from .model import Capability, normalize, rarity_price
 from .smith import ItemCtx, LLMSmith, Smith, StubSmith
 
 __all__ = ["ItemCtx", "Smith", "LLMSmith", "StubSmith", "Capability",
-           "inspect", "view", "normalize",
-           "Recipe", "craft", "mastery", "repair", "condition", "use", "active_mods"]
+           "inspect", "view", "normalize", "rarity_price", "loot_pool",
+           "Recipe", "craft", "craft_path", "materials_graph", "mastery", "repair",
+           "condition", "use", "active_mods"]

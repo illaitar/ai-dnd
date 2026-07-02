@@ -49,6 +49,11 @@ class WorldStore:
                       "btype TEXT, data TEXT)")
             c.execute("CREATE TABLE IF NOT EXISTS user_worlds (user_id TEXT PRIMARY KEY, "
                       "world_id INTEGER, seed INTEGER)")
+            # пул предметов мира (весовой) + реестр выпавших уникальных (больше не спавнятся)
+            c.execute("CREATE TABLE IF NOT EXISTS item_pool (world_id INT, key TEXT, data TEXT, "
+                      "weight INT, PRIMARY KEY(world_id, key))")
+            c.execute("CREATE TABLE IF NOT EXISTS unique_spawned (world_id INT, key TEXT, "
+                      "PRIMARY KEY(world_id, key))")
             c.execute("CREATE TABLE IF NOT EXISTS npc_state (world_id INT, npc_id TEXT, data TEXT, "
                       "PRIMARY KEY(world_id, npc_id))")
 
@@ -141,10 +146,36 @@ class WorldStore:
             for iid in [row[0] for row in
                         c.execute("SELECT item_id FROM inventory WHERE world_id=?", (world_id,))]:
                 c.execute("DELETE FROM items WHERE id=?", (iid,))   # предмет живёт в одном мире
-            for t in ("buildings", "placements", "inventory", "pc_state",
-                      "purse", "flags", "contracts", "npc_state"):
+            for t in ("buildings", "placements", "inventory", "pc_state", "purse", "flags",
+                      "contracts", "npc_state", "item_pool", "unique_spawned"):
                 c.execute(f"DELETE FROM {t} WHERE world_id=?", (world_id,))
             c.execute("DELETE FROM user_worlds WHERE world_id=?", (world_id,))
+
+    # ------------------------------------------------------ пул предметов мира --- #
+    def pool_add_item(self, world_id: int, key: str, data: dict, weight: int) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO item_pool (world_id, key, data, weight) VALUES (?,?,?,?)",
+                      (world_id, key, json.dumps(data, ensure_ascii=False), int(weight)))
+
+    def pool_items(self, world_id: int) -> list:
+        with self._conn() as c:
+            rows = c.execute("SELECT key, data, weight FROM item_pool WHERE world_id=?",
+                             (world_id,)).fetchall()
+        return [{"key": r[0], "data": json.loads(r[1]), "weight": int(r[2])} for r in rows]
+
+    def item_pool_count(self, world_id: int) -> int:
+        with self._conn() as c:
+            return c.execute("SELECT COUNT(*) FROM item_pool WHERE world_id=?", (world_id,)).fetchone()[0]
+
+    def unique_taken(self, world_id: int, key: str) -> bool:
+        with self._conn() as c:
+            return c.execute("SELECT 1 FROM unique_spawned WHERE world_id=? AND key=?",
+                             (world_id, key)).fetchone() is not None
+
+    def unique_mark(self, world_id: int, key: str) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR IGNORE INTO unique_spawned (world_id, key) VALUES (?,?)",
+                      (world_id, key))
 
     def pool_save_building(self, bid: str, kind: str, btype: str, data: dict) -> None:
         with self._conn() as c:

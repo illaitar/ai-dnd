@@ -1,0 +1,27 @@
+{
+  "nodes": [
+    {"id": "железная руда", "kind": "material", "worth": 2},
+    {"id": "железный слиток", "kind": "material", "worth": 6},
+    {"id": "стальной клинок", "kind": "weapon", "worth": 18},
+    {"id": "сырая шкура", "kind": "material", "worth": 2},
+    {"id": "выделанная кожа", "kind": "material", "worth": 5},
+    {"id": "кожаный доспех", "kind": "armor", "worth": 12},
+    {"id": "древесина", "kind": "material", "worth": 1},
+    {"id": "доска", "kind": "material", "worth": 3},
+    {"id": "древко", "kind": "material", "worth": 4},
+    {"id": "тетива", "kind": "material", "worth": 2},
+    {"id": "деревянный лук", "kind": "weapon", "worth": 12},
+    {"id": "травы", "kind": "material", "worth": 2},
+    {"id": "целебный отвар", "kind": "consumable", "worth": 6}
+  ],
+  "edges": [
+    {"from": ["железная руда"], "to": "железный слиток", "tool": "печь", "place": "forge", "skill": "metalwork", "time": 20},
+    {"from": ["железный слиток"], "to": "стальной клинок", "tool": "молот", "place": "anvil", "skill": "metalwork", "time": 40},
+    {"from": ["сырая шкура"], "to": "выделанная кожа", "tool": "скребок", "place": "tannery", "skill": "", "time": 30},
+    {"from": ["выделанная кожа"], "to": "кожаный доспех", "tool": "шило", "place": "bench", "skill": "", "time": 25},
+    {"from": ["древесина"], "to": "доска", "tool": "пила", "place": "bench", "skill": "", "time": 15},
+    {"from": ["доска"], "to": "древко", "tool": "нож", "place": "bench", "skill": "", "time": 15},
+    {"from": ["древко", "тетива"], "to": "деревянный лук", "tool": "нож", "place": "bench", "skill": "", "time": 30},
+    {"from": ["травы"], "to": "целебный отвар", "tool": "котёл", "place": "cauldron", "skill": "herbs", "time": 12}
+  ]
+}

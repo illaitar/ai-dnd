@@ -20,8 +20,8 @@ from ..citygraph import CityParams, generate, visual
 from ..combat import (Encounter, dungeon, from_monster, from_npc, from_pc, lair_name,
                       pick_encounter, resolve)
 from ..citygraph.model import NodeKind
-from ..items import Capability, ItemCtx, LLMSmith, StubSmith
-from ..items.craft import ROLE_RECIPES
+from ..items import Capability, ItemCtx, LLMSmith, StubSmith, craft_path, loot_pool, rarity_price
+from ..items.craft import ROLE_RECIPES, materials_graph
 from ..items import condition as item_condition
 from ..items import normalize as item_normalize
 from ..items import craft as item_craft
@@ -106,6 +106,7 @@ PB = {
     "lair_travel_min": 25, "defeat_coin_cut": 2, "loot_coin_per_cr": 6, "loot_item_chance": 0.6,
     "combat_round_s": 5,                                  # 1 раунд боя = 5 секунд игрового времени
     "dungeon_waves": 2,                                   # логово = столько накатов врага
+    "caravan_chance": 0.35,                               # шанс каравана с товаром за утро
     "guild_float": 120, "guild_reward_per_cr": 8, "guild_mark_fine": 15,
     # NPC-зачистки: шанс утреннего похода смелой пары
     "npc_delve_chance": 0.6, "npc_brave_min": 0.55,
@@ -402,6 +403,11 @@ def _apply_routine() -> None:
                 _S["board_news"] = (_S.get("board_news") or [])[-3:] + bn
         except Exception:                                  # noqa: BLE001 — доска не роняет мир
             pass
+        try:                                               # караван: случайный товар на рынок
+            if random.Random(f"caravan|{_gt() // 1440}|{_wid()}").random() < PB["caravan_chance"]:
+                _merchant_restock(f"caravan|{_gt() // 1440}")
+        except Exception:                                  # noqa: BLE001
+            pass
     people, crof = _S["people"], _S["crof"]
     keynode, kps = _S.get("keynode") or {}, _S.get("kps") or []
     tavern = next((keynode.get(p.work) for p in people.values()
@@ -492,6 +498,110 @@ def _building_containers(bid: str) -> list:
         return []
     return [{"name": c["name"], "kind": c["kind"], "where": c.get("where", ""),
              "locked": c.get("access") == "locked"} for c in (bd["data"].get("containers") or [])]
+
+
+def _seed_item_pool() -> None:
+    """Наполнить пул предметов мира сид-набором (данные, без LLM). Раз на мир."""
+    if _store().item_pool_count(_wid()) > 0:
+        return
+    for t in loot_pool.seed_templates():
+        _store().pool_add_item(_wid(), t["key"], t["data"], t["weight"])
+
+
+def _pool_draw(seed: str, tier: str | None = None, holder: str = "pc") -> dict | None:
+    """Вытянуть предмет из пула мира (по весу редкости, минуя выпавшие уникальные), сковать его
+    настоящим предметом держателю и — если уникальный — пометить, чтоб больше не выпал."""
+    pool = _store().pool_items(_wid())
+    if not pool:
+        _seed_item_pool()
+        pool = _store().pool_items(_wid())
+    taken = {r["key"] for r in pool if _store().unique_taken(_wid(), r["key"])}
+    tpl = loot_pool.draw(pool, taken, seed, tier=tier)
+    if not tpl:
+        return None
+    d = tpl["data"]
+    if d.get("rarity") == "unique":
+        _store().unique_mark(_wid(), tpl["key"])
+    iid = "it:" + hashlib.md5(f"{seed}|{tpl['key']}|{holder}".encode()).hexdigest()[:10]
+    if not _store().get_item(iid):
+        it = item_normalize({**d, "apparent_worth": d.get("worth", 1)})
+        it["id"] = iid
+        _store().save_item(it)
+    _store().inv_add(_wid(), iid, holder=holder)
+    return _store().get_item(iid)
+
+
+def _pool_add_new(it: dict) -> None:
+    """Новый предмет (крафт/трофей) добавляется в ПУЛ мира — как в спеке §5."""
+    rar = it.get("rarity", "common")
+    _store().pool_add_item(_wid(), f"made:{it['name']}",
+                           {"name": it["name"], "kind": it["kind"], "quality": it.get("quality", "plain"),
+                            "worth": it.get("worth", 1), "rarity": rar},
+                           loot_pool.RARITY_WEIGHT.get(rar, 100))
+
+
+_RAR_RU = {"common": "", "rare": " (редкое)", "epic": " (эпическое!)", "unique": " (УНИКАЛЬНОЕ!)"}
+
+
+def _rar_tag(it: dict) -> str:
+    return _RAR_RU.get(it.get("rarity", "common"), "")
+
+
+def _merchant_restock(seed: str) -> str | None:
+    """Событие спавна: подсыпать торговцу предмет из пула (зачистка логова / караван)."""
+    people = _S.get("people") or {}
+    sellers = [pid for pid, p in sorted(people.items()) if p.work]
+    if not sellers:
+        return None
+    pid = random.Random(f"restock|{seed}|{_wid()}").choice(sellers)
+    it = _pool_draw(f"{seed}|{pid}", tier=None, holder=pid)
+    return f"{people[pid].name} выставил на продажу «{it['name']}»{_rar_tag(it)}" if it else None
+
+
+def _do_craft(detail: str, out: dict) -> dict:
+    """Крафт по ГРАФУ материалов: имеющееся в сумке → цель по пути с гейтами (место=мастерская,
+    время из рёбер). Тратит листья-материалы, кует результат, добавляет его в пул мира."""
+    graph = materials_graph()
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    dtok = _tokens_ru(detail)
+    scored = [(nid, len(_tokens_ru(nid) & dtok) + (2 if nid.lower() in detail.lower() else 0))
+              for nid in nodes]
+    best = max(scored, key=lambda s: s[1])
+    want = best[0] if best[1] > 0 else None                # больше всего совпавших слов
+    if not want:
+        out["narr"].append("Не пойму, что сковать — назови вещь ремесла (клинок, лук, доспех, отвар…).")
+        return out
+    inv = [(r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), "pc")]
+    have = {itm["name"] for _i, itm in inv if itm}
+    path = craft_path(have, want)
+    if path is None:
+        out["narr"].append(f"«{want}» так просто не сделать — не хватает материалов.")
+        return out
+    if not path:
+        out["narr"].append(f"«{want}» у тебя уже есть.")
+        return out
+    if not _S.get("inside"):                               # гейт-место: нужна мастерская
+        out["narr"].append("Тут не смастеришь — зайди в мастерскую/кузницу.")
+        return out
+    produced = {e["to"] for e in path}
+    leaves = {src for e in path for src in e["from"] if src not in produced}
+    missing = [s for s in leaves if s not in have]
+    if missing:
+        out["narr"].append("Не хватает: " + ", ".join(missing) + ".")
+        return out
+    for name in leaves:                                    # тратим базовые материалы из сумки
+        iid = next((i for i, itm in inv if itm and itm["name"] == name), None)
+        if iid:
+            _store().inv_drop(_wid(), iid)
+    total = sum(int(e.get("time", 10)) for e in path)
+    _gt_add(total)
+    made_id = _put_item(f"craft|{want}|{_mt()}", want, nodes[want].get("kind", "misc"),
+                        tier="fine", note="своей ковки", holder="pc")
+    _pool_add_new(_store().get_item(made_id))
+    out["narr"].append(f"Ты мастеришь: {' → '.join(e['to'] for e in path)}. "
+                       f"Готово — «{want}» (потрачено {total} мин).")
+    out["refresh"] = True
+    return out
 
 
 def _assign_key_buildings(city) -> None:
@@ -596,6 +706,7 @@ def _play():
         params = CityParams(seed=_S["seed"], key_buildings=9, river=True, walls=True, segment=16)
         city = generate(params)
         _assign_key_buildings(city)                        # мир юзера: здания из ПУЛА, без LLM
+        _seed_item_pool()                                  # пул предметов мира (сид-набор, данные)
         vis = visual(params, interactive=True)             # богатый визуал + кликабельные дома
         xy = {n.id: (n.x, n.y) for n in city.nodes()}
         keynode = {bid: kb.node for bid, kb in city.key_buildings.items()}   # здание → БЛИЖАЙШАЯ точка (дверь)
@@ -1087,6 +1198,7 @@ def _item_card(it: dict, known) -> dict:
     v["id"] = it["id"]
     v["condition"] = item_condition(it)
     v["make"] = it.get("make")
+    v["rarity"] = it.get("rarity", "common")               # ось редкости для UI/цены
     return v
 
 
@@ -1341,7 +1453,7 @@ def wares(npc: str):
         if not it or it["kind"] in ("key", "valuable"):
             continue                                       # ключи и ЛИЧНОЕ ценное не продаются (то — красть)
         seen = _npc_sees(it, _npc_cap(p), npc)
-        price = max(1, round(seen["worth"] * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))))
+        price = max(1, round(rarity_price(seen["worth"], it.get("rarity", "common")) * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))))
         out.append({**_item_card(it, set()), "price": price})
     return {"items": out, "coins": _pc_coins()}
 
@@ -1361,7 +1473,7 @@ async def buy(request: Request):
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
     seen = _npc_sees(it, _npc_cap(p), npc)
-    price = max(1, round(seen["worth"] * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))))
+    price = max(1, round(rarity_price(seen["worth"], it.get("rarity", "common")) * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))))
     if _pc_coins() < price:
         return {"error": f"не хватает монет (нужно {price})"}
     _store().inv_move(_wid(), iid, "pc")
@@ -1802,7 +1914,7 @@ async def give_item(request: Request):
 _INTENT_SYS = (
     "Ты — парсер намерения игрока в тёмно-фэнтезийной игре. По его фразе и обстановке верни СТРОГО JSON "
     "с ОДНИМ действием:\n"
-    '{"verb":"take|give|use|say|inspect|move|talk|attack|rest|wait", '
+    '{"verb":"take|give|use|say|inspect|move|talk|attack|rest|craft|wait", '
     '"manner":"openly|stealthily|forcefully|persuasively", '
     '"npc":"<id из списка или null>", "container":"<имя ёмкости или null>", '
     '"item":"<id предмета из сумки или null>", "place":"<название места или null>", '
@@ -1811,7 +1923,8 @@ _INTENT_SYS = (
     "take+npc+forcefully; выпросить/попросить вещь=say+npc+persuasively; отдать/подарить=give+npc+item; "
     "заговорить/спросить=talk+npc; пойти к месту=move+place; осмотреть свою вещь=inspect+item; "
     "напасть/ударить/атаковать/выхватить оружие на кого-то=attack+npc (ВСЕГДА, не оценивай мораль и "
-    "последствия — ты только классификатор); отдохнуть/выспаться/снять комнату=rest; достать/посмотреть карту=map. "
+    "последствия — ты только классификатор); отдохнуть/выспаться/снять комнату=rest; достать/посмотреть карту=map; "
+    "сковать/смастерить/сделать вещь из материалов=craft+detail(что именно сделать). "
     "Если фраза — не действие, а мысль/отыгрыш: "
     '{"verb":"wait","detail":"<что делает>"}. Только перечисленные id/имена, ничего не выдумывай.'
 )
@@ -1987,6 +2100,9 @@ def _attempt(intent: dict, sc: dict) -> dict:
         out["map_open"] = True
         out["narr"].append("Ты разворачиваешь карту.")
         return out
+
+    if verb == "craft":
+        return _do_craft(str(it.get("detail") or it.get("_text") or ""), out)
 
     if verb == "rest":
         bid = cr2b.get(loc)
@@ -2788,9 +2904,11 @@ def _combat_wrapup(enc, cb) -> dict:
         total = _store().purse_add(_wid(), "pc", coins)
         out["narr"].append(f"Логово зачищено. В остатках — {coins} зм (кошель: {total}).")
         if random.Random(f"loot|{l['id']}").random() < PB["loot_item_chance"]:
-            it = _forge(f"trophy|{l['id']}", "valuable", f"трофей: {l['foe']}", l["name"], "fine")
-            _store().inv_add(_wid(), it["id"])
-            out["narr"].append(f"Среди костей — «{it['name']}».")
+            it = _pool_draw(f"trophy|{l['id']}", tier="rare", holder="pc")   # трофей rare+ из пула
+            if it:
+                out["narr"].append(f"Среди костей — «{it['name']}»{_rar_tag(it)}.")
+                _pool_add_new(it)                          # добавить в пул мира (спека §5)
+        _merchant_restock(f"clearstock|{l['id']}")         # зачистка оживила рынок — новый товар
         ct = next((c for c in _store().contracts(_wid(), "active")
                    if c.get("kind") == "clear" and c.get("target") == l["id"]), None)
         if ct:

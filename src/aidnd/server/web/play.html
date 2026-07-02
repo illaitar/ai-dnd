@@ -919,9 +919,11 @@ function openInv(){
   $('invcoins').textContent=$('coins').textContent;
   const g=$('invgrid');
   if(!INV.length){g.innerHTML='<div class="bagempty">пусто — только пыль по швам</div>';return;}
-  g.innerHTML=INV.map(it=>`<div class="invcard" onclick="$('invwrap').classList.add('hidden');inspectItem('${it.id}')">
-    <div class="bn">${esc(it.name)}</div>
-    <div class="bw">${esc(it.kind||'')}${it.qty>1?(' × '+it.qty):''}</div></div>`).join('');
+  const RC={common:'',rare:'#5f8296',epic:'#8a6fae',unique:'#d9a441'};
+  const RL={common:'',rare:'редкое',epic:'эпическое',unique:'уникальное'};
+  g.innerHTML=INV.map(it=>{const rc=RC[it.rarity||'common'];return `<div class="invcard" style="${rc?('border-color:'+rc):''}" onclick="$('invwrap').classList.add('hidden');inspectItem('${it.id}')">
+    <div class="bn">${esc(it.name)}${rc?` <span style="color:${rc};font-size:10px">◆ ${RL[it.rarity]}</span>`:''}</div>
+    <div class="bw">${esc(it.kind||'')}${it.qty>1?(' × '+it.qty):''}</div></div>`;}).join('');
 }
 function openCombat(cb,head){CB=cb;$('cbname').textContent=(head&&head.name)||'Бой';
   $('cbsub').textContent=(head&&head.sub)||'';

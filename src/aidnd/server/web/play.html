@@ -511,16 +511,17 @@ function applyWorld(r){
   if(!r)return;
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);if(r.hp!=null)setHp(r.hp);
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
   (r.feed||[]).forEach(f=>LIVEF.push(f));
   if(r.feed&&r.feed.length)renderFeed();
   (r.address||[]).forEach(a=>{
     const el=npcMsg(a.npc,a.text,'— тебе');
     el.style.cursor='pointer';el.title='ответить';el.onclick=()=>talk(a.npc);});
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
-  (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
-  (r.address||[]).forEach(a=>{const el=npcMsg(a.npc,a.text,'— тебе');el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
   if(r.dice)showDice(r.dice);
-  if(r.location){SCENE=r;renderAmb();renderLoc(r.location);renderWays();
+  if(r.location){SCENE=r;
+    BOARD=r.guild_board?{jobs:r.guild_board,news:r.guild_news,status:r.guild_status}:null;
+    renderAmb();renderLoc(r.location);renderWays();
     $('locname').textContent=r.location.name;}
 }
 function renderWays(){
@@ -832,20 +833,43 @@ let BOARD=null;
 function renderBoard(){
   const el=document.querySelector('.locard .desc');
   if(!el||!BOARD)return;
+  const st=BOARD.status||{};
+  let rankline='';
+  if(st.marked)
+    rankline=`<div class="ctw" style="color:var(--red)">на тебе чёрная метка гильдии
+      <button onclick="guildRedeem()">искупить</button></div>`;
+  else if(st.member){
+    const prog=st.next?` · до «${esc(st.next)}»: ${st.closed}/${st.next_need}`:' · высший ранг';
+    rankline=`<div class="ctw">ранг: <b style="color:var(--gold)">${esc(st.rank)}</b>
+      (заказы до CR ${st.cr_max})${prog}${st.own?'':' — <span style="color:var(--red)">жетон не твой</span>'}</div>`;
+  }
   const news=(BOARD.news||[]).map(n=>`<div class="ctw">&#8226; ${esc(n)}</div>`).join('');
-  el.innerHTML+= `<div class="subcap" style="margin-top:10px">доска гильдии</div>`+news+
+  el.innerHTML+= `<div class="subcap" style="margin-top:10px">доска гильдии</div>`+rankline+news+
     ((BOARD.jobs||[]).map(j=>`<div class="boardjob">${esc(j.name)} — ${esc(j.foe)}&times;${j.n} (CR ${j.cr}) · ${j.reward} зм
       <button data-i="${j.id}" data-l="${j.lair}" onclick="takeJob(this.dataset.i,this.dataset.l)">взяться</button></div>`).join('')
      ||'<div class="bagempty">заказов нет — всё зачищено</div>');
 }
+async function refreshBoard(){
+  const s=await api('/api/play/scene');
+  if(s.guild_board){BOARD={jobs:s.guild_board,news:s.guild_news,status:s.guild_status};renderLoc(s.location);}
+}
 async function takeJob(id,lair){
   const r=await api('/api/play/board_take',{id});
-  if(r.error){push('sys',esc(r.error));return;}
+  if(r.dice)showDice(r.dice);
+  if(r.error){push('sys',esc(r.error));await refreshBoard();return;}
   push('narr','Заказ снят с доски. Он теперь в «делах» — отправляйся, когда будешь готов.');
-  renderJobs();api('/api/play/scene').then(s=>{if(s.guild_board){BOARD={jobs:s.guild_board,news:s.guild_news};renderLoc(s.location);}});
+  renderJobs();refreshBoard();
+}
+async function guildRedeem(){
+  const r=await api('/api/play/guild_redeem',{});
+  if(r.error){push('sys',esc(r.error));return;}
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  if(r.coins!=null)setCoins(r.coins);
+  refreshBoard();
 }
 async function delve(lair){
   const r=await api('/api/play/delve',{lair});
+  if(r.dice)showDice(r.dice);
   if(r.error){push('sys',esc(r.error));return;}
   if(r.gt!=null){GT=r.gt;setClock();}
   openCombat(r.combat,{name:r.lair.name,sub:r.lair.env+' · CR '+r.lair.cr});

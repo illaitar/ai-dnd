@@ -104,7 +104,7 @@ PB = {
     "pc_max_hp": 18, "lairs": 5, "lair_cr_near": 0.8, "lair_cr_far": 3.0,
     "lair_travel_min": 25, "defeat_coin_cut": 2, "loot_coin_per_cr": 6, "loot_item_chance": 0.6,
     "combat_round_s": 5,                                  # 1 раунд боя = 5 секунд игрового времени
-    "guild_float": 120, "guild_reward_per_cr": 8,
+    "guild_float": 120, "guild_reward_per_cr": 8, "guild_mark_fine": 15,
     # NPC-зачистки: шанс утреннего похода смелой пары
     "npc_delve_chance": 0.6, "npc_brave_min": 0.55,
     "fighter_roles": ("стражник", "охотник", "головорез", "бродяга", "наёмник"),
@@ -695,7 +695,7 @@ def _scene_dict(city, people, crof, cr2b, loc):
     more = max(0, len(here) - PB["here_show_cap"])
     here = here[:PB["here_show_cap"]]
     vis_here = here if lvl >= 1 else []                    # туман: людей различаешь, лишь осмотревшись
-    return {
+    d = {
         "loc": loc,
         "inside": inside,
         "enterable": ({"bid": bid, "name": _binfo(bid)["name"]} if (bid and not inside) else None),
@@ -717,6 +717,14 @@ def _scene_dict(city, people, crof, cr2b, loc):
                   "portrait": _portrait_url(people[pid], _emo(people[pid].state))}
                  for i, pid in enumerate(vis_here)],
     }
+    if bid and bid == _guild_bid():                        # в гильдии — доска, ранг, приём новичка
+        d.setdefault("narr", [])
+        if not _pc_badge() and not _store().flag_get(_wid(), "guild_mark|pc"):
+            _mint_badge(0)
+            d["narr"].append("Тебя приняли в гильдию. Вот жетон приключенца (Медь).")
+        d["guild_board"], d["guild_news"] = _guild_board(), (_S.get("guild_news") or [])
+        d["guild_status"] = _guild_status()
+    return d
 
 
 def _mind_scene(npc_id, people) -> MWorld:
@@ -818,10 +826,7 @@ def scene():
     city, people, crof, cr2b, loc = _play()
     out = {**_scene_dict(city, people, crof, cr2b, loc), "gt": _gt(), "coins": _pc_coins(),
            "hp": _pc_hp(), "max_hp": PB["pc_max_hp"], "city": _city_name()}
-    if cr2b.get(loc) and cr2b.get(loc) == _guild_bid():
-        out["guild_board"] = _guild_board()
-        out["guild_news"] = _S.get("guild_news") or []
-    return out
+    return out                                             # доска/ранг гильдии — из _scene_dict
 
 
 @router.get("/api/play/map")
@@ -2265,6 +2270,102 @@ def _lairs() -> list:
             for l in _S["lairs"]]
 
 
+# ---- РАНГИ ГИЛЬДИИ (данные): имя · потолок CR заказа · сколько закрытых заказов нужно ---- #
+GUILD_RANKS = (
+    {"name": "Медь", "cr_max": 1.0, "need": 0},
+    {"name": "Бронза", "cr_max": 2.0, "need": 2},
+    {"name": "Железо", "cr_max": 4.0, "need": 5},
+    {"name": "Серебро", "cr_max": 8.0, "need": 9},
+    {"name": "Золото", "cr_max": 99.0, "need": 14},
+)
+
+
+def _rank_by_name(nm: str) -> int:
+    return next((i for i, r in enumerate(GUILD_RANKS) if r["name"] == nm), 0)
+
+
+def _mint_badge(rank_idx: int, holder: str = "pc") -> str:
+    """Выковать жетон гильдии (предмет-удостоверение) данного ранга и вручить держателю.
+    Ранг/владелец живут во флагах, привязанных к id жетона (переживают кражу/передачу)."""
+    nm = GUILD_RANKS[rank_idx]["name"]
+    iid = _put_item(f"badge|{_wid()}|{holder}|{rank_idx}", f"Жетон гильдии ({nm})", "document",
+                    tier="fine", note="удостоверение приключенца", holder=holder)
+    _store().flag_set(_wid(), f"badge_rank|{iid}", str(rank_idx))
+    _store().flag_set(_wid(), f"badge_owner|{iid}", holder)
+    return iid
+
+
+def _pc_badge() -> tuple | None:
+    """(iid, rank_idx, owner) жетона в сумке игрока, либо None. Ранг — из флага (или из имени)."""
+    for r in _store().inventory(_wid(), "pc"):
+        it = _store().get_item(r["item_id"])
+        if it and it["kind"] == "document" and "Жетон гильдии" in it["name"]:
+            iid = r["item_id"]
+            rf = _store().flag_get(_wid(), f"badge_rank|{iid}")
+            if rf is None:
+                nm = it["name"].split("(")[-1].rstrip(")")
+                rf = _rank_by_name(nm)
+            owner = _store().flag_get(_wid(), f"badge_owner|{iid}") or "pc"
+            return iid, int(rf), owner
+    return None
+
+
+def _guild_steward():
+    """Распорядитель гильдии — работник её здания (для проверки лжи по чужому жетону)."""
+    gb = _guild_bid()
+    people = _S.get("people") or {}
+    return next((p for pid, p in people.items() if p.work == gb), None)
+
+
+def _guild_closed() -> int:
+    return int(_store().flag_get(_wid(), "guild_closed|pc") or 0)
+
+
+def _guild_promote() -> str | None:
+    """Повышение по числу закрытых заказов: если дорос — заменить жетон на старший ранг."""
+    b = _pc_badge()
+    if not b or b[2] != "pc":                              # без своего жетона не повышают
+        return None
+    iid, rank, _own = b
+    closed = _guild_closed()
+    nxt = rank + 1
+    if nxt < len(GUILD_RANKS) and closed >= GUILD_RANKS[nxt]["need"]:
+        _store().inv_drop(_wid(), iid)                     # старый жетон изымают
+        _mint_badge(nxt)
+        return f"Распорядитель вручает тебе жетон ({GUILD_RANKS[nxt]['name']}) — ранг повышен."
+    return None
+
+
+def _guild_gate(job_cr: float) -> dict | None:
+    """Гейт доски/вылазки: жетон в сумке, ранг по чину, проверка лжи для чужого жетона.
+    Возвращает {error, dice?} при отказе, иначе None (и, для чужого жетона, {dice, stolen})."""
+    if _store().flag_get(_wid(), "guild_mark|pc"):
+        return {"error": f"на тебе чёрная метка гильдии — искупи вину ({PB['guild_mark_fine']} зм)"}
+    b = _pc_badge()
+    if not b:
+        return {"error": "нужен жетон гильдии — вступи у доски"}
+    iid, rank, owner = b
+    if job_cr > GUILD_RANKS[rank]["cr_max"]:
+        return {"error": f"не по чину: жетон «{GUILD_RANKS[rank]['name']}» "
+                         f"берёт заказы до CR {GUILD_RANKS[rank]['cr_max']:g}"}
+    if owner != "pc":                                      # чужой жетон — распорядитель проверяет
+        stew = _guild_steward()
+        wis = stew.state.config.abilities.get("wis", 10) if stew else 10
+        pr, pw = random.Random(f"lie|{iid}|{_gt()}").randint(1, 20), \
+            random.Random(f"insight|{iid}|{_gt()}").randint(1, 20)
+        me = pr + _PC_CAP.mod("cha")
+        them = pw + (wis - 10) // 2
+        dice = {"die": 20, "roll": pr, "mod": _PC_CAP.mod("cha"), "total": me, "dc": them,
+                "ok": me >= them, "label": "Обман (Cha) против чутья распорядителя"}
+        if me < them:                                      # раскусили — жетон изъят, метка
+            _store().inv_drop(_wid(), iid)
+            _store().flag_set(_wid(), "guild_mark|pc", "1")
+            return {"error": "Распорядитель прищуривается: «Это не твой жетон». Его изымают, "
+                             "а тебе — чёрную метку.", "dice": dice}
+        return {"ok_stolen": True, "dice": dice}           # прошло, но заслуги не твои
+    return None
+
+
 def _guild_bid() -> str | None:
     """Здание гильдии: лучший матч по данным (тип весомее имени — «склад гильдии» не гильдия)."""
     best, score = None, 0
@@ -2295,12 +2396,50 @@ def _guild_board() -> list:
     return out
 
 
+def _guild_status() -> dict:
+    """Ранг игрока (по жетону в сумке), прогресс до следующего, метка."""
+    b = _pc_badge()
+    closed = _guild_closed()
+    if not b:
+        return {"member": False, "closed": closed,
+                "marked": bool(_store().flag_get(_wid(), "guild_mark|pc"))}
+    _iid, rank, owner = b
+    nxt = GUILD_RANKS[rank + 1] if rank + 1 < len(GUILD_RANKS) else None
+    return {"member": True, "rank": GUILD_RANKS[rank]["name"], "rank_idx": rank,
+            "cr_max": GUILD_RANKS[rank]["cr_max"], "own": owner == "pc", "closed": closed,
+            "next": (nxt["name"] if nxt else None), "next_need": (nxt["need"] if nxt else None),
+            "marked": bool(_store().flag_get(_wid(), "guild_mark|pc"))}
+
+
 @router.get("/api/play/board")
 def board():
     _play()
     gb = _guild_bid()
+    joined = None
+    if not _pc_badge() and not _store().flag_get(_wid(), "guild_mark|pc"):
+        _mint_badge(0)                                     # первое обращение — приняли, вот Медь
+        joined = "Тебя приняли в гильдию. Вот жетон приключенца (Медь)."
     return {"guild": (_binfo(gb)["name"] if gb else None), "jobs": _guild_board(),
-            "lairs": _lairs()}
+            "lairs": _lairs(), "status": _guild_status(), "joined": joined}
+
+
+@router.post("/api/play/guild_redeem")
+async def guild_redeem(request: Request):
+    """Искупить чёрную метку гильдии штрафом (и вернуть себе Медь-жетон, если его нет)."""
+    _play()
+    if not _store().flag_get(_wid(), "guild_mark|pc"):
+        return {"error": "метки нет"}
+    fine = PB["guild_mark_fine"]
+    if _pc_coins() < fine:
+        return {"error": f"нужно {fine} зм, чтобы загладить вину"}
+    _store().purse_add(_wid(), "pc", -fine)
+    _store().purse_add(_wid(), "guild", fine)
+    _store().flag_set(_wid(), "guild_mark|pc", "")         # снять метку
+    if not _pc_badge():
+        _mint_badge(0)
+    _pc_remember("загладил вину перед гильдией штрафом", 0.4)
+    return {"redeemed": True, "coins": _pc_coins(), "status": _guild_status(),
+            "narr": [f"Ты платишь гильдии {fine} зм. Метку снимают, жетон (Медь) снова у тебя."]}
 
 
 @router.post("/api/play/board_take")
@@ -2310,6 +2449,9 @@ async def board_take(request: Request):
     job = next((j for j in _guild_board() if j["id"] == jid), None)
     if not job:
         return {"error": "этого заказа уже нет"}
+    gate = _guild_gate(job["cr"])                          # жетон · ранг по чину · проверка лжи
+    if gate and gate.get("error"):
+        return {"error": gate["error"], "dice": gate.get("dice"), "status": _guild_status()}
     gb = _guild_bid()
     _store().save_contract(_wid(), jid, "active", {
         "giver": "guild", "giver_name": _binfo(gb)["name"] if gb else "Гильдия",
@@ -2317,7 +2459,9 @@ async def board_take(request: Request):
         "target_name": job["name"], "reward": job["reward"], "reward_item": None,
         "reward_name": None, "pitch": "", "why": "доска гильдии"})
     _pc_remember(f"взял с доски гильдии заказ: {job['name']} (CR {job['cr']}) за {job['reward']} зм", 0.5)
-    return {"taken": True}
+    stolen = bool(gate and gate.get("ok_stolen"))          # прошёл по чужому жетону — заслуга не в счёт
+    return {"taken": True, "dice": (gate.get("dice") if gate else None),
+            "narr": (["Распорядитель косится на жетон, но пропускает."] if stolen else [])}
 
 
 def _pc_combatant():
@@ -2357,6 +2501,11 @@ async def delve(request: Request):
         return {"error": "там уже пусто — зачищено"}
     if _pc_hp() <= 1:
         return {"error": "ты еле стоишь — сперва отлежись"}
+    taken = any(c.get("target") == lid for c in _store().contracts(_wid(), "active"))
+    if not taken:                                          # не по заказу — гильдия гейтит на месте
+        gate = _guild_gate(l["cr"])
+        if gate and gate.get("error"):
+            return {"error": gate["error"], "dice": gate.get("dice")}
     _gt_add(PB["lair_travel_min"])
     foes = pick_encounter(l["cr"] + 0.01, l["env"], seed=f"lair|{lid.split(':')[1]}")
     enc = Encounter([_pc_combatant()], foes, seed=f"fight|{lid}|{_mt()}")
@@ -2492,6 +2641,12 @@ def _combat_wrapup(enc, cb) -> dict:
             _store().save_contract(_wid(), ct["id"], "done",
                                    {k: v for k, v in ct.items() if k not in ("id", "status")})
             out["narr"].append(f"Заказ гильдии закрыт: +{reward} зм (кошель: {total}).")
+            b = _pc_badge()
+            if b and b[2] == "pc":                          # заслуга идёт лишь под СВОИМ жетоном
+                _store().flag_set(_wid(), "guild_closed|pc", str(_guild_closed() + 1))
+                up = _guild_promote()
+                if up:
+                    out["narr"].append(up)
         _pc_remember(f"зачистил {l['name']}", 0.7)
     elif st == "lost":
         cut = _pc_coins() // PB["defeat_coin_cut"]

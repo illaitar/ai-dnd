@@ -246,6 +246,12 @@ class WorldStore:
             c.execute("UPDATE inventory SET holder=? WHERE world_id=? AND item_id=?",
                       (holder, world_id, item_id))
 
+    def inv_drop(self, world_id: int, item_id: str) -> None:
+        """Изъять предмет из мира совсем (конфискация/расход/уничтожение)."""
+        with self._conn() as c:
+            c.execute("DELETE FROM inventory WHERE world_id=? AND item_id=?", (world_id, item_id))
+            c.execute("DELETE FROM items WHERE id=?", (item_id,))
+
     def purse_get(self, world_id: int, holder: str) -> int:
         with self._conn() as c:
             r = c.execute("SELECT coins FROM purse WHERE world_id=? AND holder=?",

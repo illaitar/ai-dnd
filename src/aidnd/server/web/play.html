@@ -737,7 +737,8 @@ async function renderJobs(){
   const r=await api('/api/play/contracts');
   const act=(r.active||[]),done=(r.done||[]);
   const kd={bring:'добудь',deliver:'отнеси',visit:'наведайся',befriend:'расположи к себе',clear:'зачисть'};
-  const lbl=c=>`${kd[c.kind]||'сделай'}: ${esc(c.want||c.target_name||'?')}`
+  const lbl=c=>(c.step_total>1?`<span class="ctw">шаг ${c.step_n}/${c.step_total}:</span> `:'')
+    +`${kd[c.kind]||'сделай'}: ${esc(c.want||c.target_name||'?')}`
     +(c.kind==='clear'?` <button class="keychip" style="padding:1px 8px" data-l="${esc(c.target)}" onclick="delve(this.dataset.l)">в путь</button>`:'');
   const rw=c=>c.reward_name?('вещь: '+esc(c.reward_name)):(c.reward+' зм');
   el.innerHTML=(act.length||done.length)

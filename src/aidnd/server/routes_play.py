@@ -1414,10 +1414,51 @@ _CONTRACT_SYS = (
     "visit — сходить в место и глянуть, что там; befriend — расположить к себе названного человека; "
     "dead — покончить с твоим ВРАГОМ (только из списка врагов; тёмное дело — лишь если твоя натура "
     "такое стерпит).\n"
-    "Верни СТРОГО JSON: {\"kind\": \"bring|deliver|visit|befriend\", \"want\": \"<вещь дословно или null>\", "
-    "\"target\": \"<имя человека или место дословно, или null>\", \"reward\": <целое, не больше наличности>, "
-    "\"pitch\": \"<просьба В ХАРАКТЕРЕ, 1-2 фразы, с сутью и наградой>\"}"
+    "Можно ОДНО поручение или ЦЕПОЧКУ из 2-3 связанных шагов (steps), если так честнее "
+    "(например: bring траву → deliver зелье жене мельника).\n"
+    "Верни СТРОГО JSON: {\"steps\": [{\"kind\": \"bring|deliver|visit|befriend|dead\", "
+    "\"want\": \"<вещь дословно или null>\", \"target\": \"<имя человека/место дословно или null>\"}, ...], "
+    "\"reward\": <целое, не больше наличности>, \"pitch\": \"<просьба В ХАРАКТЕРЕ, 1-2 фразы, с сутью и наградой>\"}. "
+    "Для простого поручения — steps из одного элемента."
 )
+
+
+def _build_step(spec, npc, p, cands, own, others) -> dict | None:
+    """Проверить и собрать ОДИН шаг уговора из спеки LLM (цель — из реального мира). None — невалиден."""
+    kind = spec.get("kind") if spec.get("kind") in ("bring", "deliver", "visit", "befriend", "dead") else "bring"
+    want, tgt = str(spec.get("want") or "").strip(), str(spec.get("target") or "").strip()
+    step = {"kind": kind, "want": None, "target": None, "target_name": None,
+            "where": "", "deliver_item": None}
+    if kind == "bring":
+        cand = next((c for c in cands if c["name"] == want), None)
+        if not cand:
+            return None
+        step.update(want=want, where=cand["where"])
+    elif kind == "deliver":
+        oit = next(((i, it) for i, it in own if it["name"] == want), None)
+        who = next(((pid, o) for pid, o in others if o.name == tgt), None)
+        if not oit or not who:
+            return None
+        step.update(want=want, deliver_item=oit[0], target=who[0], target_name=who[1].name,
+                    where=f"вручить: {who[1].name}")
+    elif kind == "visit":
+        pl = next((k for k in _S["geom"]["keys"] if k["label"] == tgt), None)
+        if not pl:
+            return None
+        step.update(target=pl["node"], target_name=pl["label"], where=f"место: {pl['label']}")
+    elif kind == "befriend":
+        who = next(((pid, o) for pid, o in others if o.name == tgt), None)
+        if not who:
+            return None
+        step.update(target=who[0], target_name=who[1].name, where=f"человек: {who[1].name}")
+    else:                                                   # dead — только настоящий враг гивера
+        who = next(((oid, o) for oid, o in others if o.name == tgt
+                    and (p.state.relationships.get(oid) or {}).get("affinity", 0) < -0.15), None)
+        if not who:
+            return None
+        step.update(target=who[0], target_name=who[1].name,
+                    where=f"человек: {who[1].name} — найти и покончить")
+    return step
 
 
 def _contract_candidates(giver: str) -> list:
@@ -1495,43 +1536,21 @@ def _contract_offer(npc: str) -> dict | None:
         d = json.loads(t[t.find("{"):t.rfind("}") + 1])
     except (json.JSONDecodeError, ValueError):
         return None
-    kind = d.get("kind") if d.get("kind") in ("bring", "deliver", "visit", "befriend", "dead") else "bring"
-    want, tgt = str(d.get("want") or "").strip(), str(d.get("target") or "").strip()
-    data = {"giver": npc, "giver_name": p.name, "kind": kind, "want": None, "where": "",
-            "target": None, "target_name": None,
+    specs = d.get("steps") if isinstance(d.get("steps"), list) and d["steps"] else [d]
+    steps = []
+    for spec in specs[:3]:                                  # цепочка до 3 шагов; любой невалидный → отказ
+        st = _build_step(spec if isinstance(spec, dict) else {}, npc, p, cands, own, others)
+        if not st:
+            return None
+        steps.append(st)
+    if not steps:
+        return None
+    first = steps[0]                                        # top-level = ПЕРВЫЙ шаг (совместимость)
+    data = {"giver": npc, "giver_name": p.name, "step": 0, "steps": steps, **first,
             "reward": (0 if reward_item else max(PB["contract_reward_min"], min(int(d.get("reward") or 5), purse))),
             "reward_item": (reward_item[0] if reward_item else None),
             "reward_name": (reward_item[1]["name"] if reward_item else None),
             "pitch": str(d.get("pitch") or "")[:220], "why": getattr(ag, "summary", "")}
-    if kind == "bring":
-        cand = next((c for c in cands if c["name"] == want), None)
-        if not cand:
-            return None
-        data.update(want=want, where=cand["where"])
-    elif kind == "deliver":
-        oit = next(((i, it) for i, it in own if it["name"] == want), None)
-        who = next(((pid, o) for pid, o in others if o.name == tgt), None)
-        if not oit or not who:
-            return None
-        data.update(want=want, deliver_item=oit[0], target=who[0], target_name=who[1].name,
-                    where=f"вручить: {who[1].name}")
-    elif kind == "visit":
-        pl = next((k for k in _S["geom"]["keys"] if k["label"] == tgt), None)
-        if not pl:
-            return None
-        data.update(target=pl["node"], target_name=pl["label"], where=f"место: {pl['label']}")
-    elif kind == "befriend":
-        who = next(((pid, o) for pid, o in others if o.name == tgt), None)
-        if not who:
-            return None
-        data.update(target=who[0], target_name=who[1].name, where=f"человек: {who[1].name}")
-    else:                                                   # dead — только настоящий враг гивера
-        who = next(((oid, o) for oid, o in others if o.name == tgt
-                    and (p.state.relationships.get(oid) or {}).get("affinity", 0) < -0.15), None)
-        if not who:
-            return None
-        data.update(target=who[0], target_name=who[1].name,
-                    where=f"человек: {who[1].name} — найти и покончить")
     cid = f"ct:{npc}:{_mt()}"
     _store().save_contract(_wid(), cid, "offered", data)
     _store().flag_set(_wid(), f"coffer|{npc}")
@@ -1541,6 +1560,42 @@ def _contract_offer(npc: str) -> dict | None:
 def _tokens_ru(s: str) -> set:
     """Грубый стем: префикс-5 (падежи не мешают «медяки»↔«медяков»)."""
     return {w[:5] for w in str(s).lower().replace("«", " ").replace("»", " ").split() if len(w) >= 4}
+
+
+_KIND_VERB = {"bring": "добыть", "deliver": "отнести", "visit": "наведаться",
+              "befriend": "расположить к себе", "dead": "покончить с"}
+
+
+def _ct_steps(ct: dict) -> list:
+    """Шаги уговора. Старый одношаговый контракт (без steps) — оборачиваем в один шаг."""
+    if ct.get("steps"):
+        return ct["steps"]
+    return [{"kind": ct.get("kind", "bring"), "want": ct.get("want"), "target": ct.get("target"),
+             "target_name": ct.get("target_name"), "where": ct.get("where", ""),
+             "deliver_item": ct.get("deliver_item")}]
+
+
+def _ct_cur(ct: dict) -> dict:
+    steps = _ct_steps(ct)
+    return steps[min(ct.get("step", 0), len(steps) - 1)]
+
+
+def _step_desc(step: dict) -> str:
+    v = _KIND_VERB.get(step.get("kind"), "сделать")
+    tgt = step.get("want") or step.get("target_name") or ""
+    return f"{v} «{tgt}»" + (f" ({step['where']})" if step.get("where") else "")
+
+
+def _ct_advance(ct: dict, step_narr: str) -> str:
+    """Текущий шаг закрыт: если он последний — выплата; иначе шаг++ и подсказка следующего."""
+    steps = _ct_steps(ct)
+    nstep = ct.get("step", 0) + 1
+    if nstep >= len(steps):
+        return _contract_complete(ct)
+    data = {k: v for k, v in ct.items() if k not in ("id", "status")}
+    data["step"] = nstep
+    _store().save_contract(_wid(), ct["id"], "active", data)
+    return f"{step_narr} Шаг {nstep} из {len(steps)}. Дальше: {_step_desc(steps[nstep])}."
 
 
 def _contract_complete(ct: dict) -> str:
@@ -1568,35 +1623,38 @@ def _contract_complete(ct: dict) -> str:
 
 
 def _contract_on_give(npc: str, it: dict) -> str | None:
-    """give закрывает: bring (принёс гиверу) и deliver (вручил адресату). КАК добыл — неважно."""
+    """give закрывает ТЕКУЩИЙ шаг: bring (принёс гиверу) и deliver (вручил адресату)."""
     for ct in _store().contracts(_wid(), "active"):
-        kind = ct.get("kind", "bring")
-        if kind == "bring" and ct["giver"] == npc and (_tokens_ru(ct["want"]) & _tokens_ru(it["name"])):
-            return _contract_complete(ct)
-        if kind == "deliver" and ct.get("target") == npc and (_tokens_ru(ct["want"]) & _tokens_ru(it["name"])):
+        cur = _ct_cur(ct)
+        kind = cur.get("kind", "bring")
+        if kind == "bring" and ct["giver"] == npc and (_tokens_ru(cur["want"]) & _tokens_ru(it["name"])):
+            return _ct_advance(ct, "Есть, добыто.")
+        if kind == "deliver" and cur.get("target") == npc and (_tokens_ru(cur["want"]) & _tokens_ru(it["name"])):
             tgt = _S["people"][npc]
             tgt.state.memory.add(f"чужак передал мне «{it['name']}» от {ct['giver_name']}",
                                  _mt(), 0.5, about=[PLAYER, ct["giver"]])
             _npc_save(npc)
-            return _contract_complete(ct)
+            return _ct_advance(ct, "Передал из рук в руки.")
     return None
 
 
 def _contract_on_move(loc: int) -> str | None:
-    """visit: дошёл до места — уговор исполнен (гивер узнает — слово чужака здесь вес имеет)."""
+    """visit: дошёл до места — текущий шаг закрыт."""
     for ct in _store().contracts(_wid(), "active"):
-        if ct.get("kind") == "visit" and ct.get("target") == loc:
-            return _contract_complete(ct)
+        cur = _ct_cur(ct)
+        if cur.get("kind") == "visit" and cur.get("target") == loc:
+            return _ct_advance(ct, "Место осмотрено.")
     return None
 
 
 def _contract_on_talk(npc: str) -> str | None:
-    """befriend: цель прониклась к тебе — уговор исполнен."""
+    """befriend: цель прониклась к тебе — текущий шаг закрыт."""
     for ct in _store().contracts(_wid(), "active"):
-        if ct.get("kind") == "befriend" and ct.get("target") == npc:
+        cur = _ct_cur(ct)
+        if cur.get("kind") == "befriend" and cur.get("target") == npc:
             rel = _S["people"][npc].state.relationships.get(PLAYER, {})
             if rel.get("affinity", 0) >= PB["befriend_aff"]:
-                return _contract_complete(ct)
+                return _ct_advance(ct, "Он проникся к тебе.")
     return None
 
 
@@ -1625,8 +1683,17 @@ async def contract_accept(request: Request):
 @router.get("/api/play/contracts")
 def contracts_list():
     _play()
-    return {"active": _store().contracts(_wid(), "active"),
-            "done": _store().contracts(_wid(), "done")[-3:]}
+    active = []
+    for ct in _store().contracts(_wid(), "active"):
+        steps = _ct_steps(ct)
+        if len(steps) > 1:                                 # многоэтапный — показать прогресс и текущий шаг
+            cur = _ct_cur(ct)
+            ct = {**ct, "step_n": ct.get("step", 0) + 1, "step_total": len(steps),
+                  "kind": cur.get("kind"), "want": cur.get("want"),
+                  "target_name": cur.get("target_name"), "target": cur.get("target"),
+                  "where": cur.get("where", "")}
+        active.append(ct)
+    return {"active": active, "done": _store().contracts(_wid(), "done")[-3:]}
 
 
 @router.post("/api/play/give")
@@ -2528,10 +2595,11 @@ async def delve(request: Request):
 
 
 def _contract_on_death(pid: str) -> str | None:
-    """dead-предикат: заказанный враг мёртв — уговор исполнен."""
+    """dead-предикат: заказанный враг мёртв — текущий шаг закрыт."""
     for ct in _store().contracts(_wid(), "active"):
-        if ct.get("kind") == "dead" and ct.get("target") == pid:
-            return _contract_complete(ct)
+        cur = _ct_cur(ct)
+        if cur.get("kind") == "dead" and cur.get("target") == pid:
+            return _ct_advance(ct, "Дело сделано — его больше нет.")
     return None
 
 

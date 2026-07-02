@@ -108,6 +108,7 @@ PB = {
     # NPC-зачистки: шанс утреннего похода смелой пары
     "npc_delve_chance": 0.6, "npc_brave_min": 0.55,
     "fighter_roles": ("стражник", "охотник", "головорез", "бродяга", "наёмник"),
+    "board_max_ads": 4, "board_npc_fulfill": 0.4,          # столб: потолок объявлений, шанс закрытия NPC
     "rest_cost": 2, "rest_until_h": 7,
     "tone_friendly_aff": 0.04, "tone_rude_aff": 0.08, "tone_threat_aff": 0.15, "tone_threat_fear": 0.2, "look_dc": 8, "look_good": 15,
 }
@@ -393,6 +394,12 @@ def _apply_routine() -> None:
                 _S["guild_news"] = (_S.get("guild_news") or [])[-2:] + news
         except Exception:                                  # noqa: BLE001 — вылазка не роняет мир
             pass
+        try:                                               # столб: горожане вешают и снимают объявления
+            bn = _board_npc_fulfill() + _board_publish()
+            if bn:
+                _S["board_news"] = (_S.get("board_news") or [])[-3:] + bn
+        except Exception:                                  # noqa: BLE001 — доска не роняет мир
+            pass
     people, crof = _S["people"], _S["crof"]
     keynode, kps = _S.get("keynode") or {}, _S.get("kps") or []
     tavern = next((keynode.get(p.work) for p in people.values()
@@ -624,8 +631,14 @@ def _build_geom(city, xy, n2b, vis) -> dict:
     for bid, kb in sorted(city.key_buildings.items()):
         keys.append({"node": kb.node, "x": round(kb.x, 1), "y": round(kb.y, 1),
                      "label": _binfo(bid)["label"], "bid": bid})
+    cx, cy = vis["W"] / 2, vis["H"] / 2                     # ДОСКА-СТОЛБ: перекрёсток ближе к центру
+    cross = [n for n in xy if city.node_kind(n) == NodeKind.CROSSROAD]
+    plaza = min(cross, key=lambda n: (xy[n][0] - cx) ** 2 + (xy[n][1] - cy) ** 2) if cross else None
+    if plaza is not None:
+        keys.append({"node": plaza, "x": round(xy[plaza][0], 1), "y": round(xy[plaza][1], 1),
+                     "label": "Доска", "bid": "board:plaza"})
     return {"viewBox": [0, 0, vis["W"], vis["H"]], "svg": vis["inner"],
-            "h2n": h2n, "points": points, "keys": keys,
+            "h2n": h2n, "points": points, "keys": keys, "plaza": plaza,
             "_xy": {n: [round(xy[n][0], 1), round(xy[n][1], 1)] for n in xy}}
 
 
@@ -680,12 +693,15 @@ def _scene_dict(city, people, crof, cr2b, loc):
     if inside and inside != bid:                           # отошёл от здания — значит, вышел
         inside = _S["inside"] = None
     _mark_seen(bid)                                        # пришёл — узнал место
+    plaza = (_S.get("geom") or {}).get("plaza")
     if inside:
         info = _binfo(inside)
         name, kind = info["name"], info["kind"]
     elif bid:
         info = _binfo(bid)
         name, kind = f"у входа: {info['name']}", "снаружи"
+    elif plaza is not None and loc == plaza:
+        name, kind = "Городская доска", "площадь · объявления горожан"
     elif city.node_kind(loc) == NodeKind.CROSSROAD:
         name, kind = "Перекрёсток", "городская развилка"
     else:
@@ -724,6 +740,9 @@ def _scene_dict(city, people, crof, cr2b, loc):
             d["narr"].append("Тебя приняли в гильдию. Вот жетон приключенца (Медь).")
         d["guild_board"], d["guild_news"] = _guild_board(), (_S.get("guild_news") or [])
         d["guild_status"] = _guild_status()
+    if plaza is not None and loc == plaza and not inside:  # у столба — объявления горожан
+        d["board_ads"] = _board_ads()
+        d["board_news"] = _S.get("board_news") or []
     return d
 
 
@@ -836,7 +855,8 @@ def game_map():
     pxy = g["_xy"].get(loc, [0, 0])
     return {"viewBox": g["viewBox"], "svg": g["svg"], "h2n": g["h2n"],
             "points": g["points"],
-            "keys": [k for k in g["keys"] if k["bid"] in _seen()],   # туман войны: только известные
+            "keys": [k for k in g["keys"]                            # туман: известные + доска (столб виден)
+                     if k["bid"] in _seen() or k["bid"] == "board:plaza"],
             "loc": loc, "player": {"x": pxy[0], "y": pxy[1]}}
 
 
@@ -1485,13 +1505,24 @@ def _contract_candidates(giver: str) -> list:
 
 
 def _contract_offer(npc: str) -> dict | None:
-    """Механика решает, ЧТО просить можно; LLM просит В ХАРАКТЕРЕ. Раз на человека."""
+    """Личная просьба в разговоре: раз на человека (флаг coffer). Механика решает ЧТО можно,
+    LLM просит В ХАРАКТЕРЕ."""
     p = _S["people"][npc]
     if _store().flag_get(_wid(), f"coffer|{npc}"):
         return None
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     if rel.get("affinity", 0) < PB["contract_enemy_aff"]:                      # с явным недругом дел не ведут
         return None
+    r = _make_contract(npc, "offered")
+    if r:
+        _store().flag_set(_wid(), f"coffer|{npc}")
+    return r
+
+
+def _make_contract(npc: str, status: str) -> dict | None:
+    """Ядро генерации уговора для NPC (просьба/объявление): агенда → кандидаты → LLM → шаги.
+    Сохраняет контракт с заданным статусом. None — если нечего/невалидно/LLM недоступен."""
+    p = _S["people"][npc]
     mgr = _model()
     if not mgr.available():
         return None
@@ -1512,6 +1543,7 @@ def _contract_offer(npc: str) -> dict | None:
             return None
         reward_item = max(rows, key=lambda x: x[1]["worth"])
     cands = _contract_candidates(npc)
+    random.Random(f"cands|{npc}").shuffle(cands)            # разный порядок разным гиверам — против эха
     others = [(pid, o) for pid, o in sorted((_S.get("people") or {}).items()) if pid != npc]
     own = [(r["item_id"], _store().get_item(r["item_id"]))
            for r in _store().inventory(_wid(), npc)]
@@ -1552,8 +1584,7 @@ def _contract_offer(npc: str) -> dict | None:
             "reward_name": (reward_item[1]["name"] if reward_item else None),
             "pitch": str(d.get("pitch") or "")[:220], "why": getattr(ag, "summary", "")}
     cid = f"ct:{npc}:{_mt()}"
-    _store().save_contract(_wid(), cid, "offered", data)
-    _store().flag_set(_wid(), f"coffer|{npc}")
+    _store().save_contract(_wid(), cid, status, data)
     return {"id": cid, **data}
 
 
@@ -1656,6 +1687,62 @@ def _contract_on_talk(npc: str) -> str | None:
             if rel.get("affinity", 0) >= PB["befriend_aff"]:
                 return _ct_advance(ct, "Он проникся к тебе.")
     return None
+
+
+def _board_ads() -> list:
+    """Объявления на столбе — контракты со статусом board (повесили NPC по своим агендам)."""
+    out = []
+    for ct in _store().contracts(_wid(), "board"):
+        cur = _ct_cur(ct)
+        out.append({"id": ct["id"], "giver_name": ct["giver_name"], "kind": cur.get("kind"),
+                    "want": cur.get("want"), "target_name": cur.get("target_name"),
+                    "where": cur.get("where", ""), "reward": ct.get("reward", 0),
+                    "reward_name": ct.get("reward_name"), "steps": len(_ct_steps(ct))})
+    return out
+
+
+def _board_publish() -> list:
+    """Утро: занятый горожанин вешает объявление на столб (тот же генератор уговоров)."""
+    people = _S.get("people") or {}
+    ads = _store().contracts(_wid(), "board")
+    if len(ads) >= PB["board_max_ads"]:
+        return []
+    taken = {a["giver"] for a in ads}
+    cands = [pid for pid, p in sorted(people.items()) if p.work and pid not in taken]
+    if not cands:
+        return []
+    npc = random.Random(f"boardpub|{_gt() // 1440}").choice(cands)
+    try:
+        r = _make_contract(npc, "board")
+    except Exception:                                      # noqa: BLE001 — публикация не роняет утро
+        return []
+    return [f"{people[npc].name} повесил объявление на городскую доску"] if r else []
+
+
+def _board_npc_fulfill() -> list:
+    """Утро: кто-то из горожан снимает объявление и выполняет его (мир живёт без игрока)."""
+    rng = random.Random(f"boardful|{_gt() // 1440}")
+    news = []
+    for ct in _store().contracts(_wid(), "board"):
+        if rng.random() > PB["board_npc_fulfill"]:
+            continue
+        _store().save_contract(_wid(), ct["id"], "done",
+                               {k: v for k, v in ct.items() if k not in ("id", "status")})
+        news.append(f"с доски сняли: «{_step_desc(_ct_cur(ct))}» — выполнено горожанином")
+    return news
+
+
+@router.post("/api/play/ad_take")
+async def ad_take(request: Request):
+    _play()
+    aid = (await request.json()).get("id")
+    ct = next((c for c in _store().contracts(_wid(), "board") if c["id"] == aid), None)
+    if not ct:
+        return {"error": "этого объявления уже нет"}
+    _store().save_contract(_wid(), aid, "active", {k: v for k, v in ct.items()
+                                                       if k not in ("id", "status")})
+    _pc_remember(f"взял с городской доски: {_step_desc(_ct_cur(ct))}", 0.4)
+    return {"taken": True}
 
 
 def trait_hints_str(p) -> str:

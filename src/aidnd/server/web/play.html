@@ -521,6 +521,7 @@ function applyWorld(r){
   if(r.dice)showDice(r.dice);
   if(r.location){SCENE=r;
     BOARD=r.guild_board?{jobs:r.guild_board,news:r.guild_news,status:r.guild_status}:null;
+    ADS=r.board_ads?{ads:r.board_ads,news:r.board_news}:null;
     renderAmb();renderLoc(r.location);renderWays();
     $('locname').textContent=r.location.name;}
 }
@@ -830,7 +831,23 @@ async function inspectItem(id){
   else push('sys',(npc?'«'+esc(byId(npc).name)+'» пожимает плечами':'ничего нового ты не замечаешь')+'.');
   await refreshInv();
 }
-let BOARD=null;
+let BOARD=null,ADS=null;
+const AD_KD={bring:'добыть',deliver:'отнести',visit:'наведаться',befriend:'расположить к себе',dead:'покончить с'};
+function renderAds(){
+  const el=document.querySelector('.locard .desc');
+  if(!el||!ADS)return;
+  const news=(ADS.news||[]).map(n=>`<div class="ctw">&#8226; ${esc(n)}</div>`).join('');
+  el.innerHTML+=`<div class="subcap" style="margin-top:10px">городская доска объявлений</div>`+news+
+    ((ADS.ads||[]).map(a=>`<div class="boardjob"><b>${esc(a.giver_name)}</b>: ${esc(AD_KD[a.kind]||'сделать')} «${esc(a.want||a.target_name||'?')}»${a.steps>1?` <span class="ctw">(${a.steps} шага)</span>`:''} · ${a.reward_name?('вещь: '+esc(a.reward_name)):(a.reward+' зм')}
+      <button data-i="${a.id}" onclick="takeAd(this.dataset.i)">взяться</button></div>`).join('')
+     ||'<div class="bagempty">на доске пусто</div>');
+}
+async function takeAd(id){
+  const r=await api('/api/play/ad_take',{id});
+  if(r.error){push('sys',esc(r.error));return;}
+  push('narr','Ты снимаешь объявление со столба. Оно теперь в «делах».');
+  renderJobs();const s=await api('/api/play/scene');ADS=s.board_ads?{ads:s.board_ads,news:s.board_news}:null;renderLoc(s.location);
+}
 function renderBoard(){
   const el=document.querySelector('.locard .desc');
   if(!el||!BOARD)return;
@@ -883,6 +900,7 @@ function renderLoc(loc){
   document.querySelector('.locard .desc').innerHTML=esc(loc.desc||'')+(cs.length?
     `<div class="conts">${cs.map(c=>`<span class="cont op${c.locked?' lk':''}" data-n="${esc(c.name)}" onclick="loot(this.dataset.n)" title="${esc(c.where||'')}${c.locked?' · заперто (нужен ключ)':' · обшарить'}">${c.locked?'&#128274;':'&#9642;'} ${esc(c.name)}</span>`).join('')}</div>`:'');
   renderBoard();
+  renderAds();
 }
 
 // ─── БОЙ (BG-lite): грид, ходы кликами, сухой лог ───

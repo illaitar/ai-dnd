@@ -108,6 +108,7 @@ PB = {
     "dungeon_waves": 2,                                   # логово = столько накатов врага
     "caravan_chance": 0.35,                               # шанс каравана с товаром за утро
     "path_event_dc": 0.7,                                 # порог эмоции NPC, прерывающий путь
+    "say_cap_per_tick": 3,                                # не больше стольких реплик за живой тик
     "guild_float": 120, "guild_reward_per_cr": 8, "guild_mark_fine": 15,
     # NPC-зачистки: шанс утреннего похода смелой пары
     "npc_delve_chance": 0.6, "npc_brave_min": 0.55,
@@ -2444,12 +2445,26 @@ def _live_tick(people) -> tuple:
         advance_agendas(st, w)                              # долгие цели двигаются
         return pid, decide_hybrid(st, w, mind_perceive(st, w), mgr, ctx)
 
+    ctx["addressed"] = lv.get("addressed", {})             # к кому вчерашний тик обратились по имени
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=8) as ex:
         decisions = dict(ex.map(think_one, order))
 
     feed, address = [], []
+    said_n, topics = 0, []                                 # кэп реплик на тик + анти-эхо (сигнатуры тем)
+    lv["addressed"] = {}                                   # копим адресации этого тика для следующего
     pc = _pc()
+
+    def _say_ok(txt: str) -> bool:
+        nonlocal said_n
+        sig = frozenset(list(_tokens_ru(txt))[:6])
+        if said_n >= PB["say_cap_per_tick"]:               # лимит реплик — остальные слушают
+            return False
+        if sig and any(len(sig & s) >= max(2, len(sig) // 2 + 1) for s in topics):
+            return False                                   # почти дубль сказанного в этом тике
+        topics.append(sig)
+        said_n += 1
+        return True
     for pid in order:                                       # применяем последовательно (честный порядок)
         d = decisions[pid]
         st = w.npc_minds[pid]
@@ -2499,6 +2514,8 @@ def _live_tick(people) -> tuple:
                 tgt = str(a.get("to") or "")
                 tid = (w.aliases or {}).get(tgt.strip().lower(), tgt)
                 txt = str(a["text"])[:180]
+                if not _say_ok(txt):                        # кэп реплик / анти-эхо — этот молчит
+                    continue
                 said = True
                 if tid == PLAYER:
                     cd = lv.setdefault("addr_cd", {})
@@ -2512,8 +2529,11 @@ def _live_tick(people) -> tuple:
                                  "to": _display(tid, people) if tid in people else tgt, "text": txt})
                     pc.memory.add(f"слышал в «{lv['place']}»: {who} — {txt[:90]}",
                                   _mt(), 0.18, kind="heard", about=[pid])
-                    if tid in w.npc_minds:                  # сплетня перетекает собеседнику
+                    if tid in w.npc_minds:                  # адресату — сплетня + нудж «ответь»
                         _gossip(st, lv["names"].get(pid, pid), w.npc_minds[tid])
+                        w.npc_minds[tid].memory.add(f"ко мне обратился {who}: «{txt[:80]}» — стоит ответить",
+                                                    lv["clock"], 0.55, about=[pid])
+                        lv["addressed"][tid] = f"{who}: «{txt[:60]}»"
         does = (d.get("does") or "").strip()
         if does and not said:                               # реплика сама несёт момент — не дублируем
             feed.append({"k": "deed", "who": who, "text": does[:150]})

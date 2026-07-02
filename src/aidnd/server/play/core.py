@@ -459,6 +459,36 @@ def _model():
     return _S["model"]
 
 
+def _inscriber():
+    """Инскриптор магии (роль А — имя закона, роль Б — дикий хаос). LLM если доступен, иначе заглушка."""
+    if _S.get("inscriber") is None:
+        from ...magic import LLMInscriber, StubInscriber
+        mgr = _model()
+        _S["inscriber"] = LLMInscriber(mgr) if mgr.available() else StubInscriber()
+    return _S["inscriber"]
+
+
+def _grimoire_get(h: str) -> dict | None:
+    """Вписанный закон круга (по хэшу состава) для текущего мира — или None."""
+    raw = _store().flag_get(_wid(), f"grim|{h}")
+    return json.loads(raw) if raw else None
+
+
+def _grimoire_put(h: str, entry: dict) -> None:
+    _store().flag_set(_wid(), f"grim|{h}", json.dumps(entry, ensure_ascii=False))
+
+
+def _grimoire_list() -> list:
+    """Все вписанные в мир круги (гримуар игрока), в порядке первого творения."""
+    out = []
+    for v in _store().flags_prefix(_wid(), "grim|").values():
+        try:
+            out.append(json.loads(v))
+        except (ValueError, TypeError):
+            pass
+    return sorted(out, key=lambda e: e.get("first_gt", 0))
+
+
 def _in_room(where: str, room: str | None, rooms: list) -> bool:
     """Ёмкость принадлежит помещению: по совпадению слов комнаты в where (падежи не мешают);
     иначе — общий зал."""

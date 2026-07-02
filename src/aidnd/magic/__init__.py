@@ -8,5 +8,7 @@
 from __future__ import annotations
 
 from .grammar import build_spec, classify, known_ids, load
+from .inscribe import (WILD_EFFECTS, Inscriber, LLMInscriber, StubInscriber, circle_hash)
 
-__all__ = ["load", "classify", "build_spec", "known_ids"]
+__all__ = ["load", "classify", "build_spec", "known_ids",
+           "Inscriber", "LLMInscriber", "StubInscriber", "circle_hash", "WILD_EFFECTS"]

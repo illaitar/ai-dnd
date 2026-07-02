@@ -19,7 +19,7 @@ from ... import config
 from ...citygraph import CityParams, generate, visual
 from ...combat import (Encounter, dungeon, from_monster, from_npc, from_pc, lair_name,
                       pick_encounter, resolve, roll_dice)
-from ...magic import build_spec, classify, known_ids, load as magic_load
+from ...magic import build_spec, circle_hash, classify, known_ids, load as magic_load
 from ...citygraph.model import NodeKind
 from ...items import Capability, ItemCtx, LLMSmith, StubSmith, craft_path, loot_pool, rarity_price
 from ...items.craft import ROLE_RECIPES, materials_graph
@@ -42,7 +42,7 @@ from ...play import populate
 from ...play.population import Townsperson
 from ...worldgen import WorldStore
 
-from .core import (PB, PLAYER, _COLORS, _DM_SYS, _PHASE_RU, _PORT_DIR, _S, _binfo, _city_name, _display, _emo, _fat_add, _fatigue, _gt, _gt_add, _here, _in_room, _mana, _mana_cap, _mana_grow, _mana_spend, _mark_seen, _met, _model, _mt, _npc_save, _pc, _pc_cap_eff, _pc_hp, _pc_name, _pc_remember, _pc_save, _pc_set_name, _phase, _pool, _portrait_url, _role_at, _role_for_building, _seen, _spurns, _store, _tokens_ru, _topics_for, _wanted, _wanted_add, _wanted_clear, _wid, _witness_crime, router, _PC_CAP)
+from .core import (PB, PLAYER, _COLORS, _DM_SYS, _PHASE_RU, _PORT_DIR, _S, _binfo, _city_name, _display, _emo, _fat_add, _fatigue, _grimoire_get, _grimoire_list, _grimoire_put, _gt, _gt_add, _here, _in_room, _inscriber, _mana, _mana_cap, _mana_grow, _mana_spend, _mark_seen, _met, _model, _mt, _npc_save, _pc, _pc_cap_eff, _pc_hp, _pc_name, _pc_remember, _pc_save, _pc_set_name, _phase, _pool, _portrait_url, _role_at, _role_for_building, _seen, _spurns, _store, _tokens_ru, _topics_for, _wanted, _wanted_add, _wanted_clear, _wid, _witness_crime, router, _PC_CAP)
 from .items import (_CRAFT, _cont_holder, _do_craft, _forge, _item_card, _known, _materialize_npc, _merchant_restock, _npc_cap, _npc_sees, _pc_coins, _pc_key_for, _seed_item_pool)
 from .contracts import (_board_ads, _board_npc_fulfill, _board_publish, _contract_offer, _contract_on_give, _contract_on_move, _contract_on_talk, _ct_cur, _ct_steps, _step_desc)
 from .combat import (_combat_wrapup, _combatant_from_npc, _guild_bid, _guild_board, _guild_gate, _guild_status, _lairs, _mint_badge, _npc_delves, _pc_badge, _pc_combatant)
@@ -1844,6 +1844,75 @@ def _apply_spell(spec: dict, target, out: dict, people, crof, loc) -> None:
         out["narr"].append("Путы сплетены, но некого вязать (нужна цель в бою).")
 
 
+_ELEM_DMG = {"огонь": "fire", "лёд": "cold", "яд": "poison",
+             "свет": "radiant", "тьма": "necrotic", "камень": "bludgeoning"}
+
+
+def _apply_wild(comp, reason: str, out: dict) -> None:
+    """Дикий/сорванный круг (М-3): LLM выбирает исход из ОГРАНИЧЕННОГО меню — применяем механически.
+    Меню безопасно (нельзя сломать мир): backfire | nothing | scorch | warp | boon."""
+    cb = _S.get("combat")
+    w = _inscriber().wild(comp, reason, bool(cb)) or {
+        "effect": "backfire", "magnitude": 2, "element": "", "text": f"Круг рвётся вразнос — {reason}."}
+    mag = max(1, min(3, int(w.get("magnitude") or 1)))
+    eff = w.get("effect", "backfire")
+    out["cast"]["wild"] = True
+    out["cast"]["effect"] = eff
+    out["narr"].append(w.get("text") or f"Круг идёт вразнос — {reason}.")
+    if eff == "nothing":
+        return
+    if eff == "boon":
+        before = _pc_hp()
+        _pc_hp(2 * mag)
+        out["narr"].append(f"Нежданная удача — раны затягиваются (+{_pc_hp() - before} hp).")
+        return
+    if eff == "warp":
+        _gt_add(PB["act_min"])                             # искажение — странный сдвиг, без жёсткой механики
+        out["refresh"] = True
+        return
+    if eff == "scorch" and cb:
+        dt = _ELEM_DMG.get(w.get("element", ""), "fire")
+        hit = 0
+        for u in cb["enc"].units.values():
+            if u.side == "foes" and not u.down():
+                n = mag * 3
+                if dt in u.immune:
+                    n = 0
+                elif dt in u.resist:
+                    n //= 2
+                u.hp -= n
+                if u.hp <= 0:
+                    u.alive = False
+                hit += 1
+        if hit:
+            out["narr"].append(f"Выброс стихии хлещет по округе — задето {hit}.")
+            out["combat_refresh"] = True
+            return
+    # backfire (и scorch, когда некого жечь) — отдача калечит чертящего
+    _pc_hp(-2 * mag)
+    out["narr"].append(f"Отдача калечит чертящего — {2 * mag} урона.")
+
+
+_LAW_KEYS = ("damage", "area", "heal", "status", "reveal", "unlock", "range", "mana_cost", "difficulty")
+
+
+def _inscribe_law(comp, spec: dict):
+    """Роль А: вписать чистый круг в законы мира. Первый раз — LLM даёт имя+флейвор, кэш в гримуаре
+    по хэшу состава; дальше имя стабильно. Возвращает (entry, fresh)."""
+    h = circle_hash(comp)
+    entry = _grimoire_get(h)
+    if entry:
+        return entry, False
+    named = _inscriber().name_circle(comp, spec) or {}
+    entry = {"hash": h, "comp": list(comp),
+             "name": named.get("name") or ", ".join(comp),
+             "flavor": named.get("flavor", ""), "sensory": named.get("sensory", ""),
+             "spec": {k: spec[k] for k in _LAW_KEYS if k in spec},
+             "first_gt": _gt(), "casts": 0}
+    _grimoire_put(h, entry)
+    return entry, True
+
+
 @router.post("/api/play/cast")
 async def cast(request: Request):
     """Сотворить круг из глифов (М-2: ввод составом; drag-холст — М-5). Тратит ману, растит потолок,
@@ -1870,17 +1939,30 @@ async def cast(request: Request):
     _gt_add(PB["act_min"])
     out["dice"] = {"die": 20, "roll": roll, "mod": _pc_cap_eff().mod("int"), "total": total,
                    "dc": dc, "ok": total >= dc, "label": "Черчение круга (Int)"}
-    if cls["kind"] == "wild" or total < dc:               # дикая магия / осечка (LLM-хаос — М-3)
-        back = random.Random(f"wild|{_mt()}").randint(1, 4)
-        _pc_hp(-back)
-        out["cast"]["wild"] = True
-        out["narr"].append(f"Круг идёт вразнос — отдачей тебя опаляет ({back} урона). "
-                           + (cls["reason"] if cls["kind"] == "wild" else "Рука дрогнула."))
+    if cls["kind"] == "wild" or total < dc:               # дикая магия / осечка → непредсказуемый LLM-исход
+        reason = cls["reason"] if cls["kind"] == "wild" else "рука дрогнула, круг сорвался"
+        _apply_wild(comp, reason, out)
+        _pc_remember(f"круг ушёл вразнос ({', '.join(comp)})", 0.4)
         _pc_save()
-        return {**out, "mana": _mana(), "mana_cap": _mana_cap(), "hp": _pc_hp(),
-                "fatigue": _fatigue(), "gt": _gt()}
+        res = {**out, "mana": _mana(), "mana_cap": _mana_cap(), "hp": _pc_hp(),
+               "fatigue": _fatigue(), "gt": _gt()}
+        if out.get("combat_refresh") and _S.get("combat"):
+            res["combat"] = _S["combat"]["enc"].view()
+        return res
     _apply_spell(spec, target, out, people, crof, loc)     # чистый круг — по спеку
-    _pc_remember(f"сотворил круг ({', '.join(comp)})", 0.4)
+    law, fresh = _inscribe_law(comp, spec)                 # вписать/подтвердить закон в гримуаре
+    law["casts"] = law.get("casts", 0) + 1
+    _grimoire_put(law["hash"], law)
+    out["cast"]["name"] = law["name"]
+    out["cast"]["fresh"] = fresh
+    if fresh:
+        head = f"✦ Новый закон вписан в гримуар: «{law['name']}»"
+        if law.get("flavor"):
+            head += f" — {law['flavor']}"
+        out["narr"].insert(0, head)
+        if law.get("sensory"):
+            out["narr"].insert(1, law["sensory"])
+    _pc_remember(f"сотворил «{law['name']}» ({', '.join(comp)})", 0.4)
     _pc_save()
     res = {**out, "mana": _mana(), "mana_cap": _mana_cap(), "hp": _pc_hp(),
            "fatigue": _fatigue(), "gt": _gt()}
@@ -1897,6 +1979,16 @@ def glyphs_list():
     return {"elements": list(g["elements"].values()), "glyphs": list(g["glyphs"].values()),
             "known": sorted(known_ids()), "mana": _mana(), "mana_cap": _mana_cap(),
             "fatigue": _fatigue()}
+
+
+@router.get("/api/play/grimoire")
+def grimoire_list():
+    """Вписанные в мир законы (гримуар игрока): имя, состав, флейвор, число сотворений."""
+    _play()
+    laws = _grimoire_list()
+    return {"laws": [{"name": e.get("name"), "comp": e.get("comp", []), "flavor": e.get("flavor", ""),
+                      "sensory": e.get("sensory", ""), "casts": e.get("casts", 0)} for e in laws],
+            "count": len(laws)}
 
 
 @router.post("/api/play/look")

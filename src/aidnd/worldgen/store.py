@@ -36,6 +36,11 @@ class WorldStore:
                       "known TEXT, PRIMARY KEY(world_id, item_id))")
             # состояние игрока-агента (память + отношения) — «игрок такой же агент, как NPC»
             c.execute("CREATE TABLE IF NOT EXISTS pc_state (world_id INT PRIMARY KEY, data TEXT)")
+            # кошельки держателей (монеты — счётчик, не предмет) и флаги мира (маркеры материализации)
+            c.execute("CREATE TABLE IF NOT EXISTS purse (world_id INT, holder TEXT, coins INT, "
+                      "PRIMARY KEY(world_id, holder))")
+            c.execute("CREATE TABLE IF NOT EXISTS flags (world_id INT, key TEXT, val TEXT, "
+                      "PRIMARY KEY(world_id, key))")
             # живое состояние placed NPC (память/отношения/нужды) — переживает рестарт
             c.execute("CREATE TABLE IF NOT EXISTS npc_state (world_id INT, npc_id TEXT, data TEXT, "
                       "PRIMARY KEY(world_id, npc_id))")
@@ -168,6 +173,34 @@ class WorldStore:
             rows = c.execute("SELECT item_id,known FROM inventory WHERE world_id=? AND holder=?",
                              (world_id, holder)).fetchall()
         return [{"item_id": r["item_id"], "known": json.loads(r["known"])} for r in rows]
+
+    def inv_move(self, world_id: int, item_id: str, holder: str) -> None:
+        """Перенос предмета к другому держателю (лут/кража/покупка/дар — один механизм)."""
+        with self._conn() as c:
+            c.execute("UPDATE inventory SET holder=? WHERE world_id=? AND item_id=?",
+                      (holder, world_id, item_id))
+
+    def purse_get(self, world_id: int, holder: str) -> int:
+        with self._conn() as c:
+            r = c.execute("SELECT coins FROM purse WHERE world_id=? AND holder=?",
+                          (world_id, holder)).fetchone()
+        return int(r["coins"]) if r else 0
+
+    def purse_add(self, world_id: int, holder: str, delta: int) -> int:
+        v = max(0, self.purse_get(world_id, holder) + int(delta))
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO purse (world_id,holder,coins) VALUES (?,?,?)",
+                      (world_id, holder, v))
+        return v
+
+    def flag_get(self, world_id: int, key: str) -> str | None:
+        with self._conn() as c:
+            r = c.execute("SELECT val FROM flags WHERE world_id=? AND key=?", (world_id, key)).fetchone()
+        return r["val"] if r else None
+
+    def flag_set(self, world_id: int, key: str, val: str = "1") -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO flags (world_id,key,val) VALUES (?,?,?)", (world_id, key, val))
 
     def save_npc_state(self, world_id: int, npc_id: str, data: dict) -> None:
         with self._conn() as c:

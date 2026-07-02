@@ -18,6 +18,7 @@ from ..citygraph import CityParams, generate, visual
 from ..citygraph.model import NodeKind
 from ..items import Capability, ItemCtx, LLMSmith, Recipe, StubSmith
 from ..items import condition as item_condition
+from ..items import normalize as item_normalize
 from ..items import craft as item_craft
 from ..items import inspect as item_inspect
 from ..items import repair as item_repair
@@ -570,6 +571,7 @@ async def talk(request: Request):
         st.memory.add("незнакомец (игрок) подошёл и заговорил со мной", _mt(), 0.4, about=[PLAYER])
         _pc_remember(f"я познакомился с {p.name} ({p.role})", 0.45, about=[npc])
         _npc_save(npc)
+    _materialize_npc(npc, "visible")                   # видимое (экипировка+ключи) — настоящие предметы
     rel = st.relationships.get(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     per = p.persona or {}
     emo = _emo(st)
@@ -631,6 +633,77 @@ def _npc_cap(p) -> Capability:
     return Capability(abilities=ab, competencies=_ROLE_COMP.get(p.role, set()))
 
 
+# ---------------------------------- ЕДИНЫЙ ИНВЕНТАРЬ (держатели: pc | npc | cont:) ----
+_TIER_Q = {"poor": "crude", "modest": "plain", "fine": "fine", "rich": "exquisite"}
+_TIER_W = {"poor": 1, "modest": 4, "fine": 15, "rich": 40}
+
+
+def _cont_holder(bid: str, name: str) -> str:
+    return f"cont:{bid}:{name}"
+
+
+def _put_item(seed: str, name: str, kind: str, *, tier: str = "modest", note: str = "",
+              mods=None, holder: str = "pc") -> str:
+    """Механическая ковка предмета из тега персоны/фактшита (без LLM — флейвор уже придуман)
+    + положить держателю. Идемпотентно по seed."""
+    iid = "it:" + hashlib.md5(seed.encode()).hexdigest()[:10]
+    if not _store().get_item(iid):
+        w = _TIER_W.get(tier, 3)
+        it = item_normalize({"kind": kind, "name": name, "quality": _TIER_Q.get(tier, "plain"),
+                             "worth": w, "apparent_worth": w, "tags": [note] if note else [],
+                             "mods": mods or []})
+        it["id"] = iid
+        _store().save_item(it)
+    _store().inv_add(PLAY_WORLD, iid, holder=holder)
+    return iid
+
+
+def _materialize_npc(pid: str, layer: str = "visible") -> None:
+    """Инвентарь NPC из персоны → настоящие предметы, ПО СЛОЯМ: visible (экипировка+ключи —
+    видно глазами) при первом касании; pockets (карманы/ценное/монеты) — при краже/обыске."""
+    p = (_S.get("people") or {}).get(pid)
+    if not p or _store().flag_get(PLAY_WORLD, f"mat|{pid}|{layer}"):
+        return
+    per = p.persona or {}
+    if layer == "visible":
+        g = per.get("gear") or {}
+        for slot, kind in (("weapon", "weapon"), ("offhand", "misc"),
+                           ("armor", "armor"), ("garb", "armor")):
+            it = g.get(slot)
+            if it:
+                _put_item(f"npcinv|{pid}|{slot}", it["name"], kind,
+                          tier=it.get("tier", "modest"), note=it.get("note", ""), holder=pid)
+        for i, t in enumerate((g.get("trinkets") or [])[:3]):
+            _put_item(f"npcinv|{pid}|tr{i}", t["name"], "trinket",
+                      tier=t.get("tier", "modest"), note=t.get("note", ""), holder=pid)
+        for k in (p.keys or []):                           # ключи владельца — НАСТОЯЩИЕ предметы
+            _put_item(f"npcinv|{pid}|key|{k['opens']}", k["name"], "key", tier="plain",
+                      note=f"открывает: {k['opens']}",
+                      mods=[{"target": "special:opens", "op": "grant", "amount": 1,
+                             "when": "passive", "cond": k["opens"]}], holder=pid)
+    else:                                                  # pockets
+        c = per.get("carry") or {}
+        for i, s in enumerate((c.get("goods") or [])[:3]):
+            _put_item(f"npcinv|{pid}|g{i}", s, "misc", tier="modest", holder=pid)
+        for i, s in enumerate((c.get("personal") or [])[:3]):
+            _put_item(f"npcinv|{pid}|p{i}", s, "misc", tier="poor", holder=pid)
+        for i, s in enumerate((per.get("valuables") or [])[:3]):
+            _put_item(f"npcinv|{pid}|v{i}", s, "valuable", tier="fine", holder=pid)
+        _store().purse_add(PLAY_WORLD, pid, int(c.get("coins") or 0))
+    _store().flag_set(PLAY_WORLD, f"mat|{pid}|{layer}")
+
+
+def _pc_key_for(cont_name: str) -> dict | None:
+    """Ключ в сумке игрока, открывающий эту ёмкость (mod special:opens с cond=имя)."""
+    for r in _store().inventory(PLAY_WORLD, "pc"):
+        it = _store().get_item(r["item_id"])
+        if it and it["kind"] == "key" and any(
+                m["target"] == "special:opens" and m.get("cond") == cont_name
+                for m in it.get("mods", [])):
+            return it
+    return None
+
+
 def _forge(seed: str, kind: str, name_hint: str, source: str, band: str = "plain") -> dict:
     """Ленивая выковка предмета (кэш на id по seed) — строка → фактшит с surface/hidden."""
     iid = "it:" + hashlib.md5(seed.encode()).hexdigest()[:10]
@@ -679,15 +752,31 @@ async def loot(request: Request):
     full = next((x for x in ((bd or {}).get("data", {}).get("containers") or []) if x["name"] == name), None)
     if not full:
         return {"error": "нет такой ёмкости"}
+    unlocked = None
     if full.get("access") == "locked":
-        return {"error": "заперто — нужен ключ"}
-    inv = {r["item_id"]: set(r["known"]) for r in _store().inventory(PLAY_WORLD)}
+        key = _pc_key_for(name)
+        if not key:
+            return {"error": "заперто — нужен ключ"}
+        unlocked = key["name"]
+    holder = _cont_holder(bid, name)
+    if not _store().flag_get(PLAY_WORLD, f"seeded|{holder}"):
+        for i, s in enumerate(full.get("contents") or []):   # первое касание: содержимое → ёмкость
+            it = _forge(f"{PLAY_WORLD}|{bid}|{name}|{i}", "misc", s, f"{name} ({full['kind']})")
+            _store().inv_add(PLAY_WORLD, it["id"], holder=holder)
+        _store().flag_set(PLAY_WORLD, f"seeded|{holder}")
+    rows = _store().inventory(PLAY_WORLD, holder)
+    _gt_add(2)
+    if not rows:
+        return {"container": name, "items": [], "empty": True, "unlocked": unlocked, "gt": _gt()}
     out = []
-    for i, s in enumerate(full.get("contents") or []):
-        it = _forge(f"{PLAY_WORLD}|{bid}|{name}|{i}", "misc", s, f"{name} ({full['kind']})")
-        _store().inv_add(PLAY_WORLD, it["id"])
-        out.append(_item_card(it, inv.get(it["id"], set())))
-    return {"container": name, "items": out}
+    for r in rows:                                          # обшарить = забрать всё (перенос, не копия)
+        it = _store().get_item(r["item_id"])
+        if it:
+            _store().inv_move(PLAY_WORLD, it["id"], "pc")
+            out.append(_item_card(it, set(r["known"])))
+    _pc_remember(f"обшарил «{name}» в «{(bd or {}).get('sign') or 'здании'}»: "
+                 + ", ".join(i["name"] for i in out), 0.3)
+    return {"container": name, "items": out, "unlocked": unlocked, "gt": _gt()}
 
 
 @router.post("/api/play/inspect")
@@ -773,6 +862,41 @@ async def use_item(request: Request):
     ev = item_use(it, 1)
     _store().save_item(it)
     return {"item": _item_card(it, _known(iid)), "event": ev}
+
+
+@router.post("/api/play/askkey")
+async def askkey(request: Request):
+    """Попросить у NPC его ключ. Гейт механикой: симпатия+доверие против жадности/осторожности —
+    хозяйка кассы чужаку ключ не отдаст (честно; путь добычи — кража/торг, срез 2)."""
+    _city, people, _crof, _cr2b, _loc = _play()
+    b = await request.json()
+    npc = b.get("npc")
+    if npc not in people:
+        return {"error": "нет такого"}
+    p = people[npc]
+    _materialize_npc(npc, "visible")
+    want = str(b.get("key") or "").strip()                 # какой именно ключ просим (имя с чипа)
+    keys = [(_store().get_item(r["item_id"]), r["item_id"])
+            for r in _store().inventory(PLAY_WORLD, npc)]
+    keys = [(it, iid) for it, iid in keys if it and it["kind"] == "key"
+            and (not want or it["name"] == want)]
+    if not keys:
+        return {"error": f"у {p.name} нет такого ключа при себе"}
+    rel = p.state.relationships.get(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
+    tr = p.state.config.traits
+    bar = 0.5 + 0.4 * tr.get("greed", 0.5) - 0.2 * tr.get("honesty", 0.5)
+    if rel.get("affinity", 0) + rel.get("trust", 0) < bar:
+        line = _voice(p, rel, "reply", "Одолжи мне свой ключ.")
+        p.state.memory.add("незнакомец просил у меня ключ — я не дал(а)", _mt(), 0.5, about=[PLAYER])
+        _npc_save(npc)
+        return {"given": False, "line": line}
+    it, iid = keys[0]
+    _store().inv_move(PLAY_WORLD, iid, "pc")
+    p.state.memory.add(f"я доверил(а) игроку свой ключ «{it['name']}»", _mt(), 0.6, about=[PLAYER])
+    _pc_remember(f"{p.name} доверил(а) мне ключ «{it['name']}»", 0.5, about=[npc])
+    _npc_save(npc)
+    return {"given": True, "item": _item_card(it, set()),
+            "line": _voice(p, rel, "reply", "Спасибо, что доверяешь мне ключ.")}
 
 
 # ------------------------------------------- ЖИВАЯ ЛОКАЦИЯ (mind + LLM) --- #

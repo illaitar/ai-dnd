@@ -85,7 +85,8 @@
   #bagn{color:var(--dim);font-size:11px}
   .keys{display:flex;flex-wrap:wrap;gap:6px}
   .keychip{font-size:11.5px;padding:3px 9px;border-radius:6px;background:rgba(217,164,65,.1);
-    border:1px solid var(--gold-dim);color:var(--gold)}
+    border:1px solid var(--gold-dim);color:var(--gold);cursor:pointer}
+  .keychip:hover{background:rgba(217,164,65,.22)}
   .npc{flex:1;display:flex;flex-direction:column;padding:0 12px 12px;overflow:auto}
   .portrait{width:100%;height:210px;flex:0 0 210px;border-radius:9px;border:1px solid var(--line2);
     background:radial-gradient(120% 100% at 50% 0%,#2a2f3e,#171a22);position:relative;overflow:hidden;
@@ -388,7 +389,7 @@ function renderNpc(n){
      ${(n.known&&n.known.length)?`<div class="subcap">ты о нём знаешь</div>
        <div class="known">${n.known.map(k=>`<div class="kn">${esc(k)}</div>`).join('')}</div>`:''}
      ${(n.keys&&n.keys.length)?`<div class="subcap">при себе ключи</div>
-       <div class="keys">${n.keys.map(k=>`<span class="keychip">&#128273; ${esc(k)}</span>`).join('')}</div>`:''}
+       <div class="keys">${n.keys.map(k=>`<span class="keychip" data-k="${esc(k)}" onclick="askKey(this.dataset.k)" title="попросить ключ">&#128273; ${esc(k)}</span>`).join('')}</div>`:''}
      <div class="subcap">темы разговора</div>
      <div class="topics">${(n.topics||[]).map(t=>`<span class="chip" onclick="say('${esc(t)}')">${esc(t)}</span>`).join('')}</div>
      ${n.crafter?`<button class="commission" onclick="commission()">&#9874; заказать: ${esc(n.recipe)}</button>`:''}
@@ -488,8 +489,17 @@ async function commission(){
 async function loot(name){
   const r=await api('/api/play/loot',{container:name});
   if(r.error){push('sys',esc(r.error));return;}
-  push('narr','Ты обшариваешь «'+esc(name)+'»'+((r.items&&r.items.length)?': '+r.items.map(i=>'«'+esc(i.name)+'»').join(', '):' — пусто')+'.');
+  if(r.gt!=null){GT=r.gt;setClock();}
+  const pre=r.unlocked?('Ключ «'+esc(r.unlocked)+'» щёлкает в замке. '):'';
+  push('narr',pre+'Ты обшариваешь «'+esc(name)+'»'+((r.items&&r.items.length)?': '+r.items.map(i=>'«'+esc(i.name)+'»').join(', '):' — пусто')+'.');
   await refreshInv();
+}
+async function askKey(k){
+  if(!cur)return;
+  const r=await api('/api/play/askkey',{npc:cur,key:k||null});
+  if(r.error){push('sys',esc(r.error));return;}
+  if(r.line)push('npc',`<div class="sp">${esc(byId(cur).name)}</div><div class="tx">${esc(r.line)}</div>`);
+  if(r.given){push('narr','«'+esc(r.item.name)+'» перекочёвывает в твою сумку.');await refreshInv();}
 }
 async function inspectItem(id){
   const npc=(mode==='dialogue'&&cur)?cur:null;
@@ -508,7 +518,7 @@ function renderLoc(loc){
   document.querySelector('.locard .kd').textContent=loc.kind;
   const cs=(loc.containers||[]);
   document.querySelector('.locard .desc').innerHTML=esc(loc.desc||'')+(cs.length?
-    `<div class="conts">${cs.map(c=>`<span class="cont${c.locked?' lk':' op'}" data-n="${esc(c.name)}" ${c.locked?'':'onclick="loot(this.dataset.n)"'} title="${esc(c.where||'')}${c.locked?' · заперто':' · обшарить'}">${c.locked?'&#128274;':'&#9642;'} ${esc(c.name)}</span>`).join('')}</div>`:'');
+    `<div class="conts">${cs.map(c=>`<span class="cont op${c.locked?' lk':''}" data-n="${esc(c.name)}" onclick="loot(this.dataset.n)" title="${esc(c.where||'')}${c.locked?' · заперто (нужен ключ)':' · обшарить'}">${c.locked?'&#128274;':'&#9642;'} ${esc(c.name)}</span>`).join('')}</div>`:'');
 }
 </script>
 </body>

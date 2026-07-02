@@ -82,6 +82,10 @@
   .commission{margin-top:12px;width:100%;padding:9px;border-radius:9px;background:rgba(217,164,65,.12);
     border:1px solid var(--gold-dim);color:var(--gold);font:500 13px var(--sans);cursor:pointer}
   .commission:hover{background:rgba(217,164,65,.2)}
+  .stealbtn{margin-top:9px;width:100%;padding:7px;border-radius:9px;background:transparent;
+    border:1px dashed var(--line2);color:var(--faint);font:12px var(--sans);cursor:pointer}
+  .stealbtn:hover{border-color:var(--red);color:var(--red)}
+  .acts .sellb{border-color:var(--gold-dim);color:var(--gold)}
   #bagn{color:var(--dim);font-size:11px}
   .keys{display:flex;flex-wrap:wrap;gap:6px}
   .keychip{font-size:11.5px;padding:3px 9px;border-radius:6px;background:rgba(217,164,65,.1);
@@ -165,7 +169,7 @@
 <div class="top">
   <span class="brand">&#10022; AI-DnD</span>
   <span class="loc"><b id="locname">Трактир</b><span class="sep">·</span><span id="locdist">рыночный квартал</span></span>
-  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span>&#9829; 18/18</span><span>12 зм</span></span>
+  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span>&#9829; 18/18</span><span id="coins">12 зм</span></span>
 </div>
 
 <div class="stage">
@@ -243,6 +247,7 @@ function applySky(){const t=((GT/60)%24+24)%24;let a=SKY[0],b=SKY[SKY.length-1];
   if(rect){rect.style.fill=`rgb(${[0,1,2].map(k=>Math.round(L(a.ov[k],b.ov[k]))).join(',')})`;
     rect.style.opacity=L(a.oo,b.oo).toFixed(3);}}
 function setClock(){const c=$('clock');if(c)c.textContent=fmtClock(GT);applySky();}
+function setCoins(v){if(v==null)return;const c=$('coins');if(c)c.textContent=v+' зм';}
 function applyVB(){const w=BVB[2]/Z,h=BVB[3]/Z;
   $('mapsvg').setAttribute('viewBox',`${(CX-w/2).toFixed(1)} ${(CY-h/2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`);
   $('zlvl').textContent=Math.round(Z*100)+'%';}
@@ -393,6 +398,8 @@ function renderNpc(n){
      <div class="subcap">темы разговора</div>
      <div class="topics">${(n.topics||[]).map(t=>`<span class="chip" onclick="say('${esc(t)}')">${esc(t)}</span>`).join('')}</div>
      ${n.crafter?`<button class="commission" onclick="commission()">&#9874; заказать: ${esc(n.recipe)}</button>`:''}
+     <div id="wares"></div>
+     <button class="stealbtn" onclick="stealNpc()" title="рискованно: поймают — запомнят и разнесут">&#9788; обчистить карманы</button>
      <button class="end" onclick="endTalk()">&#8592; завершить разговор</button>`;
 }
 
@@ -405,12 +412,12 @@ async function talk(id){
   const n=await api('/api/play/talk',{npc:id});
   if(n.error){push('sys',esc(n.error));return;}
   if(n.gt!=null){GT=n.gt;setClock();}
-  CARD=n;renderNpc(n);
+  CARD=n;renderNpc(n);if(n.crafter)loadWares();renderBag();
   push('npc',`<div class="sp">${esc(n.name)}</div><div class="tx">${esc(n.line)}</div>`);
 }
 function endTalk(){
   push('sys','— ты отходишь от '+esc(byId(cur).name)+' —');
-  cur=null;mode='explore';document.body.className='explore';
+  cur=null;mode='explore';document.body.className='explore';OFFERS={};renderBag();
   $('mapwrap').classList.remove('hidden');$('npcwrap').classList.add('hidden');
   $('amb').classList.remove('hidden');$('mini').classList.add('hidden');
   $('inp').placeholder='что делаешь?';
@@ -440,7 +447,7 @@ $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
 loadMap();
 push('narr','Дверь трактира захлопывается за твоей спиной, отрезая шум дождя. Внутри тепло, пахнет элем и подгоревшим луком.');
 api('/api/play/scene').then(s=>{
-  SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}renderAmb();
+  SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}setCoins(s.coins);renderAmb();
   if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
   push('narr','Десяток лиц скользят по тебе взглядами и возвращаются к кружкам.');
   setTimeout(pollLive,600);
@@ -465,6 +472,10 @@ function bagItem(it){
   const acts=[`<button onclick="itemAct('${it.id}','inspect')">осмотреть</button>`];
   if(it.condition)acts.push(`<button onclick="itemAct('${it.id}','use')">испытать</button>`);
   if(canRepair)acts.push(`<button onclick="itemAct('${it.id}','repair')">починить</button>`);
+  if(mode==='dialogue'&&CARD&&CARD.crafter&&it.kind!=='key')
+    acts.push(OFFERS[it.id]!=null
+      ?`<button class="sellb" onclick="doSell('${it.id}')">&#10003; отдать за ${OFFERS[it.id]} зм</button>`
+      :`<button onclick="offerSell('${it.id}')">продать</button>`);
   return `<div class="bagitem2">
     <div class="bn">${esc(it.name)}${q}</div>
     <div class="bw">${esc(it.kind)} · ${worth}${qual}${cond}${mk}${mods}</div>
@@ -477,6 +488,50 @@ async function itemAct(id,act){
     const e=r.event;push(e.broke?'sys':'narr',e.broke?('«'+esc(r.item.name)+'» с треском ломается ('+esc(e.break_behavior)+')!'):('Ты пускаешь «'+esc(r.item.name)+'» в дело — '+esc(e.label)+'.'));await refreshInv();}
   if(act==='repair'){const r=await api('/api/play/repair',{item:id,npc:cur});if(r.error){push('sys',esc(r.error));return;}
     push('narr','«'+esc(byId(cur).name)+'» чинит «'+esc(r.item.name)+'»: '+esc(r.note)+'.');await refreshInv();}
+}
+let OFFERS={};
+async function offerSell(id){
+  const r=await api('/api/play/offer',{npc:cur,item:id});
+  if(r.error){push('sys',esc(r.error));return;}
+  if(r.line)push('npc',`<div class="sp">${esc(byId(cur).name)}</div><div class="tx">${esc(r.line)}</div>`);
+  OFFERS[id]=r.price;renderBag();
+}
+async function doSell(id){
+  const r=await api('/api/play/sell',{npc:cur,item:id});
+  if(r.error){push('sys',esc(r.error));return;}
+  delete OFFERS[id];setCoins(r.coins);if(r.gt!=null){GT=r.gt;setClock();}
+  push('narr','Сделка: '+r.price+' зм переходят в твой кошель.');
+  await refreshInv();
+}
+async function loadWares(){
+  if(!cur)return;
+  const r=await api('/api/play/wares?npc='+encodeURIComponent(cur));
+  const el=$('wares');
+  if(!el||r.error)return;
+  setCoins(r.coins);
+  el.innerHTML=(r.items&&r.items.length)?`<div class="subcap">купить у него</div>
+    <div class="keys">${r.items.map(w=>`<span class="keychip" data-i="${w.id}" data-p="${w.price}"
+      onclick="buyItem(this.dataset.i,this.dataset.p)" title="${esc(w.kind)}">${esc(w.name)} · ${w.price} зм</span>`).join('')}</div>`:'';
+}
+async function buyItem(id,price){
+  const r=await api('/api/play/buy',{npc:cur,item:id});
+  if(r.error){push('sys',esc(r.error));return;}
+  setCoins(r.coins);if(r.gt!=null){GT=r.gt;setClock();}
+  push('narr','Ты выкладываешь '+r.price+' зм — «'+esc(r.item.name)+'» теперь твой.');
+  await refreshInv();await loadWares();
+}
+async function stealNpc(){
+  if(!cur)return;
+  const r=await api('/api/play/steal',{npc:cur});
+  if(r.error){push('sys',esc(r.error));return;}
+  setCoins(r.coins);if(r.gt!=null){GT=r.gt;setClock();}
+  if(r.caught){
+    push('narr','Тебя ловят за руку!'+(r.witnesses?(' Свидетелей: '+r.witnesses+'.'):''));
+    if(r.line)push('npc',`<div class="sp">${esc(byId(cur).name)}</div><div class="tx">${esc(r.line)}</div>`);
+  }else if(r.coins_taken)push('narr','Пальцы делают своё: +'+r.coins_taken+' зм тихо перетекают к тебе.');
+  else if(r.item)push('narr','Ты незаметно вытягиваешь «'+esc(r.item.name)+'».');
+  else push('sys','в карманах пусто.');
+  await refreshInv();
 }
 async function commission(){
   if(!cur)return;

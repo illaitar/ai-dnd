@@ -521,7 +521,7 @@ def _voice(p, rel, kind, player_text=None) -> str:
 @router.get("/api/play/scene")
 def scene():
     city, people, crof, cr2b, loc = _play()
-    return {**_scene_dict(city, people, crof, cr2b, loc), "gt": _gt()}
+    return {**_scene_dict(city, people, crof, cr2b, loc), "gt": _gt(), "coins": _pc_coins()}
 
 
 @router.get("/api/play/map")
@@ -689,8 +689,23 @@ def _materialize_npc(pid: str, layer: str = "visible") -> None:
             _put_item(f"npcinv|{pid}|p{i}", s, "misc", tier="poor", holder=pid)
         for i, s in enumerate((per.get("valuables") or [])[:3]):
             _put_item(f"npcinv|{pid}|v{i}", s, "valuable", tier="fine", holder=pid)
-        _store().purse_add(PLAY_WORLD, pid, int(c.get("coins") or 0))
-    _store().flag_set(PLAY_WORLD, f"mat|{pid}|{layer}")
+        _store().purse_add(PLAY_WORLD, pid, int(c.get("coins") or 0) + (30 if p.work else 0))
+    _store().flag_set(PLAY_WORLD, f"mat|{pid}|{layer}")     # работнику — торговая наличность
+
+
+def _pc_coins() -> int:
+    """Кошель игрока (настоящий). Первый доступ — стартовые 12 зм (как в шапке UI)."""
+    if not _store().flag_get(PLAY_WORLD, "purse_init|pc"):
+        _store().purse_add(PLAY_WORLD, "pc", 12)
+        _store().flag_set(PLAY_WORLD, "purse_init|pc")
+    return _store().purse_get(PLAY_WORLD, "pc")
+
+
+def _npc_sees(it: dict, cap: Capability, observer: str) -> dict:
+    """Что ТОРГОВЕЦ видит в предмете: его глаз (компетенции/броски) вскрывает свои гейты.
+    Асимметрия знания: он может видеть сапфир, которого не видишь ты — и наоборот."""
+    res = item_inspect(it, cap, "expert", observer=observer)
+    return item_view(it, {h["prop"] for h in res["revealed"]})
 
 
 def _pc_key_for(cont_name: str) -> dict | None:
@@ -899,6 +914,159 @@ async def askkey(request: Request):
             "line": _voice(p, rel, "reply", "Спасибо, что доверяешь мне ключ.")}
 
 
+# ----------------------------------------------- ТОРГОВЛЯ И КРАЖА (срез 2) - #
+def _merchant(people, npc):
+    p = people.get(npc)
+    return p if (p and (p.role in _CRAFT or p.role == "лавочник")) else None
+
+
+@router.post("/api/play/offer")
+async def offer(request: Request):
+    """Предложить предмет торговцу: он оценивает СВОИМ глазом (асимметрия знания) и называет цену."""
+    _city, people, _crof, _cr2b, _loc = _play()
+    b = await request.json()
+    npc, iid = b.get("npc"), b.get("item")
+    p = _merchant(people, npc)
+    if not p:
+        return {"error": "он не торгует"}
+    it = _store().get_item(iid)
+    if not it or not any(r["item_id"] == iid for r in _store().inventory(PLAY_WORLD, "pc")):
+        return {"error": "у тебя нет этого"}
+    _materialize_npc(npc, "pockets")
+    seen = _npc_sees(it, _npc_cap(p), npc)
+    rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
+    greed = p.state.config.traits.get("greed", 0.5)
+    price = max(0, round(seen["worth"] * (0.55 + 0.15 * rel.get("affinity", 0) - 0.2 * greed)))
+    price = min(price, _store().purse_get(PLAY_WORLD, npc))
+    line = _voice(p, rel, "reply",
+                  f"(Я предлагаю тебе купить у меня «{it['name']}». Ты осмотрел вещь и даёшь {price} зм — "
+                  f"назови эту цену вслух по-своему.)")
+    return {"price": price, "line": line, "sees_worth": seen["worth"], "gt": _gt()}
+
+
+@router.post("/api/play/sell")
+async def sell(request: Request):
+    _city, people, _crof, _cr2b, _loc = _play()
+    b = await request.json()
+    npc, iid = b.get("npc"), b.get("item")
+    p = _merchant(people, npc)
+    it = _store().get_item(iid)
+    if not p or not it or not any(r["item_id"] == iid for r in _store().inventory(PLAY_WORLD, "pc")):
+        return {"error": "сделки не будет"}
+    _materialize_npc(npc, "pockets")
+    seen = _npc_sees(it, _npc_cap(p), npc)
+    rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
+    greed = p.state.config.traits.get("greed", 0.5)
+    price = max(0, round(seen["worth"] * (0.55 + 0.15 * rel.get("affinity", 0) - 0.2 * greed)))
+    price = min(price, _store().purse_get(PLAY_WORLD, npc))
+    _store().inv_move(PLAY_WORLD, iid, npc)
+    _store().purse_add(PLAY_WORLD, npc, -price)
+    coins = _store().purse_add(PLAY_WORLD, "pc", price)
+    _gt_add(3)
+    p.state.memory.add(f"купил(а) у игрока «{it['name']}» за {price} зм", _mt(), 0.4, about=[PLAYER])
+    _pc_remember(f"продал {p.name} «{it['name']}» за {price} зм", 0.4, about=[npc])
+    _npc_save(npc)
+    return {"sold": True, "price": price, "coins": coins, "gt": _gt()}
+
+
+@router.get("/api/play/wares")
+def wares(npc: str):
+    """Что торговец продаст (его материализованный инвентарь, кроме ключей) + цены ЕГО глазом."""
+    _city, people, _crof, _cr2b, _loc = _play()
+    p = _merchant(people, npc)
+    if not p:
+        return {"error": "он не торгует"}
+    _materialize_npc(npc, "visible")
+    _materialize_npc(npc, "pockets")
+    rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
+    greed = p.state.config.traits.get("greed", 0.5)
+    out = []
+    for r in _store().inventory(PLAY_WORLD, npc):
+        it = _store().get_item(r["item_id"])
+        if not it or it["kind"] in ("key", "valuable"):
+            continue                                       # ключи и ЛИЧНОЕ ценное не продаются (то — красть)
+        seen = _npc_sees(it, _npc_cap(p), npc)
+        price = max(1, round(seen["worth"] * (1.35 + 0.25 * greed - 0.15 * rel.get("affinity", 0))))
+        out.append({**_item_card(it, set()), "price": price})
+    return {"items": out, "coins": _pc_coins()}
+
+
+@router.post("/api/play/buy")
+async def buy(request: Request):
+    _city, people, _crof, _cr2b, _loc = _play()
+    b = await request.json()
+    npc, iid = b.get("npc"), b.get("item")
+    p = _merchant(people, npc)
+    it = _store().get_item(iid)
+    if not p or not it or not any(r["item_id"] == iid for r in _store().inventory(PLAY_WORLD, npc)):
+        return {"error": "у него этого нет"}
+    rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
+    greed = p.state.config.traits.get("greed", 0.5)
+    seen = _npc_sees(it, _npc_cap(p), npc)
+    price = max(1, round(seen["worth"] * (1.35 + 0.25 * greed - 0.15 * rel.get("affinity", 0))))
+    if _pc_coins() < price:
+        return {"error": f"не хватает монет (нужно {price})"}
+    _store().inv_move(PLAY_WORLD, iid, "pc")
+    coins = _store().purse_add(PLAY_WORLD, "pc", -price)
+    _store().purse_add(PLAY_WORLD, npc, price)
+    _gt_add(3)
+    p.state.memory.add(f"продал(а) игроку «{it['name']}» за {price} зм", _mt(), 0.4, about=[PLAYER])
+    _pc_remember(f"купил у {p.name} «{it['name']}» за {price} зм", 0.4, about=[npc])
+    _npc_save(npc)
+    return {"bought": True, "item": _item_card(it, set()), "price": price, "coins": coins, "gt": _gt()}
+
+
+@router.post("/api/play/steal")
+async def steal(request: Request):
+    """Обчистить карманы: dex игрока против бдительности жертвы. Провал = поймал + свидетели видели
+    (память+сплетни разнесут). Успех тих — но это преступление, и оно записано в мире."""
+    _city, people, crof, _cr2b, loc = _play()
+    npc = (await request.json()).get("npc")
+    if npc not in people:
+        return {"error": "нет такого"}
+    p = people[npc]
+    _materialize_npc(npc, "pockets")
+    n = int(_store().flag_get(PLAY_WORLD, f"steal|{npc}") or 0) + 1
+    _store().flag_set(PLAY_WORLD, f"steal|{npc}", str(n))
+    lv = _S.get("live") or {}
+    att = next((w.attention for w in [(lv.get("world") or MWorld()).bodies.get(npc)] if w), 0.65)
+    roll = random.Random(f"steal|{npc}|{n}").randint(1, 20)
+    dc = 9 + round(att * 8)
+    _gt_add(2)
+    if roll + _PC_CAP.mod("dex") < dc:                     # ПОЙМАН
+        rel = p.state.rel(PLAYER)
+        rel["affinity"] = min(rel["affinity"], -0.5)
+        p.state.emotion["anger"] = min(1.0, p.state.emotion.get("anger", 0) + 0.7)
+        p.state.emotion_target["anger"] = PLAYER
+        p.state.memory.add("поймал(а) игрока, когда тот лез мне в карман!", _mt(), 0.9, about=[PLAYER])
+        wit = [w for w in _here(loc, crof) if w != npc]
+        for w in wit:
+            people[w].state.memory.add(f"видел(а), как чужак лез в карман к {p.name}",
+                                       _mt(), 0.6, about=[PLAYER, npc])
+            _npc_save(w)
+        _pc_remember(f"попался на краже у {p.name} — при {len(wit)} свидетелях", 0.7, about=[npc])
+        _npc_save(npc)
+        return {"caught": True, "witnesses": len(wit),
+                "line": _voice(p, rel, "reply", "(Ты поймал этого человека за руку в своём кармане!)"),
+                "gt": _gt()}
+    loot_rows = [(r["item_id"], _store().get_item(r["item_id"]))
+                 for r in _store().inventory(PLAY_WORLD, npc)]
+    loot_rows = [(iid, it) for iid, it in loot_rows if it and it["kind"] != "key"]
+    coins_np = _store().purse_get(PLAY_WORLD, npc)
+    if coins_np > 0 and (not loot_rows or roll % 2 == 0):  # тянем кошель или вещь
+        take = max(1, coins_np // 2)
+        _store().purse_add(PLAY_WORLD, npc, -take)
+        coins = _store().purse_add(PLAY_WORLD, "pc", take)
+        _pc_remember(f"вытащил у {p.name} {take} зм", 0.6, about=[npc])
+        return {"caught": False, "coins_taken": take, "coins": coins, "gt": _gt()}
+    if not loot_rows:
+        return {"caught": False, "nothing": True, "gt": _gt()}
+    iid, it = max(loot_rows, key=lambda x: x[1]["worth"])
+    _store().inv_move(PLAY_WORLD, iid, "pc")
+    _pc_remember(f"вытащил у {p.name} «{it['name']}»", 0.6, about=[npc])
+    return {"caught": False, "item": _item_card(it, set()), "coins": _pc_coins(), "gt": _gt()}
+
+
 # ------------------------------------------- ЖИВАЯ ЛОКАЦИЯ (mind + LLM) --- #
 # NPC текущей локации живут по-настоящему: каждый тик КАЖДЫЙ решает ходом гибридного мозга
 # (механика даёт побуждения → LLM выбирает В ХАРАКТЕРЕ, пишет реплику и описание). Действия
@@ -987,8 +1155,18 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                    loot=[MItem("кошель", round(0.2 + p.appearance * 0.6, 2), kind="coin",
                                amount=round(3 + p.appearance * 30))] if p.appearance >= 0.3 else []))
         names[pid], roles[pid] = p.name, p.role
-    w.add(Body(id=PLAYER, place=place, charisma=0.45, appearance=0.35, attention=0.85,
-               loot=[MItem("кошель", 0.4, kind="coin", amount=12)]))
+    pc_loot, pc_map = [], {}
+    coins = _pc_coins()
+    if coins > 0:
+        pc_loot.append(MItem("кошель", min(1.0, 0.15 + coins / 40), kind="coin", amount=coins))
+    best = max(((r["item_id"], _store().get_item(r["item_id"]))
+                for r in _store().inventory(PLAY_WORLD, "pc")),
+               key=lambda x: (x[1] or {}).get("worth", 0), default=(None, None))
+    if best[1]:
+        pc_loot.append(MItem(best[1]["name"], min(1.0, best[1]["worth"] / 40)))
+        pc_map[best[1]["name"]] = best[0]
+    w.add(Body(id=PLAYER, place=place, charisma=0.45, appearance=min(0.8, 0.25 + coins / 60),
+               attention=0.85, loot=pc_loot))              # добыча игрока НАСТОЯЩАЯ (кража реальна)
     w.npc_minds = {pid: people[pid].state for pid in _here(loc, crof)}
     w.aliases = {v.lower(): k for k, v in names.items()}
     w.lookup = lambda q: _world_lookup(q, loc)             # тулкол know: знание мира по запросу
@@ -1026,7 +1204,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         with ThreadPoolExecutor(max_workers=4) as ex:
             list(ex.map(plan_one, todo))
     _S["live"] = {"world": w, "loc": loc, "place": place, "clock": 0, "ts": 0.0,
-                  "who": frozenset(here),
+                  "who": frozenset(here), "pc_map": pc_map,
                   "last": {}, "hist": {}, "names": names, "roles": roles, "personas": personas,
                   "pdesc": ((data or {}).get("notable") or "")}
 
@@ -1067,10 +1245,28 @@ def _live_tick(people) -> tuple:
 
     feed, address = [], []
     pc = _pc()
+    pc_body = w.bodies.get(PLAYER)
     for pid in order:                                       # применяем последовательно (честный порядок)
         d = decisions[pid]
         st = w.npc_minds[pid]
+        before = {i.name for i in (pc_body.loot if pc_body else [])}
         evs = apply_actions(d.get("actions") or [], st, w, lv["clock"])
+        stolen = before - {i.name for i in (pc_body.loot if pc_body else [])}
+        for nm in stolen:                                   # кража у игрока РЕАЛЬНА
+            if nm == "кошель":
+                take = max(1, _pc_coins() // 2)
+                _store().purse_add(PLAY_WORLD, "pc", -take)
+                _store().purse_add(PLAY_WORLD, pid, take)
+                feed.append({"k": "deed", "who": _display(pid, people),
+                             "text": f"ловко срезает твой кошель — минус {take} зм!"})
+                _pc_remember(f"у меня срезали кошель ({take} зм) — это был {_display(pid, people)}",
+                             0.8, about=[pid])
+            elif nm in (lv.get("pc_map") or {}):
+                _store().inv_move(PLAY_WORLD, lv["pc_map"][nm], pid)
+                feed.append({"k": "deed", "who": _display(pid, people),
+                             "text": f"вытягивает у тебя «{nm}»!"})
+                _pc_remember(f"у меня украли «{nm}»", 0.8, about=[pid])
+            st.memory.add(f"я обчистил(а) чужака: взял(а) {nm}", lv["clock"], 0.7, about=[PLAYER])
         lv["last"][pid] = "; ".join(evs)[:80] or "—"
         lv["hist"].setdefault(pid, []).append("; ".join(evs)[:60])
         who = _display(pid, people)

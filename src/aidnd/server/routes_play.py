@@ -15,6 +15,7 @@ import random
 from fastapi import APIRouter, Request
 
 from ..citygraph import CityParams, generate, visual
+from ..combat import Encounter, from_monster, from_npc, from_pc, lair_name, pick_encounter, resolve
 from ..citygraph.model import NodeKind
 from ..items import Capability, ItemCtx, LLMSmith, StubSmith
 from ..items.craft import ROLE_RECIPES
@@ -65,6 +66,13 @@ PB = {
     "eve_worker": 0.5, "eve_commoner": 0.45, "eve_rogue": 0.4,
     # подарок: прирост симпатии = min(cap, base + worth/div)
     "gift_aff_base": 0.05, "gift_aff_div": 100, "gift_aff_cap": 0.25,
+    # герой и логова
+    "pc_max_hp": 18, "lairs": 5, "lair_cr_near": 0.8, "lair_cr_far": 3.0,
+    "lair_travel_min": 25, "defeat_coin_cut": 2, "loot_coin_per_cr": 6, "loot_item_chance": 0.6,
+    "guild_float": 120, "guild_reward_per_cr": 8,
+    # NPC-зачистки: шанс утреннего похода смелой пары
+    "npc_delve_chance": 0.6, "npc_brave_min": 0.55,
+    "rest_cost": 2, "rest_until_h": 7,
 }
 _GT0 = PB["start_gt"]
 
@@ -118,10 +126,22 @@ def _pc() -> NpcState:
     return _S["pc"]
 
 
+def _pc_hp(delta: int = 0, set_to: int | None = None) -> int:
+    v = _S.get("pc_hp")
+    if v is None:
+        row = _store().get_pc(PLAY_WORLD) or {}
+        v = _S["pc_hp"] = row.get("hp", PB["pc_max_hp"])
+    if set_to is not None:
+        v = set_to
+    v = max(0, min(PB["pc_max_hp"], v + delta))
+    _S["pc_hp"] = v
+    return v
+
+
 def _pc_save() -> None:
     st = _pc()
     _store().save_pc(PLAY_WORLD, {
-        "gt": _gt(), "relationships": st.relationships,
+        "gt": _gt(), "hp": _pc_hp(), "relationships": st.relationships,
         "memory": [{"text": m.text, "t": m.t, "importance": m.importance,
                     "last_access": m.last_access, "kind": m.kind, "about": m.about}
                    for m in st.memory.items[-400:]]})      # хвост — журнал не разрастается бесконечно
@@ -169,7 +189,7 @@ _TYPE_ROLE = (("таверн", "трактирщик"), ("трактир", "тр
               ("целебн", "знахарка"), ("знахар", "знахарка"), ("травн", "знахарка"),
               ("мельниц", "мельник"), ("пекарн", "трактирщик"), ("мастерск", "сапожник"),
               ("кожевн", "дубильщик"), ("дубильн", "дубильщик"), ("конюшн", "горожанин"),
-              ("усадьб", "горожанин"), ("гильди", "лавочник"))
+              ("усадьб", "горожанин"), ("гильди", "стражник"))
 
 
 def _role_for_building(bid: str) -> str:
@@ -241,6 +261,13 @@ def _apply_routine() -> None:
     if _S.get("routine_key") == key or not _S.get("people"):
         return
     _S["routine_key"] = key
+    if key[0] == "morning":                                # утро: смелые идут по заказам доски
+        try:
+            news = _npc_delves()
+            if news:
+                _S["guild_news"] = (_S.get("guild_news") or [])[-2:] + news
+        except Exception:                                  # noqa: BLE001 — вылазка не роняет мир
+            pass
     people, crof = _S["people"], _S["crof"]
     keynode, kps = _S.get("keynode") or {}, _S.get("kps") or []
     tavern = next((keynode.get(p.work) for p in people.values()
@@ -390,7 +417,7 @@ def _fill_from_pool(city, keynode, kps):
 
 def _play():
     if _S["city"] is None:
-        params = CityParams(seed=1, key_buildings=8, river=True, walls=True, segment=16)
+        params = CityParams(seed=1, key_buildings=9, river=True, walls=True, segment=16)
         city = generate(params)
         vis = visual(params, interactive=True)             # богатый визуал + кликабельные дома
         xy = {n.id: (n.x, n.y) for n in city.nodes()}
@@ -581,7 +608,12 @@ def _voice(p, rel, kind, player_text=None) -> str:
 @router.get("/api/play/scene")
 def scene():
     city, people, crof, cr2b, loc = _play()
-    return {**_scene_dict(city, people, crof, cr2b, loc), "gt": _gt(), "coins": _pc_coins()}
+    out = {**_scene_dict(city, people, crof, cr2b, loc), "gt": _gt(), "coins": _pc_coins(),
+           "hp": _pc_hp(), "max_hp": PB["pc_max_hp"]}
+    if cr2b.get(loc) and cr2b.get(loc) == _guild_bid():
+        out["guild_board"] = _guild_board()
+        out["guild_news"] = _S.get("guild_news") or []
+    return out
 
 
 @router.get("/api/play/map")
@@ -1375,7 +1407,7 @@ async def give_item(request: Request):
 _INTENT_SYS = (
     "Ты — парсер намерения игрока в тёмно-фэнтезийной игре. По его фразе и обстановке верни СТРОГО JSON "
     "с ОДНИМ действием:\n"
-    '{"verb":"take|give|use|say|inspect|move|talk|attack|wait", '
+    '{"verb":"take|give|use|say|inspect|move|talk|attack|rest|wait", '
     '"manner":"openly|stealthily|forcefully|persuasively", '
     '"npc":"<id из списка или null>", "container":"<имя ёмкости или null>", '
     '"item":"<id предмета из сумки или null>", "place":"<название места или null>", '
@@ -1383,7 +1415,7 @@ _INTENT_SYS = (
     "Правила: взять из ёмкости=take+container; обчистить карманы=take+npc+stealthily; отнять силой="
     "take+npc+forcefully; выпросить/попросить вещь=say+npc+persuasively; отдать/подарить=give+npc+item; "
     "заговорить/спросить=talk+npc; пойти к месту=move+place; осмотреть свою вещь=inspect+item; "
-    "напасть/ударить=attack+npc. Если фраза — не действие, а мысль/отыгрыш: "
+    "напасть/ударить=attack+npc; отдохнуть/выспаться/снять комнату=rest. Если фраза — не действие, а мысль/отыгрыш: "
     '{"verb":"wait","detail":"<что делает>"}. Только перечисленные id/имена, ничего не выдумывай.'
 )
 
@@ -1551,6 +1583,28 @@ def _attempt(intent: dict, sc: dict) -> dict:
 
     if verb == "inspect" and intent.get("item"):
         return {"inspect": intent["item"], "narr": [], "refresh": True}
+
+    if verb == "rest":
+        bid = cr2b.get(loc)
+        data = ((_store().get_building(PLAY_WORLD, bid) or {}).get("data")) if bid else {}
+        if "lodging" not in ((data or {}).get("services") or []):
+            out["narr"].append("Здесь не переночуешь — ищи место с ночлегом.")
+            return out
+        if _pc_coins() < PB["rest_cost"]:
+            out["narr"].append(f"Ночлег стоит {PB['rest_cost']} зм — а у тебя пусто.")
+            return out
+        _store().purse_add(PLAY_WORLD, "pc", -PB["rest_cost"])
+        now = _gt()
+        wake = (now // 1440) * 1440 + PB["rest_until_h"] * 60
+        if wake <= now:
+            wake += 1440
+        _S["gt"] = wake
+        _apply_routine()
+        _pc_hp(set_to=PB["pc_max_hp"])
+        _pc_save()
+        out["narr"].append(f"Ты снимаешь тюфяк за {PB['rest_cost']} зм и спишь до утра. Силы вернулись.")
+        out["refresh"] = True
+        return out
 
     if verb == "attack" and npc:
         p = people[npc]
@@ -1869,3 +1923,247 @@ async def live(request: Request):
     except Exception as exc:                               # noqa: BLE001 — пульс не должен ронять клиент
         return {"feed": [], "address": [], "clock": lv["clock"], "gt": _gt(), "error": str(exc)[:160]}
     return {"feed": feed, "address": address, "clock": lv["clock"], "gt": _gt()}
+
+
+# ---------------------------------------- ЛОГОВА, ГИЛЬДИЯ, БОЙ (BG-lite) --- #
+def _lairs() -> list:
+    """Логова вокруг города: детерминированно из данных бестиария (вид/CR/среда), cleared — в store."""
+    if _S.get("lairs") is None:
+        import math
+        rng = random.Random("lairs|1")
+        out = []
+        envs = ["Forest", "Hill", "Grassland", "Swamp", "Ruin", "Caverns"]
+        for i in range(PB["lairs"]):
+            ang = (i / PB["lairs"]) * 6.2832 + rng.uniform(-0.3, 0.3)
+            rr = 300 * (1.25 + rng.uniform(0, 0.45))
+            cr = PB["lair_cr_near"] + (PB["lair_cr_far"] - PB["lair_cr_near"]) * (i / max(1, PB["lairs"] - 1))
+            env = rng.choice(envs)
+            units = pick_encounter(cr, env, seed=f"lair|{i}")
+            out.append({"id": f"lair:{i}", "name": lair_name(units, random.Random(f"ln|{i}")),
+                        "env": env, "cr": round(sum(u.cr for u in units), 2),
+                        "n": len(units), "foe": (units[0].name if units else "?"),
+                        "x": round(490 + math.cos(ang) * rr, 1), "y": round(350 + math.sin(ang) * rr * 0.72, 1)})
+        _S["lairs"] = out
+    return [{**l, "cleared": bool(_store().flag_get(PLAY_WORLD, f"cleared|{l['id']}"))}
+            for l in _S["lairs"]]
+
+
+def _guild_bid() -> str | None:
+    """Здание гильдии: лучший матч по данным (тип весомее имени — «склад гильдии» не гильдия)."""
+    best, score = None, 0
+    for bid in sorted(set((_S.get("cr2b") or {}).values())):
+        info = _binfo(bid)
+        sc = (2 if "гильд" in info["kind"].lower() else 0) + \
+             (1 if "гильд" in info["name"].lower() else 0) - \
+             (1 if "склад" in (info["name"] + info["kind"]).lower() else 0)
+        if sc > score:
+            best, score = bid, sc
+    return best
+
+
+def _guild_board() -> list:
+    """Доска гильдии: контракт на каждое незачищенное логово. Награда по CR из кассы гильдии."""
+    if not _store().flag_get(PLAY_WORLD, "guild_purse"):
+        _store().purse_add(PLAY_WORLD, "guild", PB["guild_float"])
+        _store().flag_set(PLAY_WORLD, "guild_purse")
+    taken = {c.get("target") for c in _store().contracts(PLAY_WORLD, "active")}
+    done = {c.get("target") for c in _store().contracts(PLAY_WORLD, "done")}
+    out = []
+    for l in _lairs():
+        if l["cleared"] or l["id"] in taken or l["id"] in done:
+            continue
+        out.append({"id": f"ct:guild:{l['id']}", "lair": l["id"], "name": l["name"],
+                    "foe": l["foe"], "n": l["n"], "cr": l["cr"],
+                    "reward": max(3, round(l["cr"] * PB["guild_reward_per_cr"]))})
+    return out
+
+
+@router.get("/api/play/board")
+def board():
+    _play()
+    gb = _guild_bid()
+    return {"guild": (_binfo(gb)["name"] if gb else None), "jobs": _guild_board(),
+            "lairs": _lairs()}
+
+
+@router.post("/api/play/board_take")
+async def board_take(request: Request):
+    _play()
+    jid = (await request.json()).get("id")
+    job = next((j for j in _guild_board() if j["id"] == jid), None)
+    if not job:
+        return {"error": "этого заказа уже нет"}
+    gb = _guild_bid()
+    _store().save_contract(PLAY_WORLD, jid, "active", {
+        "giver": "guild", "giver_name": _binfo(gb)["name"] if gb else "Гильдия",
+        "kind": "clear", "want": None, "where": job["name"], "target": job["lair"],
+        "target_name": job["name"], "reward": job["reward"], "reward_item": None,
+        "reward_name": None, "pitch": "", "why": "доска гильдии"})
+    _pc_remember(f"взял с доски гильдии заказ: {job['name']} (CR {job['cr']}) за {job['reward']} зм", 0.5)
+    return {"taken": True}
+
+
+def _pc_combatant():
+    rows = [(r["item_id"], _store().get_item(r["item_id"]))
+            for r in _store().inventory(PLAY_WORLD, "pc")]
+    weapons = [it for _i, it in rows if it and it["kind"] == "weapon"]
+    weapon = max(weapons, key=lambda w: w["worth"], default=None)
+    return from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon=weapon)
+
+
+@router.post("/api/play/delve")
+async def delve(request: Request):
+    """Отправиться к логову и вступить в бой (время на дорогу честное)."""
+    _play()
+    lid = (await request.json()).get("lair")
+    l = next((x for x in _lairs() if x["id"] == lid), None)
+    if not l:
+        return {"error": "нет такого места"}
+    if l["cleared"]:
+        return {"error": "там уже пусто — зачищено"}
+    if _pc_hp() <= 1:
+        return {"error": "ты еле стоишь — сперва отлежись"}
+    _gt_add(PB["lair_travel_min"])
+    foes = pick_encounter(l["cr"] + 0.01, l["env"], seed=f"lair|{lid.split(':')[1]}")
+    enc = Encounter([_pc_combatant()], foes, seed=f"fight|{lid}|{_mt()}")
+    _S["combat"] = {"enc": enc, "lair": l}
+    guard = 0
+    while enc.status() == "active" and guard < 50:          # докрутить ИИ до хода игрока
+        c0 = enc.current()
+        if c0 is None or c0.id == "pc":
+            break
+        enc.ai_turn(c0)
+        guard += 1
+    _pc_remember(f"пришёл к месту: {l['name']}", 0.4)
+    if enc.status() != "active":
+        return {"combat": enc.view(), "over": _combat_wrapup(enc, l), "lair": l, "gt": _gt()}
+    pc_u = enc.units.get("pc")
+    if pc_u:
+        _pc_hp(set_to=max(0, pc_u.hp))
+    return {"combat": enc.view(), "lair": l, "gt": _gt(), "hp": _pc_hp()}
+
+
+def _combat_wrapup(enc, l) -> dict:
+    """Итог боя: лут/награды/hp/последствия. Один путь для победы/бегства/поражения."""
+    st = enc.status()
+    pc_u = enc.units.get("pc")
+    out = {"status": st, "narr": []}
+    if pc_u:
+        _pc_hp(set_to=max(1, pc_u.hp) if st != "lost" else 1)
+    if st == "won":
+        _store().flag_set(PLAY_WORLD, f"cleared|{l['id']}")
+        coins = max(1, round(l["cr"] * PB["loot_coin_per_cr"]))
+        total = _store().purse_add(PLAY_WORLD, "pc", coins)
+        out["narr"].append(f"Логово зачищено. В остатках — {coins} зм (кошель: {total}).")
+        if random.Random(f"loot|{l['id']}").random() < PB["loot_item_chance"]:
+            it = _forge(f"trophy|{l['id']}", "valuable", f"трофей: {l['foe']}", l["name"], "fine")
+            _store().inv_add(PLAY_WORLD, it["id"])
+            out["narr"].append(f"Среди костей — «{it['name']}».")
+        ct = next((c for c in _store().contracts(PLAY_WORLD, "active")
+                   if c.get("kind") == "clear" and c.get("target") == l["id"]), None)
+        if ct:
+            reward = min(ct["reward"], _store().purse_get(PLAY_WORLD, "guild"))
+            _store().purse_add(PLAY_WORLD, "guild", -reward)
+            total = _store().purse_add(PLAY_WORLD, "pc", reward)
+            _store().save_contract(PLAY_WORLD, ct["id"], "done",
+                                   {k: v for k, v in ct.items() if k not in ("id", "status")})
+            out["narr"].append(f"Заказ гильдии закрыт: +{reward} зм (кошель: {total}).")
+        _pc_remember(f"зачистил {l['name']}", 0.7)
+    elif st == "lost":
+        cut = _pc_coins() // PB["defeat_coin_cut"]
+        if cut:
+            _store().purse_add(PLAY_WORLD, "pc", -cut)
+        out["narr"].append(f"Тьма. Ты очнулся у городских ворот — жив, но растрёпан"
+                           + (f" и легче на {cut} зм." if cut else "."))
+        _pc_remember(f"был бит в {l['name']} — едва унёс ноги", 0.8)
+    else:
+        out["narr"].append("Ты уходишь из боя. Логово осталось за ними.")
+        _pc_remember(f"отступил из {l['name']}", 0.5)
+    _pc_save()
+    _S["combat"] = None
+    out["hp"] = _pc_hp()
+    out["coins"] = _pc_coins()
+    return out
+
+
+@router.get("/api/play/combat")
+def combat_state():
+    cb = _S.get("combat")
+    if not cb:
+        return {"active": False}
+    return {"active": True, "combat": cb["enc"].view(), "lair": cb["lair"], "hp": _pc_hp()}
+
+
+@router.post("/api/play/combat_act")
+async def combat_act(request: Request):
+    cb = _S.get("combat")
+    if not cb:
+        return {"error": "боя нет"}
+    enc = cb["enc"]
+    b = await request.json()
+    cur = enc.current()
+    err = None
+    if cur and cur.id == "pc":
+        a = b.get("type")
+        if a == "move":
+            err = enc.act_move(cur, int(b.get("x", cur.x)), int(b.get("y", cur.y)))
+        elif a == "attack":
+            err = enc.act_attack(cur, str(b.get("target")))
+        elif a == "dodge":
+            err = enc.act_dodge(cur)
+        elif a == "flee":
+            err = enc.act_flee(cur)
+        elif a == "end":
+            enc.end_turn()
+        if err:
+            return {"combat": enc.view(), "error": err}
+        if a in ("attack", "dodge", "flee"):
+            enc.end_turn()
+    guard = 0
+    while enc.status() == "active" and guard < 50:          # крутим ИИ до хода игрока
+        c = enc.current()
+        if c is None or c.id == "pc":
+            break
+        enc.ai_turn(c)
+        guard += 1
+    if enc.status() != "active":
+        return {"combat": enc.view(), "over": _combat_wrapup(enc, cb["lair"]), "gt": _gt()}
+    pc_u = enc.units.get("pc")
+    if pc_u:
+        _pc_hp(set_to=max(0, pc_u.hp))
+    return {"combat": enc.view(), "hp": _pc_hp(), "gt": _gt()}
+
+
+def _npc_delves() -> list:
+    """Утренние вылазки: пара смелых незанятых NPC берёт верхний заказ доски и идёт в бой
+    (авторезолв ТЕМ ЖЕ движком). Мир живёт: доска пустеет без игрока."""
+    people = _S.get("people") or {}
+    jobs = _guild_board()
+    if not jobs or random.Random(f"delve|{_gt() // 1440}").random() > PB["npc_delve_chance"]:
+        return []
+    day = _gt() // 1440
+    rng = random.Random(f"delveparty|{day}")
+    brave = [(pid, p) for pid, p in sorted(people.items())
+             if not p.work and p.state.config.traits.get("bravery", 0) >= PB["npc_brave_min"]]
+    if not brave:
+        return []
+    duo = rng.sample(brave, min(2, len(brave)))
+    job = jobs[0]
+    l = next(x for x in _lairs() if x["id"] == job["lair"])
+    party = [from_npc(pid, p.name, {"abilities": p.state.config.abilities,
+                                    "traits": p.state.config.traits}, hp=12) for pid, p in duo]
+    foes = pick_encounter(l["cr"] + 0.01, l["env"], seed=f"lair|{l['id'].split(':')[1]}")
+    r = resolve(party, foes, seed=f"npcdelve|{day}")
+    names = " и ".join(p.name for _pid, p in duo)
+    if r["status"] == "won":
+        _store().flag_set(PLAY_WORLD, f"cleared|{l['id']}")
+        for pid, p in duo:
+            _store().purse_add(PLAY_WORLD, pid, max(1, job["reward"] // 2))
+            p.state.memory.add(f"мы с напарником зачистили {l['name']} по заказу гильдии",
+                               _mt(), 0.8, about=[d0 for d0, _ in duo])
+            _npc_save(pid)
+        return [f"{names} зачистили {l['name']} (заказ доски закрыт)"]
+    for pid, p in duo:
+        p.state.memory.add(f"нас потрепали в {l['name']} — еле ушли", _mt(), 0.7)
+        _npc_save(pid)
+    return [f"{names} вернулись из {l['name']} потрёпанными — логово стоит"]

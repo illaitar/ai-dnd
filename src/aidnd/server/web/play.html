@@ -164,6 +164,23 @@
   .lf.lfq{font-style:italic;color:var(--faint)}
   .hidden{display:none}
   .miniscene{padding:2px 12px 12px;display:flex;flex-direction:column;gap:10px}
+  #combat{position:fixed;inset:0;background:rgba(10,11,15,.94);z-index:50;display:flex;gap:14px;padding:22px}
+  #combat.hidden{display:none}
+  .cbleft{flex:1;display:flex;flex-direction:column;min-width:0}
+  .cbgrid{flex:1;border:1px solid var(--line2);border-radius:10px;background:var(--panel)}
+  .cbright{flex:0 0 300px;display:flex;flex-direction:column;gap:10px}
+  .cblog{flex:1;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);
+    padding:10px 12px;font:12.5px/1.6 var(--serif);color:var(--dim)}
+  .cbbtns{display:flex;gap:8px;flex-wrap:wrap}
+  .cbbtns button{flex:1;padding:9px;border-radius:9px;border:1px solid var(--line2);background:var(--panel2);
+    color:var(--ink);font:500 12.5px var(--sans);cursor:pointer}
+  .cbbtns button:hover{border-color:var(--gold-dim);color:var(--gold)}
+  .cbhead{font:600 14px var(--serif);color:var(--gold)}
+  .cbsub{font-size:11.5px;color:var(--faint)}
+  .boardjob{font-size:12px;padding:8px 10px;border:1px solid var(--gold-dim);border-radius:9px;
+    background:rgba(217,164,65,.07);color:var(--ink);margin-top:6px}
+  .boardjob button{margin-left:8px;font-size:11px;padding:2px 9px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--gold-dim);background:transparent;color:var(--gold)}
 </style>
 </head>
 <body class="explore">
@@ -171,7 +188,7 @@
 <div class="top">
   <span class="brand">&#10022; AI-DnD</span>
   <span class="loc"><b id="locname">Трактир</b><span class="sep">·</span><span id="locdist">рыночный квартал</span></span>
-  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span>&#9829; 18/18</span><span id="coins">12 зм</span></span>
+  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="coins">12 зм</span></span>
 </div>
 
 <div class="stage">
@@ -210,6 +227,24 @@
     <div class="bag" id="bag"></div>
     <div class="cap" style="margin-top:4px">дела</div>
     <div class="bag" id="jobs"></div>
+  </div>
+</div>
+
+<div id="combat" class="hidden">
+  <div class="cbleft">
+    <div class="cbhead" id="cbname">Бой</div>
+    <div class="cbsub" id="cbsub"></div>
+    <svg class="cbgrid" id="cbsvg"></svg>
+  </div>
+  <div class="cbright">
+    <div class="cbhead">ход: <span id="cbturn"></span> · раунд <span id="cbround"></span></div>
+    <div class="cblog" id="cblog"></div>
+    <div class="cbbtns">
+      <button onclick="cbAct({type:'dodge'})">защита</button>
+      <button onclick="cbAct({type:'flee'})">бежать</button>
+      <button onclick="cbAct({type:'end'})">конец хода</button>
+    </div>
+    <div class="cbsub">клик по клетке — шаг · клик по врагу — удар</div>
   </div>
 </div>
 
@@ -252,6 +287,8 @@ function applySky(){const t=((GT/60)%24+24)%24;let a=SKY[0],b=SKY[SKY.length-1];
     rect.style.opacity=L(a.oo,b.oo).toFixed(3);}}
 function setClock(){const c=$('clock');if(c)c.textContent=fmtClock(GT);applySky();}
 function setCoins(v){if(v==null)return;const c=$('coins');if(c)c.textContent=v+' зм';}
+function setHp(v,mx){if(v==null)return;const c=$('hp');if(c)c.textContent='\u2665 '+v+'/'+(mx||PBMAXHP);}
+let PBMAXHP=18;
 function applyVB(){const w=BVB[2]/Z,h=BVB[3]/Z;
   $('mapsvg').setAttribute('viewBox',`${(CX-w/2).toFixed(1)} ${(CY-h/2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`);
   $('zlvl').textContent=Math.round(Z*100)+'%';}
@@ -316,7 +353,9 @@ async function go(){
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
-  MAP.loc=r.loc;SCENE=r;LIVEF=[];renderAmb();setTimeout(pollLive,800);
+  MAP.loc=r.loc;SCENE=r;LIVEF=[];BOARD=null;
+  api('/api/play/scene').then(s2=>{if(s2.guild_board){BOARD={jobs:s2.guild_board,news:s2.guild_news};renderLoc(s2.location);}setHp(s2.hp,s2.max_hp);});
+  renderAmb();setTimeout(pollLive,800);
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   renderLoc(r.location);
   push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'» ('+fmtClock(GT).split(', ')[1]+').');
@@ -477,7 +516,10 @@ $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
 
 loadMap();
 api('/api/play/scene').then(s=>{
-  SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}setCoins(s.coins);renderAmb();
+  SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}setCoins(s.coins);
+  if(s.max_hp)PBMAXHP=s.max_hp;setHp(s.hp,s.max_hp);
+  if(s.guild_board)BOARD={jobs:s.guild_board,news:s.guild_news};
+  renderAmb();
   if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
   const a0=s.ambient||{};
   push('narr',s.location.name+'. '+[a0.time,a0.weather,a0.mood].filter(Boolean).join(', ')+'. '
@@ -535,8 +577,9 @@ async function renderJobs(){
   const el=$('jobs');if(!el)return;
   const r=await api('/api/play/contracts');
   const act=(r.active||[]),done=(r.done||[]);
-  const kd={bring:'добудь',deliver:'отнеси',visit:'наведайся',befriend:'расположи к себе'};
-  const lbl=c=>`${kd[c.kind]||'сделай'}: ${esc(c.want||c.target_name||'?')}`;
+  const kd={bring:'добудь',deliver:'отнеси',visit:'наведайся',befriend:'расположи к себе',clear:'зачисть'};
+  const lbl=c=>`${kd[c.kind]||'сделай'}: ${esc(c.want||c.target_name||'?')}`
+    +(c.kind==='clear'?` <button class="keychip" style="padding:1px 8px" data-l="${esc(c.target)}" onclick="delve(this.dataset.l)">в путь</button>`:'');
   const rw=c=>c.reward_name?('вещь: '+esc(c.reward_name)):(c.reward+' зм');
   el.innerHTML=(act.length||done.length)
     ?act.map(c=>`<div class="job"><b>${esc(c.giver_name)}</b> — ${lbl(c)} <span class="ctw">${esc(c.where)}</span> · ${rw(c)}</div>`).join('')
@@ -628,13 +671,87 @@ async function inspectItem(id){
   else push('sys',(npc?'«'+esc(byId(npc).name)+'» пожимает плечами':'ничего нового ты не замечаешь')+'.');
   await refreshInv();
 }
+let BOARD=null;
+function renderBoard(){
+  const el=document.querySelector('.locard .desc');
+  if(!el||!BOARD)return;
+  const news=(BOARD.news||[]).map(n=>`<div class="ctw">&#8226; ${esc(n)}</div>`).join('');
+  el.innerHTML+= `<div class="subcap" style="margin-top:10px">доска гильдии</div>`+news+
+    ((BOARD.jobs||[]).map(j=>`<div class="boardjob">${esc(j.name)} — ${esc(j.foe)}&times;${j.n} (CR ${j.cr}) · ${j.reward} зм
+      <button data-i="${j.id}" data-l="${j.lair}" onclick="takeJob(this.dataset.i,this.dataset.l)">взяться</button></div>`).join('')
+     ||'<div class="bagempty">заказов нет — всё зачищено</div>');
+}
+async function takeJob(id,lair){
+  const r=await api('/api/play/board_take',{id});
+  if(r.error){push('sys',esc(r.error));return;}
+  push('narr','Заказ снят с доски. Он теперь в «делах» — отправляйся, когда будешь готов.');
+  renderJobs();api('/api/play/scene').then(s=>{if(s.guild_board){BOARD={jobs:s.guild_board,news:s.guild_news};renderLoc(s.location);}});
+}
+async function delve(lair){
+  const r=await api('/api/play/delve',{lair});
+  if(r.error){push('sys',esc(r.error));return;}
+  if(r.gt!=null){GT=r.gt;setClock();}
+  openCombat(r.combat,r.lair);
+}
 function renderLoc(loc){
   document.querySelector('.locard .nm').textContent=loc.name;
   document.querySelector('.locard .kd').textContent=loc.kind;
   const cs=(loc.containers||[]);
   document.querySelector('.locard .desc').innerHTML=esc(loc.desc||'')+(cs.length?
     `<div class="conts">${cs.map(c=>`<span class="cont op${c.locked?' lk':''}" data-n="${esc(c.name)}" onclick="loot(this.dataset.n)" title="${esc(c.where||'')}${c.locked?' · заперто (нужен ключ)':' · обшарить'}">${c.locked?'&#128274;':'&#9642;'} ${esc(c.name)}</span>`).join('')}</div>`:'');
+  renderBoard();
 }
+
+// ─── БОЙ (BG-lite): грид, ходы кликами, сухой лог ───
+let CB=null;
+function openCombat(cb,lair){CB=cb;$('cbname').textContent=lair.name;
+  $('cbsub').textContent=lair.env+' · CR '+lair.cr;
+  $('combat').classList.remove('hidden');renderCombat();}
+function closeCombat(){$('combat').classList.add('hidden');CB=null;refreshInv();renderJobs();}
+function renderCombat(){
+  if(!CB)return;
+  $('cbturn').textContent=(CB.units.find(u=>u.id===CB.turn)||{}).name||'—';
+  $('cbround').textContent=CB.round;
+  $('cblog').innerHTML=CB.log.map(l=>'<div>'+esc(l)+'</div>').join('');
+  $('cblog').scrollTop=$('cblog').scrollHeight;
+  const svg=$('cbsvg'),W=CB.w,H=CB.h;
+  const r=svg.getBoundingClientRect(),cell=Math.min(r.width/W,r.height/H);
+  svg.setAttribute('viewBox',`0 0 ${W*40} ${H*40}`);
+  let g='';
+  for(let x=0;x<W;x++)for(let y=0;y<H;y++)
+    g+=`<rect class="cbcell" data-x="${x}" data-y="${y}" x="${x*40+1}" y="${y*40+1}" width="38" height="38"
+        fill="${(x+y)%2?'#1b1f29':'#181c25'}" stroke="#232836" stroke-width="1" style="cursor:pointer"/>`;
+  CB.obstacles.forEach(([x,y])=>g+=`<rect x="${x*40+4}" y="${y*40+4}" width="32" height="32" rx="5" fill="#2c3140"/>`);
+  CB.units.forEach(u=>{
+    if(u.fled||(!u.alive))return;
+    const cx=u.x*40+20,cy=u.y*40+20,col=u.side==='party'?'#d9a441':'#c25450';
+    const ring=u.id===CB.turn?`<circle cx="${cx}" cy="${cy}" r="17" fill="none" stroke="#ffe6a8" stroke-width="2" opacity=".8"/>`:'';
+    g+=`${ring}<circle class="cbu" data-id="${u.id}" cx="${cx}" cy="${cy}" r="13" fill="${col}" stroke="#12151c" stroke-width="2" style="cursor:pointer"/>
+       <text x="${cx}" y="${cy+4}" text-anchor="middle" font-size="12" fill="#15120a" style="pointer-events:none">${esc((u.name[0]||'?').toUpperCase())}</text>
+       <rect x="${cx-14}" y="${cy-21}" width="28" height="4" fill="#12151c"/>
+       <rect x="${cx-14}" y="${cy-21}" width="${Math.max(0,28*u.hp/u.max_hp)}" height="4" fill="${u.side==='party'?'#5db07a':'#d9615a'}"/>`;
+  });
+  svg.innerHTML=g;
+  svg.querySelectorAll('.cbcell').forEach(e=>e.addEventListener('click',()=>cbAct({type:'move',x:+e.dataset.x,y:+e.dataset.y})));
+  svg.querySelectorAll('.cbu').forEach(e=>e.addEventListener('click',ev=>{ev.stopPropagation();
+    const u=CB.units.find(x=>x.id===e.dataset.id);
+    if(u&&u.side==='foes')cbAct({type:'attack',target:u.id});}));
+}
+async function cbAct(a){
+  if(!CB)return;
+  const r=await api('/api/play/combat_act',a);
+  if(r.error){const el=$('cblog');el.innerHTML+='<div style="color:var(--red)">'+esc(r.error)+'</div>';el.scrollTop=el.scrollHeight;}
+  if(r.combat){CB=r.combat;renderCombat();}
+  if(r.hp!=null)setHp(r.hp);
+  if(r.gt!=null){GT=r.gt;setClock();}
+  if(r.over){
+    (r.over.narr||[]).forEach(t=>push('narr',esc(t)));
+    setHp(r.over.hp);setCoins(r.over.coins);
+    setTimeout(closeCombat, 1200);
+  }
+}
+// возобновить бой после перезагрузки страницы
+api('/api/play/combat').then(r=>{if(r.active)openCombat(r.combat,r.lair);});
 </script>
 </body>
 </html>

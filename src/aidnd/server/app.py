@@ -17,7 +17,7 @@ from .routes_auth import router as _auth_router
 from .routes_citydebug import router as _citydebug_router
 from .routes_minddebug import router as _minddebug_router
 from .routes_npcdebug import router as _npcdebug_router
-from .routes_play import router as _play_router
+from .play import router as _play_router
 from .routes_usage import router as _usage_router
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")

@@ -111,19 +111,24 @@ def from_monster(row: dict, cid: str) -> Combatant:
         cr=float(row.get("cr", 0)), kind="monster", ref=row["id"])
 
 
+NPC_HP_BASE = 10                     # каркас живучести бойца-NPC (данные, не магия по коду)
+
+
 def from_npc(pid: str, name: str, mech: dict, hp: int | None = None,
              weapon: dict | None = None) -> Combatant:
     ab = mech.get("abilities") or {}
-    smod, dmod = _mod(ab.get("str", 10)), _mod(ab.get("dex", 10))
+    smod, dmod, cmod = _mod(ab.get("str", 10)), _mod(ab.get("dex", 10)), _mod(ab.get("con", 10))
     brave = (mech.get("traits") or {}).get("bravery", 0.5)
-    hp = 10 if hp is None else hp
+    prof = round(brave * 3)                               # кураж = боевая выучка добровольца
+    hp = NPC_HP_BASE + cmod * 2 + round(brave * 6) if hp is None else hp   # выносливость+кураж
     rng = _ranged((weapon or {}).get("name", ""), WEAPON_RANGE, 1)
     dice = WEAPON_DICE.get((weapon or {}).get("quality", ""), "1d6") if weapon else "1d6"
+    atk = dmod if rng > 1 else max(smod, dmod)
     return Combatant(
         id=pid, name=name, side="party",
-        hp=hp, max_hp=hp, ac=10 + dmod,
-        speed=6, init_mod=dmod, to_hit=2 + (dmod if rng > 1 else max(smod, dmod)),
-        dmg_dice=dice, dmg_bonus=(dmod if rng > 1 else smod),
+        hp=hp, max_hp=hp, ac=11 + dmod + (1 if brave > 0.7 else 0),   # снаряжённый боец крепче
+        speed=6, init_mod=dmod, to_hit=2 + atk + prof,
+        dmg_dice=dice, dmg_bonus=atk + (1 if brave > 0.6 else 0),
         dmg_type="piercing" if rng > 1 else "slashing", range=rng,
         cr=0.25 + brave * 0.5, kind="npc", ref=pid)
 

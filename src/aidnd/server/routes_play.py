@@ -107,6 +107,7 @@ PB = {
     "guild_float": 120, "guild_reward_per_cr": 8,
     # NPC-зачистки: шанс утреннего похода смелой пары
     "npc_delve_chance": 0.6, "npc_brave_min": 0.55,
+    "fighter_roles": ("стражник", "охотник", "головорез", "бродяга", "наёмник"),
     "rest_cost": 2, "rest_until_h": 7,
     "tone_friendly_aff": 0.04, "tone_rude_aff": 0.08, "tone_threat_aff": 0.15, "tone_threat_fear": 0.2, "look_dc": 8, "look_good": 15,
 }
@@ -1851,8 +1852,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
     if verb == "attack" and npc:
         p = people[npc]
         _materialize_npc(npc, "visible")
-        foe = from_npc(npc, p.name, {"abilities": p.state.config.abilities,
-                                     "traits": p.state.config.traits}, hp=10)
+        foe = _combatant_from_npc(npc, p)
         foe.side = "foes"
         enc = Encounter([_pc_combatant()], [foe], seed=f"duel|{npc}|{_mt()}", w=9, h=7)
         _S["combat"] = {"enc": enc, "npc": npc, "loc": loc,
@@ -2328,6 +2328,23 @@ def _pc_combatant():
     return from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon=weapon)
 
 
+_TIER_QUALITY = {"poor": "crude", "modest": "plain", "comfortable": "fine", "wealthy": "exquisite"}
+
+
+def _npc_weapon(p) -> dict | None:
+    """Оружие NPC для боя — из его персоны (имя даёт дальнобой, ярус → качество кости)."""
+    w = ((p.persona or {}).get("gear") or {}).get("weapon")
+    if not w:
+        return None
+    return {"name": w.get("name", ""), "quality": _TIER_QUALITY.get(w.get("tier", "modest"), "plain")}
+
+
+def _combatant_from_npc(pid, p):
+    """Боец из NPC: живучесть от выносливости/куража, оружие из персоны (from_npc сам считает hp)."""
+    return from_npc(pid, p.name, {"abilities": p.state.config.abilities,
+                                  "traits": p.state.config.traits}, weapon=_npc_weapon(p))
+
+
 @router.post("/api/play/delve")
 async def delve(request: Request):
     """Отправиться к логову и вступить в бой (время на дорогу честное)."""
@@ -2555,11 +2572,12 @@ def _npc_delves() -> list:
              if not p.work and p.state.config.traits.get("bravery", 0) >= PB["npc_brave_min"]]
     if not brave:
         return []
-    duo = rng.sample(brave, min(2, len(brave)))
+    # приоритет — бойцовым ролям (данные), внутри группы порядок случайный; отряд 2-3
+    brave.sort(key=lambda pp: (0 if pp[1].role in PB["fighter_roles"] else 1, rng.random()))
+    duo = brave[:rng.randint(2, 3)]
     job = jobs[0]
     l = next(x for x in _lairs() if x["id"] == job["lair"])
-    party = [from_npc(pid, p.name, {"abilities": p.state.config.abilities,
-                                    "traits": p.state.config.traits}, hp=12) for pid, p in duo]
+    party = [_combatant_from_npc(pid, p) for pid, p in duo]
     foes = pick_encounter(l["cr"] + 0.01, l["env"], seed=f"lair|{l['id'].split(':')[1]}")
     r = resolve(party, foes, seed=f"npcdelve|{day}")
     names = " и ".join(p.name for _pid, p in duo)

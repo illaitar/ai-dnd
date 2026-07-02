@@ -492,13 +492,34 @@ def _building_keys(bid: str) -> list:
             if c.get("access") == "locked" and c.get("key")]
 
 
-def _building_containers(bid: str) -> list:
-    """Ёмкости здания для сцены (без содержимого — вскрывается взаимодействием)."""
+def _building_rooms(bid: str) -> list:
+    """Суб-помещения здания (мини-граф): name/kind/access/hidden (скрытое видно лишь по зоркому осмотру)."""
     bd = _store().get_building(_wid(), bid)
     if not bd:
         return []
+    return [{"name": s["name"], "kind": s.get("kind", "backroom"),
+             "access": s.get("access", "public")} for s in (bd["data"].get("sub_rooms") or [])]
+
+
+def _in_room(where: str, room: str | None, rooms: list) -> bool:
+    """Ёмкость принадлежит помещению: по совпадению слов комнаты в where (падежи не мешают);
+    иначе — общий зал."""
+    wt = _tokens_ru(where)
+    if room:
+        return bool(_tokens_ru(room) & wt)
+    return not any(_tokens_ru(r["name"]) & wt for r in rooms)   # в зале — не привязанное к комнатам
+
+
+def _building_containers(bid: str, room: str | None = None) -> list:
+    """Ёмкости ТЕКУЩЕГО помещения (без содержимого — вскрывается взаимодействием)."""
+    bd = _store().get_building(_wid(), bid)
+    if not bd:
+        return []
+    rooms = bd["data"].get("sub_rooms") or []
     return [{"name": c["name"], "kind": c["kind"], "where": c.get("where", ""),
-             "locked": c.get("access") == "locked"} for c in (bd["data"].get("containers") or [])]
+             "locked": c.get("access") == "locked"}
+            for c in (bd["data"].get("containers") or [])
+            if _in_room(c.get("where", ""), room, rooms)]
 
 
 def _seed_item_pool() -> None:
@@ -806,6 +827,7 @@ def _scene_dict(city, people, crof, cr2b, loc):
     inside = _S.get("inside")
     if inside and inside != bid:                           # отошёл от здания — значит, вышел
         inside = _S["inside"] = None
+        _S["room"] = None
     _mark_seen(bid)                                        # пришёл — узнал место
     plaza = (_S.get("geom") or {}).get("plaza")
     if inside:
@@ -825,16 +847,27 @@ def _scene_dict(city, people, crof, cr2b, loc):
     more = max(0, len(here) - PB["here_show_cap"])
     here = here[:PB["here_show_cap"]]
     vis_here = here if lvl >= 1 else []                    # туман: людей различаешь, лишь осмотревшись
+    room = _S.get("room") if inside else None
+    rooms = []
+    if inside:
+        for r in _building_rooms(inside):                  # скрытые видны лишь по зоркому осмотру (lvl 2)
+            if r["access"] == "hidden" and lvl < 2:
+                continue
+            rooms.append(r)
+    if inside and room:
+        name = f"{_binfo(inside)['name']} · {room}"
     d = {
         "loc": loc,
         "inside": inside,
+        "room": room,
+        "rooms": rooms,
         "enterable": ({"bid": bid, "name": _binfo(bid)["name"]} if (bid and not inside) else None),
         "looked": lvl,
         "here_more": (more if lvl >= 1 else 0),
         "location": {"name": name, "kind": kind,
                      "desc": ("Обычное место фронтирного городка — идёт своя жизнь." if role
                               else "Мимо спешат редкие прохожие; в лужах дрожит свет окон."),
-                     "containers": (_building_containers(inside) if (inside and lvl >= 1) else [])},
+                     "containers": (_building_containers(inside, room) if (inside and lvl >= 1) else [])},
         "ambient": {"time": _PHASE_RU[_phase()], "weather": "дождь",
                     "mood": "оживлённо" if len(here) > 2 else "тихо",
                     "event": ("Ты ещё не осмотрелся здесь." if lvl == 0 and here else
@@ -2524,11 +2557,54 @@ async def enter(request: Request):
     if not bid:
         return {"error": "тут не во что входить"}
     _S["inside"] = bid
+    _S["room"] = None
     _gt_add(PB["give_min"])
     _pc_remember(f"вошёл в {_binfo(bid)['name']}", 0.25)
     t = _world_tick()
     return {**_scene_dict(city, people, crof, cr2b, loc), **t, "gt": _gt(), "coins": _pc_coins(),
             "hp": _pc_hp(), "city": _city_name()}
+
+
+@router.post("/api/play/room")
+async def go_room(request: Request):
+    """Перейти в суб-помещение здания (или в зал, room=null). Гейты: public — свободно;
+    staff — по доверию работника ИЛИ скрытности; locked — по ключу; hidden — уже раскрыто."""
+    city, people, crof, cr2b, loc = _play()
+    inside = _S.get("inside")
+    if not inside:
+        return {"error": "ты не внутри здания"}
+    want = (await request.json()).get("room")
+    out = {"narr": []}
+    if not want:                                           # вернуться в общий зал
+        _S["room"] = None
+    else:
+        room = next((r for r in _building_rooms(inside) if r["name"] == want), None)
+        if not room:
+            return {"error": "такого помещения тут нет"}
+        acc = room["access"]
+        if acc in ("staff",):                              # служебное — доверие работника или скрытно
+            worker = next((people[pid] for pid in _here(loc, crof) if people[pid].work == inside), None)
+            trust = worker.state.rel(PLAYER)["trust"] if worker else 0.0
+            if trust < 0.3:
+                roll = random.Random(f"sneakroom|{inside}|{want}|{_mt()}").randint(1, 20)
+                total = roll + _PC_CAP.mod("dex")
+                dc = PB["steal_dc_base"]
+                out["dice"] = {"die": 20, "roll": roll, "mod": _PC_CAP.mod("dex"), "total": total,
+                               "dc": dc, "ok": total >= dc, "label": "Скрытность (Dex) — пройти незаметно"}
+                if total < dc:
+                    out["narr"].append(f"«{want}» — не для чужих. На тебя косятся, пришлось отступить.")
+                    return {**out, **_scene_dict(city, people, crof, cr2b, loc), "gt": _gt()}
+        elif acc == "locked":                              # заперто — нужен ключ здания
+            has_key = any((_store().get_item(r["item_id"]) or {}).get("kind") == "key"
+                          for r in _store().inventory(_wid(), "pc"))
+            if not has_key:
+                out["narr"].append(f"«{want}» заперто — нужен ключ.")
+                return {**out, **_scene_dict(city, people, crof, cr2b, loc), "gt": _gt()}
+        _S["room"] = want
+        out["narr"].append(f"Ты проходишь в: {want}.")
+    _gt_add(PB["give_min"])
+    return {**out, **_scene_dict(city, people, crof, cr2b, loc), "gt": _gt(), "coins": _pc_coins(),
+            "hp": _pc_hp()}
 
 
 @router.post("/api/play/exit")

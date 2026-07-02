@@ -540,17 +540,29 @@ function applyWorld(r){
     renderAmb();renderLoc(r.location);renderWays();
     $('locname').textContent=r.location.name;}
 }
+const ROOM_KD={cellar:'подвал',backroom:'задняя комната',attic:'чердак',quarters:'жильё',hidden:'тайник'};
 function renderWays(){
   const el=$('waybtns');if(!el)return;
   const b=[];
   if(SCENE.inside)b.push(`<button onclick="exitB()">&#8592; выйти наружу</button>`);
   else if(SCENE.enterable)b.push(`<button onclick="enterB()">войти: ${esc(SCENE.enterable.name)}</button>`);
   if((SCENE.looked|0)<1)b.push(`<button onclick="lookAround()">&#128065; осмотреться</button>`);
+  if(SCENE.inside&&SCENE.room)b.push(`<button onclick="goRoom(null)">&#8598; в общий зал</button>`);
+  (SCENE.inside?(SCENE.rooms||[]):[]).forEach(rm=>{if(rm.name!==SCENE.room){
+    const lk=rm.access==='locked'?' &#128274;':(rm.access==='staff'?' (служебное)':'');
+    b.push(`<button data-r="${esc(rm.name)}" onclick="goRoom(this.dataset.r)">&#8600; ${esc(rm.name)}${lk}</button>`);}});
   b.push(`<button class="gray" onclick="openParch()">&#128506; карта</button>`);
   b.push(`<button class="gray" onclick="waitTurn()">&#8987; ждать</button>`);
   el.innerHTML=b.join('');
   $('mapbox').classList.toggle('inside',!!SCENE.inside);
   renderEnterPulse();
+}
+async function goRoom(room){
+  const r=await api('/api/play/room',{room});
+  if(r.error){push('sys',esc(r.error));return;}
+  if(r.dice)showDice(r.dice);
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  applyWorld(r);
 }
 function renderEnterPulse(){
   const old=document.getElementById('epulse');if(old)old.remove();

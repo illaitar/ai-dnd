@@ -42,6 +42,7 @@ _setenv()
 from aidnd.inference import ModelManager                       # noqa: E402
 from aidnd.mind import ABILITIES                               # noqa: E402
 from aidnd.play.population import person_core                  # noqa: E402
+from aidnd.worldgen.abilities import roll_abilities             # noqa: E402
 from aidnd.worldgen import (LLMPersona, PersonaCtx, StubPersona,  # noqa: E402
                             WorldStore, get_imagegen)
 
@@ -122,7 +123,6 @@ def main() -> None:
         portraits = {}
         if img and img.available():
             portraits = img.portraits(pid, persona, seed=1000 + i, out_dir=PORTRAITS_DIR)
-        mech = {"role": role, "traits": core["traits"], "abilities": dict.fromkeys(ABILITIES, 10)}
         return pid, role, core, persona, portraits
 
     n = 0
@@ -130,7 +130,8 @@ def main() -> None:
         for fut in as_completed([ex.submit(work, it) for it in todo]):
             pid, role, core, persona, portraits = fut.result()
             store.save_person(pid, role, core["name"], core["charisma"], core["appearance"],
-                              {"role": role, "traits": core["traits"], "abilities": dict.fromkeys(ABILITIES, 10)},
+                              {"role": role, "traits": core["traits"],
+                               "abilities": roll_abilities(role, random.Random(f"abil|{pid}"))},
                               persona, portraits, seed=a.seed)
             n += 1
             print(f"  [{n}/{len(todo)}] {pid} {role:11} {core['name']:22} "

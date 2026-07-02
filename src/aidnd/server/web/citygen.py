@@ -368,7 +368,7 @@ def shade(hexc, f):
     return f"rgb({c(n >> 16)},{c((n >> 8) & 255)},{c(n & 255)})"
 
 # ----------------------------------------------------------------- генерация города
-def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Фэндалин'):
+def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Городок'):
     buildings = buildings or []
     key_map = {h['id']: h for h in (key_houses or [])}
     CX, CY = W / 2, H / 2

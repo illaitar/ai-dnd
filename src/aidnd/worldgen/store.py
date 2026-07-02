@@ -45,6 +45,10 @@ class WorldStore:
             c.execute("CREATE TABLE IF NOT EXISTS contracts (world_id INT, id TEXT, status TEXT, "
                       "data TEXT, PRIMARY KEY(world_id, id))")
             # живое состояние placed NPC (память/отношения/нужды) — переживает рестарт
+            c.execute("CREATE TABLE IF NOT EXISTS building_pool (id TEXT PRIMARY KEY, kind TEXT, "
+                      "btype TEXT, data TEXT)")
+            c.execute("CREATE TABLE IF NOT EXISTS user_worlds (user_id TEXT PRIMARY KEY, "
+                      "world_id INTEGER, seed INTEGER)")
             c.execute("CREATE TABLE IF NOT EXISTS npc_state (world_id INT, npc_id TEXT, data TEXT, "
                       "PRIMARY KEY(world_id, npc_id))")
 
@@ -100,6 +104,46 @@ class WorldStore:
             c.execute("DELETE FROM buildings WHERE world_id=?", (world_id,))
 
     # ------------------------------------------------------ пул NPC ------- #
+    def flags_prefix(self, world_id: int, prefix: str) -> dict:
+        with self._conn() as c:
+            rows = c.execute("SELECT key, val FROM flags WHERE world_id=? AND key LIKE ?",
+                             (world_id, prefix + "%")).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def user_world(self, user_id: str) -> tuple | None:
+        """(world_id, seed) пользователя или None."""
+        with self._conn() as c:
+            r = c.execute("SELECT world_id, seed FROM user_worlds WHERE user_id=?",
+                          (str(user_id),)).fetchone()
+        return (int(r[0]), int(r[1])) if r else None
+
+    def user_world_create(self, user_id: str) -> tuple:
+        """Выделить пользователю НОВЫЙ мир (свой id и свой seed города)."""
+        with self._conn() as c:
+            m = c.execute("SELECT COALESCE(MAX(world_id), 0) FROM user_worlds").fetchone()[0]
+            wid = int(m) + 1
+            seed = wid                                    # свой город каждому (граф детерминирован)
+            c.execute("INSERT OR REPLACE INTO user_worlds (user_id, world_id, seed) VALUES (?,?,?)",
+                      (str(user_id), wid, seed))
+        return wid, seed
+
+    def pool_save_building(self, bid: str, kind: str, btype: str, data: dict) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO building_pool (id, kind, btype, data) VALUES (?,?,?,?)",
+                      (bid, kind, btype, json.dumps(data, ensure_ascii=False)))
+
+    def pool_buildings(self, kind: str | None = None) -> list:
+        with self._conn() as c:
+            rows = c.execute("SELECT id, kind, btype, data FROM building_pool" +
+                             (" WHERE kind=?" if kind else ""),
+                             ((kind,) if kind else ())).fetchall()
+        return [{"id": r[0], "kind": r[1], "btype": r[2], "data": json.loads(r[3])} for r in rows]
+
+    def pool_count(self, kind: str | None = None) -> int:
+        with self._conn() as c:
+            q = "SELECT COUNT(*) FROM building_pool" + (" WHERE kind=?" if kind else "")
+            return c.execute(q, ((kind,) if kind else ())).fetchone()[0]
+
     def save_person(self, pid: str, role: str, name: str, charisma: float, appearance: float,
                     mech: dict, persona: dict, portraits: dict, seed: int) -> None:
         with self._conn() as c:

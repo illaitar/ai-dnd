@@ -27,15 +27,60 @@
   .stage{display:flex;gap:12px;padding:12px;height:calc(100vh - 46px)}
   .col{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-width:0;
     display:flex;flex-direction:column;overflow:hidden}
-  .left{flex:0 0 300px;transition:flex-basis .35s ease}
+  .left{flex:0 0 480px;transition:flex-basis .35s ease}
   .center{flex:1}
   .right{flex:0 0 260px;transition:flex-basis .35s ease}
-  body.dialogue .right{flex-basis:190px}
+  body.dialogue .right{flex-basis:300px}
   .cap{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);padding:11px 14px 6px}
   .map{flex:1;position:relative;margin:6px 10px 10px;border:1px solid var(--line);border-radius:9px;
     background:var(--panel2);overflow:hidden}
   .map svg{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
   .map svg.drag{cursor:grabbing}
+  .overlay{position:fixed;inset:0;background:rgba(8,9,12,.82);z-index:60;display:flex;
+    align-items:center;justify-content:center}
+  .overlay.hidden{display:none}
+  .parch{width:min(1040px,94vw);height:min(760px,92vh);border-radius:10px;position:relative;
+    background:#e8d9b0;box-shadow:0 30px 80px rgba(0,0,0,.6),inset 0 0 90px rgba(120,84,30,.45),
+    inset 0 0 12px rgba(120,84,30,.35);overflow:hidden}
+  .parch svg{width:100%;height:100%;filter:invert(.93) hue-rotate(180deg) sepia(.65) saturate(.6) contrast(.88) brightness(1.04)}
+  .parch .ptitle{position:absolute;top:14px;left:0;right:0;text-align:center;
+    font:600 20px var(--serif);color:#5a4013;letter-spacing:.06em;pointer-events:none}
+  .parch .pclose{position:absolute;top:10px;right:14px;background:none;border:0;cursor:pointer;
+    font:22px var(--serif);color:#5a4013}
+  .invwin{width:min(680px,92vw);max-height:82vh;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:18px 20px;overflow:auto}
+  .invwin h3{font:600 16px var(--serif);color:var(--gold);margin:0 0 12px;display:flex;
+    justify-content:space-between;align-items:center}
+  .invwin h3 button{background:none;border:0;color:var(--dim);cursor:pointer;font-size:18px}
+  .invgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+  .invcard{padding:10px 12px;border:1px solid var(--line2);border-radius:10px;background:var(--panel2);
+    cursor:pointer}
+  .invcard:hover{border-color:var(--gold-dim)}
+  .invcard .bn{font-size:13.5px;color:var(--ink)}
+  .invcard .bw{font-size:11px;color:var(--faint);margin-top:3px}
+  .map.inside svg{pointer-events:none;filter:brightness(.45) saturate(.5)}
+  .map .insidemsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    color:var(--dim);font:13px var(--serif);font-style:italic;pointer-events:none;opacity:0}
+  .map.inside .insidemsg{opacity:1}
+  @keyframes pulseIn{0%,100%{stroke:#ffe6a8;stroke-width:2}50%{stroke:#d9615a;stroke-width:4}}
+  .enterpulse{animation:pulseIn 1.2s infinite;fill:none}
+  .waybtns{display:flex;gap:8px;margin:0 10px 8px}
+  .waybtns button{flex:1;padding:8px;border-radius:9px;border:1px solid var(--gold-dim);
+    background:rgba(217,164,65,.1);color:var(--gold);font:500 12.5px var(--sans);cursor:pointer}
+  .waybtns button:hover{background:rgba(217,164,65,.2)}
+  .waybtns button.gray{border-color:var(--line2);background:transparent;color:var(--dim)}
+  #dicewrap{margin:0 10px 10px;padding:10px;border:1px solid var(--line);border-radius:9px;
+    background:var(--panel2);display:none;align-items:center;gap:12px}
+  #dicewrap.on{display:flex}
+  .d20{width:54px;height:54px;flex:0 0 54px;perspective:300px}
+  .d20 svg{width:100%;height:100%}
+  .d20.rolling svg{animation:spin3d .9s cubic-bezier(.3,.7,.4,1.1)}
+  @keyframes spin3d{0%{transform:rotateX(0) rotateY(0) scale(.7)}
+    60%{transform:rotateX(680deg) rotateY(420deg) scale(1.15)}
+    100%{transform:rotateX(720deg) rotateY(360deg) scale(1)}}
+  .dtxt{font:12px var(--sans);color:var(--dim)}
+  .dtxt b{color:var(--ink);font-size:14px}
+  .dtxt .ok{color:var(--green)} .dtxt .fail{color:var(--red)}
   .zoom{position:absolute;left:8px;bottom:8px;display:flex;align-items:center;gap:2px;
     background:rgba(15,17,22,.82);border:1px solid var(--line2);border-radius:8px;padding:2px}
   .zoom button{background:transparent;border:0;color:var(--ink);font:500 16px var(--sans);
@@ -187,7 +232,7 @@
 
 <div class="top">
   <span class="brand">&#10022; AI-DnD</span>
-  <span class="loc"><b id="locname">Трактир</b><span class="sep">·</span><span id="locdist">рыночный квартал</span></span>
+  <span class="loc"><b id="locname">Трактир</b><span class="sep">·</span><span id="locdist"></span></span>
   <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="coins">12 зм</span></span>
 </div>
 
@@ -196,12 +241,15 @@
     <div id="mapwrap">
       <div class="cap">карта <span id="here-lbl" style="color:var(--gold)"></span></div>
       <div class="map" id="mapbox"><svg id="mapsvg"></svg>
+        <div class="insidemsg">ты внутри — карта подождёт снаружи</div>
         <div class="zoom"><button onclick="zoomBy(1/1.4)" aria-label="отдалить">&#8722;</button>
           <span id="zlvl">100%</span>
           <button onclick="zoomBy(1.4)" aria-label="приблизить">&#43;</button>
           <button onclick="recenter()" title="к игроку" style="font-size:12px">&#9678;</button></div>
         <button id="gobtn" class="gobtn hidden" onclick="go()">&#9654; идти <span id="goeta"></span></button>
       </div>
+      <div class="waybtns" id="waybtns"></div>
+      <div id="dicewrap"><div class="d20" id="d20box"></div><div class="dtxt" id="dtxt"></div></div>
       <div class="locard">
         <div class="nm">Трактир</div><div class="kd">таверна</div>
         <div class="desc">…</div>
@@ -223,13 +271,27 @@
     <div class="cap" id="rightcap">сцена</div>
     <div class="amb" id="amb"></div>
     <div class="miniscene hidden" id="mini"></div>
-    <div class="cap" style="margin-top:4px">сумка <span id="bagn"></span></div>
-    <div class="bag" id="bag"></div>
+    <div class="cap" style="margin-top:4px;cursor:pointer" onclick="openInv()">🎒 сумка <span id="bagn"></span> — открыть</div>
+    <div class="bag" id="bag" style="display:none"></div>
     <div class="cap" style="margin-top:4px">дела</div>
     <div class="bag" id="jobs"></div>
   </div>
 </div>
 
+<div id="parchwrap" class="overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+  <div class="parch">
+    <div class="ptitle" id="ptitle">Карта</div>
+    <button class="pclose" onclick="$('parchwrap').classList.add('hidden')">✕</button>
+    <svg id="parchsvg"></svg>
+  </div>
+</div>
+<div id="invwrap" class="overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+  <div class="invwin">
+    <h3>Сумка <span id="invcoins" style="font-size:13px;color:var(--dim)"></span>
+      <button onclick="$('invwrap').classList.add('hidden')">✕</button></h3>
+    <div class="invgrid" id="invgrid"></div>
+  </div>
+</div>
 <div id="combat" class="hidden">
   <div class="cbleft">
     <div class="cbhead" id="cbname">Бой</div>
@@ -251,7 +313,14 @@
 <script>
 const $=id=>document.getElementById(id);
 let mode='explore', cur=null, SCENE={here:[],ambient:{}}, CARD=null;
-const api=(u,b)=>fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{}).then(r=>r.json());
+const api=async(u,b)=>{
+  const r=await fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});
+  if(r.status===401){location.href='/login?next=/play';return {};}
+  if(r.status===402){const d=await r.json().catch(()=>({}));
+    try{push('sys','<span style="color:var(--red)">'+esc(d.detail||'дневной лимит исчерпан')+'</span>');}catch(e){}
+    return {limited:true};}
+  return r.json();
+};
 const esc=s=>String(s==null?'':s).replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
 const byId=id=>SCENE.here.find(x=>x.id===id)||{name:id,init:'?',color:'#8a6fae'};
 const thread=()=>$('thread');
@@ -353,9 +422,10 @@ async function go(){
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
-  MAP.loc=r.loc;SCENE=r;LIVEF=[];BOARD=null;
-  api('/api/play/scene').then(s2=>{if(s2.guild_board){BOARD={jobs:s2.guild_board,news:s2.guild_news};renderLoc(s2.location);}setHp(s2.hp,s2.max_hp);});
-  renderAmb();setTimeout(pollLive,800);
+  (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
+  (r.address||[]).forEach(a=>{const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
+  MAP.loc=r.loc;SCENE=r;LIVEF=[];BOARD=null;renderAmb();renderWays();
+  api('/api/play/scene').then(s2=>{SCENE=s2;if(s2.guild_board)BOARD={jobs:s2.guild_board,news:s2.guild_news};renderLoc(s2.location);renderWays();setHp(s2.hp,s2.max_hp);});
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   renderLoc(r.location);
   push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'» ('+fmtClock(GT).split(', ')[1]+').');
@@ -389,6 +459,66 @@ function renderAmb(){
   renderFeed();
 }
 let LIVEF=[],LIVEBUSY=false;
+// ─── пошаговый мир: единый обработчик ответа действия ───
+function applyWorld(r){
+  if(!r)return;
+  if(r.gt!=null){GT=r.gt;setClock();}
+  setCoins(r.coins);if(r.hp!=null)setHp(r.hp);
+  (r.feed||[]).forEach(f=>LIVEF.push(f));
+  if(r.feed&&r.feed.length)renderFeed();
+  (r.address||[]).forEach(a=>{
+    const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);
+    el.style.cursor='pointer';el.title='ответить';el.onclick=()=>talk(a.npc);});
+  if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
+  (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
+  (r.address||[]).forEach(a=>{const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
+  if(r.dice)showDice(r.dice);
+  if(r.location){SCENE=r;renderAmb();renderLoc(r.location);renderWays();
+    $('locname').textContent=r.location.name;}
+}
+function renderWays(){
+  const el=$('waybtns');if(!el)return;
+  const b=[];
+  if(SCENE.inside)b.push(`<button onclick="exitB()">&#8592; выйти наружу</button>`);
+  else if(SCENE.enterable)b.push(`<button onclick="enterB()">войти: ${esc(SCENE.enterable.name)}</button>`);
+  if((SCENE.looked|0)<1)b.push(`<button onclick="lookAround()">&#128065; осмотреться</button>`);
+  b.push(`<button class="gray" onclick="openParch()">&#128506; карта</button>`);
+  b.push(`<button class="gray" onclick="waitTurn()">&#8987; ждать</button>`);
+  el.innerHTML=b.join('');
+  $('mapbox').classList.toggle('inside',!!SCENE.inside);
+  renderEnterPulse();
+}
+function renderEnterPulse(){
+  const old=document.getElementById('epulse');if(old)old.remove();
+  if(SCENE.inside||!SCENE.enterable||!MAP)return;
+  const k=(MAP.keys||[]).find(x=>x.bid===SCENE.enterable.bid);
+  const svg=$('mapsvg');
+  if(k&&svg){const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('id','epulse');c.setAttribute('cx',k.x);c.setAttribute('cy',k.y);
+    c.setAttribute('r',10);c.setAttribute('class','enterpulse');svg.appendChild(c);}
+}
+async function enterB(){applyWorld(await api('/api/play/enter',{}));}
+async function exitB(){applyWorld(await api('/api/play/exit',{}));}
+async function waitTurn(){applyWorld(await api('/api/play/live',{}));}
+async function lookAround(){applyWorld(await api('/api/play/look',{}));}
+function showDice(d){
+  const box=$('d20box'),txt=$('dtxt'),wrap=$('dicewrap');
+  wrap.classList.add('on');
+  box.innerHTML=`<svg viewBox="0 0 60 60"><polygon points="30,3 55,17 55,43 30,57 5,43 5,17"
+    fill="#1e222c" stroke="#d9a441" stroke-width="2"/><polygon points="30,3 55,17 30,30 5,17"
+    fill="#242938" stroke="#8a6f34" stroke-width="1"/><text x="30" y="38" text-anchor="middle"
+    font-size="20" font-weight="700" fill="#e9e6dd" id="dnum"></text></svg>`;
+  box.classList.remove('rolling');void box.offsetWidth;box.classList.add('rolling');
+  txt.innerHTML='<b>…</b>';
+  let t=0;const iv=setInterval(()=>{
+    document.getElementById('dnum').textContent=1+Math.floor(Math.random()*20);
+    if(++t>7){clearInterval(iv);
+      document.getElementById('dnum').textContent=d.roll;
+      txt.innerHTML=`${esc(d.label||'бросок')}<br><b>${d.roll}</b>${d.mod?((d.mod>0?' + ':' − ')+Math.abs(d.mod)):''}`
+        +` = <b>${d.total}</b> против СЛ ${d.dc} — <span class="${d.ok?'ok':'fail'}">${d.ok?'успех':'провал'}</span>`;}
+  },110);
+}
+
 function renderFeed(){const el=$('lfeed');if(!el)return;
   el.innerHTML=LIVEF.length?LIVEF.slice(-14).map(f=>
     f.k==='speech'?`<div class="lf"><b>${esc(f.who)}</b> <span class="lfto">→ ${esc(f.to)}</span>: «${esc(f.text)}»</div>`
@@ -407,7 +537,7 @@ async function pollLive(){
       el.style.cursor='pointer';el.title='ответить — начать разговор';el.onclick=()=>talk(a.npc);});
   }catch(e){}finally{LIVEBUSY=false;}
 }
-setInterval(pollLive,15000);
+
 function renderMini(){
   const a=SCENE.ambient||{};
   $('mini').innerHTML=`<div class="amchips"><span class="amchip">${esc(a.time||'вечер')}</span></div>
@@ -482,6 +612,8 @@ async function converse(text){
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
+  (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
+  (r.address||[]).forEach(a=>{const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
   el.querySelector('.tx').textContent=r.line;
   if(CARD){Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
     if($('meters'))$('meters').innerHTML=meters(CARD);if($('emo'))$('emo').textContent=r.emotion;
@@ -508,6 +640,8 @@ async function freeAct(v){
   if(r.goto!=null){selectDest(r.goto,null);await go();}
   if(r.open_talk){await talk(r.open_talk);
     if(r.say_first){push('me',`<div class="tx">${esc(r.say_first)}</div>`);converse(r.say_first);}}
+  if(r.combat){const st=await api('/api/play/combat');if(st.active)openCombat(st.combat,st.head);}
+  if(r.map_open)openParch();
   if(r.refresh)await refreshInv();
   renderJobs();
 }
@@ -519,12 +653,12 @@ api('/api/play/scene').then(s=>{
   SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}setCoins(s.coins);
   if(s.max_hp)PBMAXHP=s.max_hp;setHp(s.hp,s.max_hp);
   if(s.guild_board)BOARD={jobs:s.guild_board,news:s.guild_news};
-  renderAmb();
+  renderAmb();renderWays();
+  if(s.city){document.title=s.city+' — AI-DnD';$('locdist').textContent=s.city;}
   if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
   const a0=s.ambient||{};
   push('narr',s.location.name+'. '+[a0.time,a0.weather,a0.mood].filter(Boolean).join(', ')+'. '
-    +(s.here&&s.here.length?('Здесь: '+s.here.length+' чел.'):'Никого.'));
-  setTimeout(pollLive,600);
+    +((s.looked|0)<1?'Стоит осмотреться.':(s.here&&s.here.length?('Здесь: '+s.here.length+' чел.'):'Никого.')));
 });
 refreshInv();renderJobs();
 let INV=[];
@@ -691,7 +825,7 @@ async function delve(lair){
   const r=await api('/api/play/delve',{lair});
   if(r.error){push('sys',esc(r.error));return;}
   if(r.gt!=null){GT=r.gt;setClock();}
-  openCombat(r.combat,r.lair);
+  openCombat(r.combat,{name:r.lair.name,sub:r.lair.env+' · CR '+r.lair.cr});
 }
 function renderLoc(loc){
   document.querySelector('.locard .nm').textContent=loc.name;
@@ -704,8 +838,26 @@ function renderLoc(loc){
 
 // ─── БОЙ (BG-lite): грид, ходы кликами, сухой лог ───
 let CB=null;
-function openCombat(cb,lair){CB=cb;$('cbname').textContent=lair.name;
-  $('cbsub').textContent=lair.env+' · CR '+lair.cr;
+
+function openParch(){
+  const w=$('parchwrap');w.classList.remove('hidden');
+  $('ptitle').textContent=(SCENE&&SCENE.city)?SCENE.city:'Карта';
+  const svg=$('parchsvg');
+  svg.setAttribute('viewBox',BVB?BVB.join(' '):'0 0 980 700');   // ВЕСЬ город, без пан/зума
+  svg.innerHTML=$('mapsvg').innerHTML;
+  ['epulse','destmark'].forEach(id=>{const e=svg.querySelector('#'+id);if(e)e.remove();});
+}
+function openInv(){
+  $('invwrap').classList.remove('hidden');
+  $('invcoins').textContent=$('coins').textContent;
+  const g=$('invgrid');
+  if(!INV.length){g.innerHTML='<div class="bagempty">пусто — только пыль по швам</div>';return;}
+  g.innerHTML=INV.map(it=>`<div class="invcard" onclick="$('invwrap').classList.add('hidden');inspectItem('${it.id}')">
+    <div class="bn">${esc(it.name)}</div>
+    <div class="bw">${esc(it.kind||'')}${it.qty>1?(' × '+it.qty):''}</div></div>`).join('');
+}
+function openCombat(cb,head){CB=cb;$('cbname').textContent=(head&&head.name)||'Бой';
+  $('cbsub').textContent=(head&&head.sub)||'';
   $('combat').classList.remove('hidden');renderCombat();}
 function closeCombat(){$('combat').classList.add('hidden');CB=null;refreshInv();renderJobs();}
 function renderCombat(){
@@ -751,7 +903,7 @@ async function cbAct(a){
   }
 }
 // возобновить бой после перезагрузки страницы
-api('/api/play/combat').then(r=>{if(r.active)openCombat(r.combat,r.lair);});
+api('/api/play/combat').then(r=>{if(r.active)openCombat(r.combat,{name:r.lair.name,sub:r.lair.env+' · CR '+r.lair.cr});});
 </script>
 </body>
 </html>

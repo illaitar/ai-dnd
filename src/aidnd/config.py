@@ -59,6 +59,7 @@ SESSION_TTL_DAYS: int = int(os.environ.get("AIDND_SESSION_TTL_DAYS", "30"))
 COOKIE_SECURE: bool = os.environ.get("AIDND_COOKIE_SECURE", "0") == "1"   # Secure-кука (только HTTPS, за TLS)
 FREE_ENRICH: int = int(os.environ.get("AIDND_FREE_ENRICH", "1"))       # бесплатных генераций мира
 FREE_REQUESTS: int = int(os.environ.get("AIDND_FREE_REQUESTS", "100"))  # бесплатных игровых запросов
+DAILY_LLM: int = int(os.environ.get("AIDND_DAILY_LLM", "300"))          # LLM-вызовов в сутки без кода
 GOOGLE_CLIENT_ID: str = os.environ.get("AIDND_GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET: str = os.environ.get("AIDND_GOOGLE_CLIENT_SECRET", "")
 

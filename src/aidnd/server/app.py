@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -51,19 +51,26 @@ async def _no_cache(request, call_next):
 
 @app.get("/")
 def index() -> HTMLResponse:
-    return HTMLResponse(
-        "<!doctype html><meta charset=utf-8><title>AI-DnD</title>"
-        "<body style='font:15px/1.6 -apple-system,sans-serif;background:#0f1115;color:#e6e8ec;padding:48px'>"
-        "<h1 style='font-size:20px'>AI-DnD — новый контур в сборке</h1>"
-        "<p style='color:#9aa0aa'>Старый движок снесён; интерфейс игрока строится на "
-        "mind + citygraph + worldgen.</p>"
-        "<p>Дебаг: <a style='color:#3b9eff' href='/minddebug'>/minddebug</a> · "
-        "<a style='color:#3b9eff' href='/citydebug'>/citydebug</a></p></body>")
+    with open(os.path.join(WEB_DIR, "landing.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
 
 
 @app.get("/play")
-def play_pilot() -> HTMLResponse:
-    """Пилот нового игрового интерфейса (динамическая раскладка, пока на заглушках)."""
+async def play_page(request: Request) -> HTMLResponse:
+    """Игра — только под сессией (полная авторизация по email)."""
+    from fastapi.responses import RedirectResponse
+    from .auth import user_for_token
+    from .db import SessionLocal
+    token = request.cookies.get("aidnd_session", "")
+    user, db_ok = None, True
+    try:
+        async with SessionLocal() as db:
+            if token:
+                user = await user_for_token(db, token)
+    except Exception:                                      # noqa: BLE001 — БД лежит → демо-режим
+        db_ok = False
+    if not user and db_ok and not os.environ.get("AIDND_OPEN_PLAY"):
+        return RedirectResponse("/login?next=/play", status_code=303)
     with open(os.path.join(WEB_DIR, "play.html"), encoding="utf-8") as f:
         return HTMLResponse(f.read())
 

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-DnD</title>
+<style>
+  :root{--bg:#0f1116;--panel:#171a22;--line:#2a2f3c;--ink:#e9e6dd;--dim:#9aa0ad;--gold:#d9a441;
+    --serif:"Iowan Old Style",Georgia,serif;--sans:-apple-system,Segoe UI,Roboto,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 var(--sans);
+    min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .card{width:min(440px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:34px 36px}
+  h1{font:600 26px var(--serif);color:var(--gold);margin:0 0 4px}
+  .sub{color:var(--dim);font-size:13.5px;margin-bottom:22px}
+  .play{display:block;width:100%;padding:13px;border-radius:12px;border:0;background:var(--gold);
+    color:#1a1408;font:600 15px var(--sans);cursor:pointer;text-align:center;text-decoration:none}
+  .play:hover{filter:brightness(1.08)}
+  .sect{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:#6c7280;margin:24px 0 10px}
+  .opt{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .opt:last-of-type{border:0}
+  .opt input{background:#1e222c;border:1px solid var(--line);border-radius:8px;color:var(--ink);
+    font:13px var(--sans);padding:6px 10px;width:150px}
+  .foot{margin-top:20px;font-size:12px;color:#6c7280;display:flex;justify-content:space-between}
+  .foot a{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>&#10022; AI-DnD</h1>
+  <div class="sub">Живой фронтирный городок: у каждого жителя — разум, память и свои дела.</div>
+  <a class="play" href="/play">Играть</a>
+  <div class="sect">настройки</div>
+  <div class="opt"><span>Имя героя</span><input id="hero" placeholder="Странник"></div>
+  <div class="opt"><span>Аккаунт</span><span id="acct" style="color:var(--dim)">…</span></div>
+  <div class="opt"><span>Инвайт-код</span>
+    <span style="display:flex;gap:6px"><input id="code" placeholder="код">
+    <button id="redeem" style="background:#242938;border:1px solid var(--line);color:var(--gold);
+      border-radius:8px;padding:6px 10px;cursor:pointer;font:12.5px var(--sans)">ввести</button></span></div>
+  <div class="opt"><span>Тариф</span><span id="plan" style="color:var(--dim)">—</span></div>
+  <div class="foot"><a href="/login">войти / регистрация</a><a href="#" id="logout" style="display:none">выйти</a></div>
+</div>
+<script>
+const hero=document.getElementById('hero');
+hero.value=localStorage.getItem('hero_name')||'';
+hero.addEventListener('change',()=>localStorage.setItem('hero_name',hero.value.trim()));
+document.getElementById('redeem').onclick=async()=>{
+  const code=document.getElementById('code').value.trim();
+  if(!code)return;
+  const r=await fetch('/usage/redeem',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code})});
+  const d=await r.json().catch(()=>({}));
+  document.getElementById('plan').textContent=r.ok?'полный доступ':(d.detail||'код не подошёл');
+};
+fetch('/usage/me').then(r=>r.ok?r.json():null).then(d=>{
+  if(d)document.getElementById('plan').textContent=d.unlimited?'полный доступ':'базовый (дневной лимит)';
+}).catch(()=>{});
+fetch('/auth/me').then(r=>r.ok?r.json():null).then(d=>{
+  const a=document.getElementById('acct'), lo=document.getElementById('logout');
+  if(d&&d.email){a.textContent=d.email;lo.style.display='inline';
+    lo.onclick=async e=>{e.preventDefault();await fetch('/auth/logout',{method:'POST'});location.reload();};}
+  else a.textContent='гость';
+}).catch(()=>{});
+</script>
+</body>
+</html>

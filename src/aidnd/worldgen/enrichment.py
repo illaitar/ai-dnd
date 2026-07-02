@@ -57,17 +57,19 @@ def _targets(city, scope: str) -> list[tuple]:
     return out
 
 
-def building_ctx(city, bid: str, is_key: bool, idx: int):
+def building_ctx(city, bid: str, is_key: bool, idx: int, region: str | None = None):
     """Контекст здания для енричера (имя-подсказка по типу/ориентиру + роль + ориентиры карты)."""
     node = city.key_buildings[bid].interior if is_key else city.houses[bid].node
     landmarks = city._landmarks_at(node) if node in city._xy else []   # noqa: SLF001
+    kw = {"region": region} if region else {}
     return BuildingCtx(id=bid, name_hint=_name_hint(is_key, idx, landmarks),
                        role_hint=("значимое здание небольшого городка" if is_key else "жилой дом горожанина"),
-                       landmarks=landmarks)
+                       landmarks=landmarks, **kw)
 
 
 def enrich_city(city, scope: str, enricher: Enricher, max_concurrent: int = 8,
-                on_progress=None, store=None, world_id: int | None = None, resume: bool = False) -> Enrichment:
+                on_progress=None, store=None, world_id: int | None = None, resume: bool = False,
+                region: str | None = None) -> Enrichment:
     """Насытить локации фактшитами (одна фаза). scope: 'keys' | 'all'. Если задан store+world_id —
     пишем в БД ИНКРЕМЕНТАЛЬНО (каждое здание сразу, в главном потоке → без гонок SQLite; обрыв не теряет
     прогресс). resume=True — пропускать уже насыщённые в БД (доделать после обрыва)."""
@@ -84,7 +86,7 @@ def enrich_city(city, scope: str, enricher: Enricher, max_concurrent: int = 8,
 
     def work(item):
         idx, (bid, is_key, node_) = item
-        data = enricher.describe_building(building_ctx(city, bid, is_key, idx))
+        data = enricher.describe_building(building_ctx(city, bid, is_key, idx, region=region))
         return bid, node_, is_key, (city.key_buildings[bid].name if is_key else None), data
 
     with ThreadPoolExecutor(max_workers=max(1, max_concurrent)) as ex:

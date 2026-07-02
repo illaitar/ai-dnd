@@ -81,8 +81,20 @@ def main() -> None:
     store = WorldStore(args.db) if args.world else None
     if store and args.fresh:
         store.clear_world(args.world)
+    region = None
+    if store and args.world and not args.stub:
+        name = store.flag_get(args.world, "city_name")
+        if not name:
+            resp = mgr.call("narrator", [
+                {"role": "system", "content": "Придумай ОДНО название фронтирного городка тёмного "
+                 "фэнтези на русском (1-2 слова, без кавычек и пояснений)."},
+                {"role": "user", "content": f"seed {args.seed}"}], options={"temperature": 0.9})
+            name = ((resp.get("content") if resp else "") or "Серый Брод").strip().strip('«»"').split("\n")[0][:24]
+            store.flag_set(args.world, "city_name", name)
+        region = f"фронтирный городок {name}"
+        print(f"город: {name}")
     enr = enrich_city(city, args.enrich, enricher, max_concurrent=conc, on_progress=on_prog,
-                      store=store, world_id=(args.world or None), resume=args.resume)
+                      store=store, world_id=(args.world or None), resume=args.resume, region=region)
     print()
 
     if args.world:

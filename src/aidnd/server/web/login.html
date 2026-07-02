@@ -29,7 +29,7 @@
         body: JSON.stringify({ email: $("email").value.trim(), password: $("pass").value })
       });
       const d = await r.json().catch(() => ({}));
-      if (r.ok && d.token) { location.href = "/"; }     // cookie сессии поставлена сервером
+      if (r.ok && d.token) { location.href = new URLSearchParams(location.search).get("next") || "/play"; }
       else { $("msg").textContent = d.detail || "Ошибка"; }
     }
     $("login").onclick = () => go("/auth/login");

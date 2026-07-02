@@ -550,8 +550,10 @@ async def move(request: Request):
     _S["loc"] = to
     _gt_add(max(1, len(path) - 1))                         # шаг пути = 1 игровая минута (граф густой)
     _apply_routine()                                       # за дорогу мир мог перейти в другую фазу
+    ct_done = _contract_on_move(to)                        # visit-уговор: дошёл — исполнил
     sc = _scene_dict(city, people, crof, cr2b, to)
-    return {**sc, "path": path, "moved": sc["location"]["name"], "gt": _gt()}
+    return {**sc, "path": path, "moved": sc["location"]["name"], "gt": _gt(),
+            "contract_done": ct_done, "coins": _pc_coins()}
 
 
 @router.post("/api/play/talk")
@@ -614,9 +616,10 @@ async def say(request: Request):
     _pc_remember(f"{p.name} на «{text[:60]}» ответил(а): «{line[:90]}»", 0.35, about=[npc])
     _npc_save(npc)
     emo = _emo(p.state)
+    ct_done = _contract_on_talk(npc)                       # befriend-уговор: цель прониклась
     return {"line": line, "aff": round(rel["affinity"], 2), "trust": round(rel.get("trust", 0), 2),
             "fear": round(rel.get("fear", 0), 2), "emotion": emo, "portrait": _portrait_url(p, emo),
-            "gt": _gt()}
+            "gt": _gt(), "contract_done": ct_done, "coins": _pc_coins()}
 
 
 # --------------------------------------------------- ПРЕДМЕТЫ (срез 1) ---- #
@@ -1077,11 +1080,14 @@ async def steal(request: Request):
 # награда. Цель выбирается из НАСТОЯЩИХ вещей мира (ёмкости зданий, ценное других людей).
 
 _CONTRACT_SYS = (
-    "Ты — житель фронтирного городка, которому нужна помощь чужака. По твоей натуре, твоей долгой цели "
-    "и списку РЕАЛЬНЫХ вещей мира выбери ОДНУ вещь, которая тебе нужна (строго из списка кандидатов, "
-    "дословно), придумай зачем (вяжется с твоей целью) и назначь награду монетами (не больше своей "
-    "наличности). Верни СТРОГО JSON: {\"want\": \"<дословно из списка>\", \"reward\": <целое>, "
-    "\"pitch\": \"<как ты просишь, В ХАРАКТЕРЕ, 1-2 фразы, упомяни где вещь>\"}"
+    "Ты — житель фронтирного городка, которому нужна помощь чужака. По твоей натуре и долгой цели выбери "
+    "ОДНО поручение из доступных ВИДОВ (используй только перечисленные кандидаты, дословно):\n"
+    "bring — добыть тебе вещь из мира; deliver — отнести ТВОЮ вещь названному человеку; "
+    "visit — сходить в место и глянуть, что там; befriend — расположить к себе названного человека "
+    "(втереться в доверие, разговорить).\n"
+    "Верни СТРОГО JSON: {\"kind\": \"bring|deliver|visit|befriend\", \"want\": \"<вещь дословно или null>\", "
+    "\"target\": \"<имя человека или место дословно, или null>\", \"reward\": <целое, не больше наличности>, "
+    "\"pitch\": \"<просьба В ХАРАКТЕРЕ, 1-2 фразы, с сутью и наградой>\"}"
 )
 
 
@@ -1132,14 +1138,20 @@ def _contract_offer(npc: str) -> dict | None:
             return None
         reward_item = max(rows, key=lambda x: x[1]["worth"])
     cands = _contract_candidates(npc)
-    if not cands:
-        return None
+    others = [(pid, o) for pid, o in sorted((_S.get("people") or {}).items()) if pid != npc]
+    own = [(r["item_id"], _store().get_item(r["item_id"]))
+           for r in _store().inventory(PLAY_WORLD, npc)]
+    own = [(i, it) for i, it in own if it and it["kind"] != "key"]
+    places = [k["label"] for k in _S["geom"]["keys"]]
     ag = p.state.agendas[0]
     pay_line = (f"Наличность: {purse} зм." if not reward_item
                 else f"Монет у тебя нет — в награду отдашь свою вещь «{reward_item[1]['name']}» (reward=0).")
     user = (f"ТЫ: {p.name}, {p.role}. Натура: {trait_hints_str(p)}. "
             f"ТВОЯ ДОЛГАЯ ЦЕЛЬ: {getattr(ag, 'summary', '')}. {pay_line}\n"
-            f"КАНДИДАТЫ (вещь → где): " + "; ".join(f"«{c['name']}» → {c['where']}" for c in cands))
+            f"bring-КАНДИДАТЫ (вещь → где): " + ("; ".join(f"«{c['name']}» → {c['where']}" for c in cands) or "нет") + "\n"
+            f"deliver-ТВОИ ВЕЩИ: " + ("; ".join(f"«{it['name']}»" for _i, it in own[:4]) or "нет") + "\n"
+            f"ЛЮДИ (для deliver/befriend): " + ("; ".join(o.name for _pid, o in others[:10]) or "нет") + "\n"
+            f"МЕСТА (для visit): " + ", ".join(places))
     resp = mgr.call("narrator", [{"role": "system", "content": _CONTRACT_SYS},
                                  {"role": "user", "content": user}], options={"temperature": 0.7})
     t = (resp.get("content") if resp else "").strip()
@@ -1147,16 +1159,37 @@ def _contract_offer(npc: str) -> dict | None:
         d = json.loads(t[t.find("{"):t.rfind("}") + 1])
     except (json.JSONDecodeError, ValueError):
         return None
-    want = str(d.get("want") or "").strip()
-    cand = next((c for c in cands if c["name"] == want), None)
-    if not cand:
-        return None
-    cid = f"ct:{npc}:{_mt()}"
-    data = {"giver": npc, "giver_name": p.name, "want": want, "where": cand["where"],
+    kind = d.get("kind") if d.get("kind") in ("bring", "deliver", "visit", "befriend") else "bring"
+    want, tgt = str(d.get("want") or "").strip(), str(d.get("target") or "").strip()
+    data = {"giver": npc, "giver_name": p.name, "kind": kind, "want": None, "where": "",
+            "target": None, "target_name": None,
             "reward": (0 if reward_item else max(2, min(int(d.get("reward") or 5), purse))),
             "reward_item": (reward_item[0] if reward_item else None),
             "reward_name": (reward_item[1]["name"] if reward_item else None),
             "pitch": str(d.get("pitch") or "")[:220], "why": getattr(ag, "summary", "")}
+    if kind == "bring":
+        cand = next((c for c in cands if c["name"] == want), None)
+        if not cand:
+            return None
+        data.update(want=want, where=cand["where"])
+    elif kind == "deliver":
+        oit = next(((i, it) for i, it in own if it["name"] == want), None)
+        who = next(((pid, o) for pid, o in others if o.name == tgt), None)
+        if not oit or not who:
+            return None
+        data.update(want=want, deliver_item=oit[0], target=who[0], target_name=who[1].name,
+                    where=f"вручить: {who[1].name}")
+    elif kind == "visit":
+        pl = next((k for k in _S["geom"]["keys"] if k["label"] == tgt), None)
+        if not pl:
+            return None
+        data.update(target=pl["node"], target_name=pl["label"], where=f"место: {pl['label']}")
+    else:                                                   # befriend
+        who = next(((pid, o) for pid, o in others if o.name == tgt), None)
+        if not who:
+            return None
+        data.update(target=who[0], target_name=who[1].name, where=f"человек: {who[1].name}")
+    cid = f"ct:{npc}:{_mt()}"
     _store().save_contract(PLAY_WORLD, cid, "offered", data)
     _store().flag_set(PLAY_WORLD, f"coffer|{npc}")
     return {"id": cid, **data}
@@ -1167,32 +1200,60 @@ def _tokens_ru(s: str) -> set:
     return {w[:5] for w in str(s).lower().replace("«", " ").replace("»", " ").split() if len(w) >= 4}
 
 
+def _contract_complete(ct: dict) -> str:
+    """Общая выплата ЛЮБОГО исполненного уговора: награда, доверие, память, журнал."""
+    giver = ct["giver"]
+    p = _S["people"][giver]
+    _materialize_npc(giver, "pockets")                     # чтоб было чем платить
+    if ct.get("reward_item"):                              # награда вещью (бедняк)
+        _store().inv_move(PLAY_WORLD, ct["reward_item"], "pc")
+        paid = f"{p.name} отдаёт обещанное — «{ct.get('reward_name')}»"
+    else:
+        reward = min(ct["reward"], _store().purse_get(PLAY_WORLD, giver))
+        _store().purse_add(PLAY_WORLD, giver, -reward)
+        coins = _store().purse_add(PLAY_WORLD, "pc", reward)
+        paid = f"{p.name} отсыпает тебе {reward} зм (кошель: {coins})"
+    _store().save_contract(PLAY_WORLD, ct["id"], "done", {k: v for k, v in ct.items()
+                                                          if k not in ("id", "status")})
+    p.state.rel(PLAYER)["trust"] = min(1.0, p.state.rel(PLAYER)["trust"] + 0.3)
+    p.state.rel(PLAYER)["affinity"] = min(1.0, p.state.rel(PLAYER)["affinity"] + 0.2)
+    p.state.memory.add("чужак исполнил мою просьбу. Надёжный человек", _mt(), 0.85, about=[PLAYER])
+    _pc_remember(f"исполнил просьбу {p.name} ({ct['kind']}: {ct.get('want') or ct.get('target_name')})",
+                 0.6, about=[giver])
+    _npc_save(giver)
+    return f"Уговор исполнен! {paid}."
+
+
 def _contract_on_give(npc: str, it: dict) -> str | None:
-    """Отданная вещь закрывает контракт? Предикату всё равно, КАК добыл (купил/украл/налутал)."""
+    """give закрывает: bring (принёс гиверу) и deliver (вручил адресату). КАК добыл — неважно."""
     for ct in _store().contracts(PLAY_WORLD, "active"):
-        if ct["giver"] != npc:
-            continue
-        a, b = _tokens_ru(ct["want"]), _tokens_ru(it["name"])
-        if not (a & b):
-            continue
-        p = _S["people"][npc]
-        if ct.get("reward_item"):                          # награда вещью (бедняк)
-            _store().inv_move(PLAY_WORLD, ct["reward_item"], "pc")
-            paid = f"{p.name} отдаёт тебе обещанное — «{ct.get('reward_name')}»"
-        else:
-            reward = min(ct["reward"], _store().purse_get(PLAY_WORLD, npc))
-            _store().purse_add(PLAY_WORLD, npc, -reward)
-            coins = _store().purse_add(PLAY_WORLD, "pc", reward)
-            paid = f"{p.name} отсыпает тебе {reward} зм (кошель: {coins})"
-        _store().save_contract(PLAY_WORLD, ct["id"], "done", {k: v for k, v in ct.items()
-                                                              if k not in ("id", "status")})
-        p.state.rel(PLAYER)["trust"] = min(1.0, p.state.rel(PLAYER)["trust"] + 0.3)
-        p.state.rel(PLAYER)["affinity"] = min(1.0, p.state.rel(PLAYER)["affinity"] + 0.2)
-        p.state.memory.add(f"чужак исполнил мою просьбу — принёс «{it['name']}». Надёжный человек",
-                           _mt(), 0.85, about=[PLAYER])
-        _pc_remember(f"исполнил просьбу {p.name} («{ct['want']}»)", 0.6, about=[npc])
-        _npc_save(npc)
-        return f"Уговор исполнен! {paid}."
+        kind = ct.get("kind", "bring")
+        if kind == "bring" and ct["giver"] == npc and (_tokens_ru(ct["want"]) & _tokens_ru(it["name"])):
+            return _contract_complete(ct)
+        if kind == "deliver" and ct.get("target") == npc and (_tokens_ru(ct["want"]) & _tokens_ru(it["name"])):
+            tgt = _S["people"][npc]
+            tgt.state.memory.add(f"чужак передал мне «{it['name']}» от {ct['giver_name']}",
+                                 _mt(), 0.5, about=[PLAYER, ct["giver"]])
+            _npc_save(npc)
+            return _contract_complete(ct)
+    return None
+
+
+def _contract_on_move(loc: int) -> str | None:
+    """visit: дошёл до места — уговор исполнен (гивер узнает — слово чужака здесь вес имеет)."""
+    for ct in _store().contracts(PLAY_WORLD, "active"):
+        if ct.get("kind") == "visit" and ct.get("target") == loc:
+            return _contract_complete(ct)
+    return None
+
+
+def _contract_on_talk(npc: str) -> str | None:
+    """befriend: цель прониклась к тебе — уговор исполнен."""
+    for ct in _store().contracts(PLAY_WORLD, "active"):
+        if ct.get("kind") == "befriend" and ct.get("target") == npc:
+            rel = _S["people"][npc].state.relationships.get(PLAYER, {})
+            if rel.get("affinity", 0) >= 0.25:
+                return _contract_complete(ct)
     return None
 
 
@@ -1209,9 +1270,13 @@ async def contract_accept(request: Request):
         return {"error": "уговора нет"}
     _store().save_contract(PLAY_WORLD, cid, "active", {k: v for k, v in ct.items()
                                                        if k not in ("id", "status")})
-    _pc_remember(f"взялся за дело для {ct['giver_name']}: добыть «{ct['want']}» ({ct['where']}) "
-                 f"за {ct['reward']} зм", 0.6, about=[ct["giver"]])
-    return {"accepted": True}
+    note = None
+    if ct.get("kind") == "deliver" and ct.get("deliver_item"):   # посылку вручают сразу
+        _store().inv_move(PLAY_WORLD, ct["deliver_item"], "pc")
+        note = f"«{ct['want']}» ложится в твою сумку — доставь по адресу."
+    _pc_remember(f"взялся за дело для {ct['giver_name']}: {ct.get('kind')} — "
+                 f"{ct.get('want') or ct.get('target_name')} ({ct['where']})", 0.6, about=[ct["giver"]])
+    return {"accepted": True, "note": note}
 
 
 @router.get("/api/play/contracts")
@@ -1506,12 +1571,24 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     w.ground[place] = _live_affordances(bid)
     names, roles = {PLAYER: "чужак"}, {PLAYER: "недавно вошедший незнакомец"}
     rng = random.Random(f"live|{loc}")
+    npc_map: dict = {}                                     # pid → {имя вещи: item_id} (кражи реальны)
     for pid in _here(loc, crof):
         p = people[pid]
+        _materialize_npc(pid, "visible")                   # у присутствующих настоящие вещи при себе
+        loot, imap = [], {}
+        coins_np = _store().purse_get(PLAY_WORLD, pid)
+        if coins_np > 0:
+            loot.append(MItem("кошель", min(1.0, 0.15 + coins_np / 40), kind="coin", amount=coins_np))
+        rows = [(r["item_id"], _store().get_item(r["item_id"]))
+                for r in _store().inventory(PLAY_WORLD, pid)]
+        rows = [(i, it) for i, it in rows if it and it["kind"] != "key"]
+        if rows:
+            iid, it = max(rows, key=lambda x: x[1]["worth"])
+            loot.append(MItem(it["name"], min(1.0, it["worth"] / 40)))
+            imap[it["name"]] = iid
+        npc_map[pid] = imap
         w.add(Body(id=pid, place=place, charisma=p.charisma, appearance=p.appearance,
-                   attention=round(rng.uniform(0.45, 0.85), 2),
-                   loot=[MItem("кошель", round(0.2 + p.appearance * 0.6, 2), kind="coin",
-                               amount=round(3 + p.appearance * 30))] if p.appearance >= 0.3 else []))
+                   attention=round(rng.uniform(0.45, 0.85), 2), loot=loot))
         names[pid], roles[pid] = p.name, p.role
     pc_loot, pc_map = [], {}
     coins = _pc_coins()
@@ -1562,7 +1639,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         with ThreadPoolExecutor(max_workers=4) as ex:
             list(ex.map(plan_one, todo))
     _S["live"] = {"world": w, "loc": loc, "place": place, "clock": 0, "ts": 0.0,
-                  "who": frozenset(here), "pc_map": pc_map,
+                  "who": frozenset(here), "pc_map": pc_map, "npc_map": npc_map,
                   "last": {}, "hist": {}, "names": names, "roles": roles, "personas": personas,
                   "pdesc": ((data or {}).get("notable") or "")}
 
@@ -1603,28 +1680,46 @@ def _live_tick(people) -> tuple:
 
     feed, address = [], []
     pc = _pc()
-    pc_body = w.bodies.get(PLAYER)
     for pid in order:                                       # применяем последовательно (честный порядок)
         d = decisions[pid]
         st = w.npc_minds[pid]
-        before = {i.name for i in (pc_body.loot if pc_body else [])}
+        before = {vid: {i.name for i in b.loot} for vid, b in w.bodies.items() if vid != pid}
         evs = apply_actions(d.get("actions") or [], st, w, lv["clock"])
-        stolen = before - {i.name for i in (pc_body.loot if pc_body else [])}
-        for nm in stolen:                                   # кража у игрока РЕАЛЬНА
-            if nm == "кошель":
-                take = max(1, _pc_coins() // 2)
-                _store().purse_add(PLAY_WORLD, "pc", -take)
-                _store().purse_add(PLAY_WORLD, pid, take)
-                feed.append({"k": "deed", "who": _display(pid, people),
-                             "text": f"ловко срезает твой кошель — минус {take} зм!"})
-                _pc_remember(f"у меня срезали кошель ({take} зм) — это был {_display(pid, people)}",
-                             0.8, about=[pid])
-            elif nm in (lv.get("pc_map") or {}):
-                _store().inv_move(PLAY_WORLD, lv["pc_map"][nm], pid)
-                feed.append({"k": "deed", "who": _display(pid, people),
-                             "text": f"вытягивает у тебя «{nm}»!"})
-                _pc_remember(f"у меня украли «{nm}»", 0.8, about=[pid])
-            st.memory.add(f"я обчистил(а) чужака: взял(а) {nm}", lv["clock"], 0.7, about=[PLAYER])
+        for vid, names_before in before.items():            # кражи РЕАЛЬНЫ (у игрока и NPC↔NPC)
+            b = w.bodies.get(vid)
+            stolen = names_before - ({i.name for i in b.loot} if b else set())
+            for nm in stolen:
+                if vid == PLAYER:
+                    if nm == "кошель":
+                        take = max(1, _pc_coins() // 2)
+                        _store().purse_add(PLAY_WORLD, "pc", -take)
+                        _store().purse_add(PLAY_WORLD, pid, take)
+                        feed.append({"k": "deed", "who": _display(pid, people),
+                                     "text": f"ловко срезает твой кошель — минус {take} зм!"})
+                        _pc_remember(f"у меня срезали кошель ({take} зм) — это был {_display(pid, people)}",
+                                     0.8, about=[pid])
+                    elif nm in (lv.get("pc_map") or {}):
+                        _store().inv_move(PLAY_WORLD, lv["pc_map"][nm], pid)
+                        feed.append({"k": "deed", "who": _display(pid, people),
+                                     "text": f"вытягивает у тебя «{nm}»!"})
+                        _pc_remember(f"у меня украли «{nm}»", 0.8, about=[pid])
+                    st.memory.add(f"я обчистил(а) чужака: взял(а) {nm}", lv["clock"], 0.7, about=[PLAYER])
+                else:
+                    if nm == "кошель":
+                        take = max(1, _store().purse_get(PLAY_WORLD, vid) // 2)
+                        _store().purse_add(PLAY_WORLD, vid, -take)
+                        _store().purse_add(PLAY_WORLD, pid, take)
+                    elif nm in (lv.get("npc_map", {}).get(vid) or {}):
+                        _store().inv_move(PLAY_WORLD, lv["npc_map"][vid][nm], pid)
+                    feed.append({"k": "deed", "who": _display(pid, people),
+                                 "text": f"тянет что-то из добра ({_display(vid, people)}) — ты это ВИДИШЬ"})
+                    st.memory.add(f"я взял(а) чужое ({nm}) у {lv['names'].get(vid, vid)}",
+                                  lv["clock"], 0.6, about=[vid])
+                    if vid in w.npc_minds:
+                        w.npc_minds[vid].memory.add(f"меня обокрали — пропало {nm}", lv["clock"],
+                                                    0.7, about=[pid])
+                    _pc_remember(f"видел, как {_display(pid, people)} обокрал {_display(vid, people)}",
+                                 0.5, about=[pid, vid])
         lv["last"][pid] = "; ".join(evs)[:80] or "—"
         lv["hist"].setdefault(pid, []).append("; ".join(evs)[:60])
         who = _display(pid, people)

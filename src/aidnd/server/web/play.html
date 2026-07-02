@@ -314,6 +314,8 @@ async function go(){
   await walk(path);
   hideDest();PEND=null;
   if(r.gt!=null){GT=r.gt;setClock();}
+  setCoins(r.coins);
+  if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
   MAP.loc=r.loc;SCENE=r;LIVEF=[];renderAmb();setTimeout(pollLive,800);
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   renderLoc(r.location);
@@ -418,8 +420,10 @@ async function talk(id){
   CARD=n;renderNpc(n);if(n.crafter)loadWares();renderBag();
   if(n.contract){
     const ct=n.contract;
+    const kd={bring:'добыть',deliver:'отнести',visit:'наведаться',befriend:'расположить к себе'};
+    const rw=ct.reward_name?('вещь: '+esc(ct.reward_name)):(ct.reward+' зм');
     push('npc',`<div class="sp">${esc(n.name)} — у него к тебе дело</div><div class="tx">${esc(ct.pitch)}</div>`);
-    const card=push('sys',`<div class="ctcard"><b>Уговор:</b> добыть «${esc(ct.want)}» <span class="ctw">(${esc(ct.where)})</span> · награда ${ct.reward} зм
+    push('sys',`<div class="ctcard"><b>Уговор:</b> ${kd[ct.kind]||'сделать'} «${esc(ct.want||ct.target_name)}» <span class="ctw">(${esc(ct.where)})</span> · награда ${rw}
       <div class="acts" style="justify-content:center;margin-top:6px"><button onclick="acceptContract('${ct.id}',this)">взяться</button></div></div>`);
   }
   push('npc',`<div class="sp">${esc(n.name)}</div><div class="tx">${esc(n.line)}</div>`);
@@ -437,6 +441,8 @@ async function converse(text){
   const r=await api('/api/play/say',{npc:id,text});
   if(r.error){el.querySelector('.tx').textContent=r.error;return;}
   if(r.gt!=null){GT=r.gt;setClock();}
+  setCoins(r.coins);
+  if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
   el.querySelector('.tx').textContent=r.line;
   if(CARD){Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
     if($('meters'))$('meters').innerHTML=meters(CARD);if($('emo'))$('emo').textContent=r.emotion;
@@ -520,16 +526,20 @@ async function acceptContract(id,btn){
   const r=await api('/api/play/contract_accept',{id});
   if(r.error){push('sys',esc(r.error));return;}
   btn.textContent='по рукам';btn.disabled=true;
-  push('narr','Вы ударяете по рукам.');
+  push('narr','Вы ударяете по рукам.'+(r.note?(' '+esc(r.note)):''));
+  if(r.note)await refreshInv();
   renderJobs();
 }
 async function renderJobs(){
   const el=$('jobs');if(!el)return;
   const r=await api('/api/play/contracts');
   const act=(r.active||[]),done=(r.done||[]);
+  const kd={bring:'добудь',deliver:'отнеси',visit:'наведайся',befriend:'расположи к себе'};
+  const lbl=c=>`${kd[c.kind]||'сделай'}: ${esc(c.want||c.target_name||'?')}`;
+  const rw=c=>c.reward_name?('вещь: '+esc(c.reward_name)):(c.reward+' зм');
   el.innerHTML=(act.length||done.length)
-    ?act.map(c=>`<div class="job"><b>${esc(c.giver_name)}</b>: «${esc(c.want)}» <span class="ctw">${esc(c.where)}</span> · ${c.reward} зм</div>`).join('')
-     +done.map(c=>`<div class="job jdone">&#10003; ${esc(c.giver_name)}: «${esc(c.want)}»</div>`).join('')
+    ?act.map(c=>`<div class="job"><b>${esc(c.giver_name)}</b> — ${lbl(c)} <span class="ctw">${esc(c.where)}</span> · ${rw(c)}</div>`).join('')
+     +done.map(c=>`<div class="job jdone">&#10003; ${esc(c.giver_name)}: ${lbl(c)}</div>`).join('')
     :'<div class="bagempty">никто пока ни о чём не просил</div>';
 }
 async function giveItem(id){

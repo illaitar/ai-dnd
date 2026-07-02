@@ -95,6 +95,8 @@ def craft(cap: Capability, recipe: Recipe, *, seed: str, inputs=None,
 
 def repair(item: dict, cap: Capability, *, seed: str, station: str = "anvil") -> dict:
     """Починка/перековка — гейт по мастерству. Слабая рука чинит грубо (потолок просядет)."""
+    if item.get("kind") == "consumable":
+        return {"ok": False, "reason": "снадобья и съестное не чинятся — только заново"}
     d = item.get("durability")
     if not d:
         return {"ok": False, "reason": "чинить нечего"}

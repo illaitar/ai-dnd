@@ -60,7 +60,7 @@ PB = {
     # контракты
     "contract_enemy_aff": -0.1, "contract_poor_purse": 5, "contract_reward_min": 2,
     "complete_trust": 0.3, "complete_aff": 0.2, "befriend_aff": 0.25,
-    "merchant_float": 30,
+    "merchant_float": 30, "hostile_aff": -0.2,
     # распорядок: вероятность вечерней тяги в трактир
     "eve_worker": 0.5, "eve_commoner": 0.45, "eve_rogue": 0.4,
     # подарок: прирост симпатии = min(cap, base + worth/div)
@@ -185,6 +185,21 @@ def _topics_for(p) -> list:
     out = [t[:40] for t in (per.get("rumors") or [])[:2]] + \
           [t[:40] for t in (per.get("wants") or [])[:1]]
     return out or ["что нового?", "о городе", "о жизни здесь"]
+
+
+def _spurns(p) -> bool:
+    """Не желает иметь с тобой дела: вражда или свежий адресный гнев."""
+    rel = p.state.relationships.get(PLAYER) or {}
+    ang = p.state.emotion.get("anger", 0)
+    return (rel.get("affinity", 0) < PB["hostile_aff"]
+            or (ang > 0.5 and p.state.emotion_target.get("anger") == PLAYER))
+
+
+_DM_SYS = ("Ты — мастер настольной игры. Игрок заявил действие, которое НЕ ИСПОЛНЯЕТСЯ механикой — "
+           "мир от него НЕ изменится. Ответь СУХО: 1-2 короткие фразы, 2-е лицо, настоящее время, без "
+           "цветистости. НИКОГДА не подтверждай свершение заявленного (особенно разрушительного): опиши, "
+           "почему оно не происходит или на чём останавливается (обстановка, взгляды людей, нет средств, "
+           "здравый смысл) — либо, для созерцательного, что игрок видит. Новых фактов мира не выдумывай.")
 
 
 def _model():
@@ -352,15 +367,16 @@ def _fill_from_pool(city, keynode, kps):
                     return row
         return None
 
-    def place(row, node, work):
-        people[row["id"]] = _person_from_row(row, node, work)
+    def place(row, node, work, home=None):
+        home = node if home is None else home
+        people[row["id"]] = _person_from_row(row, home, work)
         spot[row["id"]] = node
-        store.place_person(PLAY_WORLD, row["id"], node, node, work)
+        store.place_person(PLAY_WORLD, row["id"], node, home, work)
 
     for bid, kb in sorted(city.key_buildings.items()):
         row = draw(_role_for_building(bid))               # роль работника — из типа здания
         if row:
-            place(row, kb.node, bid)
+            place(row, kb.node, bid, home=next(hi, kb.node))   # дом — настоящий, не лавка
     for _ in range(16):
         row = draw("горожанин")
         if row:
@@ -517,6 +533,12 @@ def _voice(p, rel, kind, player_text=None) -> str:
         bits.append(f"К чужаку держишься {_STANCE.get(per.get('stance'), 'нейтрально')}.")
         if per.get("secret"):
             bits.append(f"У тебя есть тайна (НЕ выдавай без веской причины): {per['secret'].get('what', '')}.")
+    if _spurns(p):                                         # обида/гнев ПЕРЕВЕШИВАЮТ радушие персоны
+        bits.append("Ты ЗОЛ на этого человека (вспомни, почему) — никакого радушия: "
+                    "холод, резкость или презрение, по твоему характеру.")
+    bits.append("КАНОН: о людях и местах ЭТОГО города говори только то, что есть в памяти и справке — "
+                "здешних имён и заведений не выдумывай. Вымысел допустим лишь о дальних краях и былом, "
+                "и подавай его как слух.")
     lv = _S.get("live") or {}
     just = (lv.get("last") or {}).get(p.id)
     if just and just != "—":
@@ -874,6 +896,9 @@ async def commission(request: Request):
     rec = _CRAFT.get(p.role)
     if not rec:
         return {"error": f"{p.name} не берётся за ремесло"}
+    if _spurns(p):
+        return {"error": f"{p.name} не желает иметь с тобой дела"}
+
     n = len(_store().inventory(PLAY_WORLD))
     rep = random.Random(f"skill|{npc}").randint(-1, 3)     # у каждого мастера своя рука (мир разнороден)
     it = item_craft(_npc_cap(p), rec, seed=f"{npc}|{rec.name}|{n}",
@@ -898,6 +923,8 @@ async def repair_item(request: Request):
     if not it.get("durability"):
         return {"error": "чинить нечего"}
     res = item_repair(it, _npc_cap(p), seed=f"rep|{iid}|{npc}", station=_CRAFT[p.role].station)
+    if not res.get("ok"):
+        return {"error": res.get("reason", "не чинится")}
     _store().save_item(it)
     return {"item": _item_card(it, _known(iid)), "note": res.get("note"), "by": p.name}
 
@@ -926,6 +953,8 @@ async def askkey(request: Request):
     if npc not in people:
         return {"error": "нет такого"}
     p = people[npc]
+    if _spurns(p):
+        return {"error": f"{p.name} не желает иметь с тобой дела"}
     _materialize_npc(npc, "visible")
     want = str(b.get("key") or "").strip()                 # какой именно ключ просим (имя с чипа)
     keys = [(_store().get_item(r["item_id"]), r["item_id"])
@@ -966,6 +995,8 @@ async def offer(request: Request):
     p = _merchant(people, npc)
     if not p:
         return {"error": "он не торгует"}
+    if _spurns(p):
+        return {"error": f"{p.name} не желает иметь с тобой дела"}
     it = _store().get_item(iid)
     if not it or not any(r["item_id"] == iid for r in _store().inventory(PLAY_WORLD, "pc")):
         return {"error": "у тебя нет этого"}
@@ -990,6 +1021,9 @@ async def sell(request: Request):
     it = _store().get_item(iid)
     if not p or not it or not any(r["item_id"] == iid for r in _store().inventory(PLAY_WORLD, "pc")):
         return {"error": "сделки не будет"}
+    if _spurns(p):
+        return {"error": f"{p.name} не желает иметь с тобой дела"}
+
     _materialize_npc(npc, "pockets")
     seen = _npc_sees(it, _npc_cap(p), npc)
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
@@ -1013,6 +1047,8 @@ def wares(npc: str):
     p = _merchant(people, npc)
     if not p:
         return {"error": "он не торгует"}
+    if _spurns(p):
+        return {"error": f"{p.name} не желает иметь с тобой дела"}
     _materialize_npc(npc, "visible")
     _materialize_npc(npc, "pockets")
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
@@ -1037,6 +1073,9 @@ async def buy(request: Request):
     it = _store().get_item(iid)
     if not p or not it or not any(r["item_id"] == iid for r in _store().inventory(PLAY_WORLD, npc)):
         return {"error": "у него этого нет"}
+    if _spurns(p):
+        return {"error": f"{p.name} не желает иметь с тобой дела"}
+
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
     seen = _npc_sees(it, _npc_cap(p), npc)
@@ -1492,6 +1531,24 @@ def _attempt(intent: dict, sc: dict) -> dict:
         out["refresh"] = True
         return out
 
+    if verb == "use" and intent.get("item"):
+        iid = intent["item"]
+        it = _store().get_item(iid)
+        if not it or not any(r["item_id"] == iid for r in _store().inventory(PLAY_WORLD, "pc")):
+            out["narr"].append("У тебя нет этой вещи.")
+            return out
+        _gt_add(PB["give_min"])
+        if it["kind"] == "consumable" or not it.get("durability"):
+            _store().inv_move(PLAY_WORLD, iid, "used")     # выпито/израсходовано — вещь уходит
+            out["narr"].append(f"«{it['name']}» — израсходовано.")
+        else:
+            ev = item_use(it, 1)
+            _store().save_item(it)
+            out["narr"].append(f"«{it['name']}» ломается." if ev["broke"]
+                               else f"«{it['name']}»: {ev['label']}.")
+        out["refresh"] = True
+        return out
+
     if verb == "inspect" and intent.get("item"):
         return {"inspect": intent["item"], "narr": [], "refresh": True}
 
@@ -1503,7 +1560,17 @@ def _attempt(intent: dict, sc: dict) -> dict:
                            "(Сталь подождёт: боёвка ещё не выкована.)")
         return out
 
-    out["narr"].append(detail if detail else "Ты медлишь, оглядываясь по сторонам.")
+    mgr = _model()                                         # не-действие: сухой отклик мастера, мир не меняется
+    text = str(intent.get("_text") or detail or "")
+    if mgr.available() and text:
+        resp = mgr.call("narrator", [{"role": "system", "content": _DM_SYS},
+                                     {"role": "user", "content": f"Сцена: {sc.get('location', {}).get('name', 'улица')}. "
+                                                                 f"Игрок: «{text}»"}],
+                        options={"temperature": 0.5})
+        line = (resp.get("content") if resp else "").strip()
+        out["narr"].append(line or "Ничего не происходит.")
+    else:
+        out["narr"].append("Ничего не происходит.")
     return out
 
 
@@ -1518,6 +1585,7 @@ async def act(request: Request):
     it = _intent(text, sc)
     if it is None:
         return {"narr": ["(мир задумался и не понял — попробуй иначе)"], "gt": _gt()}
+    it["_text"] = text
     res = _attempt(it, sc)
     _pc_remember(f"я: {text[:80]}", 0.2)
     return {**res, "gt": _gt(), "coins": _pc_coins()}
@@ -1696,7 +1764,8 @@ def _live_tick(people) -> tuple:
     random.Random(f"tick|{lv['clock']}").shuffle(order)
     ctx = {"roles": lv["roles"], "names": lv["names"], "last_actions": lv["last"],
            "history": lv["hist"], "clock": lv["clock"], "place_desc": {lv["place"]: lv["pdesc"]},
-           "personas": lv.get("personas", {})}
+           "personas": lv.get("personas", {}),
+           "time": f"{_PHASE_RU[_phase()]}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}"}
 
     def think_one(pid):                                     # решения параллельно, снимок мира один
         st = w.npc_minds[pid]

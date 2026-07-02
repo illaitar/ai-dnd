@@ -476,11 +476,12 @@ $('send').onclick=submit;
 $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
 
 loadMap();
-push('narr','Дверь трактира захлопывается за твоей спиной, отрезая шум дождя. Внутри тепло, пахнет элем и подгоревшим луком.');
 api('/api/play/scene').then(s=>{
   SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}setCoins(s.coins);renderAmb();
   if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
-  push('narr','Десяток лиц скользят по тебе взглядами и возвращаются к кружкам.');
+  const a0=s.ambient||{};
+  push('narr',s.location.name+'. '+[a0.time,a0.weather,a0.mood].filter(Boolean).join(', ')+'. '
+    +(s.here&&s.here.length?('Здесь: '+s.here.length+' чел.'):'Никого.'));
   setTimeout(pollLive,600);
 });
 refreshInv();renderJobs();

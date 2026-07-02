@@ -107,7 +107,7 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     last = ctx.get("last_actions", {})
     place_desc = ctx.get("place_desc", {})
 
-    lines = [f"ВРЕМЯ: ход {ctx.get('clock', 0)}.", ""]
+    lines = [f"ВРЕМЯ: {ctx.get('time', 'день')} (ход {ctx.get('clock', 0)}).", ""]
     lines.append(f"ТЫ — {cfg.name}, {roles.get(cfg.id, cfg.role)}. HP {me.hp}/{me.max_hp}.")
     lines.append(f"Черты: {_traits_line(cfg.traits)}.")
     persona = ctx.get("personas", {}).get(cfg.id)  # богатая персона из пула: манера/причуда/стремления

@@ -18,7 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from ... import config
 from ...citygraph import CityParams, generate, visual
 from ...combat import (Encounter, dungeon, from_monster, from_npc, from_pc, lair_name,
-                      pick_encounter, resolve)
+                      pick_encounter, resolve, roll_dice)
+from ...magic import build_spec, classify, known_ids, load as magic_load
 from ...citygraph.model import NodeKind
 from ...items import Capability, ItemCtx, LLMSmith, StubSmith, craft_path, loot_pool, rarity_price
 from ...items.craft import ROLE_RECIPES, materials_graph
@@ -41,8 +42,8 @@ from ...play import populate
 from ...play.population import Townsperson
 from ...worldgen import WorldStore
 
-from .core import (PB, PLAYER, _COLORS, _DM_SYS, _PHASE_RU, _PORT_DIR, _S, _binfo, _city_name, _display, _emo, _gt, _gt_add, _here, _in_room, _mark_seen, _met, _model, _mt, _npc_save, _pc, _pc_hp, _pc_name, _pc_remember, _pc_save, _pc_set_name, _phase, _pool, _portrait_url, _role_at, _role_for_building, _seen, _spurns, _store, _tokens_ru, _topics_for, _wanted, _wanted_add, _wanted_clear, _wid, _witness_crime, router)
-from .items import (_CRAFT, _PC_CAP, _cont_holder, _do_craft, _forge, _item_card, _known, _materialize_npc, _merchant_restock, _npc_cap, _npc_sees, _pc_coins, _pc_key_for, _seed_item_pool)
+from .core import (PB, PLAYER, _COLORS, _DM_SYS, _PHASE_RU, _PORT_DIR, _S, _binfo, _city_name, _display, _emo, _fat_add, _fatigue, _gt, _gt_add, _here, _in_room, _mana, _mana_cap, _mana_grow, _mana_spend, _mark_seen, _met, _model, _mt, _npc_save, _pc, _pc_cap_eff, _pc_hp, _pc_name, _pc_remember, _pc_save, _pc_set_name, _phase, _pool, _portrait_url, _role_at, _role_for_building, _seen, _spurns, _store, _tokens_ru, _topics_for, _wanted, _wanted_add, _wanted_clear, _wid, _witness_crime, router, _PC_CAP)
+from .items import (_CRAFT, _cont_holder, _do_craft, _forge, _item_card, _known, _materialize_npc, _merchant_restock, _npc_cap, _npc_sees, _pc_coins, _pc_key_for, _seed_item_pool)
 from .contracts import (_board_ads, _board_npc_fulfill, _board_publish, _contract_offer, _contract_on_give, _contract_on_move, _contract_on_talk, _ct_cur, _ct_steps, _step_desc)
 from .combat import (_combat_wrapup, _combatant_from_npc, _guild_bid, _guild_board, _guild_gate, _guild_status, _lairs, _mint_badge, _npc_delves, _pc_badge, _pc_combatant)
 
@@ -560,7 +561,8 @@ def _voice(p, rel, kind, player_text=None) -> str:
 def scene():
     city, people, crof, cr2b, loc = _play()
     out = {**_scene_dict(city, people, crof, cr2b, loc), "gt": _gt(), "coins": _pc_coins(),
-           "hp": _pc_hp(), "max_hp": PB["pc_max_hp"], "city": _city_name(), "hero": _pc_name()}
+           "hp": _pc_hp(), "max_hp": PB["pc_max_hp"], "city": _city_name(), "hero": _pc_name(),
+           "mana": _mana(), "mana_cap": _mana_cap(), "fatigue": _fatigue()}
     return out                                             # доска/ранг гильдии — из _scene_dict
 
 
@@ -1805,6 +1807,96 @@ async def watch_flee(request: Request):
                     "head": {"name": f"Стража: {guard.name}", "sub": "бегство сорвалось"}}
     return {"dice": dice, "combat": True,
             "narr": [f"{guard.name} перехватывает тебя. Дерись или сдавайся."]}
+
+
+def _apply_spell(spec: dict, target, out: dict, people, crof, loc) -> None:
+    """Механическое исполнение чистого круга (М-2: урон-цель/исцеление/явить; статусы+AoE — М-4)."""
+    cb = _S.get("combat")
+    if spec.get("heal"):
+        before = _pc_hp()
+        _pc_hp(spec["heal"])
+        out["narr"].append(f"Круг струит свет в раны — +{_pc_hp() - before} hp.")
+    if spec.get("reveal"):
+        _S.setdefault("looked", {})[_look_key(loc, _S.get("inside"))] = 2
+        out["narr"].append("Круг вспыхивает — округа проявляется до мелочей.")
+        out["refresh"] = True
+    if spec.get("unlock"):
+        out["narr"].append("Незримый ключ поворачивается — что заперто, поддаётся.")
+    dmg = spec.get("damage")
+    if dmg:
+        if cb and target and cb["enc"].units.get(target):
+            t = cb["enc"].units[target]
+            if t.side == "foes" and not t.down():
+                n = roll_dice(dmg["dice"], random.Random(f"spelldmg|{_mt()}|{target}"))
+                if dmg["type"] in t.immune:
+                    n = 0
+                elif dmg["type"] in t.resist:
+                    n //= 2
+                t.hp -= n
+                if t.hp <= 0:
+                    t.alive = False
+                fell = " — падает!" if not t.alive else f" [{t.hp}/{t.max_hp}]"
+                out["narr"].append(f"{spec['elements'][0].capitalize()} {dmg['dice']} → {t.name}: {n} урона{fell}")
+                out["combat_refresh"] = True
+        else:
+            out["narr"].append("Заряд собран, но метать не в кого — врагов рядом нет.")
+    if spec.get("status") and not (cb and target):
+        out["narr"].append("Путы сплетены, но некого вязать (нужна цель в бою).")
+
+
+@router.post("/api/play/cast")
+async def cast(request: Request):
+    """Сотворить круг из глифов (М-2: ввод составом; drag-холст — М-5). Тратит ману, растит потолок,
+    даёт усталость; чистый круг применяется, дикая магия/осечка — пока грубый откат (LLM в М-3)."""
+    city, people, crof, cr2b, loc = _play()
+    body = await request.json()
+    comp = [str(x) for x in (body.get("glyphs") or [])]
+    target = body.get("target")
+    cls = classify(comp)
+    out = {"narr": [], "cast": {"kind": cls["kind"]}}
+    if cls["kind"] == "empty":
+        return {**out, "narr": [f"Круг не сходится — {cls['reason']}."], "mana": _mana(), "gt": _gt()}
+    spec = build_spec(comp)
+    cost = spec["mana_cost"]
+    if _mana() < cost:
+        return {**out, "narr": [f"Маны мало: нужно {cost:g}, есть {_mana():g}. Отдохни."],
+                "mana": _mana(), "mana_cap": _mana_cap(), "gt": _gt()}
+    roll = random.Random(f"cast|{_mt()}|{'/'.join(sorted(comp))}").randint(1, 20)
+    dc = PB["cast_skill_dc"] + spec["difficulty"] // 3
+    total = roll + _pc_cap_eff().mod("int")
+    _mana_spend(cost)
+    _mana_grow(cost)                                       # выжигание растит потолок маны
+    _fat_add(cost)                                         # надрыв → усталость всех статов
+    _gt_add(PB["act_min"])
+    out["dice"] = {"die": 20, "roll": roll, "mod": _pc_cap_eff().mod("int"), "total": total,
+                   "dc": dc, "ok": total >= dc, "label": "Черчение круга (Int)"}
+    if cls["kind"] == "wild" or total < dc:               # дикая магия / осечка (LLM-хаос — М-3)
+        back = random.Random(f"wild|{_mt()}").randint(1, 4)
+        _pc_hp(-back)
+        out["cast"]["wild"] = True
+        out["narr"].append(f"Круг идёт вразнос — отдачей тебя опаляет ({back} урона). "
+                           + (cls["reason"] if cls["kind"] == "wild" else "Рука дрогнула."))
+        _pc_save()
+        return {**out, "mana": _mana(), "mana_cap": _mana_cap(), "hp": _pc_hp(),
+                "fatigue": _fatigue(), "gt": _gt()}
+    _apply_spell(spec, target, out, people, crof, loc)     # чистый круг — по спеку
+    _pc_remember(f"сотворил круг ({', '.join(comp)})", 0.4)
+    _pc_save()
+    res = {**out, "mana": _mana(), "mana_cap": _mana_cap(), "hp": _pc_hp(),
+           "fatigue": _fatigue(), "gt": _gt()}
+    if out.get("combat_refresh") and _S.get("combat"):
+        res["combat"] = _S["combat"]["enc"].view()
+    return res
+
+
+@router.get("/api/play/glyphs")
+def glyphs_list():
+    """Словарь известных игроку глифов (М-2: пока весь базис; гейт-обучение — М-4)."""
+    _play()
+    g = magic_load()
+    return {"elements": list(g["elements"].values()), "glyphs": list(g["glyphs"].values()),
+            "known": sorted(known_ids()), "mana": _mana(), "mana_cap": _mana_cap(),
+            "fatigue": _fatigue()}
 
 
 @router.post("/api/play/look")

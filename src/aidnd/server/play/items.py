@@ -41,7 +41,7 @@ from ...play import populate
 from ...play.population import Townsperson
 from ...worldgen import WorldStore
 
-from .core import (PB, _S, _binfo, _gt_add, _model, _mt, _store, _tokens_ru, _wid)
+from .core import (PB, _S, _binfo, _gt_add, _model, _mt, _store, _tokens_ru, _wid, _PC_CAP)
 
 
 
@@ -179,7 +179,6 @@ def _do_craft(detail: str, out: dict) -> dict:
 
 
 # --------------------------------------------------- ПРЕДМЕТЫ (срез 1) ---- #
-_PC_CAP = Capability(abilities={"str": 10, "dex": 11, "con": 10, "int": 11, "wis": 11, "cha": 12})
 _ROLE_COMP = {"кузнец": {"metalwork"}, "знахарка": {"herbs", "poison", "medicine"},
               "лавочник": {"trade", "gems"}, "жрец": {"letters", "faith"},
               "бард": {"lore", "letters"}, "стражник": {"law"}, "трактирщик": {"trade"}}

@@ -117,6 +117,10 @@ PB = {
     "crime_pickpocket": 1, "crime_rob": 3, "crime_assault": 4, "crime_murder": 8,
     "wanted_confront": 5, "wanted_decay": 2, "watch_fine_per_pt": 3, "watch_flee_dc": 12,
     "watch_jail_h": 7,                                     # не заплатил — «отсидка» до утра
+    # МАГИЯ (мана-свеча): старт/потолок/реген/рост/усталость/сложность каста
+    "mana_start": 12.0, "mana_cap_start": 14.0, "mana_hardcap_per_int": 8,  # потолок ≤ Int×8
+    "mana_regen_base": 1.0, "mana_grow_frac": 0.1, "cast_skill_dc": 10,
+    "fatigue_div": 8, "fatigue_min_per_pt": 24,           # усталость: 1+спалено/8 на статы, отходит
     "craft_skill_dc": 12, "craft_fail_min": 15,           # незнакомое ремесло: бросок Int / цена провала
     "guild_float": 120, "guild_reward_per_cr": 8, "guild_mark_fine": 15,
     # NPC-зачистки: шанс утреннего похода смелой пары
@@ -211,10 +215,85 @@ def _pc_set_name(name: str) -> None:
     _S["pc_name"] = (str(name or "").strip()[:24] or "Странник")
 
 
+_PC_CAP = Capability(abilities={"str": 10, "dex": 11, "con": 10, "int": 11, "wis": 11, "cha": 12})
+
+
+# ------------------------------------------------------------ МАНА (магия) --- #
+def _mana_hardcap() -> float:
+    return _PC_CAP.abilities.get("int", 10) * PB["mana_hardcap_per_int"]   # предел роста от Int
+
+
+def _mana_load() -> None:
+    if _S.get("mana") is None:
+        row = _store().get_pc(_wid()) or {}
+        _S["mana"] = float(row.get("mana", PB["mana_start"]))
+        _S["mana_cap"] = float(row.get("mana_cap", PB["mana_cap_start"]))
+        _S["mana_gt"] = int(row.get("mana_gt", _gt()))
+        _S["fat"] = int(row.get("fat", 0))
+        _S["fat_until"] = int(row.get("fat_until", 0))
+
+
+def _mana() -> float:
+    """Текущая мана с ЛЕНИВЫМ регеном от Int/Wis (без покадрового тика)."""
+    _mana_load()
+    dt_h = max(0, _gt() - _S["mana_gt"]) / 60.0
+    if dt_h > 0:
+        rate = PB["mana_regen_base"] + _PC_CAP.mod("int") + _PC_CAP.mod("wis")
+        _S["mana"] = min(_S["mana_cap"], _S["mana"] + max(0.2, rate) * dt_h)
+        _S["mana_gt"] = _gt()
+    return round(_S["mana"], 2)
+
+
+def _mana_cap() -> float:
+    _mana_load()
+    return round(_S["mana_cap"], 2)
+
+
+def _mana_spend(amount: float) -> float:
+    _S["mana"] = max(0.0, _mana() - float(amount))
+    return round(_S["mana"], 2)
+
+
+def _mana_grow(spent: float) -> None:
+    """Рост потолка от выжигания (магия как мышца), до жёсткого предела Int×N."""
+    if spent <= 0:
+        return
+    _S["mana_cap"] = min(_mana_hardcap(),
+                         _S["mana_cap"] + round(PB["mana_grow_frac"] * spent / max(1.0, _S["mana_cap"]), 3))
+
+
+def _fatigue() -> int:
+    """Текущий штраф усталости ко ВСЕМ характеристикам (спадает со временем)."""
+    _mana_load()
+    if _gt() >= _S.get("fat_until", 0):
+        _S["fat"], _S["fat_until"] = 0, 0
+    return int(_S.get("fat", 0))
+
+
+def _fat_add(spent: float) -> None:
+    """Надрыв после каста: усталость по спалённой мане, длится дольше при большем выгорании."""
+    pts = 1 + int(spent) // PB["fatigue_div"]
+    _S["fat"] = _fatigue() + pts
+    _S["fat_until"] = _gt() + pts * PB["fatigue_min_per_pt"]
+
+
+def _pc_cap_eff():
+    """Способности игрока С УЧЁТОМ усталости (для новых бросков/каста) — все статы просажены."""
+    fat = _fatigue()
+    if not fat:
+        return _PC_CAP
+    from ...items import Capability
+    return Capability(abilities={k: max(1, v - fat) for k, v in _PC_CAP.abilities.items()},
+                      competencies=_PC_CAP.competencies, tools=_PC_CAP.tools)
+
+
 def _pc_save() -> None:
     st = _pc()
+    _mana_load()
     _store().save_pc(_wid(), {
         "gt": _gt(), "hp": _pc_hp(), "name": _pc_name(), "relationships": st.relationships,
+        "mana": round(_S["mana"], 2), "mana_cap": round(_S["mana_cap"], 2), "mana_gt": _S["mana_gt"],
+        "fat": _S.get("fat", 0), "fat_until": _S.get("fat_until", 0),
         "memory": [{"text": m.text, "t": m.t, "importance": m.importance,
                     "last_access": m.last_access, "kind": m.kind, "about": m.about}
                    for m in st.memory.items[-400:]]})      # хвост — журнал не разрастается бесконечно

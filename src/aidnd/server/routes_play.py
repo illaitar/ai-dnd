@@ -359,10 +359,11 @@ def _model():
     return _S["model"]
 
 
-def _routine_spot(pid: str, p, phase: str, day: int, keynode: dict, kps: list, tavern) -> int:
+def _routine_spot(pid: str, p, phase: str, day: int, keynode: dict, kps: list, taverns) -> int:
     """Где человек в эту фазу суток. Детерминировано на (человек, фаза, день) — мир меняется,
-    пока игрока нет, но воспроизводимо."""
+    пока игрока нет, но воспроизводимо. Питейных может быть несколько — каждый выбирает свою."""
     rng = random.Random(f"rout|{pid}|{phase}|{day}")
+    tavern = rng.choice(taverns) if taverns else None       # своя питейная на вечер
     if p.role in ("бродяга", "головорез"):                  # лихой люд: днём по углам, вечером к людям
         if phase in ("evening", "night") and tavern is not None and rng.random() < PB["eve_rogue"]:
             return tavern
@@ -411,10 +412,10 @@ def _apply_routine() -> None:
             pass
     people, crof = _S["people"], _S["crof"]
     keynode, kps = _S.get("keynode") or {}, _S.get("kps") or []
-    tavern = next((keynode.get(p.work) for p in people.values()
-                   if p.role == "трактирщик" and p.work), None)
+    taverns = [keynode.get(p.work) for p in people.values()      # питейных может быть несколько
+               if p.role == "трактирщик" and p.work and keynode.get(p.work)]
     for pid, p in people.items():
-        crof[pid] = _routine_spot(pid, p, key[0], key[1], keynode, kps, tavern)
+        crof[pid] = _routine_spot(pid, p, key[0], key[1], keynode, kps, taverns)
 
 
 _TIE_ROLES = {"головорез": "головорез", "шайк": "головорез", "стражн": "стражник",
@@ -725,7 +726,7 @@ def _fill_from_pool(city, keynode, kps):
 
 def _play():
     if _S["city"] is None:
-        params = CityParams(seed=_S["seed"], key_buildings=9, river=True, walls=True, segment=16)
+        params = CityParams(seed=_S["seed"], key_buildings=12, river=True, walls=True, segment=16)
         city = generate(params)
         _assign_key_buildings(city)                        # мир юзера: здания из ПУЛА, без LLM
         _seed_item_pool()                                  # пул предметов мира (сид-набор, данные)

@@ -82,10 +82,12 @@
   .commission{margin-top:12px;width:100%;padding:9px;border-radius:9px;background:rgba(217,164,65,.12);
     border:1px solid var(--gold-dim);color:var(--gold);font:500 13px var(--sans);cursor:pointer}
   .commission:hover{background:rgba(217,164,65,.2)}
-  .stealbtn{margin-top:9px;width:100%;padding:7px;border-radius:9px;background:transparent;
-    border:1px dashed var(--line2);color:var(--faint);font:12px var(--sans);cursor:pointer}
-  .stealbtn:hover{border-color:var(--red);color:var(--red)}
   .acts .sellb{border-color:var(--gold-dim);color:var(--gold)}
+  .ctcard{max-width:100%;text-align:left;font-size:12.5px;color:var(--ink);background:var(--panel2);
+    border:1px solid var(--gold-dim);border-radius:9px;padding:9px 11px;font-style:normal}
+  .ctw{color:var(--faint);font-size:11px}
+  .job{font-size:12px;color:var(--ink);padding:7px 9px;border:1px solid var(--line2);border-radius:8px;background:var(--panel2)}
+  .job.jdone{color:var(--faint);text-decoration:none;border-style:dashed}
   #bagn{color:var(--dim);font-size:11px}
   .keys{display:flex;flex-wrap:wrap;gap:6px}
   .keychip{font-size:11.5px;padding:3px 9px;border-radius:6px;background:rgba(217,164,65,.1);
@@ -206,6 +208,8 @@
     <div class="miniscene hidden" id="mini"></div>
     <div class="cap" style="margin-top:4px">сумка <span id="bagn"></span></div>
     <div class="bag" id="bag"></div>
+    <div class="cap" style="margin-top:4px">дела</div>
+    <div class="bag" id="jobs"></div>
   </div>
 </div>
 
@@ -399,7 +403,6 @@ function renderNpc(n){
      <div class="topics">${(n.topics||[]).map(t=>`<span class="chip" onclick="say('${esc(t)}')">${esc(t)}</span>`).join('')}</div>
      ${n.crafter?`<button class="commission" onclick="commission()">&#9874; заказать: ${esc(n.recipe)}</button>`:''}
      <div id="wares"></div>
-     <button class="stealbtn" onclick="stealNpc()" title="рискованно: поймают — запомнят и разнесут">&#9788; обчистить карманы</button>
      <button class="end" onclick="endTalk()">&#8592; завершить разговор</button>`;
 }
 
@@ -413,6 +416,12 @@ async function talk(id){
   if(n.error){push('sys',esc(n.error));return;}
   if(n.gt!=null){GT=n.gt;setClock();}
   CARD=n;renderNpc(n);if(n.crafter)loadWares();renderBag();
+  if(n.contract){
+    const ct=n.contract;
+    push('npc',`<div class="sp">${esc(n.name)} — у него к тебе дело</div><div class="tx">${esc(ct.pitch)}</div>`);
+    const card=push('sys',`<div class="ctcard"><b>Уговор:</b> добыть «${esc(ct.want)}» <span class="ctw">(${esc(ct.where)})</span> · награда ${ct.reward} зм
+      <div class="acts" style="justify-content:center;margin-top:6px"><button onclick="acceptContract('${ct.id}',this)">взяться</button></div></div>`);
+  }
   push('npc',`<div class="sp">${esc(n.name)}</div><div class="tx">${esc(n.line)}</div>`);
 }
 function endTalk(){
@@ -439,7 +448,23 @@ function submit(){
   const v=$('inp').value.trim();if(!v)return;$('inp').value='';
   push('me',`<div class="tx">${esc(v)}</div>`);
   if(mode==='dialogue')converse(v);
-  else setTimeout(()=>push('narr','Ты оглядываешь зал. Дождь стучит по ставням; кто-то у очага заводит новую байку.'),220);
+  else freeAct(v);
+}
+async function freeAct(v){
+  const el=push('sys','<span style="color:var(--faint)">…мир отвечает</span>');
+  const r=await api('/api/play/act',{text:v});
+  el.remove();
+  if(r.gt!=null){GT=r.gt;setClock();}
+  setCoins(r.coins);
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  if(r.line)push('npc',`<div class="sp">${esc(r.line.who)}</div><div class="tx">${esc(r.line.text)}</div>`);
+  if(r.loot)await loot(r.loot);
+  if(r.inspect)await inspectItem(r.inspect);
+  if(r.goto!=null){selectDest(r.goto,null);await go();}
+  if(r.open_talk){await talk(r.open_talk);
+    if(r.say_first){push('me',`<div class="tx">${esc(r.say_first)}</div>`);converse(r.say_first);}}
+  if(r.refresh)await refreshInv();
+  renderJobs();
 }
 $('send').onclick=submit;
 $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
@@ -452,7 +477,7 @@ api('/api/play/scene').then(s=>{
   push('narr','Десяток лиц скользят по тебе взглядами и возвращаются к кружкам.');
   setTimeout(pollLive,600);
 });
-refreshInv();
+refreshInv();renderJobs();
 let INV=[];
 async function refreshInv(){const r=await api('/api/play/inventory');INV=(r&&r.items)||[];renderBag();}
 const condCls=c=>c.broken?'br':c.ratio<0.34?'lo':c.ratio<0.7?'mid':'ok';
@@ -476,6 +501,7 @@ function bagItem(it){
     acts.push(OFFERS[it.id]!=null
       ?`<button class="sellb" onclick="doSell('${it.id}')">&#10003; отдать за ${OFFERS[it.id]} зм</button>`
       :`<button onclick="offerSell('${it.id}')">продать</button>`);
+  if(mode==='dialogue'&&cur)acts.push(`<button onclick="giveItem('${it.id}')">отдать</button>`);
   return `<div class="bagitem2">
     <div class="bn">${esc(it.name)}${q}</div>
     <div class="bw">${esc(it.kind)} · ${worth}${qual}${cond}${mk}${mods}</div>
@@ -490,6 +516,29 @@ async function itemAct(id,act){
     push('narr','«'+esc(byId(cur).name)+'» чинит «'+esc(r.item.name)+'»: '+esc(r.note)+'.');await refreshInv();}
 }
 let OFFERS={};
+async function acceptContract(id,btn){
+  const r=await api('/api/play/contract_accept',{id});
+  if(r.error){push('sys',esc(r.error));return;}
+  btn.textContent='по рукам';btn.disabled=true;
+  push('narr','Вы ударяете по рукам.');
+  renderJobs();
+}
+async function renderJobs(){
+  const el=$('jobs');if(!el)return;
+  const r=await api('/api/play/contracts');
+  const act=(r.active||[]),done=(r.done||[]);
+  el.innerHTML=(act.length||done.length)
+    ?act.map(c=>`<div class="job"><b>${esc(c.giver_name)}</b>: «${esc(c.want)}» <span class="ctw">${esc(c.where)}</span> · ${c.reward} зм</div>`).join('')
+     +done.map(c=>`<div class="job jdone">&#10003; ${esc(c.giver_name)}: «${esc(c.want)}»</div>`).join('')
+    :'<div class="bagempty">никто пока ни о чём не просил</div>';
+}
+async function giveItem(id){
+  const r=await api('/api/play/give',{npc:cur,item:id});
+  if(r.error){push('sys',esc(r.error));return;}
+  setCoins(r.coins);if(r.gt!=null){GT=r.gt;setClock();}
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  await refreshInv();renderJobs();
+}
 async function offerSell(id){
   const r=await api('/api/play/offer',{npc:cur,item:id});
   if(r.error){push('sys',esc(r.error));return;}

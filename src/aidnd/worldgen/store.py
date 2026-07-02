@@ -41,6 +41,9 @@ class WorldStore:
                       "PRIMARY KEY(world_id, holder))")
             c.execute("CREATE TABLE IF NOT EXISTS flags (world_id INT, key TEXT, val TEXT, "
                       "PRIMARY KEY(world_id, key))")
+            # контракты: делегированные вехи агенд NPC (want-предикат + реальная награда)
+            c.execute("CREATE TABLE IF NOT EXISTS contracts (world_id INT, id TEXT, status TEXT, "
+                      "data TEXT, PRIMARY KEY(world_id, id))")
             # живое состояние placed NPC (память/отношения/нужды) — переживает рестарт
             c.execute("CREATE TABLE IF NOT EXISTS npc_state (world_id INT, npc_id TEXT, data TEXT, "
                       "PRIMARY KEY(world_id, npc_id))")
@@ -201,6 +204,18 @@ class WorldStore:
     def flag_set(self, world_id: int, key: str, val: str = "1") -> None:
         with self._conn() as c:
             c.execute("INSERT OR REPLACE INTO flags (world_id,key,val) VALUES (?,?,?)", (world_id, key, val))
+
+    # ---------------------------------------------------- контракты ------- #
+    def save_contract(self, world_id: int, cid: str, status: str, data: dict) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO contracts (world_id,id,status,data) VALUES (?,?,?,?)",
+                      (world_id, cid, status, json.dumps(data, ensure_ascii=False)))
+
+    def contracts(self, world_id: int, status: str | None = None) -> list:
+        q = "SELECT id,status,data FROM contracts WHERE world_id=?" + (" AND status=?" if status else "")
+        with self._conn() as c:
+            rows = c.execute(q, (world_id, status) if status else (world_id,)).fetchall()
+        return [{"id": r["id"], "status": r["status"], **json.loads(r["data"])} for r in rows]
 
     def save_npc_state(self, world_id: int, npc_id: str, data: dict) -> None:
         with self._conn() as c:

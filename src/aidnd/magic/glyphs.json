@@ -1,0 +1,26 @@
+{
+  "elements": [
+    {"id": "огонь",  "ru": "Огонь",  "dmg": "fire",        "flavor": "жар, поджог",        "weight": 3, "opposes": "лёд"},
+    {"id": "лёд",    "ru": "Лёд",    "dmg": "cold",        "flavor": "стужа, оковы холода", "weight": 3, "opposes": "огонь"},
+    {"id": "яд",     "ru": "Яд",     "dmg": "poison",      "flavor": "тлен, скверна",       "weight": 3, "opposes": ""},
+    {"id": "свет",   "ru": "Свет",   "dmg": "radiant",     "flavor": "озаряет, обжигает тьму", "weight": 3, "opposes": "тьма"},
+    {"id": "тьма",   "ru": "Тьма",   "dmg": "necrotic",    "flavor": "порча, страх",        "weight": 3, "opposes": "свет"},
+    {"id": "камень", "ru": "Камень", "dmg": "bludgeoning", "flavor": "земля, преграда",     "weight": 3, "opposes": ""}
+  ],
+  "glyphs": [
+    {"id": "стрела", "ru": "Стрела", "axis": "form", "shape": "bolt",  "weight": 2},
+    {"id": "взрыв",  "ru": "Взрыв",  "axis": "form", "shape": "burst", "weight": 2},
+    {"id": "стена",  "ru": "Стена",  "axis": "form", "shape": "wall",  "weight": 2},
+    {"id": "облако", "ru": "Облако", "axis": "form", "shape": "cloud", "weight": 2},
+    {"id": "луч",    "ru": "Луч",    "axis": "form", "shape": "cone",  "weight": 2},
+
+    {"id": "связать",  "ru": "Связать",  "axis": "verb", "verb": "bind",   "weight": 3},
+    {"id": "явить",    "ru": "Явить",    "axis": "verb", "verb": "reveal", "weight": 2},
+    {"id": "исцелить", "ru": "Исцелить", "axis": "verb", "verb": "heal",   "weight": 3},
+    {"id": "отпереть", "ru": "Отпереть", "axis": "verb", "verb": "unlock", "weight": 2},
+
+    {"id": "больше", "ru": "Больше", "axis": "mod", "mod": "size",     "weight": 1},
+    {"id": "дальше", "ru": "Дальше", "axis": "mod", "mod": "range",    "weight": 1},
+    {"id": "дольше", "ru": "Дольше", "axis": "mod", "mod": "duration", "weight": 1}
+  ]
+}

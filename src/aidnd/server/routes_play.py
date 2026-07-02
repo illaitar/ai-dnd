@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import contextvars
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -58,7 +59,10 @@ async def _play_session(request: Request):
         db_ok = False
     if uid is None:
         if os.environ.get("AIDND_OPEN_PLAY") or not db_ok:
-            _CUR.set(_SESS.setdefault(1, _fresh_sess(1, 1)))   # дев/демо: общий мир, без лимитов
+            if 1 not in _SESS:
+                dev_seed = int(_store().flag_get(0, "dev_seed") or 1)
+                _SESS[1] = _fresh_sess(1, dev_seed)        # дев/демо: общий мир; сид растёт после смерти
+            _CUR.set(_SESS[1])
             return
         raise HTTPException(401, "требуется вход")
     _UID.set(uid)
@@ -109,6 +113,7 @@ PB = {
     "caravan_chance": 0.35,                               # шанс каравана с товаром за утро
     "path_event_dc": 0.7,                                 # порог эмоции NPC, прерывающий путь
     "say_cap_per_tick": 3,                                # не больше стольких реплик за живой тик
+    "craft_skill_dc": 12, "craft_fail_min": 15,           # незнакомое ремесло: бросок Int / цена провала
     "guild_float": 120, "guild_reward_per_cr": 8, "guild_mark_fine": 15,
     # NPC-зачистки: шанс утреннего похода смелой пары
     "npc_delve_chance": 0.6, "npc_brave_min": 0.55,
@@ -599,6 +604,15 @@ def _merchant_restock(seed: str) -> str | None:
     return f"{people[pid].name} выставил на продажу «{it['name']}»{_rar_tag(it)}" if it else None
 
 
+# станок из ребра графа материалов → в каких зданиях он есть (ключевые слова типа/имени)
+STATION_HINTS = {"anvil": ("кузн", "оружейн"), "forge": ("кузн", "оружейн"),
+                 "bench": ("мастерск", "лавк", "оружейн", "сапожн", "столярн", "гильди"),
+                 "cauldron": ("целебн", "знахар", "таверн", "трактир", "травн", "пекарн"),
+                 "tannery": ("кожевн", "дубильн")}
+STATION_RU = {"anvil": "наковальня", "forge": "горн", "bench": "верстак",
+              "cauldron": "котёл", "tannery": "дубильня"}
+
+
 def _do_craft(detail: str, out: dict) -> dict:
     """Крафт по ГРАФУ материалов: имеющееся в сумке → цель по пути с гейтами (место=мастерская,
     время из рёбер). Тратит листья-материалы, кует результат, добавляет его в пул мира."""
@@ -621,15 +635,35 @@ def _do_craft(detail: str, out: dict) -> dict:
     if not path:
         out["narr"].append(f"«{want}» у тебя уже есть.")
         return out
-    if not _S.get("inside"):                               # гейт-место: нужна мастерская
+    inside = _S.get("inside")
+    if not inside:                                         # гейт-место: нужна мастерская
         out["narr"].append("Тут не смастеришь — зайди в мастерскую/кузницу.")
         return out
+    binfo = _binfo(inside)
+    btok = (binfo["name"] + " " + binfo["kind"]).lower()
+    for e in path:                                         # гейт-станок: у ЗДАНИЯ есть нужный
+        hints = STATION_HINTS.get(e.get("place", "bench"), ())
+        if hints and not any(h in btok for h in hints):
+            need = STATION_RU.get(e.get("place"), e.get("place", ""))
+            out["narr"].append(f"Для «{e['to']}» нужен {need} — тут такого нет.")
+            return out
     produced = {e["to"] for e in path}
     leaves = {src for e in path for src in e["from"] if src not in produced}
     missing = [s for s in leaves if s not in have]
     if missing:
         out["narr"].append("Не хватает: " + ", ".join(missing) + ".")
         return out
+    skills = {e["skill"] for e in path if e.get("skill")}
+    if skills - set(_PC_CAP.competencies):                 # гейт-навык: незнакомое ремесло — бросок
+        roll = random.Random(f"craftskill|{want}|{_mt()}").randint(1, 20)
+        total_r = roll + _PC_CAP.mod("int")
+        out["dice"] = {"die": 20, "roll": roll, "mod": _PC_CAP.mod("int"), "total": total_r,
+                       "dc": PB["craft_skill_dc"], "ok": total_r >= PB["craft_skill_dc"],
+                       "label": "Ремесло (Int) — незнакомая работа"}
+        if total_r < PB["craft_skill_dc"]:
+            _gt_add(PB["craft_fail_min"])
+            out["narr"].append("Работа не задалась — заготовка цела, но время ушло. Попробуй позже.")
+            return out
     for name in leaves:                                    # тратим базовые материалы из сумки
         iid = next((i for i, itm in inv if itm and itm["name"] == name), None)
         if iid:
@@ -1329,6 +1363,12 @@ async def loot(request: Request):
     full = next((x for x in ((bd or {}).get("data", {}).get("containers") or []) if x["name"] == name), None)
     if not full:
         return {"error": "нет такой ёмкости"}
+    rooms = (bd or {}).get("data", {}).get("sub_rooms") or []
+    if not _in_room(full.get("where", ""), _S.get("room"), rooms):   # ёмкость в другом помещении
+        holder_room = next((r["name"] for r in rooms
+                            if _tokens_ru(r["name"]) & _tokens_ru(full.get("where", ""))), None)
+        return {"error": f"отсюда не дотянуться — она в «{holder_room}»" if holder_room
+                         else "отсюда не дотянуться — она в другом помещении"}
     unlocked = None
     if full.get("access") == "locked":
         key = _pc_key_for(name)
@@ -1507,7 +1547,7 @@ async def offer(request: Request):
     seen = _npc_sees(it, _npc_cap(p), npc)
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
-    price = max(0, round(seen["worth"] * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)))
+    price = max(0, round(rarity_price(seen["worth"], it.get("rarity", "common")) * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)))
     price = min(price, _store().purse_get(_wid(), npc))
     line = _voice(p, rel, "reply",
                   f"(Я предлагаю тебе купить у меня «{it['name']}». Ты осмотрел вещь и даёшь {price} зм — "
@@ -1531,7 +1571,7 @@ async def sell(request: Request):
     seen = _npc_sees(it, _npc_cap(p), npc)
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
-    price = max(0, round(seen["worth"] * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)))
+    price = max(0, round(rarity_price(seen["worth"], it.get("rarity", "common")) * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)))
     price = min(price, _store().purse_get(_wid(), npc))
     _store().inv_move(_wid(), iid, npc)
     _store().purse_add(_wid(), npc, -price)
@@ -1942,13 +1982,52 @@ def _board_publish() -> list:
     return [f"{people[npc].name} повесил объявление на городскую доску"] if r else []
 
 
+def _consume_world_item(want: str, where: str) -> None:
+    """Вещь по объявлению закрыл NPC → она РЕАЛЬНО уходит из мира: из строк ёмкости здания
+    (не материализована) или из cont-держателя (материализована). «при человеке» не трогаем."""
+    m = re.search(r"\(([^)]+)\)\s*$", where or "")
+    if not m:
+        return
+    bname = m.group(1)
+    for bid in set((_S.get("cr2b") or {}).values()):
+        bd = _store().get_building(_wid(), bid)
+        if not bd or _binfo(bid)["name"] != bname:
+            continue
+        data = bd["data"]
+        for cnt in (data.get("containers") or []):
+            holder = _cont_holder(bid, cnt["name"])
+            if _store().flag_get(_wid(), f"seeded|{holder}"):
+                for r in _store().inventory(_wid(), holder):    # ёмкость уже живая
+                    it = _store().get_item(r["item_id"])
+                    if it and (_tokens_ru(it["name"]) & _tokens_ru(want)):
+                        _store().inv_drop(_wid(), r["item_id"])
+                        return
+            else:
+                cts = cnt.get("contents") or []
+                hit = next((x for x in cts if _tokens_ru(x) & _tokens_ru(want)), None)
+                if hit:
+                    cnt["contents"] = [x for x in cts if x != hit]
+                    node = bd.get("node") or 0
+                    _store().save_building(_wid(), bid, bool(bd.get("is_key")), node,
+                                           bd.get("sign"), data)
+                    return
+        return
+
+
 def _board_npc_fulfill() -> list:
-    """Утро: кто-то из горожан снимает объявление и выполняет его (мир живёт без игрока)."""
+    """Утро: кто-то из горожан снимает объявление и выполняет его (мир живёт без игрока).
+    bring-вещь при этом РЕАЛЬНО исчезает из ёмкости — мир не врёт."""
     rng = random.Random(f"boardful|{_gt() // 1440}")
     news = []
     for ct in _store().contracts(_wid(), "board"):
         if rng.random() > PB["board_npc_fulfill"]:
             continue
+        cur = _ct_cur(ct)
+        if cur.get("kind") == "bring" and cur.get("want"):
+            try:
+                _consume_world_item(cur["want"], cur.get("where", ""))
+            except Exception:                              # noqa: BLE001 — уборка не роняет утро
+                pass
         _store().save_contract(_wid(), ct["id"], "done",
                                {k: v for k, v in ct.items() if k not in ("id", "status")})
         news.append(f"с доски сняли: «{_step_desc(_ct_cur(ct))}» — выполнено горожанином")
@@ -2475,14 +2554,12 @@ def _live_tick(people) -> tuple:
         advance_agendas(st, w)                              # долгие цели двигаются
         return pid, decide_hybrid(st, w, mind_perceive(st, w), mgr, ctx)
 
-    ctx["addressed"] = lv.get("addressed", {})             # к кому вчерашний тик обратились по имени
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=8) as ex:
         decisions = dict(ex.map(think_one, order))
 
     feed, address = [], []
     said_n, topics = 0, []                                 # кэп реплик на тик + анти-эхо (сигнатуры тем)
-    lv["addressed"] = {}                                   # копим адресации этого тика для следующего
     pc = _pc()
 
     def _say_ok(txt: str) -> bool:
@@ -2563,7 +2640,6 @@ def _live_tick(people) -> tuple:
                         _gossip(st, lv["names"].get(pid, pid), w.npc_minds[tid])
                         w.npc_minds[tid].memory.add(f"ко мне обратился {who}: «{txt[:80]}» — стоит ответить",
                                                     lv["clock"], 0.55, about=[pid])
-                        lv["addressed"][tid] = f"{who}: «{txt[:60]}»"
         does = (d.get("does") or "").strip()
         if does and not said:                               # реплика сама несёт момент — не дублируем
             feed.append({"k": "deed", "who": who, "text": does[:150]})
@@ -2645,11 +2721,19 @@ async def go_room(request: Request):
                 if total < dc:
                     out["narr"].append(f"«{want}» — не для чужих. На тебя косятся, пришлось отступить.")
                     return {**out, **_scene_dict(city, people, crof, cr2b, loc), "gt": _gt()}
-        elif acc == "locked":                              # заперто — нужен ключ здания
-            has_key = any((_store().get_item(r["item_id"]) or {}).get("kind") == "key"
-                          for r in _store().inventory(_wid(), "pc"))
+        elif acc == "locked":                              # заперто — нужен ключ ЭТОГО здания
+            bd = _store().get_building(_wid(), inside) or {}
+            local = _tokens_ru(_binfo(inside)["name"]) | _tokens_ru(want)
+            for cnt in (bd.get("data", {}).get("containers") or []):
+                local |= _tokens_ru(cnt.get("name", ""))   # ключи хозяина ходят по его ёмкостям
+            has_key = any(
+                it and it["kind"] == "key" and any(
+                    m["target"] == "special:opens" and (_tokens_ru(m.get("cond", "")) & local)
+                    for m in it.get("mods", []))
+                for it in (_store().get_item(r["item_id"])
+                           for r in _store().inventory(_wid(), "pc")))
             if not has_key:
-                out["narr"].append(f"«{want}» заперто — нужен ключ.")
+                out["narr"].append(f"«{want}» заперто — нужен ключ здешнего хозяина.")
                 return {**out, **_scene_dict(city, people, crof, cr2b, loc), "gt": _gt()}
         _S["room"] = want
         out["narr"].append(f"Ты проходишь в: {want}.")
@@ -3000,6 +3084,8 @@ def _death(cause: str) -> dict:
     days = max(0, (_gt() - _GT0) // 1440)
     epitaph = _EPITAPHS[(_gt() // 137) % len(_EPITAPHS)]    # варьируем без Random-состояния
     wid = _wid()
+    if wid == 1:                                            # дев-мир: следующий — с новым сидом
+        _store().flag_set(0, "dev_seed", str(int(_store().flag_get(0, "dev_seed") or 1) + 1))
     _store().destroy_world(wid)
     _SESS.pop(wid, None)                                    # выкинуть мир из памяти (дев переиздаст с нуля)
     return {"status": "lost", "narr": [cause],

@@ -360,7 +360,9 @@ def apply_actions(actions, state, world, clock: int) -> list:
             if tb is not None:
                 vs = world.npc_minds.get(tb.id) if hasattr(world, "npc_minds") else None
                 if vs is not None:
-                    vs.memory.add(f"{me.id} сказал мне: «{txt}»", clock, importance=0.4,
+                    names = getattr(world, "names", None) or {}
+                    who = names.get(me.id) or me.id        # в память — ИМЯ, не голый id
+                    vs.memory.add(f"{who} сказал(а) мне: «{txt}»", clock, importance=0.4,
                                   kind="heard", about=[me.id])
                 log.append(f"💬{tb.id}:«{txt[:40]}»")
             else:

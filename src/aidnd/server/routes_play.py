@@ -2013,6 +2013,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     w.add(Body(id=PLAYER, place=place, charisma=0.45, appearance=min(0.8, 0.25 + coins / 60),
                attention=0.85, loot=pc_loot))              # добыча игрока НАСТОЯЩАЯ (кража реальна)
     w.npc_minds = {pid: people[pid].state for pid in here_all}   # умы = те же, кто в телах (кэп LOD)
+    w.names = names                                        # память пишет имена, не id
     w.aliases = {v.lower(): k for k, v in names.items()}
     w.lookup = lambda q: _world_lookup(q, loc)             # тулкол know: знание мира по запросу
     personas = {}

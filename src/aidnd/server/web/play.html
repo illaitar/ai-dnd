@@ -36,6 +36,28 @@
     background:var(--panel2);overflow:hidden}
   .map svg{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
   .map svg.drag{cursor:grabbing}
+  .msg .mrow{display:flex;gap:8px;align-items:flex-start}
+  .msg .mav{width:26px;height:26px;border-radius:50%;flex:0 0 26px;overflow:hidden;display:flex;
+    align-items:center;justify-content:center;font:500 11px var(--sans);color:#241a0c;margin-top:2px}
+  .msg .mav img{width:100%;height:100%;object-fit:cover}
+  .msg .mav.unk{background:var(--panel2);border:1px dashed var(--line2);color:var(--faint)}
+  #talkchip{display:none;margin:0 0 -1px 2px}
+  #talkchip.on{display:inline-flex;align-items:center;gap:7px;background:var(--panel2);
+    border:1px solid var(--gold-dim);border-bottom:0;border-radius:8px 8px 0 0;
+    padding:4px 10px;font:12px var(--sans);color:var(--gold)}
+  #talkchip b{font-weight:500}
+  #talkchip .x{cursor:pointer;color:var(--dim)}
+  #talkchip .x:hover{color:var(--red)}
+  .facegrid{display:flex;flex-wrap:wrap;gap:7px;padding:2px 12px 6px}
+  .face{width:36px;height:36px;border-radius:50%;overflow:hidden;cursor:pointer;position:relative;
+    display:flex;align-items:center;justify-content:center;font:500 13px var(--sans);color:#241a0c;
+    border:2px solid transparent}
+  .face img{width:100%;height:100%;object-fit:cover}
+  .face.unk{background:var(--panel2);border:1px dashed var(--line2);color:var(--faint)}
+  .face.cur{border-color:var(--gold)}
+  .face:hover{border-color:var(--gold-dim)}
+  .face.more{background:var(--panel2);color:var(--dim);font-size:11px;cursor:default}
+  .sceneline{padding:0 12px 8px;font:italic 12px var(--serif);color:var(--dim)}
   .overlay{position:fixed;inset:0;background:rgba(8,9,12,.82);z-index:60;display:flex;
     align-items:center;justify-content:center}
   .overlay.hidden{display:none}
@@ -255,12 +277,12 @@
         <div class="desc">…</div>
       </div>
     </div>
-    <div id="npcwrap" class="npc hidden"></div>
   </div>
 
   <div class="col center">
     <div class="cap">повествование</div>
     <div class="thread" id="thread"></div>
+    <div id="talkchip">говоришь с <b id="talkname"></b> <span class="x" onclick="endTalk()">✕</span></div>
     <div class="inbar">
       <input id="inp" placeholder="что делаешь?" autocomplete="off">
       <button id="send">&#8594;</button>
@@ -270,7 +292,6 @@
   <div class="col right">
     <div class="cap" id="rightcap">сцена</div>
     <div class="amb" id="amb"></div>
-    <div class="miniscene hidden" id="mini"></div>
     <div class="cap" style="margin-top:4px;cursor:pointer" onclick="openInv()">🎒 сумка <span id="bagn"></span> — открыть</div>
     <div class="bag" id="bag" style="display:none"></div>
     <div class="cap" style="margin-top:4px">дела</div>
@@ -423,7 +444,7 @@ async function go(){
   setCoins(r.coins);
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
   (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
-  (r.address||[]).forEach(a=>{const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
+  (r.address||[]).forEach(a=>{const el=npcMsg(a.npc,a.text,'— тебе');el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
   MAP.loc=r.loc;SCENE=r;LIVEF=[];BOARD=null;renderAmb();renderWays();
   api('/api/play/scene').then(s2=>{SCENE=s2;if(s2.guild_board)BOARD={jobs:s2.guild_board,news:s2.guild_news};renderLoc(s2.location);renderWays();setHp(s2.hp,s2.max_hp);});
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
@@ -446,15 +467,29 @@ async function go(){
     CX=mx+(CX-mx)*(Z/nz);CY=my+(CY-my)*(Z/nz);Z=nz;applyVB();},{passive:false});
 })();
 
+function faceHtml(n){
+  const known=n.role&&n.role!=='кто-то из горожан';
+  const inner=n.portrait?`<img src="${encodeURI(n.portrait)}" alt="">`:(known?esc(n.init):'?');
+  const cls='face'+((n.portrait||known)?'':' unk')+(cur===n.id?' cur':'');
+  const st=(n.portrait||!known)?'':` style="background:${n.color}"`;
+  return `<span class="${cls}"${st} title="${esc(n.name)}${known?(' · '+esc(n.role)):''}"
+    onclick="talk('${n.id}')">${inner}</span>`;
+}
+function sceneLine(){
+  const looked=(SCENE.looked|0)>=1;
+  if(!looked)return 'ты ещё не осмотрелся здесь';
+  const k=(SCENE.location&&SCENE.location.kind)||'';
+  return k;
+}
 function renderAmb(){
   const a=SCENE.ambient||{};
+  const more=SCENE.here_more|0;
   $('amb').innerHTML=
     `<div class="amchips">${[a.time,a.weather,a.mood].filter(Boolean).map(x=>`<span class="amchip">${esc(x)}</span>`).join('')}</div>
      <div><div class="subcap" style="margin:2px 0 6px">кто здесь</div>
-       <div class="here">${SCENE.here.map(n=>
-         `<div class="person" onclick="talk('${n.id}')"><span class="av" style="background:${n.color}">${av(n)}</span>
-           <span><div class="pn">${esc(n.name)}</div><div class="pr">${esc(n.role)}</div></span>
-           <span class="go">&#8250;</span></div>`).join('')}</div></div>
+       <div class="facegrid">${SCENE.here.map(faceHtml).join('')}${more?`<span class="face more">+${more}</span>`:''}
+       ${(!SCENE.here.length)?`<span style="font:italic 12px var(--serif);color:var(--faint)">${(SCENE.looked|0)<1?'осмотрись, чтобы различить людей':'никого'}</span>`:''}</div></div>
+     <div class="sceneline">${esc(sceneLine())}</div>
      <div><div class="subcap" style="margin:2px 0 6px">вокруг</div><div class="lfeed" id="lfeed"></div></div>`;
   renderFeed();
 }
@@ -467,11 +502,11 @@ function applyWorld(r){
   (r.feed||[]).forEach(f=>LIVEF.push(f));
   if(r.feed&&r.feed.length)renderFeed();
   (r.address||[]).forEach(a=>{
-    const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);
+    const el=npcMsg(a.npc,a.text,'— тебе');
     el.style.cursor='pointer';el.title='ответить';el.onclick=()=>talk(a.npc);});
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
   (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
-  (r.address||[]).forEach(a=>{const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
+  (r.address||[]).forEach(a=>{const el=npcMsg(a.npc,a.text,'— тебе');el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
   if(r.dice)showDice(r.dice);
   if(r.location){SCENE=r;renderAmb();renderLoc(r.location);renderWays();
     $('locname').textContent=r.location.name;}
@@ -538,87 +573,63 @@ async function pollLive(){
   }catch(e){}finally{LIVEBUSY=false;}
 }
 
-function renderMini(){
-  const a=SCENE.ambient||{};
-  $('mini').innerHTML=`<div class="amchips"><span class="amchip">${esc(a.time||'вечер')}</span></div>
-    <div><div class="subcap" style="margin:2px 0 6px">рядом</div>
-    <div class="here">${SCENE.here.filter(x=>x.id!==cur).map(n=>
-      `<div class="person" onclick="talk('${n.id}')"><span class="av" style="background:${n.color}">${av(n)}</span>
-        <span><div class="pn">${esc(n.name)}</div></span></div>`).join('')}</div></div>`;
-}
 const av=n=>n.portrait?`<img src="${encodeURI(n.portrait)}" alt="">`:esc(n.init);
-const bar=(v,c)=>`<div class="track"><i style="width:${Math.round((+v||0)*100)}%;background:${c}"></i></div>`;
-function meters(n){return `<div class="meter"><span class="ml">симпатия</span>${bar(n.aff,'var(--green)')}<span class="mv">${(+n.aff).toFixed(2)}</span></div>
-  <div class="meter"><span class="ml">доверие</span>${bar(n.trust,'var(--blue)')}<span class="mv">${(+n.trust).toFixed(2)}</span></div>
-  <div class="meter"><span class="ml">страх</span>${bar(n.fear,'var(--red)')}<span class="mv">${(+n.fear).toFixed(2)}</span></div>`;}
-function renderNpc(n){
-  const col=byId(cur).color||n.color||'#8a6fae';
-  const face=n.portrait
-    ? `<img id="npcimg" src="${encodeURI(n.portrait)}" alt="">`
-    : `<svg width="96" height="118" viewBox="0 0 96 118"><circle cx="48" cy="42" r="26" fill="${col}" opacity=".9"/>
-         <path d="M8 118 C8 82 30 74 48 74 C66 74 88 82 88 118 Z" fill="${col}" opacity=".9"/></svg>`;
-  const sub=[n.age&&({young:'молодой',adult:'взрослый',middle:'в годах',old:'пожилой',elder:'старый'}[n.age]),
-             n.origin].filter(Boolean).join(' · ');
-  $('npcwrap').innerHTML=
-    `<div class="cap" style="padding:11px 2px 8px">собеседник</div>
-     <div class="portrait">${face}<div class="frame"></div><span class="badge" id="pbadge">${esc(n.emotion||'')}</span></div>
-     <div class="who"><span class="name">${esc(n.name)}</span><span class="role">${esc(n.role)}</span></div>
-     ${sub?`<div class="npcsub">${esc(sub)}</div>`:''}
-     <div id="meters">${meters(n)}</div>
-     <div class="emo">настроение: <b id="emo">${esc(n.emotion)}</b></div>
-     ${(n.known&&n.known.length)?`<div class="subcap">ты о нём знаешь</div>
-       <div class="known">${n.known.map(k=>`<div class="kn">${esc(k)}</div>`).join('')}</div>`:''}
-     ${(n.keys&&n.keys.length)?`<div class="subcap">при себе ключи</div>
-       <div class="keys">${n.keys.map(k=>`<span class="keychip" data-k="${esc(k)}" onclick="askKey(this.dataset.k)" title="попросить ключ">&#128273; ${esc(k)}</span>`).join('')}</div>`:''}
-     <div class="subcap">темы разговора</div>
-     <div class="topics">${(n.topics||[]).map(t=>`<span class="chip" data-t="${esc(t)}" onclick="say('Расскажи-ка: '+this.dataset.t)">${esc(t)}</span>`).join('')}</div>
-     ${n.crafter?`<button class="commission" onclick="commission()">&#9874; заказать: ${esc(n.recipe)}</button>`:''}
-     <div id="wares"></div>
-     <button class="end" onclick="endTalk()">&#8592; завершить разговор</button>`;
+function npcMsg(id,text,label){
+  const n=byId(id)||{name:label||'голос',role:'',color:'#2a2f3c',init:'?'};
+  const known=n.role&&n.role!=='кто-то из горожан';
+  const avh=n.portrait?`<span class="mav"><img src="${encodeURI(n.portrait)}" alt=""></span>`
+    :(known?`<span class="mav" style="background:${n.color}">${esc(n.init)}</span>`
+           :`<span class="mav unk">?</span>`);
+  const who=esc(n.name)+(known?` · ${esc(n.role)}`:'');
+  const el=push('npc',`<div class="mrow">${avh}<div style="flex:1;min-width:0">
+    <div class="sp">${who}${label?(' '+esc(label)):''}</div><div class="tx">${esc(text)}</div></div></div>`);
+  return el;
 }
-
+const bar=(v,c)=>`<div class="track"><i style="width:${Math.round((+v||0)*100)}%;background:${c}"></i></div>`;
 async function talk(id){
-  cur=id;mode='dialogue';document.body.className='dialogue';
-  $('mapwrap').classList.add('hidden');$('npcwrap').classList.remove('hidden');
-  $('amb').classList.add('hidden');$('mini').classList.remove('hidden');
-  $('inp').placeholder='ответить '+byId(id).name+'…';
-  renderMini();push('sys','— ты заговариваешь с '+esc(byId(id).name)+' —');
+  cur=id;mode='dialogue';
+  $('talkchip').classList.add('on');$('talkname').textContent=byId(id).name;
+  $('inp').placeholder='сказать '+byId(id).name+'…';$('inp').focus();
+  renderAmb();
   const n=await api('/api/play/talk',{npc:id});
-  if(n.error){push('sys',esc(n.error));return;}
+  if(n.error){push('sys',esc(n.error));endTalk();return;}
   if(n.gt!=null){GT=n.gt;setClock();}
-  CARD=n;renderNpc(n);if(n.crafter)loadWares();renderBag();
+  CARD=n;renderBag();
+  if(byId(id)){byId(id).name=n.name;byId(id).role=n.role;$('talkname').textContent=n.name;renderAmb();}
   if(n.contract){
     const ct=n.contract;
-    const kd={bring:'добыть',deliver:'отнести',visit:'наведаться',befriend:'расположить к себе'};
+    const kd={bring:'добыть',deliver:'отнести',visit:'наведаться',befriend:'расположить к себе',dead:'покончить с'};
     const rw=ct.reward_name?('вещь: '+esc(ct.reward_name)):(ct.reward+' зм');
-    push('npc',`<div class="sp">${esc(n.name)} — у него к тебе дело</div><div class="tx">${esc(ct.pitch)}</div>`);
+    npcMsg(id,ct.pitch,'— у него к тебе дело');
     push('sys',`<div class="ctcard"><b>Уговор:</b> ${kd[ct.kind]||'сделать'} «${esc(ct.want||ct.target_name)}» <span class="ctw">(${esc(ct.where)})</span> · награда ${rw}
       <div class="acts" style="justify-content:center;margin-top:6px"><button onclick="acceptContract('${ct.id}',this)">взяться</button></div></div>`);
   }
-  push('npc',`<div class="sp">${esc(n.name)}</div><div class="tx">${esc(n.line)}</div>`);
+  npcMsg(id,n.line);
+  const extras=[];
+  if(n.crafter)extras.push(`<button onclick="commission()">&#9874; заказать: ${esc(n.recipe)}</button>`);
+  (n.keys||[]).forEach(k=>extras.push(`<button data-k="${esc(k)}" onclick="askKey(this.dataset.k)">&#128273; ${esc(k)}</button>`));
+  if(extras.length)push('sys',`<div class="acts" style="justify-content:flex-start">${extras.join('')}</div>`);
+  if(n.crafter)loadWares();
 }
 function endTalk(){
-  push('sys','— ты отходишь от '+esc(byId(cur).name)+' —');
-  cur=null;mode='explore';document.body.className='explore';OFFERS={};renderBag();
-  $('mapwrap').classList.remove('hidden');$('npcwrap').classList.add('hidden');
-  $('amb').classList.remove('hidden');$('mini').classList.add('hidden');
+  if(cur)push('sys','— ты отходишь от '+esc(byId(cur).name)+' —');
+  cur=null;mode='explore';OFFERS={};CARD=null;renderBag();renderAmb();
+  $('talkchip').classList.remove('on');
   $('inp').placeholder='что делаешь?';
 }
 async function converse(text){
   const id=cur;
-  const el=push('npc',`<div class="sp">${esc(byId(id).name)}</div><div class="tx"><span style="color:var(--faint)">…</span></div>`);
+  const el=npcMsg(id,'…');
   const r=await api('/api/play/say',{npc:id,text});
   if(r.error){el.querySelector('.tx').textContent=r.error;return;}
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
   (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
-  (r.address||[]).forEach(a=>{const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
+  (r.address||[]).forEach(a=>{const e2=npcMsg(a.npc,a.text,'— тебе');e2.style.cursor='pointer';e2.onclick=()=>talk(a.npc);});
   el.querySelector('.tx').textContent=r.line;
-  if(CARD){Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
-    if($('meters'))$('meters').innerHTML=meters(CARD);if($('emo'))$('emo').textContent=r.emotion;
-    if(r.portrait&&$('npcimg'))$('npcimg').src=encodeURI(r.portrait);
-    if($('pbadge'))$('pbadge').textContent=r.emotion;}
+  if(CARD)Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
+  if(r.portrait&&byId(id)){byId(id).portrait=r.portrait;}
 }
 function say(t){push('me',`<div class="tx">${esc(t)}</div>`);converse(t);}
 function submit(){
@@ -634,7 +645,8 @@ async function freeAct(v){
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);
   (r.narr||[]).forEach(t=>push('narr',esc(t)));
-  if(r.line)push('npc',`<div class="sp">${esc(r.line.who)}</div><div class="tx">${esc(r.line.text)}</div>`);
+  if(r.line){const pid=(SCENE.here.find(h=>h.name===r.line.who)||{}).id;
+    if(pid)npcMsg(pid,r.line.text);else push('npc',`<div class="sp">${esc(r.line.who)}</div><div class="tx">${esc(r.line.text)}</div>`);}
   if(r.loot)await loot(r.loot);
   if(r.inspect)await inspectItem(r.inspect);
   if(r.goto!=null){selectDest(r.goto,null);await go();}
@@ -743,12 +755,11 @@ async function doSell(id){
 async function loadWares(){
   if(!cur)return;
   const r=await api('/api/play/wares?npc='+encodeURIComponent(cur));
-  const el=$('wares');
-  if(!el||r.error)return;
+  if(r.error||!(r.items&&r.items.length))return;
   setCoins(r.coins);
-  el.innerHTML=(r.items&&r.items.length)?`<div class="subcap">купить у него</div>
+  push('sys',`<div class="subcap" style="margin-bottom:4px">на прилавке</div>
     <div class="keys">${r.items.map(w=>`<span class="keychip" data-i="${w.id}" data-p="${w.price}"
-      onclick="buyItem(this.dataset.i,this.dataset.p)" title="${esc(w.kind)}">${esc(w.name)} · ${w.price} зм</span>`).join('')}</div>`:'';
+      onclick="buyItem(this.dataset.i,this.dataset.p)" title="${esc(w.kind)}">${esc(w.name)} · ${w.price} зм</span>`).join('')}</div>`);
 }
 async function buyItem(id,price){
   const r=await api('/api/play/buy',{npc:cur,item:id});

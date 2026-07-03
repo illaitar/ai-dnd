@@ -1,53 +1,64 @@
-"""Магия: грамматика круга (empty/clean/wild) + механический спек эффекта из глифов."""
+"""Грамматика рисунка: нормализация, бюджет силы, якорь, противоречия по кольцам, канонический хэш."""
 
-from aidnd.magic import build_spec, classify, known_ids, load
+from __future__ import annotations
+
+from aidnd.magic import (anchor, circle_hash, classify, fallback_law, glyph_cost, known_ids,
+                         load, normalize, power_budget)
 
 
-def test_vocabulary_loaded():
+def test_load_dictionary():
     g = load()
     assert len(g["elements"]) == 6 and len(g["glyphs"]) == 12
-    assert {"огонь", "лёд", "свет", "тьма", "яд", "камень"} <= set(g["elements"])
-    assert "стрела" in g["glyphs"] and "исцелить" in g["glyphs"]
+    assert "огонь" in known_ids() and "стрела" in known_ids()
 
 
-def test_empty_circle_wont_cast():
-    assert classify([])["kind"] == "empty"
-    assert classify(["стрела"])["kind"] == "empty"          # форма без сути
-    assert classify(["больше", "дальше"])["kind"] == "empty"
+def test_normalize_accepts_strings_and_dicts():
+    pts = normalize(["огонь", {"id": "стрела", "size": 0.9, "angle": 10, "ring": 1}])
+    assert len(pts) == 2
+    assert pts[0]["ring"] == 0 and pts[1]["ring"] == 1
+    assert normalize(["нет-такого"]) == []
 
 
-def test_clean_damage_circle():
-    c = classify(["огонь", "стрела", "дальше"])
-    assert c["kind"] == "clean"
-    s = build_spec(["огонь", "стрела", "дальше"])
-    assert s["damage"]["type"] == "fire" and s["damage"]["dice"] == "1d6"
-    assert s["area"]["shape"] == "bolt" and s["range"] == 11        # 6 + 5×1
-    assert s["mana_cost"] >= 5
+def test_size_and_ring_scale_budget():
+    small = power_budget([{"id": "огонь", "size": 0.2, "angle": 0, "ring": 0}])
+    big = power_budget([{"id": "огонь", "size": 0.9, "angle": 0, "ring": 0}])
+    inner = power_budget([{"id": "огонь", "size": 0.9, "angle": 0, "ring": 1}])
+    assert small < big and inner < big                      # крупный сильнее, внутреннее кольцо — тоньше
+    assert glyph_cost("огонь", 0.9, 0) > glyph_cost("огонь", 0.2, 0)
 
 
-def test_size_and_burst_scale():
-    s = build_spec(["лёд", "взрыв", "больше", "больше"])
-    assert s["damage"]["type"] == "cold" and s["damage"]["dice"] == "3d6"   # 1 + 2 size
-    assert s["area"] == {"shape": "burst", "radius": 3}                     # 1 + 2 size
+def test_anchor_direction():
+    assert anchor([{"id": "огонь", "size": 0.5, "angle": 0, "ring": 0}]) == "вовне/на цель"
+    assert anchor([{"id": "огонь", "size": 0.5, "angle": 180, "ring": 0}]) == "на себя"
+    spread = [{"id": "огонь", "size": 0.5, "angle": a, "ring": 0} for a in (0, 120, 240)]
+    assert anchor(spread) == "вокруг"
 
 
-def test_verbs_bind_heal_reveal():
-    assert build_spec(["связать", "камень", "стрела", "дольше"])["status"] == {"kind": "bound", "turns": 2}
-    assert build_spec(["исцелить", "больше"])["heal"] == 7                  # 4 + 3
-    assert build_spec(["явить", "свет"]).get("reveal") is True
+def test_classify_empty_and_clean():
+    assert classify([{"id": "больше", "size": 0.5, "angle": 0, "ring": 0}])["kind"] == "empty"
+    assert classify(["огонь", "стрела"])["kind"] == "clean"
 
 
-def test_wild_contradictions():
-    assert classify(["огонь", "лёд", "стрела"])["kind"] == "wild"           # противостоящие стихии
-    assert classify(["свет", "тьма"])["kind"] == "wild"
-    assert classify(["исцелить", "огонь"])["kind"] == "wild"                # лечение + губящая стихия
-    assert classify(["огонь", "стрела", "взрыв"])["kind"] == "wild"         # две формы
+def test_opposing_elements_same_ring_wild_but_rings_tame():
+    same = [{"id": "огонь", "size": 0.5, "angle": 0, "ring": 0},
+            {"id": "лёд", "size": 0.5, "angle": 90, "ring": 0}]
+    split = [{"id": "огонь", "size": 0.5, "angle": 0, "ring": 0},
+             {"id": "лёд", "size": 0.5, "angle": 90, "ring": 1}]
+    assert classify(same)["kind"] == "wild"
+    assert classify(split)["kind"] == "clean"               # контраст на разных кольцах — обуздан
 
 
-def test_unknown_ids_ignored():
-    c = classify(["огонь", "стрела", "ЧУШЬ"])
-    assert c["kind"] == "clean" and "ЧУШЬ" not in c["elements"] + c["forms"]
+def test_hash_quantized_stable():
+    a = [{"id": "огонь", "size": 0.5, "angle": 10, "ring": 0}]
+    b = [{"id": "огонь", "size": 0.55, "angle": 12, "ring": 0}]   # чуть сдвинут — тот же закон
+    c = [{"id": "огонь", "size": 0.9, "angle": 10, "ring": 0}]    # крупнее — другой закон
+    assert circle_hash(a) == circle_hash(b) != circle_hash(c)
+    assert circle_hash(["огонь", "стрела"]) == circle_hash(["огонь", "стрела"])
 
 
-def test_deterministic():
-    assert build_spec(["огонь", "взрыв", "больше"]) == build_spec(["огонь", "взрыв", "больше"])
+def test_fallback_law_within_budget():
+    comp = ["огонь", "стрела", "больше"]
+    law = fallback_law(comp)
+    assert law["power"] <= max(1, round(power_budget(comp)))
+    assert law["mech"].get("damage")
+    assert law["name"]

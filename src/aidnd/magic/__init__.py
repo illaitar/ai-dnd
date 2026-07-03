@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
-from .grammar import build_spec, classify, known_ids, load
-from .inscribe import (WILD_EFFECTS, Inscriber, LLMInscriber, StubInscriber, circle_hash)
+from .grammar import (RULES_RU, anchor, circle_hash, classify, describe, fallback_law, glyph_cost,
+                      known_ids, load, normalize, power_budget)
+from .inscribe import WILD_EFFECTS, Inscriber, LLMInscriber, StubInscriber, clamp_law
 
-__all__ = ["load", "classify", "build_spec", "known_ids",
-           "Inscriber", "LLMInscriber", "StubInscriber", "circle_hash", "WILD_EFFECTS"]
+__all__ = ["load", "classify", "known_ids", "normalize", "describe", "anchor", "power_budget",
+           "glyph_cost", "fallback_law", "circle_hash", "RULES_RU", "clamp_law",
+           "Inscriber", "LLMInscriber", "StubInscriber", "WILD_EFFECTS"]

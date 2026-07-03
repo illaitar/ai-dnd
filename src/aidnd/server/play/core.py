@@ -119,7 +119,7 @@ PB = {
     "watch_jail_h": 7,                                     # не заплатил — «отсидка» до утра
     # МАГИЯ (мана-свеча): старт/потолок/реген/рост/усталость/сложность каста
     "mana_start": 12.0, "mana_cap_start": 14.0, "mana_hardcap_per_int": 8,  # потолок ≤ Int×8
-    "mana_regen_base": 1.0, "mana_grow_frac": 0.1, "cast_skill_dc": 10,
+    "mana_regen_base": 1.0, "mana_grow_frac": 0.1, "mana_sleep_mult": 3,  # сон наполняет свечу быстрее
     "fatigue_div": 8, "fatigue_min_per_pt": 24,           # усталость: 1+спалено/8 на статы, отходит
     # ЧЕРЧЕНИЕ (М-5.2): свеча тает ~drain/сек (мягче от Int+Wis) + вес глифа при нанесении;
     # известный круг из гримуара — мгновенно за долю сложности; выброс (маны 0) → misfire+усталость×mult
@@ -239,15 +239,26 @@ def _mana_load() -> None:
         _S["fat_until"] = int(row.get("fat_until", 0))
 
 
+def _mana_rate() -> float:
+    """Реген маны в час бодрствования — от Int/Wis."""
+    return max(0.2, PB["mana_regen_base"] + _PC_CAP.mod("int") + _PC_CAP.mod("wis"))
+
+
 def _mana() -> float:
     """Текущая мана с ЛЕНИВЫМ регеном от Int/Wis (без покадрового тика)."""
     _mana_load()
     dt_h = max(0, _gt() - _S["mana_gt"]) / 60.0
     if dt_h > 0:
-        rate = PB["mana_regen_base"] + _PC_CAP.mod("int") + _PC_CAP.mod("wis")
-        _S["mana"] = min(_S["mana_cap"], _S["mana"] + max(0.2, rate) * dt_h)
+        _S["mana"] = min(_S["mana_cap"], _S["mana"] + _mana_rate() * dt_h)
         _S["mana_gt"] = _gt()
     return round(_S["mana"], 2)
+
+
+def _mana_sleep(hours: float) -> None:
+    """Сон наполняет свечу быстрее бодрствования (×mana_sleep_mult): добор сверх ленивого регена."""
+    _mana()                                                # ленивый реген за проспанное — по ставке ×1
+    bonus = _mana_rate() * max(0.0, hours) * (PB["mana_sleep_mult"] - 1)
+    _S["mana"] = min(_S["mana_cap"], _S["mana"] + bonus)
 
 
 def _mana_cap() -> float:

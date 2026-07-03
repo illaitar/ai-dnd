@@ -646,6 +646,7 @@ async def move(request: Request):
     seg = route_nodes[:route_nodes.index(dest) + 1] if dest in route_nodes else [dest]
     path = [xy[n] for n in seg if n in xy]
     _S["loc"] = dest
+    _S["dlg"] = None                                       # ушёл — разговор оборвался
     _gt_add(PB["step_min"] * max(1, len(seg) - 1))         # время дороги: минут за пройденный шаг
     _apply_routine()                                       # за дорогу мир мог перейти в другую фазу
     ct_done = _contract_on_move(dest)                      # visit-уговор: дошёл — исполнил
@@ -685,7 +686,10 @@ async def talk(request: Request):
     p = people[npc]
     first = npc not in _met()
     _pc().rel(npc)                                     # заговорил = познакомился (имя открыто)
-    _S["dlg"] = {"npc": npc, "gt": _gt()}              # активный диалог: собеседник не лезет параллельно
+    _S["dlg"] = npc                                    # мир знает: чужак занят ЭТИМ разговором
+    if _S.get("live"):                                 # сцена видит действие игрока
+        _S["live"]["last"][PLAYER] = f"подошёл и заговорил с {p.name}"
+        _S["live"]["pc_spoke"] = True
     _gt_add(PB["talk_min"])
     st = p.state
     st.needs["social"] = max(st.needs.get("social", 0.0), 0.4)
@@ -729,7 +733,10 @@ async def say(request: Request):
     p = people[npc]
     rel = p.state.relationships.setdefault(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     text = str(b.get("text", ""))
-    _S["dlg"] = {"npc": npc, "gt": _gt()}                  # диалог продолжается — окно свежести сдвигается
+    _S["dlg"] = npc                                        # разговор продолжается
+    if _S.get("live"):                                     # сцена видит: чужак беседует
+        _S["live"]["last"][PLAYER] = f"беседует с {p.name}: «{text[:50]}»"
+        _S["live"]["pc_spoke"] = True
     _gt_add(PB["talk_min"])
     line = _voice(p, rel, "reply", text)
     tone = _S.get("last_tone", "neutral")                  # тон слов игрока — из уст самого NPC
@@ -1462,7 +1469,10 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     names = {PLAYER: hero if hero != "Странник" else "чужак"}   # NPC зовут по имени, если знают
     known_by = {pid for pid in _here(loc, crof)                 # кто из присутствующих УЖЕ знаком с игроком
                 if PLAYER in people[pid].state.relationships}
-    roles = {PLAYER: ("гость, которого тут уже знают" if known_by else "недавно вошедший незнакомец")}
+    roles = {PLAYER: ("гость, которого тут уже знают" if known_by else
+                      "недавно вошедший незнакомец. К чужакам тут не лезут первыми: глазеют исподволь, "
+                      "шепчутся; заговаривает лишь тот, кому это К ЛИЦУ — хозяин заведения с гостем, "
+                      "наглец, или у кого к нему дело/любопытство пересилило")}
     rng = random.Random(f"live|{loc}")
     npc_map: dict = {}                                     # pid → {имя вещи: item_id} (кражи реальны)
     here_all = _here(loc, crof)
@@ -1546,7 +1556,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     _S["live"] = {"world": w, "loc": loc, "place": place, "clock": 0, "ts": 0.0,
                   "who": frozenset(here), "pc_map": pc_map, "npc_map": npc_map,
                   "last": {}, "hist": {}, "names": names, "roles": roles, "personas": personas,
-                  "pdesc": ((data or {}).get("notable") or "")}
+                  "pdesc": (f"Город «{_city_name()}». " + ((data or {}).get("notable") or "")).strip()}
 
 
 def _gossip(actor_st, actor_name: str, target_st) -> None:
@@ -1568,9 +1578,30 @@ def _live_tick(people) -> tuple:
     order = [pid for pid in w.npc_minds
              if not w.bodies[pid].down() and w.bodies[pid].place == lv["place"]]
     random.Random(f"tick|{lv['clock']}").shuffle(order)
-    ctx = {"roles": lv["roles"], "names": lv["names"], "last_actions": lv["last"],
+    # МОЛЧАНИЕ — тоже сигнал: окликнул чужака, а тот не ответил → это факт мира, NPC его помнит
+    awaiting = lv.get("awaiting") or []
+    if awaiting and not lv.pop("pc_spoke", False):
+        for pid in awaiting:
+            if pid in w.npc_minds:                          # kind=note → попадает в «ТВОИ МЫСЛИ» решений
+                w.npc_minds[pid].memory.add(
+                    "я окликнул(а) чужака, но он ПРОМОЛЧАЛ — не хочет говорить, навязываться дальше стыдно",
+                    lv["clock"], 0.55, kind="note", about=[PLAYER])
+        lv["last"][PLAYER] = "молчит — на обращения не отвечает, в разговоры не вступает"
+    lv["awaiting"] = []
+    # чем занят чужак ПРЯМО СЕЙЧАС — часть мира: NPC сами решают, лезть ли (характер, не таймер)
+    roles = dict(lv["roles"])
+    dlg = _S.get("dlg")
+    if dlg and dlg in people and dlg in order:
+        roles[PLAYER] = (f"{roles.get(PLAYER, 'чужак')} — прямо сейчас увлечён разговором "
+                         f"с {lv['names'].get(dlg, 'кем-то')}; встревать в чужую беседу — дело наглое")
+    personas = dict(lv.get("personas", {}))
+    if dlg in personas or (dlg and dlg in order):
+        personas[dlg] = (personas.get(dlg, "") + ". Ты ПРЯМО СЕЙЧАС беседуешь с чужаком — вы уже "
+                         "в разговоре: НЕ окликай и не приветствуй заново; отвечай на его слова, "
+                         "а если он молчит — не дёргай, дай ему выпить/подумать, займись делом").lstrip(". ")
+    ctx = {"roles": roles, "names": lv["names"], "last_actions": lv["last"],
            "history": lv["hist"], "clock": lv["clock"], "place_desc": {lv["place"]: lv["pdesc"]},
-           "personas": lv.get("personas", {}),
+           "personas": personas,
            "time": f"{_PHASE_RU[_phase()]}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}"}
 
     def think_one(pid):                                     # решения параллельно, снимок мира один
@@ -1585,7 +1616,8 @@ def _live_tick(people) -> tuple:
         decisions = dict(ex.map(think_one, order))
 
     feed, address = [], []
-    said_n, addr_n, topics = 0, 0, []                      # кэп реплик + кэп обращений к игроку + анти-эхо
+    said_n = 0                                             # LOD-кэп реплик ленты
+    topics = lv.setdefault("topics", [])                   # анти-эхо ПОМНИТ прошлые тики (хвост сигнатур)
     pc = _pc()
 
     def _say_ok(txt: str) -> bool:
@@ -1594,8 +1626,9 @@ def _live_tick(people) -> tuple:
         if said_n >= PB["say_cap_per_tick"]:               # лимит реплик — остальные слушают
             return False
         if sig and any(len(sig & s) >= max(2, len(sig) // 2 + 1) for s in topics):
-            return False                                   # почти дубль сказанного в этом тике
+            return False                                   # почти дубль уже сказанного — «заезженная тема»
         topics.append(sig)
+        del topics[:-12]                                   # помним последние ~4 тика разговоров
         said_n += 1
         return True
     for pid in order:                                       # применяем последовательно (честный порядок)
@@ -1638,10 +1671,9 @@ def _live_tick(people) -> tuple:
                                                     0.7, about=[pid])
                     _pc_remember(f"видел, как {_display(pid, people)} обокрал {_display(vid, people)}",
                                  0.5, about=[pid, vid])
-        lv["last"][pid] = "; ".join(evs)[:80] or "—"
-        lv["hist"].setdefault(pid, []).append("; ".join(evs)[:60])
         who = _display(pid, people)
         said = False
+        spoke = []                                          # речь — тоже ДЕЙСТВИЕ: попадает в last/hist/память
         for a in d.get("actions") or []:
             if isinstance(a, dict) and a.get("tool") == "say" and str(a.get("text") or "").strip():
                 tgt = str(a.get("to") or "")
@@ -1650,28 +1682,26 @@ def _live_tick(people) -> tuple:
                 if not _say_ok(txt):                        # кэп реплик / анти-эхо — этот молчит
                     continue
                 said = True
-                if tid == PLAYER:
-                    if addr_n >= PB["addr_cap_per_tick"]:  # уже кто-то поздоровался в этот тик — не толпой
-                        continue
-                    dlg = _S.get("dlg") or {}              # собеседник УЖЕ говорит с тобой — не «подходит» заново
-                    if dlg.get("npc") == pid and _gt() - dlg.get("gt", -9999) <= PB["dlg_fresh_min"]:
-                        continue
-                    cd = _S.setdefault("addr_gt", {})      # кулдаун по ИГРОВОМУ времени — переживает перестройки сцены
-                    if _gt() < cd.get(pid, -9999) + PB["addr_npc_cd_min"]:
-                        continue
-                    cd[pid] = _gt()
-                    addr_n += 1
+                if tid == PLAYER:                          # решение «заговорить с чужаком» — за самим NPC
                     address.append({"npc": pid, "who": who, "text": txt})
                     pc.memory.add(f"{who} обратился ко мне: «{txt[:100]}»", _mt(), 0.4, about=[pid])
+                    spoke.append(f"я сам(а) заговорил(а) с чужаком: «{txt[:60]}»")
+                    st.memory.add(f"я сам(а) заговорил(а) с чужаком: «{txt[:80]}»",
+                                  lv["clock"], 0.45, about=[PLAYER])
+                    lv.setdefault("awaiting", []).append(pid)   # ответит ли чужак — узнаем следующим тиком
                 else:
                     feed.append({"k": "speech", "who": who,
                                  "to": _display(tid, people) if tid in people else tgt, "text": txt})
                     pc.memory.add(f"слышал в «{lv['place']}»: {who} — {txt[:90]}",
                                   _mt(), 0.18, kind="heard", about=[pid])
+                    spoke.append(f"сказал(а) {lv['names'].get(tid, tgt)}: «{txt[:50]}»")
                     if tid in w.npc_minds:                  # адресату — сплетня + нудж «ответь»
                         _gossip(st, lv["names"].get(pid, pid), w.npc_minds[tid])
                         w.npc_minds[tid].memory.add(f"ко мне обратился {who}: «{txt[:80]}» — стоит ответить",
                                                     lv["clock"], 0.55, about=[pid])
+        acted = "; ".join(evs + spoke)                      # NPC ПОМНИТ и дела, и слова — не повторяется
+        lv["last"][pid] = acted[:110] or "—"
+        lv["hist"].setdefault(pid, []).append(acted[:80])
         does = (d.get("does") or "").strip()
         if does and not said:                               # реплика сама несёт момент — не дублируем
             feed.append({"k": "deed", "who": who, "text": does[:150]})
@@ -1717,6 +1747,7 @@ async def enter(request: Request):
         return {"error": "тут не во что входить"}
     _S["inside"] = bid
     _S["room"] = None
+    _S["dlg"] = None                                       # вошёл внутрь — уличный разговор оборвался
     _gt_add(PB["give_min"])
     _pc_remember(f"вошёл в {_binfo(bid)['name']}", 0.25)
     t = _world_tick()
@@ -1769,6 +1800,7 @@ async def go_room(request: Request):
                 return {**out, **_scene_dict(city, people, crof, cr2b, loc), "gt": _gt()}
         _S["room"] = want
         out["narr"].append(f"Ты проходишь в: {want}.")
+    _S["dlg"] = None                                       # перешёл в другое помещение — беседа прервана
     _gt_add(PB["give_min"])
     return {**out, **_scene_dict(city, people, crof, cr2b, loc), "gt": _gt(), "coins": _pc_coins(),
             "hp": _pc_hp()}
@@ -1778,6 +1810,7 @@ async def go_room(request: Request):
 async def exit_building(request: Request):
     city, people, crof, cr2b, loc = _play()
     _S["inside"] = None
+    _S["dlg"] = None                                       # вышел — разговор в зале оборвался
     _gt_add(PB["give_min"])
     t = _world_tick()
     return {**_scene_dict(city, people, crof, cr2b, loc), **t, "gt": _gt(), "coins": _pc_coins(),

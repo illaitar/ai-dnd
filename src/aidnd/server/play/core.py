@@ -627,5 +627,5 @@ def _display(pid: str, people) -> str:
         return "ты"
     p = people.get(pid)
     if not p:
-        return pid
+        return "прохожий"                          # неизвестный в этой сцене — но НИКОГДА не сырой id
     return p.name if pid in _met() else _descriptor(p)

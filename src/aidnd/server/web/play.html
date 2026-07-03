@@ -558,7 +558,7 @@ async function go(){
   setCoins(r.coins);
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
   (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
-  (r.address||[]).forEach(a=>{const el=npcMsg(a.npc,a.text,'— тебе');el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
+  (r.address||[]).forEach(a=>{const el=npcMsg(a.npc,a.text,'— тебе',a.who);el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
   MAP.loc=r.loc;SCENE=r;LIVEF=[];BOARD=null;renderAmb();renderWays();
   api('/api/play/scene').then(s2=>{SCENE=s2;if(s2.guild_board)BOARD={jobs:s2.guild_board,news:s2.guild_news};renderLoc(s2.location);renderWays();setHp(s2.hp,s2.max_hp);setMana(s2.mana,s2.mana_cap,s2.fatigue);});
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
@@ -632,7 +632,7 @@ function applyWorld(r){
   (r.feed||[]).forEach(f=>LIVEF.push(f));
   if(r.feed&&r.feed.length)renderFeed();
   (r.address||[]).forEach(a=>{
-    const el=npcMsg(a.npc,a.text,'— тебе');
+    const el=npcMsg(a.npc,a.text,'— тебе',a.who);
     el.style.cursor='pointer';el.title='ответить';el.onclick=()=>talk(a.npc);});
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
   if(r.dice)showDice(r.dice);
@@ -718,8 +718,13 @@ async function pollLive(){
 }
 
 const av=n=>n.portrait?`<img src="${encodeURI(n.portrait)}" alt="">`:esc(n.init);
-function npcMsg(id,text,label){
-  const n=byId(id)||{name:label||'голос',role:'',color:'#2a2f3c',init:'?'};
+function npcMsg(id,text,label,name){
+  let n=SCENE.here.find(x=>x.id===id);
+  if(!n){                                        // говорящего нет в списке сцены — берём имя с сервера,
+    let nm=name||'';                             // но НИКОГДА не показываем сырой id (pool:…/bp:…)
+    if(/^(pool|bp|npc):/.test(nm))nm='';
+    n={name:nm||'голос',role:'',color:'#8a6fae',init:(nm||'?').trim().charAt(0)||'?'};
+  }
   const known=n.role&&n.role!=='кто-то из горожан';
   const avh=n.portrait?`<span class="mav"><img src="${encodeURI(n.portrait)}" alt=""></span>`
     :(known?`<span class="mav" style="background:${n.color}">${esc(n.init)}</span>`
@@ -770,7 +775,7 @@ async function converse(text){
   setCoins(r.coins);
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
   (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
-  (r.address||[]).forEach(a=>{const e2=npcMsg(a.npc,a.text,'— тебе');e2.style.cursor='pointer';e2.onclick=()=>talk(a.npc);});
+  (r.address||[]).forEach(a=>{const e2=npcMsg(a.npc,a.text,'— тебе',a.who);e2.style.cursor='pointer';e2.onclick=()=>talk(a.npc);});
   el.querySelector('.tx').textContent=r.line;
   if(CARD)Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
   if(r.portrait&&byId(id)){byId(id).portrait=r.portrait;}

@@ -121,6 +121,9 @@ PB = {
     "mana_start": 12.0, "mana_cap_start": 14.0, "mana_hardcap_per_int": 8,  # потолок ≤ Int×8
     "mana_regen_base": 1.0, "mana_grow_frac": 0.1, "cast_skill_dc": 10,
     "fatigue_div": 8, "fatigue_min_per_pt": 24,           # усталость: 1+спалено/8 на статы, отходит
+    # ЧЕРЧЕНИЕ (М-5.2): свеча тает ~drain/сек (мягче от Int+Wis) + вес глифа при нанесении;
+    # известный круг из гримуара — мгновенно за долю сложности; выброс (маны 0) → misfire+усталость×mult
+    "draw_drain_per_s": 1.5, "draw_intwis_k": 0.12, "known_cost_k": 0.6, "burnout_fat_mult": 2,
     # обучение глифам у мага/писца: цена = base + вес·k; ниже симпатии — не учит; высокая → даром
     "learn_base": 6, "learn_per_weight": 5, "learn_aff_min": -0.15, "learn_aff_free": 0.5,
     "taboo_witness": 2,                                    # атакующая магия при свидетелях → розыск

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import random
 import re
@@ -1967,17 +1968,38 @@ def _taboo(people, crof, loc, out: dict) -> int:
     return len(wit)
 
 
+def _draw_rate() -> float:
+    """Скорость таяния свечи (мана/сек) при черчении: базовая, мягче от Инт+Мдр (усталость учтена)."""
+    cap = _pc_cap_eff()
+    soft = 1 + PB["draw_intwis_k"] * (cap.mod("int") + cap.mod("wis"))
+    return round(PB["draw_drain_per_s"] / max(0.4, soft), 3)
+
+
+def _cast_cost(comp, spec, draw_ms, known: bool):
+    """Сколько маны сожжёт круг. Известный из гримуара — мгновенно за долю сложности. Новый —
+    утечка·секунды_черчения + суммарный вес глифов. Без draw_ms (старый клик-UI) — по сложности."""
+    if known:
+        return max(1, round(spec["difficulty"] * PB["known_cost_k"]))
+    if draw_ms is None:                                    # legacy клик-ввод без таймера
+        return spec["mana_cost"]
+    g = magic_load()
+    weights = sum(g["all"][c].get("weight", 1) for c in comp if c in g["all"])
+    secs = max(0.0, float(draw_ms) / 1000.0)
+    return max(1, math.ceil(_draw_rate() * secs + weights))
+
+
 @router.post("/api/play/cast")
 async def cast(request: Request):
-    """Сотворить круг из глифов (ввод составом; drag-холст — М-5). Тратит ману, растит потолок, даёт
-    усталость; чистый круг вписывается законом (М-3), дикая магия/осечка — непредсказуемый LLM-исход.
+    """Сотворить круг из глифов. Новый круг чертится в реальном времени (свеча тает: cost = утечка·сек +
+    вес глифов; маны не хватило → выброс/осечка). Известный из гримуара (М1a) — мгновенно за фикс-долю.
+    Чистый круг вписывается законом (М-3), дикий/осечка → непредсказуемый LLM-исход (М-3).
     Гейт: только выученные глифы (М-4); боевая магия на людях = ведьмовство → розыск."""
     city, people, crof, cr2b, loc = _play()
     body = await request.json()
     comp = [str(x) for x in (body.get("glyphs") or [])]
     target = body.get("target")
-    known = set(_glyphs_known())
-    locked = [c for c in comp if c in known_ids() and c not in known]
+    known_g = set(_glyphs_known())
+    locked = [c for c in comp if c in known_ids() and c not in known_g]
     if locked:
         g = magic_load()
         names = ", ".join(g["all"][c].get("ru", c) for c in locked)
@@ -1988,21 +2010,30 @@ async def cast(request: Request):
     if cls["kind"] == "empty":
         return {**out, "narr": [f"Круг не сходится — {cls['reason']}."], "mana": _mana(), "gt": _gt()}
     spec = build_spec(comp)
-    cost = spec["mana_cost"]
-    if _mana() < cost:
-        return {**out, "narr": [f"Маны мало: нужно {cost:g}, есть {_mana():g}. Отдохни."],
-                "mana": _mana(), "mana_cap": _mana_cap(), "gt": _gt()}
+    is_known = _grimoire_get(circle_hash(comp)) is not None   # круг уже вписан → мастерский каст
+    mana_before = _mana()
+    cost = _cast_cost(comp, spec, body.get("draw_ms"), is_known)
+    if is_known and mana_before < cost:                    # мастерский круг не запустить без маны
+        return {**out, "narr": [f"Маны мало: нужно {cost:g}, есть {mana_before:g}. Отдохни."],
+                "mana": mana_before, "mana_cap": _mana_cap(), "gt": _gt()}
+    guttered = (not is_known) and cost > mana_before       # свеча погасла посреди черчения — выброс
+    spend = min(mana_before, cost)
     roll = random.Random(f"cast|{_mt()}|{'/'.join(sorted(comp))}").randint(1, 20)
     dc = PB["cast_skill_dc"] + spec["difficulty"] // 3
     total = roll + _pc_cap_eff().mod("int")
-    _mana_spend(cost)
-    _mana_grow(cost)                                       # выжигание растит потолок маны
-    _fat_add(cost)                                         # надрыв → усталость всех статов
+    misfire = (not is_known) and (cls["kind"] == "wild" or total < dc or guttered)
+    _mana_spend(spend)
+    _mana_grow(spend)                                      # выжигание растит потолок маны
+    _fat_add(spend * (PB["burnout_fat_mult"] if guttered else 1))  # выброс истощает сильнее
     _gt_add(PB["act_min"])
-    out["dice"] = {"die": 20, "roll": roll, "mod": _pc_cap_eff().mod("int"), "total": total,
-                   "dc": dc, "ok": total >= dc, "label": "Черчение круга (Int)"}
-    if cls["kind"] == "wild" or total < dc:               # дикая магия / осечка → непредсказуемый LLM-исход
-        reason = cls["reason"] if cls["kind"] == "wild" else "рука дрогнула, круг сорвался"
+    out["cast"].update({"mode": "known" if is_known else "drawn", "guttered": guttered,
+                        "cost": round(spend, 1)})
+    if not is_known:                                       # мастерский круг не бросает — идёт наверняка
+        out["dice"] = {"die": 20, "roll": roll, "mod": _pc_cap_eff().mod("int"), "total": total,
+                       "dc": dc, "ok": total >= dc, "label": "Черчение круга (Int)"}
+    if misfire:                                            # дикая магия / осечка / выброс → LLM-хаос
+        reason = ("свеча погасла — круг сорвался в руках" if guttered and cls["kind"] != "wild"
+                  else cls["reason"] if cls["kind"] == "wild" else "рука дрогнула, круг сорвался")
         _apply_wild(comp, reason, out)
         _taboo(people, crof, loc, out)                     # дикий выброс на людях — ведьмовство
         _pc_remember(f"круг ушёл вразнос ({', '.join(comp)})", 0.4)
@@ -2045,7 +2076,8 @@ def glyphs_list():
     elems = [{**e, "known": e["id"] in known} for e in g["elements"].values()]
     glyphs = [{**s, "known": s["id"] in known} for s in g["glyphs"].values()]
     return {"elements": elems, "glyphs": glyphs, "known": sorted(known),
-            "mana": _mana(), "mana_cap": _mana_cap(), "fatigue": _fatigue()}
+            "mana": _mana(), "mana_cap": _mana_cap(), "fatigue": _fatigue(),
+            "draw": {"rate": _draw_rate(), "known_k": PB["known_cost_k"]}}   # клиент тает свечу в такт
 
 
 def _teachable(role: str) -> set:

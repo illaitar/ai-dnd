@@ -284,7 +284,22 @@
     background:var(--panel2);margin-top:5px;display:flex;align-items:center;gap:8px;cursor:pointer}
   .lawrow:hover,.teachrow:hover{border-color:var(--gold-dim)}
   .lawrow b{color:var(--gold)}.lawrow .cmp{color:var(--faint);font-size:11px;margin-left:auto}
+  .lawrow .cast1{margin-left:8px;font-size:11px;padding:2px 10px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--gold-dim);background:rgba(217,164,65,.1);color:var(--gold)}
   .teachrow .price{margin-left:auto;color:var(--gold)}
+  /* холст-кольцо + свеча (М-5.2) */
+  .ringwrap{display:flex;justify-content:center;margin:4px 0 2px}
+  #magring{width:200px;height:200px}
+  .rnode{transition:transform .18s ease-out,opacity .18s}
+  @keyframes flyin{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+  .rnode.new{animation:flyin .22s ease-out}
+  .manafill.lit{background:linear-gradient(90deg,#a8481f,#e0761f,#ffcf6a);
+    animation:flick .5s ease-in-out infinite alternate}
+  @keyframes flick{from{filter:brightness(.9)}to{filter:brightness(1.15)}}
+  .candle{font-size:11px;color:var(--faint);font-weight:400;letter-spacing:0}
+  .candle.hot{color:#e0761f}.candle.crit{color:#c25450;font-weight:600}
+  #fatwrap .fatbox{text-align:center;max-width:460px;padding:30px}
+  .fatspark{font:600 24px var(--serif);color:#c98a4a;letter-spacing:.03em}
 </style>
 </head>
 <body class="explore">
@@ -357,8 +372,9 @@
     <div class="manatxt" id="magmana">мана —</div>
     <div class="fatline" id="magfat" style="display:none"></div>
 
-    <div class="magsec">круг</div>
-    <div class="circle" id="magcircle"><span class="ph">кликай глифы ниже — собери круг</span></div>
+    <div class="magsec">круг <span class="candle" id="magcandle"></span></div>
+    <div class="ringwrap"><svg id="magring" viewBox="0 0 200 200"></svg></div>
+    <div class="circle" id="magcircle"><span class="ph">кликай глифы ниже — свеча начнёт таять с первого</span></div>
     <div class="magrow">
       <span class="hint" id="maghint"></span>
       <span id="magtargetwrap" style="display:none">цель: <select id="magtarget"></select></span>
@@ -378,6 +394,17 @@
 
     <div class="magsec">гримуар <span id="magrimn" style="color:var(--faint)"></span></div>
     <div id="magrim"><span class="hint">пока пусто — сотвори чистый круг, и закон впишется сюда</span></div>
+  </div>
+</div>
+
+<div id="fatwrap" class="overlay hidden">
+  <div class="fatbox">
+    <div class="fatspark">✦ Выброс</div>
+    <div id="fattext" style="color:var(--dim);margin:16px 0 8px;font:15px/1.65 var(--serif)"></div>
+    <div id="fatstat" style="color:#c98a4a;font-size:13px"></div>
+    <button onclick="$('fatwrap').classList.add('hidden')" style="margin-top:24px;padding:10px 28px;
+      border-radius:10px;border:1px solid var(--gold-dim);background:rgba(217,164,65,.12);color:var(--gold);
+      font:600 13px var(--serif);cursor:pointer">отдышаться</button>
   </div>
 </div>
 
@@ -1108,36 +1135,68 @@ function showDeath(d){
   $('deathdays').textContent='Прожито дней: '+((d&&d.days)||0);
   $('deathwrap').classList.remove('hidden');
 }
-// ── магия (М-5): собрать круг кликами, замкнуть; гримуар и обучение ──────────
+// ── магия (М-5.2): черчение в реальном времени — свеча тает, глиф жжёт ману ──
 let MAG={meta:{},known:new Set(),circle:[],laws:[]};
+let DRAW={lit:false,t0:0,raf:0,local:0,rate:1.5,knownKeys:new Set(),mastered:false};
+const ckey=c=>c.slice().sort().join('|');
 function openMagic(){
   $('magicwrap').classList.remove('hidden');
   Promise.all([api('/api/play/glyphs'),api('/api/play/grimoire'),api('/api/play/teachers')])
     .then(([g,gr,t])=>{
       MAG.meta={};(g.elements||[]).concat(g.glyphs||[]).forEach(x=>MAG.meta[x.id]=x);
       MAG.known=new Set(g.known||[]);
+      DRAW.rate=(g.draw&&g.draw.rate)||1.5;
       setMana(g.mana,g.mana_cap,g.fatigue);
       renderPalette(g);renderGrimoire(gr.laws||[]);renderTeachers(t.teachers||[]);
-      renderCircle();renderMana();renderTarget();
+      resetDraw();renderTarget();
     });
 }
-function closeMagic(){$('magicwrap').classList.add('hidden');}
+function closeMagic(){stopMelt();$('magicwrap').classList.add('hidden');}
+function resetDraw(){stopMelt();DRAW.lit=false;DRAW.mastered=false;DRAW.local=MANA;MAG.circle=[];renderRing();renderCircle();renderMana();}
+function stopMelt(){if(DRAW.raf)cancelAnimationFrame(DRAW.raf);DRAW.raf=0;DRAW.lit=false;}
+// свеча: пока горит — бар показывает DRAW.local, иначе живую ману
 function renderMana(){
-  const pct=MANACAP?Math.max(0,Math.min(100,100*MANA/MANACAP)):0;
-  $('magfill').style.width=pct+'%';
-  $('magmana').textContent='мана '+(Math.round(MANA*10)/10)+' / '+(Math.round(MANACAP)||'?')+' (реген от Инт+Мдр)';
+  const cur=DRAW.lit?DRAW.local:MANA, cap=MANACAP||1;
+  const pct=Math.max(0,Math.min(100,100*cur/cap));
+  const fill=$('magfill');fill.style.width=pct+'%';fill.classList.toggle('lit',DRAW.lit);
+  $('magmana').textContent='мана '+(Math.round(cur*10)/10)+' / '+(Math.round(cap)||'?')
+    +(DRAW.lit?' — свеча горит':' (реген от Инт+Мдр)');
+  const c=$('magcandle');
+  if(DRAW.lit&&!DRAW.mastered){const s=DRAW.local/DRAW.rate;
+    c.textContent='⏳ ~'+s.toFixed(1)+'с до выброса';
+    c.className='candle'+(s<2?' crit':s<4?' hot':'');
+  } else if(DRAW.mastered){c.textContent='✦ мастерский круг — мгновенно';c.className='candle';}
+  else c.textContent='',c.className='candle';
   const f=$('magfat');if(FAT>0){f.style.display='';f.textContent='усталость: −'+FAT+' ко всем характеристикам (отдохни — отойдёт)';}else f.style.display='none';
+}
+function litCandle(){DRAW.lit=true;DRAW.t0=performance.now();DRAW.last=DRAW.t0;DRAW.raf=requestAnimationFrame(melt);}
+function melt(){
+  if(!DRAW.lit){return;}
+  const now=performance.now(),dt=(now-DRAW.last)/1000;DRAW.last=now;
+  if(!DRAW.mastered){DRAW.local-=DRAW.rate*dt;
+    if(DRAW.local<=0){DRAW.local=0;renderMana();gutterOut();return;}}
+  renderMana();DRAW.raf=requestAnimationFrame(melt);
 }
 function renderPalette(g){
   const tile=x=>`<div class="gtile ${x.axis==='element'?'elem':''} ${x.known?'':'locked'}" `
-    +`title="${esc(x.flavor||x.axis)}" onclick="${x.known?`addGlyph('${x.id}')`:''}">`
+    +`title="${esc(x.flavor||x.axis)} · жжёт ${x.weight||1}" onclick="${x.known?`addGlyph('${x.id}')`:''}">`
     +`${esc(x.ru)}${x.known?'':' 🔒'}</div>`;
   $('magelems').innerHTML=(g.elements||[]).map(tile).join('');
   $('magglyphs').innerHTML=(g.glyphs||[]).map(tile).join('');
 }
-function addGlyph(id){MAG.circle.push(id);renderCircle();}
-function clearCircle(){MAG.circle=[];renderCircle();}
-function removeChip(i){MAG.circle.splice(i,1);renderCircle();}
+function updateMastered(){DRAW.mastered=MAG.circle.length>0&&DRAW.knownKeys.has(ckey(MAG.circle));}
+function addGlyph(id){
+  const w=(MAG.meta[id]||{}).weight||1;
+  MAG.circle.push(id);updateMastered();
+  if(!DRAW.mastered){                       // мастерский круг не жжёт свечу
+    if(!DRAW.lit)litCandle();
+    DRAW.local-=w;                           // нанесение глифа мгновенно съедает его вес
+    if(DRAW.local<=0){DRAW.local=0;renderRing(true);renderCircle();renderMana();gutterOut();return;}
+  }
+  renderRing(true);renderCircle();renderMana();
+}
+function clearCircle(){resetDraw();}
+function removeChip(i){MAG.circle.splice(i,1);updateMastered();renderRing();renderCircle();renderMana();}
 function classifyLocal(c){
   const m=id=>MAG.meta[id]||{};
   const el=c.filter(x=>m(x).axis==='element'),forms=c.filter(x=>m(x).axis==='form');
@@ -1150,13 +1209,28 @@ function classifyLocal(c){
   if(verbs.includes('исцелить')&&el.some(x=>x!=='свет'))return{k:'wild',t:'исцеление с губящей стихией — вразнос'};
   return{k:'clean',t:'чистый круг'};
 }
+function renderRing(animLast){
+  const svg=$('magring'),n=MAG.circle.length,cx=100,cy=100,R=70;
+  let g=`<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${DRAW.mastered?'#d9a441':'#8a6f34'}" stroke-width="1.4" stroke-dasharray="4 5" opacity=".7"/>`;
+  const pts=MAG.circle.map((id,i)=>{const a=-Math.PI/2+2*Math.PI*i/Math.max(1,n);
+    return {x:cx+R*Math.cos(a),y:cy+R*Math.sin(a),id};});
+  if(pts.length>1){let d='M'+pts.map(p=>p.x.toFixed(1)+' '+p.y.toFixed(1)).join(' L ')+' Z';
+    g+=`<path d="${d}" fill="rgba(217,164,65,.06)" stroke="#8a6f34" stroke-width="1" opacity=".6"/>`;}
+  pts.forEach((p,i)=>{const meta=MAG.meta[p.id]||{},isEl=meta.axis==='element';
+    const cls='rnode'+(animLast&&i===pts.length-1?' new':'');
+    g+=`<g class="${cls}"><circle cx="${p.x}" cy="${p.y}" r="15" fill="${isEl?'rgba(122,74,74,.85)':'rgba(53,59,74,.9)'}" stroke="${DRAW.mastered?'#d9a441':'#8a6f34'}" stroke-width="1.5"/>`
+      +`<text x="${p.x}" y="${p.y+3.5}" text-anchor="middle" font-size="9" fill="#e9e6dd">${esc((meta.ru||p.id).slice(0,4))}</text></g>`;});
+  if(!n)g+=`<text x="${cx}" y="${cy+4}" text-anchor="middle" font-size="11" fill="#6c7280">пусто</text>`;
+  svg.innerHTML=g;
+}
 function renderCircle(){
   const box=$('magcircle');
-  if(!MAG.circle.length){box.innerHTML='<span class="ph">кликай глифы ниже — собери круг</span>';}
+  if(!MAG.circle.length){box.innerHTML='<span class="ph">кликай глифы ниже — свеча начнёт таять с первого</span>';}
   else box.innerHTML=MAG.circle.map((id,i)=>`<span class="cchip" onclick="removeChip(${i})">${esc((MAG.meta[id]||{}).ru||id)} ✕</span>`).join('');
   const cl=classifyLocal(MAG.circle);
   const h=$('maghint');h.textContent=MAG.circle.length?cl.t:'';h.className='hint '+(MAG.circle.length?cl.k:'');
-  $('magcast').disabled=!MAG.circle.length||cl.k==='empty';
+  const btn=$('magcast');btn.disabled=!MAG.circle.length||cl.k==='empty';
+  btn.textContent=DRAW.mastered?'сотворить ✦':'замкнуть круг';
 }
 function renderTarget(){
   const inCombat=CB&&!$('combat').classList.contains('hidden');
@@ -1167,13 +1241,32 @@ function renderTarget(){
   }
   wrap.style.display='none';
 }
+function combatTarget(){
+  const inCombat=CB&&!$('combat').classList.contains('hidden');
+  if(!inCombat)return null;
+  if($('magtargetwrap').style.display!=='none')return $('magtarget').value;
+  const foes=CB.units.filter(u=>u.side==='foes'&&u.alive&&!u.fled);
+  return foes.length?foes[0].id:null;
+}
 async function doCast(){
   if(!MAG.circle.length)return;
+  const fatBefore=FAT;
   const body={glyphs:MAG.circle.slice()};
-  const inCombat=CB&&!$('combat').classList.contains('hidden');
-  if(inCombat&&$('magtargetwrap').style.display!=='none')body.target=$('magtarget').value;
-  $('magcast').disabled=true;
-  const r=await api('/api/play/cast',body);
+  if(DRAW.lit&&!DRAW.mastered)body.draw_ms=Math.max(0,Math.round(performance.now()-DRAW.t0));
+  const tg=combatTarget();if(tg)body.target=tg;
+  stopMelt();$('magcast').disabled=true;
+  finishCast(await api('/api/play/cast',body),fatBefore);
+}
+function gutterOut(){                       // свеча погасла посреди черчения — вынужденный выброс
+  if(!MAG.circle.length)return;
+  const fatBefore=FAT;
+  const body={glyphs:MAG.circle.slice(),draw_ms:Math.max(0,Math.round(performance.now()-DRAW.t0))};
+  const tg=combatTarget();if(tg)body.target=tg;
+  stopMelt();
+  api('/api/play/cast',body).then(r=>finishCast(r,fatBefore));
+}
+function finishCast(r,fatBefore){
+  if(!r)return;
   (r.narr||[]).forEach(t=>push('narr',esc(t)));
   if(r.dice)showDice(r.dice);
   if(r.mana!=null)setMana(r.mana,r.mana_cap,r.fatigue);
@@ -1181,17 +1274,33 @@ async function doCast(){
   if(r.gt!=null){GT=r.gt;setClock();}
   if(r.combat){CB=r.combat;renderCombat();renderTarget();}
   if(r.refresh)loadMap();
-  MAG.circle=[];renderCircle();
-  api('/api/play/grimoire').then(gr=>renderGrimoire(gr.laws||[]));
+  const guttered=r.cast&&r.cast.guttered;
+  api('/api/play/grimoire').then(gr=>{renderGrimoire(gr.laws||[]);resetDraw();
+    if(guttered)showFatigue(r,fatBefore);});
+}
+function showFatigue(r,fatBefore){
+  $('fattext').textContent=(r.narr&&r.narr.length)?r.narr[0]:'Свеча погасла, круг сорвался в руках.';
+  $('fatstat').textContent=(FAT>fatBefore)?('усталость выросла до −'+FAT+' ко всем характеристикам — отдышись')
+    :('усталость: −'+FAT);
+  $('magicwrap').classList.add('hidden');
+  $('fatwrap').classList.remove('hidden');
 }
 function showDice(d){try{const t=$('dtxt');if(t)t.textContent=(d.label||'бросок')+': '+d.roll+'+'+d.mod+'='+d.total+' / Сл '+d.dc+(d.ok?' ✓':' ✗');}catch(e){}}
 function renderGrimoire(laws){
-  MAG.laws=laws;$('magrimn').textContent=laws.length?('('+laws.length+')'):'';
-  if(!laws.length){$('magrim').innerHTML='<span class="hint">пока пусто — сотвори чистый круг, и закон впишется сюда</span>';return;}
+  MAG.laws=laws;DRAW.knownKeys=new Set(laws.map(l=>ckey(l.comp||[])));
+  $('magrimn').textContent=laws.length?('('+laws.length+')'):'';
+  if(!laws.length){$('magrim').innerHTML='<span class="hint">пока пусто — начерти чистый круг, и закон впишется сюда</span>';return;}
   $('magrim').innerHTML=laws.map((l,i)=>`<div class="lawrow" onclick="loadLaw(${i})"><b>${esc(l.name)}</b>`
-    +`${l.flavor?' — '+esc(l.flavor):''}<span class="cmp">${esc((l.comp||[]).join(' + '))} · ×${l.casts}</span></div>`).join('');
+    +`${l.flavor?' — '+esc(l.flavor):''}<span class="cmp">${esc((l.comp||[]).join(' + '))} · ×${l.casts}</span>`
+    +`<button class="cast1" onclick="event.stopPropagation();castLaw(${i})">сотворить ✦</button></div>`).join('');
 }
-function loadLaw(i){const l=MAG.laws[i];if(!l)return;MAG.circle=(l.comp||[]).slice();renderCircle();}
+function loadLaw(i){const l=MAG.laws[i];if(!l)return;resetDraw();MAG.circle=(l.comp||[]).slice();updateMastered();renderRing();renderCircle();renderMana();}
+async function castLaw(i){                   // мастерский круг из гримуара — мгновенно, без свечи
+  const l=MAG.laws[i];if(!l)return;
+  const fatBefore=FAT,body={glyphs:(l.comp||[]).slice()};
+  const tg=combatTarget();if(tg)body.target=tg;
+  finishCast(await api('/api/play/cast',body),fatBefore);
+}
 function renderTeachers(ts){
   const wrap=$('magteachwrap');
   const rows=[];

@@ -1139,17 +1139,22 @@ function showDeath(d){
 let MAG={meta:{},known:new Set(),circle:[],laws:[]};
 let DRAW={lit:false,t0:0,raf:0,local:0,rate:1.5,knownKeys:new Set(),mastered:false};
 const ckey=c=>c.slice().sort().join('|');
-function openMagic(){
+const safeApi=async u=>{try{return await api(u);}catch(e){return null;}};
+async function openMagic(){
   $('magicwrap').classList.remove('hidden');
-  Promise.all([api('/api/play/glyphs'),api('/api/play/grimoire'),api('/api/play/teachers')])
-    .then(([g,gr,t])=>{
-      MAG.meta={};(g.elements||[]).concat(g.glyphs||[]).forEach(x=>MAG.meta[x.id]=x);
-      MAG.known=new Set(g.known||[]);
-      DRAW.rate=(g.draw&&g.draw.rate)||1.5;
-      setMana(g.mana,g.mana_cap,g.fatigue);
-      renderPalette(g);renderGrimoire(gr.laws||[]);renderTeachers(t.teachers||[]);
-      resetDraw();renderTarget();
-    });
+  // ПОСЛЕДОВАТЕЛЬНО (не Promise.all): первый запрос строит сессию, остальные берут кэш —
+  // иначе три параллельных _play() гонятся за постройкой мира и рвут БД
+  const g=await safeApi('/api/play/glyphs');
+  if(!g||!g.elements){
+    $('magelems').innerHTML='<span class="hint" style="color:var(--red)">магия не отозвалась — закрой и открой ещё раз</span>';
+    $('magglyphs').innerHTML='';return;}
+  MAG.meta={};(g.elements||[]).concat(g.glyphs||[]).forEach(x=>MAG.meta[x.id]=x);
+  MAG.known=new Set(g.known||[]);
+  DRAW.rate=(g.draw&&g.draw.rate)||1.5;
+  setMana(g.mana,g.mana_cap,g.fatigue);
+  renderPalette(g);resetDraw();renderTarget();
+  const gr=await safeApi('/api/play/grimoire');renderGrimoire((gr&&gr.laws)||[]);
+  const t=await safeApi('/api/play/teachers');renderTeachers((t&&t.teachers)||[]);
 }
 function closeMagic(){stopMelt();$('magicwrap').classList.add('hidden');}
 function resetDraw(){stopMelt();DRAW.lit=false;DRAW.mastered=false;DRAW.local=MANA;MAG.circle=[];renderRing();renderCircle();renderMana();}

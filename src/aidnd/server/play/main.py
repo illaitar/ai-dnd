@@ -276,10 +276,12 @@ def _fill_from_pool(city, keynode, kps):
         store.clear_placements(_wid())                 # граф города изменился — узлы протухли
         placed = {}                                        # пере-размещаем заново (память NPC цела)
     if placed:                                             # уже наполнен — восстановить тех же людей
+        dead = {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "dead|")}  # 1 запрос, не N
+        by_id = {r["id"]: r for r in _pool().list_people(limit=100000)}           # 1 запрос, не N
         for pid, pl in placed.items():
-            if store.flag_get(_wid(), f"dead|{pid}"):
+            if pid in dead:
                 continue                                   # мёртвые не возвращаются
-            row = _pool().get_person(pid)
+            row = by_id.get(pid)
             if row:
                 people[pid] = _person_from_row(row, pl["home"], pl["work"])
                 spot[pid] = pl["node"]

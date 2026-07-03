@@ -114,6 +114,8 @@ PB = {
     "path_event_dc": 0.7,                                 # порог эмоции NPC, прерывающий путь
     "say_cap_per_tick": 3,                                # не больше стольких реплик за живой тик
     "addr_cap_per_tick": 1,                               # …и не больше стольких ОБРАЩЕНИЙ к игроку (не толпа «здрасьте»)
+    "addr_npc_cd_min": 45,                                # один NPC пристаёт к игроку не чаще раза в N игровых минут
+    "dlg_fresh_min": 12,                                  # свежий диалог: собеседник не «обращается» параллельно
     # СТРАЖА / РОЗЫСК: вес преступлений (очки), порог задержания, спад/сутки, штраф, побег
     "crime_pickpocket": 1, "crime_rob": 3, "crime_assault": 4, "crime_murder": 8,
     "wanted_confront": 5, "wanted_decay": 2, "watch_fine_per_pt": 3, "watch_flee_dc": 12,
@@ -142,8 +144,9 @@ _GT0 = PB["start_gt"]
 
 def _gt() -> int:
     v = _S.get("gt")
-    if v is None:
-        v = _S["gt"] = _GT0
+    if v is None:                                          # холодный старт: время — ИЗ СЕЙВА, не с нуля
+        row = _store().get_pc(_wid()) or {}                # (иначе распорядок/фаза дня строятся по 19:40)
+        v = _S["gt"] = int(row.get("gt", _GT0))
     return v
 
 
@@ -194,8 +197,7 @@ def _pc() -> NpcState:
                 mm = st.memory.add(m["text"], m["t"], m.get("importance", 0.3),
                                    kind=m.get("kind", "observation"), about=m.get("about") or [])
                 mm.last_access = m.get("last_access", m["t"])
-            _S["gt"] = row.get("gt", _GT0)
-        _S["pc"] = st
+        _S["pc"] = st                                      # время НЕ трогаем: _gt() сам грузит из сейва
     return _S["pc"]
 
 
@@ -324,6 +326,7 @@ def _pc_save() -> None:
         "mana": round(_S["mana"], 2), "mana_cap": round(_S["mana_cap"], 2), "mana_gt": _S["mana_gt"],
         "fat": _S.get("fat", 0), "fat_until": _S.get("fat_until", 0),
         "glyphs": _glyphs_known(),
+        "loc": _S.get("loc"), "inside": _S.get("inside"), "room": _S.get("room"),  # позиция переживает рестарт
         "memory": [{"text": m.text, "t": m.t, "importance": m.importance,
                     "last_access": m.last_access, "kind": m.kind, "about": m.about}
                    for m in st.memory.items[-400:]]})      # хвост — журнал не разрастается бесконечно

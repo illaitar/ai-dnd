@@ -341,8 +341,14 @@ def _play():
         start = next((keynode.get(p.work) for p in people.values()
                       if p.role == "трактирщик" and p.work), None) or kps[0]
         _weave_ties(people)                                # связи персон → реальные люди пула
+        row = _store().get_pc(_wid()) or {}                # позиция игрока ПЕРЕЖИВАЕТ рестарт/деплой
+        saved_loc = row.get("loc")
+        if saved_loc in xy:
+            start = saved_loc
         _S.update(city=city, people=people, crof=spot, cr2b=n2b, loc=start,
                   geom=_build_geom(city, xy, n2b, vis), keynode=keynode, kps=kps)
+        if saved_loc in xy and row.get("inside") in n2b.values():
+            _S["inside"], _S["room"] = row["inside"], row.get("room")
     _apply_routine()                                       # споты = f(время): распорядок дня
     return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]
 
@@ -505,16 +511,26 @@ def _voice(p, rel, kind, player_text=None) -> str:
     if _spurns(p):                                         # обида/гнев ПЕРЕВЕШИВАЮТ радушие персоны
         bits.append("Ты ЗОЛ на этого человека (вспомни, почему) — никакого радушия: "
                     "холод, резкость или презрение, по твоему характеру.")
-    bits.append("КАНОН: о людях и местах ЭТОГО города говори только то, что есть в памяти и справке — "
-                "здешних имён и заведений не выдумывай. Вымысел допустим лишь о дальних краях и былом, "
-                "и подавай его как слух.")
+    here_name = (_binfo(_S.get("inside"))["name"] if _S.get("inside") else "улица города")
+    bits.append(f"МЕСТО: город называется «{_city_name()}», вы сейчас — {here_name}. "
+                "КАНОН: о людях и местах ЭТОГО города говори только то, что есть в памяти и справке — "
+                "здешних имён и заведений не выдумывай (и город зови ТОЛЬКО его настоящим именем). "
+                "Вымысел допустим лишь о дальних краях и былом, и подавай его как слух.")
+    bits.append("СОБЕСЕДНИК — чужак-путник. Его внешности, одежды и имени ты НЕ ЗНАЕШЬ, пока он сам "
+                "не показал/назвал — НЕ приписывай ему одежд, черт и званий (не путай его с другими "
+                "посетителями из памяти).")
     lv = _S.get("live") or {}
     just = (lv.get("last") or {}).get(p.id)
     if just and just != "—":
-        bits.append(f"Ты в «{lv.get('place', 'этом месте')}»; только что ты: {just}.")
+        bits.append(f"Только что ты: {just}.")
     mems = p.state.memory.recall(player_text or "разговор с чужаком-игроком", now=_mt(), k=5)
-    if mems:                                               # непрерывность: NPC помнит вас и прошлое
-        bits.append("ТЫ ПОМНИШЬ: " + "; ".join(m.text for m in mems) + ".")
+    mine = [m for m in mems if PLAYER in (m.about or [])]
+    other = [m for m in mems if PLAYER not in (m.about or [])]
+    if mine:                                               # непрерывность: NPC помнит ИМЕННО вас
+        bits.append("ТЫ ПОМНИШЬ О СОБЕСЕДНИКЕ: " + "; ".join(m.text for m in mine) + ".")
+    if other:                                              # прочее — фон, НЕ про собеседника
+        bits.append("ПРОЧЕЕ ИЗ ПАМЯТИ (про ДРУГИХ людей, НЕ про собеседника — не смешивай): "
+                    + "; ".join(m.text for m in other) + ".")
     if player_text:                                        # вопрос о мире → справка сразу (не выдумывать)
         info = _world_lookup(player_text, _S.get("loc"))
         if "не скажу" not in info:
@@ -669,6 +685,7 @@ async def talk(request: Request):
     p = people[npc]
     first = npc not in _met()
     _pc().rel(npc)                                     # заговорил = познакомился (имя открыто)
+    _S["dlg"] = {"npc": npc, "gt": _gt()}              # активный диалог: собеседник не лезет параллельно
     _gt_add(PB["talk_min"])
     st = p.state
     st.needs["social"] = max(st.needs.get("social", 0.0), 0.4)
@@ -712,6 +729,7 @@ async def say(request: Request):
     p = people[npc]
     rel = p.state.relationships.setdefault(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     text = str(b.get("text", ""))
+    _S["dlg"] = {"npc": npc, "gt": _gt()}                  # диалог продолжается — окно свежести сдвигается
     _gt_add(PB["talk_min"])
     line = _voice(p, rel, "reply", text)
     tone = _S.get("last_tone", "neutral")                  # тон слов игрока — из уст самого NPC
@@ -1442,7 +1460,9 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     w.ground[place] = _live_affordances(bid)
     hero = _pc_name()
     names = {PLAYER: hero if hero != "Странник" else "чужак"}   # NPC зовут по имени, если знают
-    roles = {PLAYER: "недавно вошедший незнакомец"}
+    known_by = {pid for pid in _here(loc, crof)                 # кто из присутствующих УЖЕ знаком с игроком
+                if PLAYER in people[pid].state.relationships}
+    roles = {PLAYER: ("гость, которого тут уже знают" if known_by else "недавно вошедший незнакомец")}
     rng = random.Random(f"live|{loc}")
     npc_map: dict = {}                                     # pid → {имя вещи: item_id} (кражи реальны)
     here_all = _here(loc, crof)
@@ -1505,6 +1525,9 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             bits.append("к чужакам — " + _STANCE.get(per["stance"], "нейтрально"))
         if people[pid].work:
             bits.append("ты здесь НА РАБОТЕ — твой пост тут")
+        if pid in known_by:                                 # знакомство переживает тики и перестройки сцены
+            bits.append(f"с гостем ({names[PLAYER]}) вы УЖЕ ЗНАКОМЫ и уже здоровались — "
+                        "НЕ приветствуй заново и не спрашивай, кто он; продолжай общение по делу")
         if bits:
             personas[pid] = ". ".join(bits)
     here = _here(loc, crof)
@@ -1630,10 +1653,13 @@ def _live_tick(people) -> tuple:
                 if tid == PLAYER:
                     if addr_n >= PB["addr_cap_per_tick"]:  # уже кто-то поздоровался в этот тик — не толпой
                         continue
-                    cd = lv.setdefault("addr_cd", {})
-                    if lv["clock"] < cd.get(pid, -99):     # недавно уже приставал — помолчит
+                    dlg = _S.get("dlg") or {}              # собеседник УЖЕ говорит с тобой — не «подходит» заново
+                    if dlg.get("npc") == pid and _gt() - dlg.get("gt", -9999) <= PB["dlg_fresh_min"]:
                         continue
-                    cd[pid] = lv["clock"] + 4
+                    cd = _S.setdefault("addr_gt", {})      # кулдаун по ИГРОВОМУ времени — переживает перестройки сцены
+                    if _gt() < cd.get(pid, -9999) + PB["addr_npc_cd_min"]:
+                        continue
+                    cd[pid] = _gt()
                     addr_n += 1
                     address.append({"npc": pid, "who": who, "text": txt})
                     pc.memory.add(f"{who} обратился ко мне: «{txt[:100]}»", _mt(), 0.4, about=[pid])

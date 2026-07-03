@@ -307,7 +307,7 @@
 <div class="top">
   <span class="brand">&#10022; AI-DnD</span>
   <span class="loc"><b id="locname">Трактир</b><span class="sep">·</span><span id="locdist"></span></span>
-  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="mana" title="мана" style="cursor:pointer;color:var(--gold)" onclick="openMagic()">&#10022; 12/14</span><span id="coins">12 зм</span></span>
+  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="mana" title="мана" style="cursor:pointer;color:var(--gold)" onclick="openMagic()">&#10022; 12/14</span><span id="coins">12 зм</span><a id="dbglog" href="/api/play/debuglog?download=1" title="скачать подробный лог сессии для отладки" style="color:var(--faint);text-decoration:none;cursor:pointer" onclick="event.preventDefault();downloadLog()">&#8681; лог</a></span>
 </div>
 
 <div class="stage">
@@ -1291,6 +1291,19 @@ function showFatigue(r,fatBefore){
   $('fatwrap').classList.remove('hidden');
 }
 function showDice(d){try{const t=$('dtxt');if(t)t.textContent=(d.label||'бросок')+': '+d.roll+'+'+d.mod+'='+d.total+' / Сл '+d.dc+(d.ok?' ✓':' ✗');}catch(e){}}
+async function downloadLog(){                 // подробный лог сессии → файл (для отладки)
+  const el=$('dbglog');const was=el.textContent;el.textContent='⌛ …';
+  try{
+    const r=await fetch('/api/play/debuglog?download=1');
+    const txt=await r.text();
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain;charset=utf-8'}));
+    a.download='play-debug-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.log';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+  }catch(e){push('sys','<span style="color:var(--red)">не удалось скачать лог: '+esc(e)+'</span>');}
+  el.textContent=was;
+}
 function renderGrimoire(laws){
   MAG.laws=laws;DRAW.knownKeys=new Set(laws.map(l=>ckey(l.comp||[])));
   $('magrimn').textContent=laws.length?('('+laws.length+')'):'';

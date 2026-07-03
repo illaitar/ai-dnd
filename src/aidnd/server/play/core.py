@@ -113,6 +113,7 @@ PB = {
     "caravan_chance": 0.35,                               # шанс каравана с товаром за утро
     "path_event_dc": 0.7,                                 # порог эмоции NPC, прерывающий путь
     "say_cap_per_tick": 3,                                # не больше стольких реплик за живой тик
+    "addr_cap_per_tick": 1,                               # …и не больше стольких ОБРАЩЕНИЙ к игроку (не толпа «здрасьте»)
     # СТРАЖА / РОЗЫСК: вес преступлений (очки), порог задержания, спад/сутки, штраф, побег
     "crime_pickpocket": 1, "crime_rob": 3, "crime_assault": 4, "crime_murder": 8,
     "wanted_confront": 5, "wanted_decay": 2, "watch_fine_per_pt": 3, "watch_flee_dc": 12,
@@ -399,6 +400,12 @@ _S = _SessProxy()
 
 def _wid() -> int:
     return _S["wid"]
+
+
+def current_world_id():
+    """ID мира текущего запроса (для тегирования логов) или None вне play-сессии."""
+    s = _CUR.get()
+    return s.get("wid") if s else None
 
 _COLORS = ["#c98a52", "#6f8f6a", "#8a6fae", "#a86a6a", "#5f8296", "#b0894a"]
 def _binfo(bid: str | None) -> dict:

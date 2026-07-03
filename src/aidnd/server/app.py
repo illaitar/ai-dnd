@@ -22,6 +22,31 @@ from .routes_usage import router as _usage_router
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 app = FastAPI(title="AI-DnD Engine")
+
+# подробный файловый лог сессии (для отладки, скачивается из /api/play/debuglog)
+from . import debuglog                                     # noqa: E402
+from .play.core import current_world_id                    # noqa: E402
+debuglog.setup(current_world_id)
+
+
+@app.middleware("http")
+async def _log_requests(request: Request, call_next):
+    """Трасса запроса + ПОЛНЫЙ трейсбек любого необработанного исключения в файловый лог."""
+    import logging
+    import time
+    log = logging.getLogger("aidnd.req")
+    t0 = time.perf_counter()
+    try:
+        resp = await call_next(request)
+    except Exception:                                      # noqa: BLE001 — залогировать и пробросить
+        log.exception("НЕОБРАБОТАННОЕ исключение: %s %s", request.method, request.url.path)
+        raise
+    dt = (time.perf_counter() - t0) * 1000
+    if request.url.path.startswith("/api/"):
+        log.debug("%s %s → %s (%.0f мс)", request.method, request.url.path, resp.status_code, dt)
+    return resp
+
+
 app.include_router(_auth_router)
 app.include_router(_usage_router)
 app.include_router(_citydebug_router)

@@ -296,6 +296,7 @@ async function openPoolBuilding(bid) {
   $("card-name").textContent = (e.name || d.btype) + " · ПУЛ";
   let b = `<div class="cl g">${d.id} · ${d.btype} · ${[e.tier, e.size, e.condition].filter(Boolean).join(" · ")}</div>`;
   if (e.atmosphere) b += `<div class="cl g">${e.atmosphere}</div>`;
+  if (d.plan) b += `<div class="cl">${d.plan}</div>`;
   b += zonesHtml(e);
   $("card-body").innerHTML = b;
 }

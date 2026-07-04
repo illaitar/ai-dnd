@@ -4,9 +4,9 @@
 геометрии; выдаёт закон ЦЕЛИКОМ — суть (kind, свободная!), силу, цель, механику. Freeform: полёт,
 иллюзия, туман, свет — что угодно, что честно следует из рисунка. Сервер КЛАМПИТ закон по бюджету
 силы (power_budget) — LLM свободен в сути, но не в мощности. Кэш в гримуаре-на-мир по хэшу рисунка.
-Роль Б — сорванный круг: исход из ОГРАНИЧЕННОГО меню (мир не сломать). См. docs/MAGIC.md.
+Роль Б — сорванный круг: исход из ОГРАНИЧЕННОГО меню (мир не сломать).
 
-LLMInscriber — реальный путь (роли spell_scribe/wild_magic → deepseek); StubInscriber — офлайн/тесты.
+LLMInscriber — единственный рантайм-путь (роли spell_scribe/wild_magic); StubInscriber — ТОЛЬКО тесты.
 """
 
 from __future__ import annotations
@@ -14,7 +14,8 @@ from __future__ import annotations
 import json
 import re
 
-from .grammar import RULES_RU, anchor, describe, fallback_law, load, power_budget
+from ..inference import LLMBadOutput
+from .grammar import RULES_RU, anchor, base_law, describe, load, power_budget
 
 # исходы дикой магии — механически безопасное меню (маг. хаос ограничен этим списком) --------
 WILD_EFFECTS = ("backfire", "nothing", "scorch", "warp", "boon")
@@ -70,7 +71,7 @@ _WILD_SYS = (
 def clamp_law(d: dict, comp) -> dict:
     """Закон LLM → в рамки бюджета рисунка (LLM свободен в сути, но не в мощности)."""
     budget = max(1, round(power_budget(comp)))
-    law = dict(fallback_law(comp))                          # скелет: недостающее — из фоллбэка
+    law = dict(base_law(comp))                          # скелет: недостающее — из детерминированной грамматики
     law["name"] = str(d.get("name") or law["name"])[:40]
     for k in ("flavor", "sensory", "law", "kind", "target"):
         if d.get(k):
@@ -127,10 +128,10 @@ class Inscriber:
 
 
 class StubInscriber(Inscriber):
-    """Детерминированная заглушка (офлайн/тесты) — закон из fallback_law, отдача по-умолчанию."""
+    """ТОЛЬКО для тестов (рантайм никогда не строит): закон из base_law, отдача по-умолчанию."""
 
     def scribe_law(self, comp, cls: dict) -> dict:
-        return fallback_law(comp)
+        return base_law(comp)
 
     def wild(self, comp, reason: str, in_combat: bool) -> dict:
         n = 1 + (len(list(comp)) % 3)
@@ -144,9 +145,7 @@ class LLMInscriber(Inscriber):
     def __init__(self, manager):
         self.manager = manager
 
-    def scribe_law(self, comp, cls: dict) -> dict | None:
-        if not self.manager.available():
-            return None
+    def scribe_law(self, comp, cls: dict) -> dict:
         g = load()
         gloss = "; ".join(f"{e['ru']} — {e.get('flavor') or e.get('verb') or e.get('shape') or e.get('mod')}"
                           for e in g["all"].values())
@@ -155,22 +154,20 @@ class LLMInscriber(Inscriber):
         resp = self.manager.call("spell_scribe", [{"role": "system", "content": _SCRIBE_SYS},
                                                   {"role": "user", "content": user}],
                                  options={"temperature": 0.8})
-        d = _parse_json(resp.get("content") if resp else None)
+        d = _parse_json(resp.get("content"))
         if not d or not d.get("name"):
-            return None
+            raise LLMBadOutput("spell_scribe: закон круга не разобран")
         return clamp_law(d, comp)
 
-    def wild(self, comp, reason: str, in_combat: bool) -> dict | None:
-        if not self.manager.available():
-            return None
+    def wild(self, comp, reason: str, in_combat: bool) -> dict:
         user = (f"Рисунок сорванного круга: {describe(comp)}. Причина срыва: {reason}. "
                 f"{'Маг в бою.' if in_combat else 'Боя нет.'} Разыграй дикий исход.")
         resp = self.manager.call("wild_magic", [{"role": "system", "content": _WILD_SYS},
                                                 {"role": "user", "content": user}],
                                  options={"temperature": 1.0})
-        d = _parse_json(resp.get("content") if resp else None)
+        d = _parse_json(resp.get("content"))
         if not d:
-            return None
+            raise LLMBadOutput("wild_magic: дикий исход не разобран")
         eff = d.get("effect")
         if eff not in WILD_EFFECTS:
             eff = "backfire"

@@ -1,7 +1,9 @@
 """Догенерация портретов до потолка: NPC без портретов получают их, пока в банке
 не станет CAP душ с лицами. Существующие не трогаем. Ключ: .secrets/fal.key."""
-import os, sys
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 for f, v in (("deepseek.key", "DEEPSEEK_API_KEY"), ("fal.key", "FAL_KEY")):

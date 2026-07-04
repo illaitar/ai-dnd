@@ -18,11 +18,12 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.dirname(__file__))
 
+from mind_sim import PLACE_DESC, ROLES, build  # noqa: E402
+
 from aidnd.inference import ModelManager  # noqa: E402
 from aidnd.mind import perceive  # noqa: E402
 from aidnd.mind.llm_agent import apply_actions, decide_hybrid  # noqa: E402
 from aidnd.mind.tick import _decay_emotion, _decay_needs  # noqa: E402
-from mind_sim import PLACE_DESC, ROLES, build  # noqa: E402
 
 
 def run(seed=7, ticks=6):

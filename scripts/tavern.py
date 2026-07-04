@@ -11,7 +11,16 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from aidnd.mind import TRAITS, Body, Item, NpcConfig, NpcState, apply, decide, perceive  # noqa: E402
+from aidnd.mind import (  # noqa: E402
+    TRAITS,
+    Body,
+    Item,
+    NpcConfig,
+    NpcState,
+    apply,
+    decide,
+    perceive,
+)
 from aidnd.mind.tick import _decay_emotion, _decay_needs  # noqa: E402
 from aidnd.mind.world import World  # noqa: E402
 

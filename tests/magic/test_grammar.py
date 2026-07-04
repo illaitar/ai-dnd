@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
-from aidnd.magic import (anchor, circle_hash, classify, fallback_law, glyph_cost, known_ids,
-                         load, normalize, power_budget)
+from aidnd.magic import (
+    anchor,
+    base_law,
+    circle_hash,
+    classify,
+    glyph_cost,
+    known_ids,
+    load,
+    normalize,
+    power_budget,
+)
 
 
 def test_load_dictionary():
@@ -56,9 +65,9 @@ def test_hash_quantized_stable():
     assert circle_hash(["огонь", "стрела"]) == circle_hash(["огонь", "стрела"])
 
 
-def test_fallback_law_within_budget():
+def test_base_law_within_budget():
     comp = ["огонь", "стрела", "больше"]
-    law = fallback_law(comp)
+    law = base_law(comp)
     assert law["power"] <= max(1, round(power_budget(comp)))
     assert law["mech"].get("damage")
     assert law["name"]

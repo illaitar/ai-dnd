@@ -5,8 +5,6 @@
 from __future__ import annotations
 
 from .act import Action, decide, enumerate_actions, score
-from .brain import modulate_ranked, think
-from .modulators import modulators, urges
 from .agenda import (
     Agenda,
     Milestone,
@@ -17,11 +15,13 @@ from .agenda import (
     revenge_agenda,
     wealth_agenda,
 )
+from .brain import modulate_ranked, think
 from .fsm import dominant_need, hold, urgency
 from .fsm import step as fsm_step
 from .goals import Goal, propose_goals, standing_needs
-from .memory import LLMReranker, Memory, MemoryStore, Reranker, StubReranker
+from .memory import LLMReranker, Memory, MemoryStore, Reranker
 from .model import ABILITIES, EMOTIONS, NEEDS, TRAITS, NpcConfig, NpcState, Plan, Scene
+from .modulators import modulators, urges
 from .sim import Percept, apply, perceive, tick
 from .tick import advance, appraise
 from .tools import TOOLS, run_tool
@@ -31,7 +31,7 @@ from .world import Body, Item, World
 MODES = ("routine", "leisure", "converse", "threat")
 
 __all__ = ["NpcConfig", "NpcState", "Plan", "Scene", "MemoryStore", "Memory", "Reranker",
-           "StubReranker", "LLMReranker", "TOOLS", "run_tool", "advance", "appraise",
+           "LLMReranker", "TOOLS", "run_tool", "advance", "appraise",
            "fsm_step", "urgency", "hold", "dominant_need", "MODES",
            "TRAITS", "ABILITIES", "NEEDS", "EMOTIONS",
            # эмерджентное ядро решений

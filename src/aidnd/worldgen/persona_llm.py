@@ -4,7 +4,7 @@
 нарратор в рантайме. Согласовано с МЕХАНИКОЙ (11 черт mind + обаяние + видимое богатство) через
 подсказки в промпте, но НИКОГДА не переписывает числа — персона это только флейвор поверх.
 
-LLMPersona — реальный путь (роль character_writer → профиль deepseek); StubPersona — офлайн/тесты.
+LLMPersona — единственный рантайм-путь (роль character_writer); StubPersona — ТОЛЬКО тесты.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+
+from ..inference import LLMBadOutput
 
 SEX = ("m", "f")
 AGE = ("young", "adult", "middle", "old", "elder")
@@ -162,7 +164,7 @@ class PersonaEnricher:
 
 
 class StubPersona(PersonaEnricher):
-    """Детерминированная заглушка (офлайн/тесты) — без выдумки, ровно по механике."""
+    """ТОЛЬКО для тестов (рантайм никогда не строит) — без выдумки, ровно по механике."""
 
     def describe(self, ctx: PersonaCtx) -> dict:
         rich = ctx.appearance >= 0.55
@@ -190,9 +192,7 @@ class LLMPersona(PersonaEnricher):
     def __init__(self, manager):
         self.manager = manager
 
-    def describe(self, ctx: PersonaCtx) -> dict | None:
-        if not self.manager.available():
-            return None
+    def describe(self, ctx: PersonaCtx) -> dict:
         sex_ru = "женский" if ctx.sex == "f" else "мужской"
         user = (f"Заготовка NPC: роль «{ctx.role}»; ПОЛ {sex_ru} (строго соблюдай в look и в portrait-тегах); "
                 f"характер — {trait_hints(ctx.traits, ctx.charisma, ctx.appearance)}; мир: {ctx.region}. "
@@ -200,5 +200,7 @@ class LLMPersona(PersonaEnricher):
         resp = self.manager.call("character_writer",
                                  [{"role": "system", "content": _PERSONA_SYS},
                                   {"role": "user", "content": user}], options={"temperature": 0.75})
-        data = _parse_json(resp.get("content") if resp else None)
-        return normalize(data, ctx) if data else None
+        data = _parse_json(resp.get("content"))
+        if not data:
+            raise LLMBadOutput(f"character_writer: персона не разобрана ({ctx.name})")
+        return normalize(data, ctx)

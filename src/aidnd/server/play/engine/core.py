@@ -661,12 +661,11 @@ def _model():
 
 
 def _inscriber():
-    """Инскриптор магии (роль А — имя закона, роль Б — дикий хаос). LLM если доступен, иначе заглушка."""
+    """Инскриптор магии (роль А — закон круга, роль Б — дикий хаос). Только LLM — без фоллбэков."""
     if _S.get("inscriber") is None:
-        from aidnd.magic import LLMInscriber, StubInscriber
+        from aidnd.magic import LLMInscriber
 
-        mgr = _model()
-        _S["inscriber"] = LLMInscriber(mgr) if mgr.available() else StubInscriber()
+        _S["inscriber"] = LLMInscriber(_model())
     return _S["inscriber"]
 
 

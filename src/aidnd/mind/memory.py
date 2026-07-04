@@ -2,7 +2,8 @@
 
 Кандидаты по скору recency·importance·relevance (память Generative Agents), затем точный LLM-rerank
 выбирает top-k самых релевантных ВОПРОСУ. Обращение освежает last_access (доступ укрепляет память).
-Реранкер подключаем: StubReranker (офлайн/тесты) | LLMReranker.
+Реранкер подключаем (LLMReranker) или None — тогда shortlist по механическому скору как есть
+(это ранжирование, не контент: единственное санкционированное «без LLM» место).
 """
 
 from __future__ import annotations
@@ -65,10 +66,6 @@ class Reranker:
         return mems[:k]
 
 
-class StubReranker(Reranker):
-    """Без LLM — кандидаты как есть (уже по убыванию скора)."""
-
-
 class LLMReranker(Reranker):
     """Точный отбор top-k релевантных вопросу через модель (роль cognition)."""
 
@@ -76,7 +73,7 @@ class LLMReranker(Reranker):
         self.manager = manager
 
     def rerank(self, query: str, mems: list, k: int) -> list:
-        if not mems or not self.manager.available():
+        if not mems:
             return mems[:k]
         listing = "\n".join(f"{i}. {m.text}" for i, m in enumerate(mems))
         system = (f"Дан вопрос и пронумерованные воспоминания NPC. Верни ТОЛЬКО JSON "
@@ -115,7 +112,7 @@ class MemoryStore:
         score = {m.id: self.W_REC * rec[m.id] + self.W_IMP * imp[m.id] + self.W_REL * rel[m.id]
                  for m in self.items}
         shortlist = sorted(self.items, key=lambda m: -score[m.id])[:pool]
-        top = (reranker or StubReranker()).rerank(query, shortlist, k)
+        top = reranker.rerank(query, shortlist, k) if reranker else shortlist[:k]
         for m in top:
             m.last_access = now
         return top

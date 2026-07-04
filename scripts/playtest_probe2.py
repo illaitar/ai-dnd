@@ -10,10 +10,10 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import aidnd.server.routes_play as rp  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
 from aidnd.server.app import app  # noqa: E402
-import aidnd.server.routes_play as rp  # noqa: E402
 
 c = TestClient(app)
 

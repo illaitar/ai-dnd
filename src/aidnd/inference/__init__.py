@@ -1,11 +1,11 @@
-"""L4 Inference — клиент модели, реестр агентов, structured output (main §6, §12).
+"""Inference — клиент модели, роутинг по ролям, structured output.
 
-Клиент модели (client.py) — единственный компонент, переиспользованный из ai-dnd.
-Всё остальное (агенты, схемы, фоллбэки) реализовано по диздоку.
+Правило проекта: офлайн-фоллбэков НЕТ. Нет модели → LLMUnavailable; не разобрали
+ответ → LLMBadOutput. Обе ошибки честно доходят до игрока (503 на границе сервера).
 """
 
-from . import agents
-from .client import ModelManager, OllamaClient, OllamaError
+from .client import LLMBadOutput, LLMUnavailable, ModelManager, OllamaClient, OllamaError
 from .structured import coerce, extract
 
-__all__ = ["OllamaClient", "OllamaError", "ModelManager", "agents", "extract", "coerce"]
+__all__ = ["OllamaClient", "OllamaError", "ModelManager",
+           "LLMUnavailable", "LLMBadOutput", "extract", "coerce"]

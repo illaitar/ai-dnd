@@ -4,7 +4,7 @@
 соберёт в рантайме из этих фактов. Один вызов на здание (суб-помещения инлайн). Обезличенно —
 людей не выдумываем (NPC отдельным пассом), роли — в occupants_kind.
 
-LLMEnricher — реальный путь; StubEnricher — детерминированная заглушка (офлайн/тесты).
+LLMEnricher — единственный рантайм-путь; StubEnricher — ТОЛЬКО тесты.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+
+from ..inference import LLMBadOutput
 
 SERVICES = ("eat", "drink", "lodging", "shop", "commission", "heal", "pray", "store")
 TIERS = ("poor", "modest", "comfortable", "wealthy")
@@ -190,13 +192,13 @@ class LLMEnricher(Enricher):
     def __init__(self, manager):
         self.manager = manager
 
-    def describe_building(self, ctx: BuildingCtx) -> dict | None:
-        if not self.manager.available():
-            return None
+    def describe_building(self, ctx: BuildingCtx) -> dict:
         user = (f"Здание-слот: подсказка типа «{ctx.name_hint}», {ctx.role_hint}; "
                 f"ориентиры: {', '.join(ctx.landmarks) or 'нет'}; мир: {ctx.region}.")
         resp = self.manager.call("location_writer",
                                  [{"role": "system", "content": _BUILD_SYS},
                                   {"role": "user", "content": user}], options={"temperature": 0.6})
-        data = _parse_json(resp.get("content") if resp else None)
-        return _norm_building(data) if data else None
+        data = _parse_json(resp.get("content"))
+        if not data:
+            raise LLMBadOutput(f"location_writer: фактшит здания не разобран ({ctx.name_hint})")
+        return _norm_building(data)

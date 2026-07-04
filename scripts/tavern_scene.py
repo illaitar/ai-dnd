@@ -15,10 +15,11 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.dirname(__file__))
 
+from tavern import build  # noqa: E402
+
 from aidnd.inference import ModelManager  # noqa: E402
 from aidnd.mind import apply, decide, perceive  # noqa: E402
 from aidnd.mind.tick import _decay_emotion, _decay_needs  # noqa: E402
-from tavern import build  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "tavern_scene.txt")
 W = 74

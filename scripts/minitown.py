@@ -12,10 +12,20 @@ from collections import Counter
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.dirname(__file__))
 
-from aidnd.mind import TRAITS, Body, Item, NpcConfig, NpcState, apply, decide, perceive  # noqa: E402
+from archetypes import ARCHETYPES  # noqa: E402
+
+from aidnd.mind import (  # noqa: E402
+    TRAITS,
+    Body,
+    Item,
+    NpcConfig,
+    NpcState,
+    apply,
+    decide,
+    perceive,
+)
 from aidnd.mind.tick import _decay_emotion, _decay_needs  # noqa: E402
 from aidnd.mind.world import World  # noqa: E402
-from archetypes import ARCHETYPES  # noqa: E402
 
 TR = {a[0]: a[2] for a in ARCHETYPES}
 POW = {a[0]: a[3] for a in ARCHETYPES}

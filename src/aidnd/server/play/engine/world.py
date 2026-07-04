@@ -13,13 +13,12 @@ from fastapi import Request
 from aidnd import society
 from aidnd.citygraph import CityParams, generate, visual
 from aidnd.citygraph.model import NodeKind
-from aidnd.mind import Body, NpcConfig, NpcState, StubPlanner, advance_agendas
+from aidnd.mind import Body, NpcConfig, NpcState, advance_agendas
 from aidnd.mind import Item as MItem
 from aidnd.mind import World as MWorld
 from aidnd.mind import perceive as mind_perceive
 from aidnd.mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
 from aidnd.mind.tick import _decay_emotion, _decay_needs
-from aidnd.play import populate
 from aidnd.play.population import Townsperson
 from aidnd.server.play.engine.core import (
     _COLORS,
@@ -321,10 +320,10 @@ def _res_binfo(bid: str) -> dict | None:
 def _fill_from_pool(city, keynode, kps):
     """Наполнить толпу из БАНКА (worldgen.people): ключевые здания по роли + горожане по домам +
     пара лихих. Привязки пишем в placements (персист) и восстанавливаем при повторном заходе.
-    Пул пуст → вернём None (падаем на голое populate)."""
+    Пустой банк = сломанная поставка данных → жёсткая ошибка (мир без персон не строим)."""
     store = _store()
     if _pool().people_count() == 0:
-        return None
+        raise RuntimeError("банк NPC (worlds.db:people) пуст — мир не построить; проверь поставку пулов")
     people, spot = {}, {}
     placed = {pl["npc_id"]: pl for pl in store.placements_for(_wid())}
     if placed and not all(
@@ -388,15 +387,7 @@ def _play():
             bid: kb.node for bid, kb in city.key_buildings.items()
         }  # здание → БЛИЖАЙШАЯ точка (дверь)
         kps = city.key_points()
-        drawn = _fill_from_pool(city, keynode, kps)
-        if drawn:  # наполнение из банка
-            people, spot = drawn
-        else:  # фоллбэк: голое население (без персон/портретов)
-            people = populate(city, seed=_S["seed"], commoners=16, deviants=2)
-            rng = random.Random(f"spot|{_wid()}")
-            spot = {
-                pid: (keynode.get(p.work) or p.home or rng.choice(kps)) for pid, p in people.items()
-            }
+        people, spot = _fill_from_pool(city, keynode, kps)  # только банк; пустой банк = ошибка
         n2b = {}  # узел-точка → здание (ключевые прежде домов)
         for bid, kb in city.key_buildings.items():
             n2b.setdefault(kb.node, bid)
@@ -621,12 +612,6 @@ _STANCE = {
 
 def _voice(p, rel, kind, player_text=None) -> str:
     mgr = _model()
-    if not mgr.available():
-        return (
-            f"{p.name} окидывает тебя оценивающим взглядом."
-            if kind == "greet"
-            else f"{p.name} неопределённо пожимает плечами."
-        )
     per = getattr(p, "persona", None) or {}
     bits = [f"Ты — {p.name}, {p.role} на фронтире (тёмное фэнтези)."]
     if per:  # богатая персона из пула
@@ -1027,11 +1012,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
 
         def plan_one(pid):
             st = people[pid].state
-            ag = (
-                plan_agenda(st, w, {"roles": roles}, mgr)
-                if mgr.available()
-                else StubPlanner().plan(st, w)
-            )
+            ag = plan_agenda(st, w, {"roles": roles}, mgr)
             if ag:
                 st.agendas.append(ag)
 

@@ -10,7 +10,7 @@ import random
 from fastapi import Request
 
 from aidnd.combat import roll_dice
-from aidnd.magic import circle_hash, classify, fallback_law, power_budget
+from aidnd.magic import circle_hash, classify, power_budget
 from aidnd.magic import describe as magic_describe
 from aidnd.magic import load as magic_load
 from aidnd.magic import normalize as magic_normalize
@@ -207,7 +207,7 @@ def _inscribe_law(comp, cls: dict):
     entry = _grimoire_get(h)
     if entry:
         return entry, False
-    law = _inscriber().scribe_law(comp, cls) or fallback_law(comp)
+    law = _inscriber().scribe_law(comp, cls)  # LLM обязателен; ошибки честно летят игроку
     entry = {
         "hash": h,
         "comp": magic_normalize(comp),

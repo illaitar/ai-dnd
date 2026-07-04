@@ -22,7 +22,6 @@ from ..mind import (
     NpcConfig,
     NpcState,
     Scene,
-    StubReranker,
     advance,
     appraise,
     run_tool,
@@ -55,7 +54,7 @@ def _err(msg: str):
 
 def _reranker(use_llm: bool):
     if not use_llm:
-        return StubReranker()
+        return None
     if _S["model"] is None:
         from ..inference import ModelManager
         _S["model"] = ModelManager()

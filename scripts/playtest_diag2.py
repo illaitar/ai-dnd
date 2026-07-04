@@ -10,9 +10,9 @@ import sys
 import traceback
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from aidnd.bootstrap import new_session                      # noqa: E402
-from aidnd.inventory.items import wallet_value_cp            # noqa: E402
-from aidnd.world.environment import day_number              # noqa: E402
+from aidnd.bootstrap import new_session  # noqa: E402
+from aidnd.inventory.items import wallet_value_cp  # noqa: E402
+from aidnd.world.environment import day_number  # noqa: E402
 
 LOG = open(os.path.join(os.path.dirname(__file__), "..", "playtest2_out.txt"), "w", encoding="utf-8")
 ANOM = []

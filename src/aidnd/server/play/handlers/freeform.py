@@ -44,9 +44,9 @@ from aidnd.server.play.mechanics.items import _do_craft, _materialize_npc, _pc_c
 
 
 def _intent(text: str, sc: dict) -> dict | None:
+    """LLM-разбор фразы игрока. None — ТОЛЬКО «не понял фразу» (игроку честно так и скажем);
+    недоступность модели летит исключением из mgr.call."""
     mgr = _model()
-    if not mgr.available():
-        return None
     here = "; ".join(f"{h['id']}={h['name']} ({h['role']})" for h in sc["here"]) or "никого"
     conts = (
         "; ".join(
@@ -71,7 +71,7 @@ def _intent(text: str, sc: dict) -> dict | None:
         [{"role": "system", "content": _INTENT_SYS}, {"role": "user", "content": user}],
         options={"temperature": 0.2},
     )
-    t = (resp.get("content") if resp else "").strip()
+    t = (resp.get("content") or "").strip()
     try:
         return json.loads(t[t.find("{") : t.rfind("}") + 1])
     except (json.JSONDecodeError, ValueError):
@@ -301,7 +301,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
 
     mgr = _model()  # не-действие: сухой отклик мастера, мир не меняется
     text = str(intent.get("_text") or detail or "")
-    if mgr.available() and text:
+    if text:
         resp = mgr.call(
             "narrator",
             [
@@ -314,7 +314,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             ],
             options={"temperature": 0.5},
         )
-        line = (resp.get("content") if resp else "").strip()
+        line = (resp.get("content") or "").strip()
         out["narr"].append(line or "Ничего не происходит.")
     else:
         out["narr"].append("Ничего не происходит.")

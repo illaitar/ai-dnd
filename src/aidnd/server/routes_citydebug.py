@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 
 from ..citygraph import CityParams, generate
 from ..citygraph.generate import _citygen
-from ..worldgen import LLMEnricher, StubEnricher, WorldStore, building_ctx
+from ..worldgen import LLMEnricher, WorldStore, building_ctx
 from .models import User
 from .routes_auth import CurrentUser
 
@@ -161,8 +161,7 @@ def citydebug_building(_: Owner, bid: str, seed: int = 7, key_buildings: int = 8
     if data is None:                                         # нет в БД — генерим лениво (кэш на городе)
         cache = city.__dict__.setdefault("_enrich", {})
         if bid not in cache:
-            mdl = _model()
-            enr = LLMEnricher(mdl) if mdl.available() else StubEnricher()
+            enr = LLMEnricher(_model())            # только LLM — без фоллбэков
             cache[bid] = enr.describe_building(building_ctx(city, bid, is_key, idx)) or {}
         data = cache[bid]
     landmarks = city._landmarks_at(node) if node in city._xy else []   # noqa: SLF001

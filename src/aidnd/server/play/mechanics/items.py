@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import random
 
-from aidnd.items import Capability, ItemCtx, LLMSmith, StubSmith, craft_path, loot_pool
+from aidnd.items import Capability, ItemCtx, LLMSmith, craft_path, loot_pool
 from aidnd.items import condition as item_condition
 from aidnd.items import inspect as item_inspect
 from aidnd.items import normalize as item_normalize
@@ -213,8 +213,7 @@ _ROLE_COMP = {
 
 def _smith():
     if _S.get("smith") is None:
-        mgr = _model()
-        _S["smith"] = LLMSmith(mgr) if mgr.available() else StubSmith()
+        _S["smith"] = LLMSmith(_model())  # только LLM — без фоллбэков
     return _S["smith"]
 
 
@@ -368,7 +367,7 @@ def _forge(seed: str, kind: str, name_hint: str, source: str, band: str = "plain
     if ex:
         return ex
     ctx = ItemCtx(kind=kind, name_hint=name_hint, source=source, quality_band=band)
-    it = _smith().forge(ctx) or StubSmith().forge(ctx)
+    it = _smith().forge(ctx)  # ошибки LLM честно летят наверх
     it["id"] = iid
     _store().save_item(it)
     return it

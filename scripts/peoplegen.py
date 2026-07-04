@@ -39,12 +39,10 @@ def _setenv() -> None:
 
 _setenv()
 
-from aidnd.inference import ModelManager                       # noqa: E402
-from aidnd.mind import ABILITIES                               # noqa: E402
-from aidnd.play.population import person_core                  # noqa: E402
-from aidnd.worldgen.abilities import roll_abilities             # noqa: E402
-from aidnd.worldgen import (LLMPersona, PersonaCtx, StubPersona,  # noqa: E402
-                            WorldStore, get_imagegen)
+from aidnd.inference import ModelManager  # noqa: E402
+from aidnd.play.population import person_core  # noqa: E402
+from aidnd.worldgen import LLMPersona, PersonaCtx, WorldStore, get_imagegen  # noqa: E402
+from aidnd.worldgen.abilities import roll_abilities  # noqa: E402
 
 PORTRAITS_DIR = os.path.join(ROOT, "data", "portraits")
 
@@ -101,10 +99,11 @@ def main() -> None:
         _portraits_only(store)
         return
     mgr = ModelManager()
-    online = mgr.available()
-    enr = LLMPersona(mgr) if online else StubPersona()
+    if not mgr.available():                      # банк — прод-данные: стаб-персонами не травим
+        sys.exit("LLM недоступен (профиль/ключ) — банк NPC без модели не генерим")
+    enr = LLMPersona(mgr)
     img = get_imagegen() if not a.no_portraits else None
-    print(f"LLM: {'deepseek' if online else 'СТАБ (офлайн)'} · портреты: "
+    print(f"LLM: deepseek · портреты: "
           f"{'Flux' if (img and img.available()) else 'выкл'} · банк сейчас: {store.people_count()}")
 
     roles = _archetypes(a.count, a.seed)
@@ -119,7 +118,7 @@ def main() -> None:
         core = person_core(role, rng)
         ctx = PersonaCtx(id=pid, name=core["name"], role=role, sex=core["sex"],
                          traits=core["traits"], charisma=core["charisma"], appearance=core["appearance"])
-        persona = enr.describe(ctx) or StubPersona().describe(ctx)
+        persona = enr.describe(ctx)      # кривой ответ → LLMBadOutput, не стаб
         portraits = {}
         if img and img.available():
             portraits = img.portraits(pid, persona, seed=1000 + i, out_dir=PORTRAITS_DIR)

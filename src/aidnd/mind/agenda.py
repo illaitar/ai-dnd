@@ -86,9 +86,9 @@ def advance_agendas(state, world) -> list:
     return events
 
 
-# ── офлайн-заглушка планировщика: детерминированные агенды по натуре (для демо/тестов без LLM) ──
+# ── заглушка планировщика ТОЛЬКО для тестов/демо (рантайм никогда не строит) ──
 class StubPlanner:
-    """Без LLM: выдаёт правдоподобную агенду из черт (мирную или хищную). LLM-версия — llm_agent."""
+    """Тестовая: агенда из черт (мирная или хищная). Рантайм-путь — llm_agent.plan_agenda."""
 
     def plan(self, state, world, ctx=None) -> Agenda | None:
         t = state.config.traits

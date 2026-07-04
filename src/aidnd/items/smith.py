@@ -1,7 +1,7 @@
 """Ковка предмета: контекст (тип/источник/полоса качества/подсказка-имя) → фактшит с surface+hidden.
 Табличный скелет качества/цены/DC + LLM-флейвор и ПРИРОДА скрытого («выглядит как X, на деле Y»).
 
-LLMSmith — реальный путь (роль item_smith → deepseek); StubSmith — офлайн/тесты.
+LLMSmith — единственный рантайм-путь (роль item_smith); StubSmith — ТОЛЬКО тесты.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from ..inference import LLMBadOutput
 from .model import normalize
 
 
@@ -66,7 +67,7 @@ class Smith:
 
 
 class StubSmith(Smith):
-    """Детерминированная заглушка (офлайн/тесты) — предмет со скрытым происхождением под гейтом."""
+    """ТОЛЬКО для тестов (рантайм никогда не строит) — предмет со скрытым происхождением под гейтом."""
 
     def forge(self, ctx: ItemCtx) -> dict:
         n = ctx.name_hint or "невзрачная вещица"
@@ -86,12 +87,12 @@ class LLMSmith(Smith):
     def __init__(self, manager):
         self.manager = manager
 
-    def forge(self, ctx: ItemCtx) -> dict | None:
-        if not self.manager.available():
-            return None
+    def forge(self, ctx: ItemCtx) -> dict:
         user = (f"Предмет: тип «{ctx.kind}», подсказка-имя «{ctx.name_hint or '—'}», источник «{ctx.source or '—'}», "
                 f"ориентир качества {ctx.quality_band}; мир: {ctx.region}. Выкуй фактшит.")
         resp = self.manager.call("item_smith", [{"role": "system", "content": _ITEM_SYS},
                                                 {"role": "user", "content": user}], options={"temperature": 0.7})
-        data = _parse_json(resp.get("content") if resp else None)
-        return normalize(data) if data else None
+        data = _parse_json(resp.get("content"))
+        if not data:
+            raise LLMBadOutput("item_smith: фактшит предмета не разобран")
+        return normalize(data)

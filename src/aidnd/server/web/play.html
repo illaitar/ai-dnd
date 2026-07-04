@@ -449,6 +449,9 @@ const api=async(u,b)=>{
   if(r.status===402){const d=await r.json().catch(()=>({}));
     try{push('sys','<span style="color:var(--red)">'+esc(d.detail||'дневной лимит исчерпан')+'</span>');}catch(e){}
     return {limited:true};}
+  if(r.status===502||r.status===503){const d=await r.json().catch(()=>({}));
+    try{push('sys','<span style="color:var(--red)">'+esc((d.narr&&d.narr[0])||'рассказчик недоступен — повтори действие')+'</span>');}catch(e){}
+    return {llm_error:true};}
   return r.json();
 };
 const esc=s=>String(s==null?'':s).replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));

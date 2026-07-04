@@ -1,26 +1,23 @@
-"""Клиент к серверу модели (Ollama HTTP API).
+"""Клиент к серверу модели (Ollama HTTP API + OpenAI-совместимые облака).
 
-ЕДИНСТВЕННЫЙ компонент, переиспользованный из проекта ai-dnd: механизм запроса
-модели с сервера (стриминг /api/chat, tool-calls, think, keep_alive, preload,
-list_models). Сервер обычно проброшен SSH-туннелем на localhost:11434.
-
-Доступа к серверу сейчас нет — поэтому весь движок работает на детерминированных
-фоллбэках. Когда сервер появится, ModelManager.available() станет True и те же
-вызовы пойдут к модели (multi-LoRA маршрутизация по ролям, main §6.2-6.4).
+ПРАВИЛО ПРОЕКТА: офлайн-фоллбэков НЕТ. Нет модели / сеть легла → LLMUnavailable
+(после ретраев), и ошибка честно доходит до игрока. Заглушки (Stub*) допустимы
+ТОЛЬКО в тестах — рантайм их никогда не строит.
 """
 
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from time import perf_counter as _perf_counter
 
 from .. import config
 
-try:                                # httpx нужен только при наличии сервера
+try:
     import httpx
     _HAS_HTTPX = True
-except ModuleNotFoundError:         # офлайн-режим: весь движок на фоллбэках
+except ModuleNotFoundError:         # нет httpx → любой call() упадёт LLMUnavailable
     httpx = None                    # type: ignore
     _HAS_HTTPX = False
 
@@ -29,10 +26,14 @@ class OllamaError(Exception):
     """Любая проблема при общении с сервером Ollama (или httpx не установлен)."""
 
 
-def is_offline(manager) -> bool:
-    """True, если модель-менеджер отсутствует или сервер недоступен → берём детерминированный
-    фоллбэк. Единый guard для всех агентов/оркестратора (вместо повтора проверки на местах)."""
-    return manager is None or not manager.available()
+class LLMUnavailable(Exception):
+    """Модель недоступна (нет бэкенда/сети/httpx) — после всех ретраев. Ловится на границе
+    сервера и отдаётся игроку как честная ошибка, НЕ подменяется заглушкой."""
+
+
+class LLMBadOutput(Exception):
+    """Модель ответила, но ответ не разобрать (невалидный JSON/пустота) — после ретраев.
+    Тоже честная ошибка: фейковый контент вместо ответа не подставляем."""
 
 
 class OllamaClient:
@@ -126,11 +127,10 @@ class OllamaClient:
 
 
 class ModelManager:
-    """Маршрутизатор вызовов по ролям и менеджер режимов памяти (main §6.2-6.4).
+    """Маршрутизатор вызовов по ролям: профиль → (backend, model) → chat.
 
-    Один резидентный base + горячая подмена LoRA-адаптеров на роль (концептуально;
-    в Ollama — выбор модели/адаптера по имени). Держит флаг доступности сервера:
-    если сервер недоступен, агенты используют детерминированные фоллбэки.
+    available() — только для health-чеков (doctor/дебаг-стенды); рантайм НЕ ветвится
+    по доступности: call() либо возвращает ответ, либо кидает LLMUnavailable.
     """
 
     # роль -> (модель, опциональный LoRA-адаптер) — main §12
@@ -172,7 +172,8 @@ class ModelManager:
         self.on_call = None                 # колбэк(role, model) на каждый LLM-вызов (для ползунка генерации)
 
     def available(self, recheck: bool = False) -> bool:
-        """Доступен ли хоть один бэкенд активного профиля (кешируется). Иначе — фоллбэки.
+        """Доступен ли хоть один бэкенд активного профиля (кешируется). ТОЛЬКО для
+        health-чеков — рантайм по этому флагу не ветвится (call() кидает LLMUnavailable).
         ВАЖНО: чек всех бэкендов (не short-circuit) — иначе Ollama не наполнит список моделей."""
         if not _HAS_HTTPX or not self.backends:
             return False
@@ -203,26 +204,36 @@ class ModelManager:
                 for b in (self._route(r)[0] for r in roles) if b is not None]
         return max(1, min(caps)) if caps else 1
 
+    RETRIES = 3          # попытки на транспортную ошибку (сеть/5xx/таймаут), пауза 0.5·n сек
+
     def call(self, role: str, messages: list, *, schema=None, options=None,
-             on_token=None, think: bool = False) -> dict | None:
+             on_token=None, think: bool = False) -> dict:
         """ЕДИНАЯ точка вызова модели по роли: профиль → (backend, model) → backend.chat.
-        Возвращает {'content', 'tool_calls'} или None (бэкенд недоступен/ошибся → фоллбэк)."""
+        Возвращает {'content', 'tool_calls'}. Транспортная ошибка → ретраи → LLMUnavailable
+        (никаких None-с-фоллбэком: без модели движок честно ломается)."""
+        if not _HAS_HTTPX:
+            raise LLMUnavailable("httpx не установлен — LLM-бэкенды недоступны")
         backend, model = self._route(role)
         if backend is None:
-            return None
+            raise LLMUnavailable(f"роль «{role}»: нет бэкенда в профиле {config.LLM_PROFILE}")
         self._trace.append({"role": role, "model": model, "t": _perf_counter()})
         if len(self._trace) > 200:
             self._trace = self._trace[-100:]
-        if self.on_call is not None:                     # двигаем ползунок генерации на каждый вызов
+        if self.on_call is not None:                     # тик лимита юзера — один на логический вызов
             try:
                 self.on_call(role, model)
             except Exception:
                 pass
-        try:
-            return backend.chat(model, messages, schema=schema, options=options,
-                                 on_token=on_token, think=think)
-        except Exception:                                # сеть/сервер/таймаут → фоллбэк
-            return None
+        last: Exception | None = None
+        for attempt in range(self.RETRIES):
+            try:
+                return backend.chat(model, messages, schema=schema, options=options,
+                                     on_token=on_token, think=think)
+            except Exception as exc:                     # сеть/сервер/таймаут → ретрай
+                last = exc
+                if attempt + 1 < self.RETRIES:
+                    time.sleep(0.5 * (attempt + 1))
+        raise LLMUnavailable(f"{role} → {model}: {last}") from last
 
     def trace_take(self) -> list[dict]:
         """Снять накопленный трейс роутинга (роль→модель + прибл. длительность мс) и очистить.

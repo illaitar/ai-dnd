@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from types import SimpleNamespace
 
 from aidnd.plot import StubArchitect, match_cast, validate_bible

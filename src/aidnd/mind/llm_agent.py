@@ -6,7 +6,8 @@ HP), твои нужды и эмоции (с адресатом), отношен
 рядом) + их действие в прошлый тик, твои последние 10 действий, время. Инструменты включают и
 само-регуляцию (менять свои эмоции/нужды) и заметку в память.
 
-manager — aidnd.inference.ModelManager (профиль deepseek). Нет модели → NPC ждёт (явный фоллбэк).
+manager — aidnd.inference.ModelManager. Нет модели → LLMUnavailable, не разобрали ответ (после
+повтора) → LLMBadOutput: фоллбэков нет, ошибка честно летит наверх.
 """
 
 from __future__ import annotations
@@ -14,9 +15,9 @@ from __future__ import annotations
 import json
 import re
 
+from ..inference import LLMBadOutput
 from .act import score
 from .agenda import Agenda, Milestone
-from .world import Item
 
 NEED_RU = {"fatigue": "усталость", "hunger": "голод", "social": "тяга к общению",
            "purpose": "нужда в деле", "wealth": "жажда наживы", "comfort": "тяга к уюту",
@@ -175,50 +176,35 @@ def _parse(text: str | None) -> dict | None:
     return None
 
 
-def _action_to_tool(a) -> dict:
-    """Механический Action → вызов инструмента (для фоллбэка, когда модели нет)."""
-    if a.kind == "move":
-        return {"tool": "move", "to": a.to}
-    if a.kind == "attack":
-        return {"tool": "attack", "target": a.target}
-    if a.kind == "take":
-        return {"tool": "take", "target": a.target} if a.target else \
-            {"tool": "take", "item": getattr(a.item, "name", None)}
-    if a.kind == "say":
-        return {"tool": "say", "to": a.target, "text": ""}          # слова допишет LLM; в фоллбэке — молча
-    if a.kind == "use":
-        return {"tool": "use", "item": getattr(a.item, "name", None)}
-    return {"tool": "wait"}
+def _ask(manager, messages, temperature: float, who: str) -> dict:
+    """Вызов модели + разбор JSON: одна повторная попытка на кривой ответ, затем LLMBadOutput.
+    (Транспортные ошибки ретраит и кидает сам ModelManager.call — тут не ловим.)"""
+    for _attempt in range(2):
+        resp = manager.call("npc_mind", messages, schema=True,
+                            options={"temperature": temperature})
+        data = _parse(resp.get("content"))
+        if isinstance(data, dict):
+            return data
+    raise LLMBadOutput(f"npc_mind: ответ не разобран ({who})")
 
 
 def decide_hybrid(state, world, percept, manager, ctx: dict) -> dict:
     """ГИБРИД: механическое ядро даёт ранжированные ПОБУЖДЕНИЯ (решительность/консеквентность), LLM
-    выбирает из верхних В ХАРАКТЕРЕ, добавляет реплику и ОПИСЫВАЕТ, что делает/думает. Нет модели →
-    исполняем механический топ (гибрид деградирует в чистую механику)."""
+    выбирает из верхних В ХАРАКТЕРЕ, добавляет реплику и ОПИСЫВАЕТ, что делает/думает."""
     ranked = score(state, world, percept)
     prefs = [(a.label(), (g.kind if g else "idle"), u) for a, g, u in ranked[:5]]
-    top = ranked[0][0]
-    if manager is None or not manager.available():
-        return {"think": "", "does": "", "actions": [_action_to_tool(top)], "prefs": prefs, "src": "механика"}
-    resp = manager.call("npc_mind", build_prompt(state, world, percept, ctx, prefs=prefs),
-                        schema=True, options={"temperature": 0.55})
-    data = _parse(resp.get("content") if resp else None)
-    if not isinstance(data, dict) or not isinstance(data.get("actions"), list) or not data["actions"]:
-        return {"think": "(фоллбэк)", "does": "", "actions": [_action_to_tool(top)],
-                "prefs": prefs, "src": "фоллбэк"}
+    data = _ask(manager, build_prompt(state, world, percept, ctx, prefs=prefs), 0.55, state.config.id)
+    if not isinstance(data.get("actions"), list) or not data["actions"]:
+        raise LLMBadOutput(f"npc_mind: нет actions в решении ({state.config.id})")
     return {"think": str(data.get("think", ""))[:160], "does": str(data.get("does", ""))[:160],
             "actions": data["actions"][:3], "prefs": prefs, "src": "llm"}
 
 
 def decide_llm(state, world, percept, manager, ctx: dict) -> dict:
-    """Полный вопрос модели. Возвращает {'think', 'actions':[...]} (или пустой при недоступности)."""
-    if manager is None or not manager.available():
-        return {"think": "(нет модели)", "actions": [{"tool": "wait"}]}
-    resp = manager.call("npc_mind", build_prompt(state, world, percept, ctx),
-                        schema=True, options={"temperature": 0.7})
-    data = _parse(resp.get("content") if resp else None)
-    if not isinstance(data, dict) or not isinstance(data.get("actions"), list):
-        return {"think": "(не разобрал ответ)", "actions": [{"tool": "wait"}]}
+    """Полный вопрос модели. Возвращает {'think', 'actions':[...]}."""
+    data = _ask(manager, build_prompt(state, world, percept, ctx), 0.7, state.config.id)
+    if not isinstance(data.get("actions"), list):
+        raise LLMBadOutput(f"npc_mind: нет actions в решении ({state.config.id})")
     return {"think": str(data.get("think", ""))[:160], "actions": data["actions"][:3]}
 
 
@@ -239,10 +225,9 @@ _PLAN_SYS = (
 
 
 def plan_agenda(state, world, ctx: dict, manager) -> Agenda | None:
-    """Рефлексивный вызов (НЕ каждый тик): натура+память+ситуация → одна долгосрочная агенда. Нет модели
-    → None (вызвать StubPlanner). Механическое ядро потом тянет текущую веху реактивно."""
-    if manager is None or not manager.available():
-        return None
+    """Рефлексивный вызов (НЕ каждый тик): натура+память+ситуация → одна долгосрочная агенда.
+    Механическое ядро потом тянет текущую веху реактивно. None — только если модель ответила,
+    но вех не дала (агенды не будет — честный исход, не фоллбэк)."""
     cfg = state.config
     who = [f"{b.id} ({ctx.get('roles', {}).get(b.id, '?')}, "
            f"{'богат' if b.appearance >= .6 else 'простой'})"
@@ -257,10 +242,8 @@ def plan_agenda(state, world, ctx: dict, manager) -> Agenda | None:
         'Придумай агенду. Формат: {"summary":"...", "kind":"wealth|courtship|ambition|revenge|predation", '
         '"importance":0.0-1.0, "milestones":[{"desc":"...", "goal":"need|affiliate|trade|acquire|harm", '
         '"target":"<имя/нужда/место>", "meta":{"source":"<место>"}, "done":{...}}]}')
-    resp = manager.call("npc_mind", [{"role": "system", "content": _PLAN_SYS},
-                                     {"role": "user", "content": user}],
-                        schema=True, options={"temperature": 0.8})
-    data = _parse(resp.get("content") if resp else None)
+    data = _ask(manager, [{"role": "system", "content": _PLAN_SYS},
+                          {"role": "user", "content": user}], 0.8, f"агенда {cfg.id}")
     if not isinstance(data, dict) or not isinstance(data.get("milestones"), list) or not data["milestones"]:
         return None
     ms = []

@@ -1,7 +1,14 @@
 """Боевой движок: правила, детерминизм, авторезолв, сборка энкаунтеров из данных."""
 
-from aidnd.combat import (Encounter, bestiary, from_monster, from_npc, from_pc,
-                          pick_encounter, resolve)
+from aidnd.combat import (
+    Encounter,
+    bestiary,
+    from_monster,
+    from_npc,
+    from_pc,
+    pick_encounter,
+    resolve,
+)
 
 
 def _pc(hp=18):
@@ -121,7 +128,7 @@ def test_dungeon_obstacles_traversable():
 
 
 def test_dungeon_waves_and_spawn():
-    from aidnd.combat import dungeon, Encounter
+    from aidnd.combat import Encounter, dungeon
     wv = dungeon.waves(1.5, "Forest", "s2", n=2)
     assert 1 <= len(wv) <= 3 and all(wv)
     e = Encounter([_pc()], wv[0], seed="w", waves=wv[1:])

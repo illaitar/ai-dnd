@@ -9,7 +9,10 @@ CLI:  python citygen.py [seed] [W] [H] > city.svg
 API:  build_city(seed,W,H,buildings) -> dict;  render_svg(model) -> str
 """
 from __future__ import annotations
-import math, sys
+
+import math
+import sys
+
 
 # ----------------------------------------------------------------- RNG (mulberry32, 1:1 с JS)
 def mulberry32(a: int):

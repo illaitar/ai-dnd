@@ -19,7 +19,6 @@ from aidnd.mind import (
     predation_agenda,
     revenge_agenda,
 )
-from aidnd.mind.agenda import Agenda, Milestone
 from aidnd.mind.world import World
 
 

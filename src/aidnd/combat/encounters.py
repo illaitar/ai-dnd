@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from random import Random
 
-from .model import Combatant, bestiary, from_monster
+from .model import bestiary, from_monster
 
 
 def pick_encounter(cr_budget: float, env: str, seed: str, max_units: int = 5) -> list:

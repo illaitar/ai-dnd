@@ -10,23 +10,40 @@ from __future__ import annotations
 import os
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..inference import LLMBadOutput, LLMUnavailable
+from .play import router as _play_router
 from .routes_auth import router as _auth_router
 from .routes_citydebug import router as _citydebug_router
 from .routes_minddebug import router as _minddebug_router
 from .routes_npcdebug import router as _npcdebug_router
-from .play import router as _play_router
 from .routes_usage import router as _usage_router
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 app = FastAPI(title="AI-DnD Engine")
 
 # подробный файловый лог сессии (для отладки, скачивается из /api/play/debuglog)
-from . import debuglog                                     # noqa: E402
-from .play.engine.core import current_world_id             # noqa: E402
+from . import debuglog  # noqa: E402
+from .play.engine.core import current_world_id  # noqa: E402
+
 debuglog.setup(current_world_id)
+
+
+@app.exception_handler(LLMUnavailable)
+async def _llm_unavailable(request: Request, exc: LLMUnavailable) -> JSONResponse:
+    """Правило проекта: без LLM не подменяем контент — честная ошибка игроку."""
+    return JSONResponse(status_code=503, content={
+        "error": "llm_unavailable", "detail": str(exc),
+        "narr": ["Рассказчик недоступен — мир замер. Повтори действие чуть позже."]})
+
+
+@app.exception_handler(LLMBadOutput)
+async def _llm_bad_output(request: Request, exc: LLMBadOutput) -> JSONResponse:
+    return JSONResponse(status_code=502, content={
+        "error": "llm_bad_output", "detail": str(exc),
+        "narr": ["Рассказчик сбился с мысли. Повтори действие."]})
 
 
 @app.middleware("http")
@@ -84,6 +101,7 @@ def index() -> HTMLResponse:
 async def play_page(request: Request) -> HTMLResponse:
     """Игра — только под сессией (полная авторизация по email)."""
     from fastapi.responses import RedirectResponse
+
     from .auth import user_for_token
     from .db import SessionLocal
     token = request.cookies.get("aidnd_session", "")

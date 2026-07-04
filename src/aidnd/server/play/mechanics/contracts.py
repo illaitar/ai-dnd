@@ -9,7 +9,6 @@ import json
 import random
 import re
 
-from aidnd.mind import StubPlanner
 from aidnd.mind import World as MWorld
 from aidnd.mind.llm_agent import plan_agenda
 from aidnd.server.play.engine.core import (
@@ -151,15 +150,12 @@ def _contract_offer(npc: str) -> dict | None:
 
 def _make_contract(npc: str, status: str) -> dict | None:
     """Ядро генерации уговора для NPC (просьба/объявление): агенда → кандидаты → LLM → шаги.
-    Сохраняет контракт с заданным статусом. None — если нечего/невалидно/LLM недоступен."""
+    Сохраняет контракт с заданным статусом. None — только «нечего предложить/невалидно»;
+    недоступность LLM летит исключением."""
     p = _S["people"][npc]
     mgr = _model()
-    if not mgr.available():
-        return None
     if not (p.state.agendas or []):  # долгая цель — лениво, при первой нужде
-        ag0 = plan_agenda(p.state, MWorld(), {"roles": {npc: p.role}}, mgr) or StubPlanner().plan(
-            p.state, MWorld()
-        )
+        ag0 = plan_agenda(p.state, MWorld(), {"roles": {npc: p.role}}, mgr)
         if ag0:
             p.state.agendas.append(ag0)
     if not (p.state.agendas or []):

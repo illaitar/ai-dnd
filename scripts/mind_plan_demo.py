@@ -15,12 +15,13 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.dirname(__file__))
 
+from mind_sim import PLACE_DESC, ROLES, build  # noqa: E402
+
 from aidnd.inference import ModelManager  # noqa: E402
 from aidnd.mind import advance_agendas, apply, decide, perceive  # noqa: E402
 from aidnd.mind.agenda import StubPlanner  # noqa: E402
 from aidnd.mind.llm_agent import plan_agenda  # noqa: E402
 from aidnd.mind.tick import _decay_emotion, _decay_needs  # noqa: E402
-from mind_sim import PLACE_DESC, ROLES, build  # noqa: E402
 
 # кому что вспомнить (материал для планировщика) → ожидаем разные агенды
 SEED_MEMORY = {

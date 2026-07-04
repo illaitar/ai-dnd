@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aidnd.worldgen.floorplan import plan_location, plan_svg
+from aidnd.worldgen.floorplan import clamp_layout, plan_location, plan_svg, reachable
 from aidnd.worldgen.furnish import zones_for
 
 
@@ -36,6 +36,31 @@ def test_lockable_rooms_go_upstairs():
     plan = plan_location(_data("Трактир с комнатами"))
     assert len(plan["floors"]) == 2 and plan["floors"][1]["label"]
     assert all(r["lock"] for r in plan["floors"][1]["zones"])
+
+
+def test_doors_reachable_and_rows_aligned():
+    """Гарантии v2: все двери достижимы от входа; столы стоят РЯДАМИ (общие колонки), не россыпью."""
+    for btype in ("Таверна", "Трактир с комнатами", "Целебница", "Конюшня", "Игорный дом"):
+        for layout in ({}, {"windows": "right", "bar_wall": "right", "tables": "perimeter"},
+                       {"density": "packed"}):
+            d = _data(btype)
+            d["layout"] = layout
+            plan = plan_location(d)
+            assert reachable(plan), (btype, layout)              # двери/лестница не заставлены
+    d = _data("Таверна", size="large")
+    plan = plan_location(d)
+    hall = plan["floors"][0]
+    tables = [r for r in hall["zones"] if r["kind"] == "tables"]
+    xs = {r["x"] for r in tables}
+    assert len(xs) <= max(2, len(tables) - 2), xs                # выровненные колонки-ряды
+    aisle_x = hall["door"]["x"]
+    for r in tables:                                             # главный проход свят
+        assert not (r["x"] <= aisle_x < r["x"] + r["w"]), r
+
+
+def test_clamp_layout():
+    assert clamp_layout(None) == clamp_layout({}) == clamp_layout({"windows": "чушь"})
+    assert clamp_layout({"windows": "right", "tables": "perimeter"})["windows"] == "right"
 
 
 def test_deterministic_and_svg():

@@ -245,11 +245,35 @@ def _zone_for_container(cont: dict, zones: list[dict]) -> str:
     return zones[0]["id"] if zones else "z0"
 
 
+_LAYOUT_SYS = (
+    "Ты — архитектор планировки одного помещения тёмно-фэнтезийного фронтира. По фактшиту "
+    "здания выбери дух планировки. Верни ТОЛЬКО JSON: "
+    '{"windows": "left|right|both|none", "bar_wall": "left|right", '
+    '"tables": "rows|perimeter|mixed", "density": "airy|normal|packed"}. '
+    "Бедное/тесное — packed и мало окон; просторное/богатое — airy; постоялые дворы чаще "
+    "rows, злачные места — perimeter (центр свободен). Без прозы вне JSON."
+)
+
+
+def layout_params(data: dict, btype: str, manager) -> dict:
+    """Архитектурный пресет здания [LLM] → кламп enum'ами (геометрию всё равно строит код)."""
+    from .floorplan import clamp_layout
+    resp = manager.call("layout_architect",
+                        [{"role": "system", "content": _LAYOUT_SYS},
+                         {"role": "user", "content":
+                          f"ЗДАНИЕ: {data.get('name') or btype} — {btype}; "
+                          f"достаток {data.get('tier')}/{data.get('prosperity')}; "
+                          f"размер {data.get('size')}; свет {data.get('lighting')}."}],
+                        options={"temperature": 0.6})
+    return clamp_layout(_parse_json(resp.get("content")))
+
+
 def furnish_building(data: dict, btype: str, manager, kind: str = "key") -> dict:
     """Полная обстановка здания: зоны из шаблона + LLM-предметы + адресация ёмкостей.
     Инстансы одной группы (столы) обставляются ОДНИМ батч-вызовом — дёшево и разнообразно.
     Мутирует и возвращает data (пишется в building_pool офлайн-скриптом)."""
     zones = zones_for(btype, data, kind)
+    data["layout"] = layout_params(data, btype, manager)
     furn = LLMFurnisher(manager)
     done: set[str] = set()
     for z in zones:

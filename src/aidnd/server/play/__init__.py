@@ -1,7 +1,23 @@
-"""Игровой контур /api/play — пакет (ТД3-распил routes_play на слои).
-Импорт подмодулей регистрирует эндпоинты на общем router.
+"""Игровой контур /api/play — пакет. Слои: core (ядро) < items/contracts/combat (домены-механики)
+< world (ядро-сцена: сессия/тик/живая сцена/голос) < доменные хендлеры (регистрируют эндпоинты).
+См. docs/LOOP.md. Импорт подмодулей регистрирует эндпоинты на общем router.
 """
+from . import (  # noqa: F401 — ядро-сцена + механики  # noqa: F401 — доменные хендлеры
+    board,
+    combat,
+    contracts,
+    crime,
+    dialogue,
+    freeform,
+    item,
+    items,
+    magic,
+    misc,
+    observe,
+    trade,
+    travel,
+    world,
+)
 from .core import router
-from . import items, contracts, combat, main   # noqa: F401 — регистрация эндпоинтов
 
 __all__ = ["router"]

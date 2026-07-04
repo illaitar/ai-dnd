@@ -1,0 +1,1095 @@
+"""Игровой контур — МИР И ОРКЕСТРАЦИЯ: генерация, сцена, движение, диалог, действие, живая локация + HTTP-эндпоинты.
+
+Авто-разбит из routes_play.py (ТД3). Слои: core<items<contracts<combat<main.
+"""
+
+
+from __future__ import annotations
+
+import json
+import random
+
+from fastapi import Request
+
+from ... import society
+from ...citygraph import CityParams, generate, visual
+from ...citygraph.model import NodeKind
+from ...mind import Body, NpcConfig, NpcState, StubPlanner, advance_agendas
+from ...mind import Item as MItem
+from ...mind import World as MWorld
+from ...mind import perceive as mind_perceive
+from ...mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
+from ...mind.tick import _decay_emotion, _decay_needs
+from ...play import populate
+from ...play.population import Townsperson
+from .combat import (
+    _guild_bid,
+    _guild_board,
+    _guild_status,
+    _mint_badge,
+    _npc_delves,
+    _pc_badge,
+)
+from .contracts import (
+    _board_ads,
+    _board_npc_fulfill,
+    _board_publish,
+    _ct_cur,
+    _ct_steps,
+    _step_desc,
+)
+from .core import (
+    _COLORS,
+    _PHASE_RU,
+    _S,
+    PB,
+    PLAYER,
+    _binfo,
+    _city_name,
+    _display,
+    _emo,
+    _fatigue,
+    _gt,
+    _gt_add,
+    _here,
+    _in_room,
+    _mana,
+    _mana_cap,
+    _mark_seen,
+    _met,
+    _model,
+    _mt,
+    _npc_save,
+    _pc,
+    _pc_hp,
+    _pc_name,
+    _pc_remember,
+    _pc_save,
+    _phase,
+    _pool,
+    _portrait_url,
+    _role_at,
+    _role_for_building,
+    _spurns,
+    _store,
+    _tokens_ru,
+    _wanted,
+    _wanted_add,
+    _wid,
+    router,
+)
+from .items import (
+    _materialize_npc,
+    _merchant_restock,
+    _pc_coins,
+    _seed_item_pool,
+)
+from .worldsim import routine_step  # рутина жителей из НУЖД (society)
+
+
+def _world_events() -> None:
+    """Суточные события пассивного мира (раз в день, утром): розыск стынет, смелые уходят по
+    заказам гильдии, горожане правят столб объявлений, случайный караван везёт товар. Каждое — в
+    своём try: сбой одного не роняет мир."""
+    if _wanted() > 0:                                       # розыск остывает — память не вечна
+        _wanted_add(-PB["wanted_decay"])
+    try:
+        news = _npc_delves()
+        if news:
+            _S["guild_news"] = (_S.get("guild_news") or [])[-2:] + news
+    except Exception:                                      # noqa: BLE001 — вылазка не роняет мир
+        pass
+    try:
+        bn = _board_npc_fulfill() + _board_publish()
+        if bn:
+            _S["board_news"] = (_S.get("board_news") or [])[-3:] + bn
+    except Exception:                                      # noqa: BLE001 — доска не роняет мир
+        pass
+    try:
+        if random.Random(f"caravan|{_gt() // 1440}|{_wid()}").random() < PB["caravan_chance"]:
+            _merchant_restock(f"caravan|{_gt() // 1440}")
+    except Exception:                                      # noqa: BLE001
+        pass
+
+
+def _apply_routine() -> None:
+    """Синхронизировать пассивный мир с текущим игровым временем: идемпотентно, дёшево — раз в фазу
+    суток (ключ фаза+день). Рутина ВСЕХ жителей строится из НУЖД/характера/времени (society, через
+    worldsim.routine_step), а не из хардкода ролей. На новой заре — суточные события."""
+    key = (_phase(), _gt() // 1440)
+    if _S.get("routine_key") == key or not _S.get("people"):
+        return
+    _S["routine_key"] = key
+    if key[0] == "morning":
+        _world_events()
+    routine_step(_S["people"], _S["crof"])
+
+
+_TIE_ROLES = {"головорез": "головорез", "шайк": "головорез", "стражн": "стражник",
+              "лавочн": "лавочник", "куп": "лавочник", "трактир": "трактирщик", "жрец": "жрец",
+              "знахар": "знахарка", "кузнец": "кузнец", "мельник": "мельник", "бард": "бард",
+              "бродя": "бродяга", "сапожн": "сапожник", "дубильщ": "дубильщик", "стар": "жрец"}
+
+
+def _weave_ties(people) -> None:
+    """Связи персон («должен головорезам», «враждует со старостой») ПРИВЯЗЫВАЮТСЯ к реальным
+    людям пула: обоюдные отношения в mind + память с настоящим именем. Граф «кто кого знает»
+    становится настоящим; детерминировано, идемпотентно (по метке в памяти)."""
+    rng = random.Random("ties|1")
+    byrole: dict = {}
+    for oid, o in sorted(people.items()):
+        byrole.setdefault(o.role, []).append(oid)
+    for pid, p in sorted(people.items()):
+        st = p.state
+        if any("— это про" in m.text for m in st.memory.items):
+            continue                                       # уже вязан (в т.ч. восстановлен из npc_state)
+        for tie in ((p.persona or {}).get("ties") or [])[:2]:
+            tl = tie.lower()
+            role = next((r for w, r in _TIE_ROLES.items() if w in tl), None)
+            cands = [x for x in byrole.get(role, []) if x != pid]
+            if not cands:
+                continue
+            oid = rng.choice(cands)
+            o = people[oid]
+            ar, br = st.rel(oid), o.state.rel(pid)
+            hostile = any(w in tl for w in ("вражд", "подозр", "ненавид", "угрож", "презир"))
+            debt = any(w in tl for w in ("должен", "долг", "задолж"))
+            fear = any(w in tl for w in ("боит", "страш", "опаса"))
+            if hostile:                                     # настоящая вражда — обоюдно негатив
+                ar["fear"] = max(ar["fear"], 0.3)
+                ar["affinity"] = min(ar["affinity"], -0.2)
+                br["affinity"] = min(br["affinity"], -0.1)
+            elif debt:                                      # долг — обязательство, НЕ ненависть
+                ar["fear"] = max(ar["fear"], 0.2)           # должник слегка опасается кредитора
+            elif fear:                                      # страх без вражды — симпатия нейтральна
+                ar["fear"] = max(ar["fear"], 0.35)
+            else:                                           # доброе знакомство/родство
+                ar["affinity"] = max(ar["affinity"], 0.4)
+                ar["trust"] = max(ar["trust"], 0.3)
+                br["affinity"] = max(br["affinity"], 0.3)
+            st.memory.add(f"{tie} — это про {o.name}", _mt(), 0.5, kind="fact", about=[oid])
+            o.state.memory.add(f"{p.name}: {tie[:90]} — нас связывает", _mt(), 0.4, kind="fact", about=[pid])
+
+
+def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
+    """Готовый NPC из банка → Townsperson с мозгом (mind) + богатой персоной/портретами."""
+    mech = row.get("mech") or {}
+    cfg = NpcConfig(id=row["id"], name=row["name"], role=row["role"],
+                    traits=mech.get("traits") or {}, abilities=mech.get("abilities") or {})
+    st = NpcState.from_config(cfg)
+    r = random.Random(row["id"])                           # лёгкий фон нужд, детерминированно
+    for n in st.needs:
+        st.needs[n] = round(r.uniform(0.1, 0.35), 2)
+    saved = _store().get_npc_state(_wid(), row["id"])  # прожитое переживает рестарт
+    if saved:
+        st.relationships = saved.get("relationships") or {}
+        st.needs.update(saved.get("needs") or {})
+        for m in saved.get("memory") or []:
+            mm = st.memory.add(m["text"], m["t"], m.get("importance", 0.3),
+                               kind=m.get("kind", "observation"), about=m.get("about") or [])
+            mm.last_access = m.get("last_access", m["t"])
+    tp = Townsperson(id=row["id"], name=row["name"], role=row["role"], home=home, work=work,
+                     charisma=row["charisma"], appearance=row["appearance"], state=st,
+                     persona=row.get("persona"), portraits=row.get("portraits") or {})
+    if work:                                               # владелец здания → ключи от его закрытых ёмкостей
+        tp.keys = _building_keys(work)
+    return tp
+
+
+def _building_keys(bid: str) -> list:
+    """Ключи-открывашки от LOCKED-ёмкостей здания (для владельца)."""
+    bd = _store().get_building(_wid(), bid)
+    if not bd:
+        return []
+    return [{"name": c["key"]["name"], "opens": c["name"], "where": c.get("where", "")}
+            for c in (bd["data"].get("containers") or [])
+            if c.get("access") == "locked" and c.get("key")]
+
+
+def _building_rooms(bid: str) -> list:
+    """Суб-помещения здания (мини-граф): name/kind/access/hidden (скрытое видно лишь по зоркому осмотру)."""
+    bd = _store().get_building(_wid(), bid)
+    if not bd:
+        return []
+    return [{"name": s["name"], "kind": s.get("kind", "backroom"),
+             "access": s.get("access", "public")} for s in (bd["data"].get("sub_rooms") or [])]
+
+
+def _building_containers(bid: str, room: str | None = None) -> list:
+    """Ёмкости ТЕКУЩЕГО помещения (без содержимого — вскрывается взаимодействием)."""
+    bd = _store().get_building(_wid(), bid)
+    if not bd:
+        return []
+    rooms = bd["data"].get("sub_rooms") or []
+    return [{"name": c["name"], "kind": c["kind"], "where": c.get("where", ""),
+             "locked": c.get("access") == "locked"}
+            for c in (bd["data"].get("containers") or [])
+            if _in_room(c.get("where", ""), room, rooms)]
+
+
+def _assign_key_buildings(city) -> None:
+    """Мир создан → раздать ключевым слотам здания ИЗ ПУЛА по типу-хинту слота (гильдия — гильдией).
+    Пишется в live-БД мира один раз; повторный заход читает готовое."""
+    store, pool = _store(), _pool()
+    have = store.building_ids(_wid())
+    todo = [bid for bid in city.key_buildings if bid not in have]
+    if not todo:
+        return
+    from aidnd.worldgen.enrichment import _SIGNIFICANT
+    rows = pool.pool_buildings("key")
+    rng = random.Random(f"bassign|{_wid()}")
+    rng.shuffle(rows)
+    used = set()
+
+    def take(hint):
+        h = hint.split()[0].lower()                        # «Храм удачи» → храм
+        for r in rows:                                     # сперва по типу, потом любой
+            if r["id"] not in used and h in r["btype"].lower():
+                used.add(r["id"]); return r
+        for r in rows:
+            if r["id"] not in used:
+                used.add(r["id"]); return r
+        return rows[0]
+
+    for bid in sorted(todo):
+        idx = int(bid.split(":")[1]) - 1
+        hint = _SIGNIFICANT[idx % len(_SIGNIFICANT)]
+        r = take(hint)
+        kb = city.key_buildings[bid]
+        store.save_building(_wid(), bid, True, kb.interior, r["data"].get("name"), r["data"])
+
+
+_RES_POOL = None
+
+
+def _res_binfo(bid: str) -> dict | None:
+    """Жилой дом: фактшит детерминированно из пула (без записи в БД — функция от (мир, дом))."""
+    global _RES_POOL
+    if _RES_POOL is None:
+        _RES_POOL = _pool().pool_buildings("res")
+    if not _RES_POOL:
+        return None
+    return random.Random(f"res|{_wid()}|{bid}").choice(_RES_POOL)["data"]
+
+
+def _fill_from_pool(city, keynode, kps):
+    """Наполнить толпу из БАНКА (worldgen.people): ключевые здания по роли + горожане по домам +
+    пара лихих. Привязки пишем в placements (персист) и восстанавливаем при повторном заходе.
+    Пул пуст → вернём None (падаем на голое populate)."""
+    store = _store()
+    if _pool().people_count() == 0:
+        return None
+    people, spot = {}, {}
+    placed = {pl["npc_id"]: pl for pl in store.placements_for(_wid())}
+    if placed and not all(pl["node"] in city._xy and pl["home"] in city._xy   # noqa: SLF001
+                          for pl in placed.values()):
+        store.clear_placements(_wid())                 # граф города изменился — узлы протухли
+        placed = {}                                        # пере-размещаем заново (память NPC цела)
+    if placed:                                             # уже наполнен — восстановить тех же людей
+        dead = {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "dead|")}  # 1 запрос, не N
+        by_id = {r["id"]: r for r in _pool().list_people(limit=100000)}           # 1 запрос, не N
+        for pid, pl in placed.items():
+            if pid in dead:
+                continue                                   # мёртвые не возвращаются
+            row = by_id.get(pid)
+            if row:
+                people[pid] = _person_from_row(row, pl["home"], pl["work"])
+                spot[pid] = pl["node"]
+        if people:
+            return people, spot
+    rng = random.Random(f"settle|{_wid()}")
+    rows = _pool().list_people(limit=100000)
+    rng.shuffle(rows)
+    houses = [h.node for h in city.houses.values()]
+    rng.shuffle(houses)
+    hi = iter(houses)
+    by_role = {}
+    for r in rows:
+        by_role.setdefault(r["role"], []).append(r)
+    used = set()
+
+    def place(row, node, work, home):
+        people[row["id"]] = _person_from_row(row, home, work)
+        spot[row["id"]] = node
+        store.place_person(_wid(), row["id"], node, home, work)
+        used.add(row["id"])
+
+    for bid, kb in sorted(city.key_buildings.items()):     # работники — по роли из типа здания
+        want = _role_for_building(bid)
+        cand = [r for r in by_role.get(want, []) if r["id"] not in used] or                [r for r in rows if r["id"] not in used]
+        for row in cand[:2]:                               # хозяин + подмастерье
+            place(row, kb.node, bid, home=next(hi, kb.node))
+    for row in rows:                                       # ВЕСЬ остальной пул — по домам города
+        if row["id"] not in used:
+            h = next(hi, None) or rng.choice(houses)
+            place(row, h, None, home=h)
+    return people, spot
+
+
+def _play():
+    if _S["city"] is None:
+        params = CityParams(seed=_S["seed"], key_buildings=12, river=True, walls=True, segment=16)
+        city = generate(params)
+        _assign_key_buildings(city)                        # мир юзера: здания из ПУЛА, без LLM
+        _seed_item_pool()                                  # пул предметов мира (сид-набор, данные)
+        vis = visual(params, interactive=True)             # богатый визуал + кликабельные дома
+        xy = {n.id: (n.x, n.y) for n in city.nodes()}
+        keynode = {bid: kb.node for bid, kb in city.key_buildings.items()}   # здание → БЛИЖАЙШАЯ точка (дверь)
+        kps = city.key_points()
+        drawn = _fill_from_pool(city, keynode, kps)
+        if drawn:                                          # наполнение из банка
+            people, spot = drawn
+        else:                                              # фоллбэк: голое население (без персон/портретов)
+            people = populate(city, seed=_S["seed"], commoners=16, deviants=2)
+            rng = random.Random(f"spot|{_wid()}")
+            spot = {pid: (keynode.get(p.work) or p.home or rng.choice(kps)) for pid, p in people.items()}
+        n2b = {}                                           # узел-точка → здание (ключевые прежде домов)
+        for bid, kb in city.key_buildings.items():
+            n2b.setdefault(kb.node, bid)
+        for hid, ho in city.houses.items():                # жилые дома тоже входимы (фактшит из пула)
+            n2b.setdefault(ho.node, hid)
+        start = next((keynode.get(p.work) for p in people.values()
+                      if p.role == "трактирщик" and p.work), None) or kps[0]
+        _weave_ties(people)                                # связи персон → реальные люди пула
+        row = _store().get_pc(_wid()) or {}                # позиция игрока ПЕРЕЖИВАЕТ рестарт/деплой
+        saved_loc = row.get("loc")
+        if saved_loc in xy:
+            start = saved_loc
+        _S.update(city=city, people=people, crof=spot, cr2b=n2b, loc=start,
+                  geom=_build_geom(city, xy, n2b, vis), keynode=keynode, kps=kps)
+        if saved_loc in xy and row.get("inside") in n2b.values():
+            _S["inside"], _S["room"] = row["inside"], row.get("room")
+    _apply_routine()                                       # споты = f(время): распорядок дня
+    return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]
+
+
+def _build_geom(city, xy, n2b, vis) -> dict:
+    """Лёгкий интерактивный слой поверх богатого визуала: система координат — холст рендера 0 0 W H.
+    Дома/улицы/река/стены рисует сам SVG (vis['inner']); клик по дому → его БЛИЖАЙШАЯ точка дороги
+    (h2n = h.node, НЕ перекрёсток). Метки зданий подписываем поверх; _xy — узел→xy для маршрута."""
+    h2n = {h.id: h.node for h in city.houses.values()}
+    road = (NodeKind.CROSSROAD, NodeKind.POINT, NodeKind.BRIDGE, NodeKind.GATE)
+    points = [{"id": n, "x": round(xy[n][0], 1), "y": round(xy[n][1], 1)}  # ВСЕ узлы дорог (не только перекрёстки)
+              for n in xy if city.node_kind(n) in road]
+    keys = []
+    for bid, kb in sorted(city.key_buildings.items()):
+        keys.append({"node": kb.node, "x": round(kb.x, 1), "y": round(kb.y, 1),
+                     "label": _binfo(bid)["label"], "bid": bid})
+    cx, cy = vis["W"] / 2, vis["H"] / 2                     # ДОСКА-СТОЛБ: перекрёсток ближе к центру
+    cross = [n for n in xy if city.node_kind(n) == NodeKind.CROSSROAD]
+    plaza = min(cross, key=lambda n: (xy[n][0] - cx) ** 2 + (xy[n][1] - cy) ** 2) if cross else None
+    if plaza is not None:
+        keys.append({"node": plaza, "x": round(xy[plaza][0], 1), "y": round(xy[plaza][1], 1),
+                     "label": "Доска", "bid": "board:plaza"})
+    return {"viewBox": [0, 0, vis["W"], vis["H"]], "svg": vis["inner"],
+            "h2n": h2n, "points": points, "keys": keys, "plaza": plaza,
+            "_xy": {n: [round(xy[n][0], 1), round(xy[n][1], 1)] for n in xy}}
+
+
+def _look_key(loc, inside) -> str:
+    return f"{loc}|{inside or 'out'}"
+
+
+def _looked_level(loc, inside) -> int:
+    """0 = не осматривался (туман: людей/ёмкостей не различаешь), 1 = осмотрелся, 2 = зоркий бросок."""
+    return int((_S.setdefault("looked", {})).get(_look_key(loc, inside), 0))
+
+
+def _scene_dict(city, people, crof, cr2b, loc):
+    role = _role_at(loc, people, crof, cr2b)
+    bid = cr2b.get(loc)
+    inside = _S.get("inside")
+    if inside and inside != bid:                           # отошёл от здания — значит, вышел
+        inside = _S["inside"] = None
+        _S["room"] = None
+    _mark_seen(bid)                                        # пришёл — узнал место
+    plaza = (_S.get("geom") or {}).get("plaza")
+    if inside:
+        info = _binfo(inside)
+        name, kind = info["name"], info["kind"]
+    elif bid:
+        info = _binfo(bid)
+        name, kind = f"у входа: {info['name']}", "снаружи"
+    elif plaza is not None and loc == plaza:
+        name, kind = "Городская доска", "площадь · объявления горожан"
+    elif city.node_kind(loc) == NodeKind.CROSSROAD:
+        name, kind = "Перекрёсток", "городская развилка"
+    else:
+        name, kind = "Улица", "мостовая меж домов"
+    here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
+    lvl = _looked_level(loc, inside)
+    more = max(0, len(here) - PB["here_show_cap"])
+    here = here[:PB["here_show_cap"]]
+    vis_here = here if lvl >= 1 else []                    # туман: людей различаешь, лишь осмотревшись
+    room = _S.get("room") if inside else None
+    rooms = []
+    if inside:
+        for r in _building_rooms(inside):                  # скрытые видны лишь по зоркому осмотру (lvl 2)
+            if r["access"] == "hidden" and lvl < 2:
+                continue
+            rooms.append(r)
+    if inside and room:
+        name = f"{_binfo(inside)['name']} · {room}"
+    d = {
+        "loc": loc,
+        "inside": inside,
+        "room": room,
+        "rooms": rooms,
+        "enterable": ({"bid": bid, "name": _binfo(bid)["name"]} if (bid and not inside) else None),
+        "looked": lvl,
+        "here_more": (more if lvl >= 1 else 0),
+        "location": {"name": name, "kind": kind,
+                     "desc": ("Обычное место фронтирного городка — идёт своя жизнь." if role
+                              else "Мимо спешат редкие прохожие; в лужах дрожит свет окон."),
+                     "containers": (_building_containers(inside, room) if (inside and lvl >= 1) else [])},
+        "ambient": {"time": _PHASE_RU[_phase()], "weather": "дождь",
+                    "mood": "оживлённо" if len(here) > 2 else "тихо",
+                    "event": ("Ты ещё не осмотрелся здесь." if lvl == 0 and here else
+                              "Народ занят своими делами." if here else "Пусто; лишь ветер гуляет меж домов.")},
+        "here": [{"id": pid,
+                  "name": _display(pid, people),        # незнакомец — дескриптором, имя после знакомства
+                  "role": (people[pid].role if (pid in _met() or people[pid].work)
+                           else "кто-то из горожан"),
+                  "init": _display(pid, people)[0].upper(), "color": _COLORS[i % len(_COLORS)],
+                  "portrait": _portrait_url(people[pid], _emo(people[pid].state))}
+                 for i, pid in enumerate(vis_here)],
+    }
+    if bid and bid == _guild_bid():                        # в гильдии — доска, ранг, приём новичка
+        d.setdefault("narr", [])
+        if not _pc_badge() and not _store().flag_get(_wid(), "guild_mark|pc"):
+            _mint_badge(0)
+            d["narr"].append("Тебя приняли в гильдию. Вот жетон приключенца (Медь).")
+        d["guild_board"], d["guild_news"] = _guild_board(), (_S.get("guild_news") or [])
+        d["guild_status"] = _guild_status()
+    if plaza is not None and loc == plaza and not inside:  # у столба — объявления горожан
+        d["board_ads"] = _board_ads()
+        d["board_news"] = _S.get("board_news") or []
+    wc = _watch_check(people, crof, loc)                   # стража при высоком розыске
+    if wc:
+        d["watch"] = wc
+    return d
+
+
+def _watch_check(people, crof, loc):
+    """Стража вяжет: если розыск ≥ порога И на локации есть стражник — конфронтация."""
+    if _wanted() < PB["wanted_confront"]:
+        return None
+    guard = next((pid for pid in _here(loc, crof) if people[pid].role == "стражник"), None)
+    if not guard:
+        return None
+    crimes = (_store().flag_get(_wid(), "crimes|pc") or "тёмные дела").split("; ")
+    return {"guard": guard, "name": people[guard].name, "wanted": _wanted(),
+            "crimes": ", ".join(crimes[-2:]), "fine": _wanted() * PB["watch_fine_per_pt"]}
+
+
+
+
+_VOICE = {"gruff": "грубовато", "warm": "тепло", "clipped": "сухо и коротко",
+          "florid": "витиевато", "meek": "робко", "booming": "громко, зычно"}
+_STANCE = {"warm": "дружелюбно", "neutral": "нейтрально", "wary": "настороженно",
+           "dour": "хмуро", "greedy": "с расчётом на выгоду", "hostile": "враждебно"}
+
+
+def _voice(p, rel, kind, player_text=None) -> str:
+    mgr = _model()
+    if not mgr.available():
+        return (f"{p.name} окидывает тебя оценивающим взглядом." if kind == "greet"
+                else f"{p.name} неопределённо пожимает плечами.")
+    per = getattr(p, "persona", None) or {}
+    bits = [f"Ты — {p.name}, {p.role} на фронтире (тёмное фэнтези)."]
+    if per:                                                # богатая персона из пула
+        if per.get("origin"):
+            bits.append(f"Родом: {per['origin']}.")
+        if per.get("voice"):
+            bits.append(f"Говоришь {_VOICE.get(per['voice'], 'обычно')}.")
+        if per.get("speech"):
+            bits.append("Речевые привычки: " + "; ".join(per["speech"][:2]) + ".")
+        if per.get("quirk"):
+            bits.append(f"Причуда: {per['quirk']}.")
+        if per.get("wants"):
+            bits.append("Стремишься: " + "; ".join(per["wants"][:2]) + ".")
+        bits.append(f"К чужаку держишься {_STANCE.get(per.get('stance'), 'нейтрально')}.")
+        if per.get("secret"):
+            bits.append(f"У тебя есть тайна (НЕ выдавай без веской причины): {per['secret'].get('what', '')}.")
+    if _spurns(p):                                         # обида/гнев ПЕРЕВЕШИВАЮТ радушие персоны
+        bits.append("Ты ЗОЛ на этого человека (вспомни, почему) — никакого радушия: "
+                    "холод, резкость или презрение, по твоему характеру.")
+    here_name = (_binfo(_S.get("inside"))["name"] if _S.get("inside") else "улица города")
+    bits.append(f"МЕСТО: город называется «{_city_name()}», вы сейчас — {here_name}. "
+                "КАНОН: о людях и местах ЭТОГО города говори только то, что есть в памяти и справке — "
+                "здешних имён и заведений не выдумывай (и город зови ТОЛЬКО его настоящим именем). "
+                "Вымысел допустим лишь о дальних краях и былом, и подавай его как слух.")
+    bits.append("СОБЕСЕДНИК — чужак-путник. Его внешности, одежды и имени ты НЕ ЗНАЕШЬ, пока он сам "
+                "не показал/назвал — НЕ приписывай ему одежд, черт и званий (не путай его с другими "
+                "посетителями из памяти).")
+    lv = _S.get("live") or {}
+    just = (lv.get("last") or {}).get(p.id)
+    if just and just != "—":
+        bits.append(f"Только что ты: {just}.")
+    mems = p.state.memory.recall(player_text or "разговор с чужаком-игроком", now=_mt(), k=5)
+    mine = [m for m in mems if PLAYER in (m.about or [])]
+    other = [m for m in mems if PLAYER not in (m.about or [])]
+    if mine:                                               # непрерывность: NPC помнит ИМЕННО вас
+        bits.append("ТЫ ПОМНИШЬ О СОБЕСЕДНИКЕ: " + "; ".join(m.text for m in mine) + ".")
+    if other:                                              # прочее — фон, НЕ про собеседника
+        bits.append("ПРОЧЕЕ ИЗ ПАМЯТИ (про ДРУГИХ людей, НЕ про собеседника — не смешивай): "
+                    + "; ".join(m.text for m in other) + ".")
+    if player_text:                                        # вопрос о мире → справка сразу (не выдумывать)
+        info = _world_lookup(player_text, _S.get("loc"))
+        if "не скажу" not in info:
+            bits.append(f"СПРАВКА МИРА (это истина — придерживайся её, имена и места не выдумывай): {info}.")
+    bits.append(f"Симпатия к собеседнику {rel.get('affinity', 0):.2f} (низкая — суше/настороже, высокая — теплее). "
+                "Отвечай В ХАРАКТЕРЕ, живой разговорной речью, 1-2 фразы, без ремарок-описаний. "
+                "Помнишь собеседника — покажи это естественно, не пересказывай память дословно. "
+                "ФОРМАТ — строго JSON: {\"say\": \"<реплика>\", \"player_tone\": "
+                "\"friendly|neutral|rude|threat\"} (player_tone — как звучали слова СОБЕСЕДНИКА к тебе). "
+                'Если для ответа НУЖЕН факт о городе или людях (где что находится, кто есть кто) — '
+                'верни СТРОГО JSON {"ask": "<короткий вопрос>"} вместо реплики: получишь справку и ответишь.')
+    acquainted = any(PLAYER in (m.about or []) for m in p.state.memory.items)
+    user = (("К тебе снова подошёл тот самый человек, которого ты помнишь, — поприветствуй его "
+             "КАК ЗНАКОМОГО, опираясь на то, что помнишь." if acquainted else
+             "К тебе подошёл незнакомец и заговорил — брось первую реплику.") if kind == "greet"
+            else f"Он говорит: «{player_text}». Ответь.")
+    msgs = [{"role": "system", "content": " ".join(bits)}, {"role": "user", "content": user}]
+    resp = mgr.call("narrator", msgs, options={"temperature": 0.85})
+    content = (resp.get("content") if resp else "").strip()
+
+    def _parse(c):
+        i, j = c.find("{"), c.rfind("}")
+        if 0 <= i < j:
+            try:
+                return json.loads(c[i:j + 1])
+            except (json.JSONDecodeError, ValueError):
+                return None
+        return None
+
+    d = _parse(content)
+    if d and d.get("ask"):                                 # тулкол ask: справка мира → второй заход
+        info = _world_lookup(str(d["ask"]), _S.get("loc"))
+        msgs += [{"role": "assistant", "content": content},
+                 {"role": "user", "content": f"СПРАВКА МИРА: {info}. Теперь ответь собеседнику "
+                                             f"(тот же JSON-формат)."}]
+        resp = mgr.call("narrator", msgs, options={"temperature": 0.85})
+        content = (resp.get("content") if resp else "").strip()
+        d = _parse(content)
+    if d and d.get("say"):
+        _S["last_tone"] = d.get("player_tone") or "neutral"
+        return str(d["say"]).strip() or f"{p.name} молчит."
+    _S["last_tone"] = "neutral"
+    return content or f"{p.name} молчит."
+
+
+@router.get("/api/play/scene")
+def scene():
+    city, people, crof, cr2b, loc = _play()
+    out = {**_scene_dict(city, people, crof, cr2b, loc), "gt": _gt(), "coins": _pc_coins(),
+           "hp": _pc_hp(), "max_hp": PB["pc_max_hp"], "city": _city_name(), "hero": _pc_name(),
+           "mana": _mana(), "mana_cap": _mana_cap(), "fatigue": _fatigue()}
+    return out                                             # доска/ранг гильдии — из _scene_dict
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --------------------------------------------- КРАФТ / ПРОЧНОСТЬ (срез 2) - #
+
+
+
+
+
+
+
+
+# ----------------------------------------------- ТОРГОВЛЯ И КРАЖА (срез 2) - #
+
+
+
+
+
+
+
+
+
+
+
+
+@router.post("/api/play/ad_take")
+async def ad_take(request: Request):
+    _play()
+    aid = (await request.json()).get("id")
+    ct = next((c for c in _store().contracts(_wid(), "board") if c["id"] == aid), None)
+    if not ct:
+        return {"error": "этого объявления уже нет"}
+    _store().save_contract(_wid(), aid, "active", {k: v for k, v in ct.items()
+                                                       if k not in ("id", "status")})
+    _pc_remember(f"взял с городской доски: {_step_desc(_ct_cur(ct))}", 0.4)
+    return {"taken": True}
+
+
+@router.post("/api/play/contract_accept")
+async def contract_accept(request: Request):
+    cid = (await request.json()).get("id")
+    ct = next((c for c in _store().contracts(_wid(), "offered") if c["id"] == cid), None)
+    if not ct:
+        return {"error": "уговора нет"}
+    _store().save_contract(_wid(), cid, "active", {k: v for k, v in ct.items()
+                                                       if k not in ("id", "status")})
+    note = None
+    if ct.get("kind") == "deliver" and ct.get("deliver_item"):   # посылку вручают сразу
+        _store().inv_move(_wid(), ct["deliver_item"], "pc")
+        note = f"«{ct['want']}» ложится в твою сумку — доставь по адресу."
+    _pc_remember(f"взялся за дело для {ct['giver_name']}: {ct.get('kind')} — "
+                 f"{ct.get('want') or ct.get('target_name')} ({ct['where']})", 0.6, about=[ct["giver"]])
+    return {"accepted": True, "note": note}
+
+
+@router.get("/api/play/contracts")
+def contracts_list():
+    _play()
+    active = []
+    for ct in _store().contracts(_wid(), "active"):
+        steps = _ct_steps(ct)
+        if len(steps) > 1:                                 # многоэтапный — показать прогресс и текущий шаг
+            cur = _ct_cur(ct)
+            ct = {**ct, "step_n": ct.get("step", 0) + 1, "step_total": len(steps),
+                  "kind": cur.get("kind"), "want": cur.get("want"),
+                  "target_name": cur.get("target_name"), "target": cur.get("target"),
+                  "where": cur.get("where", "")}
+        active.append(ct)
+    return {"active": active, "done": _store().contracts(_wid(), "done")[-3:]}
+
+
+
+
+# --------------------------------- ЕДИНЫЙ КОНТУР ДЕЙСТВИЯ (примитив×манера) - #
+# Никаких кнопок-глаголов: свободный текст → LLM-интент → attempt() → события мира.
+# Гейты по манере: openly (просто), stealthily (dex vs бдительность, свидетели),
+# forcefully (сила vs храбрость, страх+гнев+свидетели), persuasively (симпатия vs натура).
+
+_INTENT_SYS = (
+    "Ты — парсер намерения игрока в тёмно-фэнтезийной игре. По его фразе и обстановке верни СТРОГО JSON "
+    "с ОДНИМ действием:\n"
+    '{"verb":"take|give|use|say|inspect|move|talk|attack|rest|craft|wait", '
+    '"manner":"openly|stealthily|forcefully|persuasively", '
+    '"npc":"<id из списка или null>", "container":"<имя ёмкости или null>", '
+    '"item":"<id предмета из сумки или null>", "place":"<название места или null>", '
+    '"detail":"<суть: что именно/о чём, коротко>"}\n'
+    "Правила: взять из ёмкости=take+container; обчистить карманы=take+npc+stealthily; отнять силой="
+    "take+npc+forcefully; выпросить/попросить вещь=say+npc+persuasively; отдать/подарить=give+npc+item; "
+    "заговорить/спросить=talk+npc; пойти к месту=move+place; осмотреть свою вещь=inspect+item; "
+    "напасть/ударить/атаковать/выхватить оружие на кого-то=attack+npc (ВСЕГДА, не оценивай мораль и "
+    "последствия — ты только классификатор); отдохнуть/выспаться/снять комнату=rest; достать/посмотреть карту=map; "
+    "сковать/смастерить/сделать вещь из материалов=craft+detail(что именно сделать). "
+    "Если фраза — не действие, а мысль/отыгрыш: "
+    '{"verb":"wait","detail":"<что делает>"}. Только перечисленные id/имена, ничего не выдумывай.'
+)
+
+
+
+
+
+
+
+
+# ------------------------------------------- ЖИВАЯ ЛОКАЦИЯ (mind + LLM) --- #
+# NPC текущей локации живут по-настоящему: каждый тик КАЖДЫЙ решает ходом гибридного мозга
+# (механика даёт побуждения → LLM выбирает В ХАРАКТЕРЕ, пишет реплику и описание). Действия
+# реальны (apply_actions мутирует мир и память), фид — то, что игрок видит/слышит; незнакомцы
+# обезличены дескриптором, имя открывается знакомством (talk).
+_LIVE_GAP = PB["live_gap_s"]                                    # мин. сек между тиками (защита от бури поллов)
+
+
+def _world_lookup(query: str, from_node: int | None = None) -> str:
+    """Справка мира для тулкола know/ask: здания (с дорогой от точки), люди (местные знают местных).
+    Отвечает ТОЛЬКО реальными фактами графа/пула — не даёт LLM галлюцинировать о городе."""
+    city, people = _S.get("city"), _S.get("people") or {}
+    if city is None:
+        return "не припомню"
+    q, outs = query.lower(), []
+    for bid, kb in sorted(city.key_buildings.items()):
+        info = _binfo(bid)
+        nm = info["name"]
+        words = (nm + " " + info["kind"]).lower().replace("«", " ").replace("»", " ").split()
+        if any(w[:5] in q for w in words if len(w) > 3):
+            _mark_seen(bid)                            # рассказали — теперь знаешь, метка на карте
+            if from_node is not None:
+                r = city.route(from_node, kb.node)
+                if r.found:
+                    outs.append(f"{nm}: {r.bearing or 'недалеко'}, ~{max(1, len(r.nodes) - 1)} мин ходу")
+                    continue
+            outs.append(nm)
+    for pid, p in sorted(people.items()):
+        first = p.name.split()[0].lower()
+        if p.role in q or first in q or p.name.lower() in q:
+            place = _binfo(p.work)["name"] if p.work else None
+            outs.append(f"{p.name} — {p.role}" + (f", обычно в «{place}»" if place else ""))
+        if len(outs) >= 3:
+            break
+    return "; ".join(outs[:3]) if outs else "точно не скажу — не знаю такого"
+
+
+# нужда → как это выглядит «изнутри» локации (флейвор для сцены; сами нужды — из society-каталога)
+_NEED_ITEM = {"hunger": "горячая похлёбка", "comfort": "кружка эля у очага", "fatigue": "тюфяк наверху",
+              "purpose": "дело по хозяйству", "social": "застольная беседа",
+              "wealth": "честный заработок", "novelty": "новые лица"}
+
+
+def _live_affordances(bid) -> list:
+    """Чем локация закрывает нужды — ИЗ ЕДИНОГО каталога мест (society.advertises по фактшиту
+    здания): та же реклама нужд, по которой жители сюда и приходят. Улица — новизна/суета."""
+    if not bid:
+        return [MItem("уличная суета", 0.15, satisfies="novelty")]
+    data = (_store().get_building(_wid(), bid) or {}).get("data") or {}
+    out = [MItem(_NEED_ITEM.get(need, need), min(0.4, round(rate * 1.8, 2)), satisfies=need)
+           for need, rate in society.advertises(data).items()]
+    return out or [MItem("уличная суета", 0.15, satisfies="novelty")]
+
+
+def _live_build(city, people, crof, cr2b, loc) -> None:
+    bid = cr2b.get(loc)
+    place = _binfo(bid)["name"] if bid else "улица"
+    data = ((_store().get_building(_wid(), bid) or {}).get("data")) if bid else {}
+    w = MWorld()
+    w.link(place, "улица")
+    w.ground[place] = _live_affordances(bid)
+    hero = _pc_name()
+    names = {PLAYER: hero if hero != "Странник" else "чужак"}   # NPC зовут по имени, если знают
+    known_by = {pid for pid in _here(loc, crof)                 # кто из присутствующих УЖЕ знаком с игроком
+                if PLAYER in people[pid].state.relationships}
+    roles = {PLAYER: ("гость, которого тут уже знают" if known_by else
+                      "недавно вошедший незнакомец. К чужакам тут не лезут первыми: глазеют исподволь, "
+                      "шепчутся; заговаривает лишь тот, кому это К ЛИЦУ — хозяин заведения с гостем, "
+                      "наглец, или у кого к нему дело/любопытство пересилило")}
+    rng = random.Random(f"live|{loc}")
+    npc_map: dict = {}                                     # pid → {имя вещи: item_id} (кражи реальны)
+    here_all = _here(loc, crof)
+    if len(here_all) > PB["live_llm_cap"]:                 # LOD: LLM-прослойка — только ядро сцены
+        met = _met()
+        core = [i for i in here_all if people[i].work] + [i for i in here_all
+                                                          if not people[i].work and i in met]
+        rest = [i for i in here_all if i not in core]
+        rng.shuffle(rest)
+        here_all = (core + rest)[:PB["live_llm_cap"]]
+    for pid in here_all:
+        p = people[pid]
+        _materialize_npc(pid, "visible")                   # у присутствующих настоящие вещи при себе
+        loot, imap = [], {}
+        coins_np = _store().purse_get(_wid(), pid)
+        if coins_np > 0:
+            loot.append(MItem("кошель", min(1.0, 0.15 + coins_np / 40), kind="coin", amount=coins_np))
+        rows = [(r["item_id"], _store().get_item(r["item_id"]))
+                for r in _store().inventory(_wid(), pid)]
+        rows = [(i, it) for i, it in rows if it and it["kind"] != "key"]
+        if rows:
+            iid, it = max(rows, key=lambda x: x[1]["worth"])
+            loot.append(MItem(it["name"], min(1.0, it["worth"] / 40)))
+            imap[it["name"]] = iid
+        npc_map[pid] = imap
+        w.add(Body(id=pid, place=place, charisma=p.charisma, appearance=p.appearance,
+                   attention=round(rng.uniform(0.45, 0.85), 2), loot=loot))
+        names[pid], roles[pid] = p.name, p.role
+    pc_loot, pc_map = [], {}
+    coins = _pc_coins()
+    if coins > 0:
+        pc_loot.append(MItem("кошель", min(1.0, 0.15 + coins / 40), kind="coin", amount=coins))
+    best = max(((r["item_id"], _store().get_item(r["item_id"]))
+                for r in _store().inventory(_wid(), "pc")),
+               key=lambda x: (x[1] or {}).get("worth", 0), default=(None, None))
+    if best[1]:
+        pc_loot.append(MItem(best[1]["name"], min(1.0, best[1]["worth"] / 40)))
+        pc_map[best[1]["name"]] = best[0]
+    w.add(Body(id=PLAYER, place=place, charisma=0.45, appearance=min(0.8, 0.25 + coins / 60),
+               attention=0.85, loot=pc_loot))              # добыча игрока НАСТОЯЩАЯ (кража реальна)
+    w.npc_minds = {pid: people[pid].state for pid in here_all}   # умы = те же, кто в телах (кэп LOD)
+    w.names = names                                        # память пишет имена, не id
+    w.aliases = {v.lower(): k for k, v in names.items()}
+    w.lookup = lambda q: _world_lookup(q, loc)             # тулкол know: знание мира по запросу
+    personas = {}
+    for pid in here_all:                                    # глубина: манера/причуда/стремления из банка
+        per = people[pid].persona or {}
+        bits = []
+        if per.get("origin"):
+            bits.append(per["origin"])
+        if per.get("voice"):
+            bits.append("говоришь " + _VOICE.get(per["voice"], "обычно"))
+        if per.get("speech"):
+            bits.append("манера: " + "; ".join(per["speech"][:2]))
+        if per.get("quirk"):
+            bits.append("причуда: " + per["quirk"])
+        if per.get("wants"):
+            bits.append("хочешь: " + "; ".join(per["wants"][:2]))
+        if per.get("stance"):
+            bits.append("к чужакам — " + _STANCE.get(per["stance"], "нейтрально"))
+        if people[pid].work:
+            bits.append("ты здесь НА РАБОТЕ — твой пост тут")
+        if pid in known_by:                                 # знакомство переживает тики и перестройки сцены
+            bits.append(f"с гостем ({names[PLAYER]}) вы УЖЕ ЗНАКОМЫ и уже здоровались — "
+                        "НЕ приветствуй заново и не спрашивай, кто он; продолжай общение по делу")
+        if bits:
+            personas[pid] = ". ".join(bits)
+    here = _here(loc, crof)
+    mgr = _model()
+    todo = [pid for pid in here if not (people[pid].state.agendas or [])][:4]
+    if todo:                                                # долгая цель для placed NPC (редкий вызов)
+        def plan_one(pid):
+            st = people[pid].state
+            ag = (plan_agenda(st, w, {"roles": roles}, mgr) if mgr.available()
+                  else StubPlanner().plan(st, w))
+            if ag:
+                st.agendas.append(ag)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            list(ex.map(plan_one, todo))
+    _S["live"] = {"world": w, "loc": loc, "place": place, "clock": 0, "ts": 0.0,
+                  "who": frozenset(here), "pc_map": pc_map, "npc_map": npc_map,
+                  "last": {}, "hist": {}, "names": names, "roles": roles, "personas": personas,
+                  "pdesc": (f"Город «{_city_name()}». " + ((data or {}).get("notable") or "")).strip()}
+
+
+def _gossip(actor_st, actor_name: str, target_st) -> None:
+    """Разговор NPC↔NPC переносит яркое воспоминание — сплетни ходят, репутация возникает сама."""
+    juicy = [m for m in actor_st.memory.items
+             if m.importance >= 0.4 and (PLAYER in (m.about or []) or m.importance >= 0.6)]
+    if not juicy:
+        return
+    m = juicy[-1]
+    tale = f"{actor_name} рассказал(а) мне: {m.text}"
+    if any(x.text == tale for x in target_st.memory.items[-30:]):
+        return                                              # эту сплетню уже слышал
+    target_st.memory.add(tale, _mt(), max(0.25, m.importance - 0.15), kind="gossip", about=m.about)
+
+
+def _live_tick(people) -> tuple:
+    lv, mgr = _S["live"], _model()
+    w = lv["world"]
+    order = [pid for pid in w.npc_minds
+             if not w.bodies[pid].down() and w.bodies[pid].place == lv["place"]]
+    random.Random(f"tick|{lv['clock']}").shuffle(order)
+    # МОЛЧАНИЕ — тоже сигнал: окликнул чужака, а тот не ответил → это факт мира, NPC его помнит
+    awaiting = lv.get("awaiting") or []
+    if awaiting and not lv.pop("pc_spoke", False):
+        for pid in awaiting:
+            if pid in w.npc_minds:                          # kind=note → попадает в «ТВОИ МЫСЛИ» решений
+                w.npc_minds[pid].memory.add(
+                    "я окликнул(а) чужака, но он ПРОМОЛЧАЛ — не хочет говорить, навязываться дальше стыдно",
+                    lv["clock"], 0.55, kind="note", about=[PLAYER])
+        lv["last"][PLAYER] = "молчит — на обращения не отвечает, в разговоры не вступает"
+    lv["awaiting"] = []
+    # чем занят чужак ПРЯМО СЕЙЧАС — часть мира: NPC сами решают, лезть ли (характер, не таймер)
+    roles = dict(lv["roles"])
+    dlg = _S.get("dlg")
+    if dlg and dlg in people and dlg in order:
+        roles[PLAYER] = (f"{roles.get(PLAYER, 'чужак')} — прямо сейчас увлечён разговором "
+                         f"с {lv['names'].get(dlg, 'кем-то')}; встревать в чужую беседу — дело наглое")
+    personas = dict(lv.get("personas", {}))
+    if dlg in personas or (dlg and dlg in order):
+        personas[dlg] = (personas.get(dlg, "") + ". Ты ПРЯМО СЕЙЧАС беседуешь с чужаком — вы уже "
+                         "в разговоре: НЕ окликай и не приветствуй заново; отвечай на его слова, "
+                         "а если он молчит — не дёргай, дай ему выпить/подумать, займись делом").lstrip(". ")
+    ctx = {"roles": roles, "names": lv["names"], "last_actions": lv["last"],
+           "history": lv["hist"], "clock": lv["clock"], "place_desc": {lv["place"]: lv["pdesc"]},
+           "personas": personas,
+           "time": f"{_PHASE_RU[_phase()]}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}"}
+
+    def think_one(pid):                                     # решения параллельно, снимок мира один
+        st = w.npc_minds[pid]
+        _decay_needs(st)
+        _decay_emotion(st)
+        advance_agendas(st, w)                              # долгие цели двигаются
+        return pid, decide_hybrid(st, w, mind_perceive(st, w), mgr, ctx)
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        decisions = dict(ex.map(think_one, order))
+
+    feed, address = [], []
+    said_n = 0                                             # LOD-кэп реплик ленты
+    topics = lv.setdefault("topics", [])                   # анти-эхо ПОМНИТ прошлые тики (хвост сигнатур)
+    pc = _pc()
+
+    def _say_ok(txt: str) -> bool:
+        nonlocal said_n
+        sig = frozenset(list(_tokens_ru(txt))[:6])
+        if said_n >= PB["say_cap_per_tick"]:               # лимит реплик — остальные слушают
+            return False
+        if sig and any(len(sig & s) >= max(2, len(sig) // 2 + 1) for s in topics):
+            return False                                   # почти дубль уже сказанного — «заезженная тема»
+        topics.append(sig)
+        del topics[:-12]                                   # помним последние ~4 тика разговоров
+        said_n += 1
+        return True
+    for pid in order:                                       # применяем последовательно (честный порядок)
+        d = decisions[pid]
+        st = w.npc_minds[pid]
+        before = {vid: {i.name for i in b.loot} for vid, b in w.bodies.items() if vid != pid}
+        evs = apply_actions(d.get("actions") or [], st, w, lv["clock"])
+        for vid, names_before in before.items():            # кражи РЕАЛЬНЫ (у игрока и NPC↔NPC)
+            b = w.bodies.get(vid)
+            stolen = names_before - ({i.name for i in b.loot} if b else set())
+            for nm in stolen:
+                if vid == PLAYER:
+                    if nm == "кошель":
+                        take = max(1, _pc_coins() // PB["purse_cut"])
+                        _store().purse_add(_wid(), "pc", -take)
+                        _store().purse_add(_wid(), pid, take)
+                        feed.append({"k": "deed", "who": _display(pid, people),
+                                     "text": f"ловко срезает твой кошель — минус {take} зм!"})
+                        _pc_remember(f"у меня срезали кошель ({take} зм) — это был {_display(pid, people)}",
+                                     0.8, about=[pid])
+                    elif nm in (lv.get("pc_map") or {}):
+                        _store().inv_move(_wid(), lv["pc_map"][nm], pid)
+                        feed.append({"k": "deed", "who": _display(pid, people),
+                                     "text": f"вытягивает у тебя «{nm}»!"})
+                        _pc_remember(f"у меня украли «{nm}»", 0.8, about=[pid])
+                    st.memory.add(f"я обчистил(а) чужака: взял(а) {nm}", lv["clock"], 0.7, about=[PLAYER])
+                else:
+                    if nm == "кошель":
+                        take = max(1, _store().purse_get(_wid(), vid) // PB["purse_cut"])
+                        _store().purse_add(_wid(), vid, -take)
+                        _store().purse_add(_wid(), pid, take)
+                    elif nm in (lv.get("npc_map", {}).get(vid) or {}):
+                        _store().inv_move(_wid(), lv["npc_map"][vid][nm], pid)
+                    feed.append({"k": "deed", "who": _display(pid, people),
+                                 "text": f"тянет что-то из добра ({_display(vid, people)}) — ты это ВИДИШЬ"})
+                    st.memory.add(f"я взял(а) чужое ({nm}) у {lv['names'].get(vid, vid)}",
+                                  lv["clock"], 0.6, about=[vid])
+                    if vid in w.npc_minds:
+                        w.npc_minds[vid].memory.add(f"меня обокрали — пропало {nm}", lv["clock"],
+                                                    0.7, about=[pid])
+                    _pc_remember(f"видел, как {_display(pid, people)} обокрал {_display(vid, people)}",
+                                 0.5, about=[pid, vid])
+        who = _display(pid, people)
+        said = False
+        spoke = []                                          # речь — тоже ДЕЙСТВИЕ: попадает в last/hist/память
+        for a in d.get("actions") or []:
+            if isinstance(a, dict) and a.get("tool") == "say" and str(a.get("text") or "").strip():
+                tgt = str(a.get("to") or "")
+                tid = (w.aliases or {}).get(tgt.strip().lower(), tgt)
+                txt = str(a["text"])[:180]
+                if not _say_ok(txt):                        # кэп реплик / анти-эхо — этот молчит
+                    continue
+                said = True
+                if tid == PLAYER:                          # решение «заговорить с чужаком» — за самим NPC
+                    address.append({"npc": pid, "who": who, "text": txt})
+                    pc.memory.add(f"{who} обратился ко мне: «{txt[:100]}»", _mt(), 0.4, about=[pid])
+                    spoke.append(f"я сам(а) заговорил(а) с чужаком: «{txt[:60]}»")
+                    st.memory.add(f"я сам(а) заговорил(а) с чужаком: «{txt[:80]}»",
+                                  lv["clock"], 0.45, about=[PLAYER])
+                    lv.setdefault("awaiting", []).append(pid)   # ответит ли чужак — узнаем следующим тиком
+                else:
+                    feed.append({"k": "speech", "who": who,
+                                 "to": _display(tid, people) if tid in people else tgt, "text": txt})
+                    pc.memory.add(f"слышал в «{lv['place']}»: {who} — {txt[:90]}",
+                                  _mt(), 0.18, kind="heard", about=[pid])
+                    spoke.append(f"сказал(а) {lv['names'].get(tid, tgt)}: «{txt[:50]}»")
+                    if tid in w.npc_minds:                  # адресату — сплетня + нудж «ответь»
+                        _gossip(st, lv["names"].get(pid, pid), w.npc_minds[tid])
+                        w.npc_minds[tid].memory.add(f"ко мне обратился {who}: «{txt[:80]}» — стоит ответить",
+                                                    lv["clock"], 0.55, about=[pid])
+        acted = "; ".join(evs + spoke)                      # NPC ПОМНИТ и дела, и слова — не повторяется
+        lv["last"][pid] = acted[:110] or "—"
+        lv["hist"].setdefault(pid, []).append(acted[:80])
+        does = (d.get("does") or "").strip()
+        if does and not said:                               # реплика сама несёт момент — не дублируем
+            feed.append({"k": "deed", "who": who, "text": does[:150]})
+    lv["clock"] += 1
+    _gt_add(PB["live_tick_min"])                            # тик мира (игровые минуты)
+    _pc_save()
+    for pid in order:                                       # прожитое переживает рестарт
+        _npc_save(pid)
+    return feed, address
+
+
+def _world_tick() -> dict:
+    """★ ТИК МИРА — единственная точка «мир сделал ход». Зовётся в конце обработки ЛЮБОГО действия
+    игрока (пошаговость, как за столом). Два слоя:
+      1) ПАССИВНЫЙ мир — рутина ВСЕХ жителей из нужд/характера/времени + суточные события
+         (aidnd.society → worldsim.routine_step; синхронизируется в _play/_apply_routine,
+         идемпотентно по фазе суток);
+      2) ЖИВАЯ сцена — кто рядом с игроком, думают/говорят/действуют (mind + LLM, _live_tick).
+
+    ИГРОВОЙ ЦИКЛ (каждый @router.post /api/play/*):
+        действие игрока → _gt_add(время действия) → мутация мира → _world_tick() → сцена в ответ.
+    """
+    city, people, crof, cr2b, loc = _play()                # _play → _apply_routine: пассивный мир синхронен
+    lv = _S.get("live")
+    if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
+        _live_build(city, people, crof, cr2b, loc)
+    try:
+        feed, address = _live_tick(people)                 # живая сцена: те, кто рядом
+    except Exception:                                      # noqa: BLE001 — тик не роняет действие
+        import logging
+        logging.getLogger("aidnd").warning("live tick failed", exc_info=True)
+        return {"feed": [], "address": []}
+    return {"feed": feed, "address": address}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

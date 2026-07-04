@@ -6,39 +6,16 @@
 
 from __future__ import annotations
 
-import hashlib
+import contextvars
 import json
 import os
 import random
-import re
-import contextvars
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ... import config
-from ...citygraph import CityParams, generate, visual
-from ...combat import (Encounter, dungeon, from_monster, from_npc, from_pc, lair_name,
-                      pick_encounter, resolve)
-from ...citygraph.model import NodeKind
-from ...items import Capability, ItemCtx, LLMSmith, StubSmith, craft_path, loot_pool, rarity_price
-from ...items.craft import ROLE_RECIPES, materials_graph
-from ...items import condition as item_condition
-from ...items import normalize as item_normalize
-from ...items import craft as item_craft
-from ...items import inspect as item_inspect
-from ...items import repair as item_repair
-from ...items import use as item_use
-from ...items import view as item_view
-from ...mind import Body, NpcConfig, NpcState
-from ...mind import Item as MItem
-from ...mind import World as MWorld
-from ...mind import perceive as mind_perceive
-from ...mind import think
-from ...mind import StubPlanner, advance_agendas
-from ...mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
-from ...mind.tick import _decay_emotion, _decay_needs
-from ...play import populate
-from ...play.population import Townsperson
+from ...items import Capability
+from ...mind import NpcConfig, NpcState
 from ...worldgen import WorldStore
 
 

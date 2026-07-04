@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 
 from ... import society
-from .core import _S, _binfo, _gt, _phase, _store, _wid
+from .core import _S, _gt, _phase, _store, _wid
 
 
 def _place_index(people, keynode: dict) -> dict:

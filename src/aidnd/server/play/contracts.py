@@ -6,45 +6,28 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import random
 import re
-import contextvars
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-
-from ... import config
-from ...citygraph import CityParams, generate, visual
-from ...combat import (Encounter, dungeon, from_monster, from_npc, from_pc, lair_name,
-                      pick_encounter, resolve)
-from ...citygraph.model import NodeKind
-from ...items import Capability, ItemCtx, LLMSmith, StubSmith, craft_path, loot_pool, rarity_price
-from ...items.craft import ROLE_RECIPES, materials_graph
-from ...items import condition as item_condition
-from ...items import normalize as item_normalize
-from ...items import craft as item_craft
-from ...items import inspect as item_inspect
-from ...items import repair as item_repair
-from ...items import use as item_use
-from ...items import view as item_view
-from ...mind import Body, NpcConfig, NpcState
-from ...mind import Item as MItem
+from ...mind import StubPlanner
 from ...mind import World as MWorld
-from ...mind import perceive as mind_perceive
-from ...mind import think
-from ...mind import StubPlanner, advance_agendas
-from ...mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
-from ...mind.tick import _decay_emotion, _decay_needs
-from ...play import populate
-from ...play.population import Townsperson
-from ...worldgen import WorldStore
-
-from .core import (PB, PLAYER, _S, _binfo, _gt, _model, _mt, _npc_save, _pc_remember, _store, _tokens_ru, _wid)
-from .items import (_cont_holder, _materialize_npc)
-
-
+from ...mind.llm_agent import plan_agenda
+from .core import (
+    _S,
+    PB,
+    PLAYER,
+    _binfo,
+    _gt,
+    _model,
+    _mt,
+    _npc_save,
+    _pc_remember,
+    _store,
+    _tokens_ru,
+    _wid,
+)
+from .items import _cont_holder, _materialize_npc
 
 # ------------------------------------------- КОНТРАКТЫ (квесты из агенд) --- #
 # Квест = делегированная нужда NPC: want-ПРЕДИКАТ над миром (всё равно КАК добудешь) + реальная
@@ -178,10 +161,10 @@ def _make_contract(npc: str, status: str) -> dict | None:
     user = (f"ТЫ: {p.name}, {p.role}. Натура: {trait_hints_str(p)}. "
             f"ТВОЯ ДОЛГАЯ ЦЕЛЬ: {getattr(ag, 'summary', '')}. {pay_line}\n"
             f"bring-КАНДИДАТЫ (вещь → где): " + ("; ".join(f"«{c['name']}» → {c['where']}" for c in cands) or "нет") + "\n"
-            f"deliver-ТВОИ ВЕЩИ: " + ("; ".join(f"«{it['name']}»" for _i, it in own[:4]) or "нет") + "\n"
-            f"ЛЮДИ (для deliver/befriend): " + ("; ".join(o.name for _pid, o in others[:10]) or "нет") + "\n"
-            f"МЕСТА (для visit): " + ", ".join(places) + "\n"
-            f"ВРАГИ (для dead): " + ("; ".join(o.name for oid, o in others
+            "deliver-ТВОИ ВЕЩИ: " + ("; ".join(f"«{it['name']}»" for _i, it in own[:4]) or "нет") + "\n"
+            "ЛЮДИ (для deliver/befriend): " + ("; ".join(o.name for _pid, o in others[:10]) or "нет") + "\n"
+            "МЕСТА (для visit): " + ", ".join(places) + "\n"
+            "ВРАГИ (для dead): " + ("; ".join(o.name for oid, o in others
                                                if (p.state.relationships.get(oid) or {}).get("affinity", 0) < -0.15)
                                      or "нет"))
     resp = mgr.call("narrator", [{"role": "system", "content": _CONTRACT_SYS},

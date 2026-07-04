@@ -6,45 +6,42 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
 import random
-import re
-import contextvars
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import Request
 
-from ... import config
-from ...citygraph import CityParams, generate, visual
-from ...combat import (Encounter, dungeon, from_monster, from_npc, from_pc, lair_name,
-                      pick_encounter, resolve)
-from ...citygraph.model import NodeKind
-from ...items import Capability, ItemCtx, LLMSmith, StubSmith, craft_path, loot_pool, rarity_price
-from ...items.craft import ROLE_RECIPES, materials_graph
-from ...items import condition as item_condition
-from ...items import normalize as item_normalize
-from ...items import craft as item_craft
-from ...items import inspect as item_inspect
-from ...items import repair as item_repair
-from ...items import use as item_use
-from ...items import view as item_view
-from ...mind import Body, NpcConfig, NpcState
-from ...mind import Item as MItem
-from ...mind import World as MWorld
-from ...mind import perceive as mind_perceive
-from ...mind import think
-from ...mind import StubPlanner, advance_agendas
-from ...mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
-from ...mind.tick import _decay_emotion, _decay_needs
-from ...play import populate
-from ...play.population import Townsperson
-from ...worldgen import WorldStore
-
-from .core import (PB, PLAYER, _GT0, _S, _SESS, _binfo, _gt, _gt_add, _here, _mt, _npc_save, _pc_hp, _pc_name, _pc_remember, _pc_save, _store, _wid, router, _wanted_add, _PC_CAP)
-from .items import (_merchant_restock, _pc_coins, _pool_add_new, _pool_draw, _put_item, _rar_tag)
-from .contracts import (_ct_advance, _ct_cur)
-
+from ...combat import (
+    dungeon,
+    from_npc,
+    from_pc,
+    lair_name,
+    pick_encounter,
+    resolve,
+)
+from .contracts import _ct_advance, _ct_cur
+from .core import (
+    _GT0,
+    _PC_CAP,
+    _S,
+    _SESS,
+    PB,
+    PLAYER,
+    _binfo,
+    _gt,
+    _gt_add,
+    _here,
+    _mt,
+    _npc_save,
+    _pc_hp,
+    _pc_name,
+    _pc_remember,
+    _pc_save,
+    _store,
+    _wanted_add,
+    _wid,
+    router,
+)
+from .items import _merchant_restock, _pc_coins, _pool_add_new, _pool_draw, _put_item, _rar_tag
 
 
 # ---------------------------------------- ЛОГОВА, ГИЛЬДИЯ, БОЙ (BG-lite) --- #
@@ -370,7 +367,7 @@ def _combat_wrapup(enc, cb) -> dict:
         cut = _pc_coins() // PB["defeat_coin_cut"]
         if cut:
             _store().purse_add(_wid(), "pc", -cut)
-        out["narr"].append(f"Тьма. Ты очнулся у городских ворот — жив, но растрёпан"
+        out["narr"].append("Тьма. Ты очнулся у городских ворот — жив, но растрёпан"
                            + (f" и легче на {cut} зм." if cut else "."))
         _pc_remember(f"был бит в {l['name']} — едва унёс ноги", 0.8)
     else:

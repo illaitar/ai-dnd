@@ -26,7 +26,6 @@ maps = ["Pillow>=10.0"]   # only for regenerating battle maps via scripts/gen_ba
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",        # lint + format (code quality)
-    "zensical",         # documentation site generator (docs/)
 ]
 
 [project.scripts]

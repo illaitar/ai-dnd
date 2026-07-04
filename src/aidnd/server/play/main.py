@@ -41,6 +41,7 @@ from ...mind import StubPlanner, advance_agendas
 from ...mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
 from ...mind.tick import _decay_emotion, _decay_needs
 from ...play import populate
+from ... import society
 from ...play.population import Townsperson
 from ...worldgen import WorldStore
 
@@ -48,72 +49,46 @@ from .core import (PB, PLAYER, TEACHER_ROLES, _COLORS, _DM_SYS, _PHASE_RU, _PORT
 from .items import (_CRAFT, _cont_holder, _do_craft, _forge, _item_card, _known, _materialize_npc, _merchant_restock, _npc_cap, _npc_sees, _pc_coins, _pc_key_for, _seed_item_pool)
 from .contracts import (_board_ads, _board_npc_fulfill, _board_publish, _contract_offer, _contract_on_give, _contract_on_move, _contract_on_talk, _ct_cur, _ct_steps, _step_desc)
 from .combat import (_combat_wrapup, _combatant_from_npc, _guild_bid, _guild_board, _guild_gate, _guild_status, _lairs, _mint_badge, _npc_delves, _pc_badge, _pc_combatant)
+from .worldsim import routine_step                          # рутина жителей из НУЖД (society)
 
 
 
-def _routine_spot(pid: str, p, phase: str, day: int, keynode: dict, kps: list, taverns) -> int:
-    """Где человек в эту фазу суток. Детерминировано на (человек, фаза, день) — мир меняется,
-    пока игрока нет, но воспроизводимо. Питейных может быть несколько — каждый выбирает свою."""
-    rng = random.Random(f"rout|{pid}|{phase}|{day}")
-    tavern = rng.choice(taverns) if taverns else None       # своя питейная на вечер
-    if p.role == "стражник" and kps:                        # СТРАЖА патрулирует город днём и вечером
-        if phase in ("day", "evening"):
-            return kps[(hash((pid, phase, day)) % len(kps))]   # обход перекрёстков (детерминир.)
-        return keynode.get(p.work, p.home) if p.work else p.home
-    if p.role in ("бродяга", "головорез"):                  # лихой люд: днём по углам, вечером к людям
-        if phase in ("evening", "night") and tavern is not None and rng.random() < PB["eve_rogue"]:
-            return tavern
-        return rng.choice(kps) if kps else p.home
-    if p.work:                                              # работник: пост днём, вечером трактир/дом
-        wn = keynode.get(p.work, p.home)
-        if phase in ("morning", "day"):
-            return wn
-        if phase == "evening":
-            if p.role == "трактирщик":
-                return wn                                   # трактирщик вечером на посту
-            return tavern if (tavern is not None and rng.random() < PB["eve_worker"]) else p.home
-        return p.home
-    if phase == "morning":                                  # горожанин: большинство — дома
-        return (rng.choice(kps) if kps and rng.random() < PB["morn_out"] else p.home)
-    if phase == "day":
-        return (rng.choice(kps) if kps and rng.random() < PB["day_out"] else p.home)
-    if phase == "evening":
-        return tavern if (tavern is not None and rng.random() < PB["eve_commoner"]) else p.home
-    return p.home
+def _world_events() -> None:
+    """Суточные события пассивного мира (раз в день, утром): розыск стынет, смелые уходят по
+    заказам гильдии, горожане правят столб объявлений, случайный караван везёт товар. Каждое — в
+    своём try: сбой одного не роняет мир."""
+    if _wanted() > 0:                                       # розыск остывает — память не вечна
+        _wanted_add(-PB["wanted_decay"])
+    try:
+        news = _npc_delves()
+        if news:
+            _S["guild_news"] = (_S.get("guild_news") or [])[-2:] + news
+    except Exception:                                      # noqa: BLE001 — вылазка не роняет мир
+        pass
+    try:
+        bn = _board_npc_fulfill() + _board_publish()
+        if bn:
+            _S["board_news"] = (_S.get("board_news") or [])[-3:] + bn
+    except Exception:                                      # noqa: BLE001 — доска не роняет мир
+        pass
+    try:
+        if random.Random(f"caravan|{_gt() // 1440}|{_wid()}").random() < PB["caravan_chance"]:
+            _merchant_restock(f"caravan|{_gt() // 1440}")
+    except Exception:                                      # noqa: BLE001
+        pass
 
 
 def _apply_routine() -> None:
-    """Пересчитать споты всех жителей при смене фазы суток (дёшево — ключ по фазе+дню)."""
+    """Синхронизировать пассивный мир с текущим игровым временем: идемпотентно, дёшево — раз в фазу
+    суток (ключ фаза+день). Рутина ВСЕХ жителей строится из НУЖД/характера/времени (society, через
+    worldsim.routine_step), а не из хардкода ролей. На новой заре — суточные события."""
     key = (_phase(), _gt() // 1440)
     if _S.get("routine_key") == key or not _S.get("people"):
         return
     _S["routine_key"] = key
-    if key[0] == "morning":                                # утро: смелые идут по заказам доски
-        if _wanted() > 0:                                  # розыск остывает со временем (память не вечна)
-            _wanted_add(-PB["wanted_decay"])
-        try:
-            news = _npc_delves()
-            if news:
-                _S["guild_news"] = (_S.get("guild_news") or [])[-2:] + news
-        except Exception:                                  # noqa: BLE001 — вылазка не роняет мир
-            pass
-        try:                                               # столб: горожане вешают и снимают объявления
-            bn = _board_npc_fulfill() + _board_publish()
-            if bn:
-                _S["board_news"] = (_S.get("board_news") or [])[-3:] + bn
-        except Exception:                                  # noqa: BLE001 — доска не роняет мир
-            pass
-        try:                                               # караван: случайный товар на рынок
-            if random.Random(f"caravan|{_gt() // 1440}|{_wid()}").random() < PB["caravan_chance"]:
-                _merchant_restock(f"caravan|{_gt() // 1440}")
-        except Exception:                                  # noqa: BLE001
-            pass
-    people, crof = _S["people"], _S["crof"]
-    keynode, kps = _S.get("keynode") or {}, _S.get("kps") or []
-    taverns = [keynode.get(p.work) for p in people.values()      # питейных может быть несколько
-               if p.role == "трактирщик" and p.work and keynode.get(p.work)]
-    for pid, p in people.items():
-        crof[pid] = _routine_spot(pid, p, key[0], key[1], keynode, kps, taverns)
+    if key[0] == "morning":
+        _world_events()
+    routine_step(_S["people"], _S["crof"])
 
 
 _TIE_ROLES = {"головорез": "головорез", "шайк": "головорез", "стражн": "стражник",
@@ -1442,21 +1417,20 @@ def _world_lookup(query: str, from_node: int | None = None) -> str:
     return "; ".join(outs[:3]) if outs else "точно не скажу — не знаю такого"
 
 
+# нужда → как это выглядит «изнутри» локации (флейвор для сцены; сами нужды — из society-каталога)
+_NEED_ITEM = {"hunger": "горячая похлёбка", "comfort": "кружка эля у очага", "fatigue": "тюфяк наверху",
+              "purpose": "дело по хозяйству", "social": "застольная беседа",
+              "wealth": "честный заработок", "novelty": "новые лица"}
+
+
 def _live_affordances(bid) -> list:
-    """Чем локация закрывает нужды — из фактшита здания (services/features). Улица — суета."""
+    """Чем локация закрывает нужды — ИЗ ЕДИНОГО каталога мест (society.advertises по фактшиту
+    здания): та же реклама нужд, по которой жители сюда и приходят. Улица — новизна/суета."""
     if not bid:
         return [MItem("уличная суета", 0.15, satisfies="novelty")]
-    data = ((_store().get_building(_wid(), bid) or {}).get("data")) or {}
-    sv, out = data.get("services") or [], []
-    for s, (nm, val, need) in {"eat": ("похлёбка", 0.3, "hunger"), "drink": ("кружка эля", 0.25, "comfort"),
-                               "lodging": ("тюфяк наверху", 0.25, "fatigue"), "pray": ("алтарь", 0.25, "purpose"),
-                               "heal": ("травяной отвар", 0.2, "comfort")}.items():
-        if s in sv:
-            out.append(MItem(nm, val, satisfies=need))
-    if any("очаг" in f for f in (data.get("features") or [])):
-        out.append(MItem("место у очага", 0.2, satisfies="fatigue"))
-    if sv:
-        out.append(MItem("работа по хозяйству", 0.2, satisfies="purpose"))
+    data = (_store().get_building(_wid(), bid) or {}).get("data") or {}
+    out = [MItem(_NEED_ITEM.get(need, need), min(0.4, round(rate * 1.8, 2)), satisfies=need)
+           for need, rate in society.advertises(data).items()]
     return out or [MItem("уличная суета", 0.15, satisfies="novelty")]
 
 
@@ -1716,15 +1690,22 @@ def _live_tick(people) -> tuple:
 
 
 def _world_tick() -> dict:
-    """ОДИН тик живого мира — вызывается ТОЛЬКО действием игрока (пошаговость, как за столом).
-    Возвращает {feed, address} для показа."""
-    city, people, crof, cr2b, loc = _play()
+    """★ ТИК МИРА — единственная точка «мир сделал ход». Зовётся в конце обработки ЛЮБОГО действия
+    игрока (пошаговость, как за столом). Два слоя:
+      1) ПАССИВНЫЙ мир — рутина ВСЕХ жителей из нужд/характера/времени + суточные события
+         (aidnd.society → worldsim.routine_step; синхронизируется в _play/_apply_routine,
+         идемпотентно по фазе суток);
+      2) ЖИВАЯ сцена — кто рядом с игроком, думают/говорят/действуют (mind + LLM, _live_tick).
+
+    ИГРОВОЙ ЦИКЛ (каждый @router.post /api/play/*):
+        действие игрока → _gt_add(время действия) → мутация мира → _world_tick() → сцена в ответ.
+    """
+    city, people, crof, cr2b, loc = _play()                # _play → _apply_routine: пассивный мир синхронен
     lv = _S.get("live")
     if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
         _live_build(city, people, crof, cr2b, loc)
-        lv = _S["live"]
     try:
-        feed, address = _live_tick(people)
+        feed, address = _live_tick(people)                 # живая сцена: те, кто рядом
     except Exception:                                      # noqa: BLE001 — тик не роняет действие
         import logging
         logging.getLogger("aidnd").warning("live tick failed", exc_info=True)

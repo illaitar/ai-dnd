@@ -100,9 +100,8 @@ PB = {
     "contract_enemy_aff": -0.1, "contract_poor_purse": 5, "contract_reward_min": 2,
     "complete_trust": 0.3, "complete_aff": 0.2, "befriend_aff": 0.25,
     "merchant_float": 30, "hostile_aff": -0.2,
-    # распорядок: вероятность вечерней тяги в трактир
-    "eve_worker": 0.5, "eve_commoner": 0.03, "eve_rogue": 0.4,
-    "day_out": 0.25, "morn_out": 0.15, "live_llm_cap": 8, "here_show_cap": 12,
+    # распорядок жителей — из НУЖД (aidnd.society), не из вероятностей ролей (см. society/*)
+    "live_llm_cap": 8, "here_show_cap": 12,
     # подарок: прирост симпатии = min(cap, base + worth/div)
     "gift_aff_base": 0.05, "gift_aff_div": 100, "gift_aff_cap": 0.25,
     # герой и логова

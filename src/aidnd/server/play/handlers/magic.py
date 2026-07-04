@@ -1,4 +1,4 @@
-"""Домен МАГИЯ (хендлеры /cast /glyphs /learn /teachers /grimoire) — распил world.py (LOOP.md).
+"""Домен МАГИЯ (хендлеры /cast /glyphs /learn /teachers /grimoire) — распил world.py (docs/loop.md).
 Круг-рисунок → закон от LLM (кламп по бюджету), каст без броска, гримуар-на-мир, обучение глифам.
 """
 

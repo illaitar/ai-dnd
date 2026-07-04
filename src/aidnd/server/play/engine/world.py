@@ -1,6 +1,6 @@
 """Игровой контур — МИР И ОРКЕСТРАЦИЯ: генерация, сцена, движение, диалог, действие, живая локация + HTTP-эндпоинты.
 
-Слой mechanics/ (см. docs/LOOP.md).
+Слой mechanics/ (см. docs/loop.md).
 """
 
 from __future__ import annotations

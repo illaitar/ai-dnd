@@ -1,4 +1,4 @@
-"""Игровой контур /api/play — пакет со слоями (см. docs/LOOP.md):
+"""Игровой контур /api/play — пакет со слоями (см. docs/loop.md):
 
     engine/     ядро-сцена: core (сессия/состояние/роутер/время/мана) · world (сцена/тик/голос) · worldsim
     mechanics/  домены-механики: items · contracts · combat

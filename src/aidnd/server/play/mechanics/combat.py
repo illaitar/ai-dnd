@@ -1,6 +1,6 @@
 """Игровой контур — БОЙ И ГИЛЬДИЯ: логова, ранги/жетон, дуэли, авторезолв.
 
-Слой mechanics/ (см. docs/LOOP.md).
+Слой mechanics/ (см. docs/loop.md).
 """
 
 from __future__ import annotations

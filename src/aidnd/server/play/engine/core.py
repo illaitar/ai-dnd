@@ -1,6 +1,6 @@
 """Игровой контур — ЯДРО: сессии-миры, состояние, БД, время, игрок-агент, общие хелперы.
 
-Слой mechanics/ (см. docs/LOOP.md).
+Слой mechanics/ (см. docs/loop.md).
 """
 
 from __future__ import annotations

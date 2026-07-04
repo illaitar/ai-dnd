@@ -1,6 +1,6 @@
 """Игровой контур — ПРЕДМЕТЫ: инвентарь, ковка, пул, редкость, крафт по графу материалов.
 
-Слой mechanics/ (см. docs/LOOP.md).
+Слой mechanics/ (см. docs/loop.md).
 """
 
 from __future__ import annotations

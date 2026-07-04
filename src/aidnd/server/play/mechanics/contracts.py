@@ -1,6 +1,6 @@
 """Игровой контур — КОНТРАКТЫ: квесты из агенд (шаги-предикаты) + доска объявлений.
 
-Слой mechanics/ (см. docs/LOOP.md).
+Слой mechanics/ (см. docs/loop.md).
 """
 
 from __future__ import annotations

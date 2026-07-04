@@ -21,6 +21,8 @@ uv run pytest -q
 
 ## Документация
 
-- **[docs/LOOP.md](docs/LOOP.md)** — архитектура игрового тика (канон).
-  Полная иерархическая структура проекта — в работе; остальные документы удалены как
-  устаревшие (история — в git).
+**[docs/README.md](docs/README.md)** — карта документации и сквозные принципы. Оттуда:
+[сущности](docs/entities.md) · [игровой цикл](docs/loop.md) · [разум NPC](docs/mind.md) ·
+[генерация мира](docs/worldgen.md) · [боёвка](docs/combat.md) · [магия](docs/magic.md) ·
+[предметы](docs/items.md) · [квесты](docs/quests.md) · [сюжет](docs/plot.md) ·
+[сервис](docs/service.md) · [структура кода](docs/structure.md)

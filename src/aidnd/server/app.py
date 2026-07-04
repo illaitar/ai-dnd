@@ -25,7 +25,7 @@ app = FastAPI(title="AI-DnD Engine")
 
 # подробный файловый лог сессии (для отладки, скачивается из /api/play/debuglog)
 from . import debuglog                                     # noqa: E402
-from .play.core import current_world_id                    # noqa: E402
+from .play.engine.core import current_world_id             # noqa: E402
 debuglog.setup(current_world_id)
 
 

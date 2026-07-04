@@ -6,9 +6,19 @@ import random
 
 from fastapi import Request
 
-from .core import _PC_CAP, _S, PB, _gt, _gt_add, _pc_hp, _store, _wid, router
-from .items import _pc_coins
-from .world import _look_key, _looked_level, _play, _scene_dict
+from aidnd.server.play.engine.core import (
+    _PC_CAP,
+    _S,
+    PB,
+    _gt,
+    _gt_add,
+    _pc_hp,
+    _store,
+    _wid,
+    router,
+)
+from aidnd.server.play.engine.world import _look_key, _looked_level, _play, _scene_dict
+from aidnd.server.play.mechanics.items import _pc_coins
 
 
 @router.post("/api/play/look")
@@ -27,9 +37,20 @@ async def look(request: Request):
     _S.setdefault("looked", {})[key] = max(prev, lvl, 1 if total >= PB["look_dc"] else prev)
     _gt_add(PB["give_min"])
     sc = _scene_dict(city, people, crof, cr2b, loc)
-    dice = {"die": 20, "roll": roll, "mod": mod, "total": total, "dc": PB["look_dc"],
-            "ok": total >= PB["look_dc"], "label": "Внимательность (Wis)"}
-    narr = ("Ты оглядываешься, но взгляд скользит мимо: толком ничего не разобрал." if total < PB["look_dc"]
-            else "Ты внимательно оглядываешься по сторонам." if total < PB["look_good"]
-            else "От твоего взгляда мало что ускользает.")
+    dice = {
+        "die": 20,
+        "roll": roll,
+        "mod": mod,
+        "total": total,
+        "dc": PB["look_dc"],
+        "ok": total >= PB["look_dc"],
+        "label": "Внимательность (Wis)",
+    }
+    narr = (
+        "Ты оглядываешься, но взгляд скользит мимо: толком ничего не разобрал."
+        if total < PB["look_dc"]
+        else "Ты внимательно оглядываешься по сторонам."
+        if total < PB["look_good"]
+        else "От твоего взгляда мало что ускользает."
+    )
     return {**sc, "dice": dice, "narr": [narr], "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}

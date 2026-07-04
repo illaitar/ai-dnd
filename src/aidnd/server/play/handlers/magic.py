@@ -9,12 +9,12 @@ import random
 
 from fastapi import Request
 
-from ...combat import roll_dice
-from ...magic import circle_hash, classify, fallback_law, power_budget
-from ...magic import describe as magic_describe
-from ...magic import load as magic_load
-from ...magic import normalize as magic_normalize
-from .core import (
+from aidnd.combat import roll_dice
+from aidnd.magic import circle_hash, classify, fallback_law, power_budget
+from aidnd.magic import describe as magic_describe
+from aidnd.magic import load as magic_load
+from aidnd.magic import normalize as magic_normalize
+from aidnd.server.play.engine.core import (
     _S,
     PB,
     PLAYER,
@@ -46,7 +46,7 @@ from .core import (
     _wid,
     router,
 )
-from .world import _look_key, _play, _voice
+from aidnd.server.play.engine.world import _look_key, _play, _voice
 
 
 def _spell_hit(t, dmg: dict, out: dict, tag: str) -> None:
@@ -63,6 +63,7 @@ def _spell_hit(t, dmg: dict, out: dict, tag: str) -> None:
         t.alive = False
     fell = " — падает!" if not t.alive else f" [{t.hp}/{t.max_hp}]"
     out["narr"].append(f"{dmg['dice']} → {t.name}: {n} урона{fell}")
+
 
 def _apply_law(law: dict, target, out: dict, people, crof, loc) -> None:
     """Исполнение ЗАКОНА круга. Механика (mech) — по бою/миру как раньше; freeform-суть (полёт,
@@ -90,14 +91,14 @@ def _apply_law(law: dict, target, out: dict, people, crof, loc) -> None:
     dmg = mech.get("damage")
     if dmg and enc:
         foes = [u for u in enc.units.values() if u.side == "foes" and not u.down()]
-        if area.get("shape") in ("burst", "cloud") and t:   # AoE вокруг клетки цели
+        if area.get("shape") in ("burst", "cloud") and t:  # AoE вокруг клетки цели
             r = area.get("radius", 1)
             hit = [u for u in foes if max(abs(u.x - t.x), abs(u.y - t.y)) <= r]
             out["narr"].append(f"«{law['name']}» накрывает {len(hit)} цел(и):")
             for u in hit:
                 _spell_hit(u, dmg, out, u.id)
             out["combat_refresh"] = True
-        elif area.get("shape") in ("cone", "wall"):         # веер/стена от героя
+        elif area.get("shape") in ("cone", "wall"):  # веер/стена от героя
             pc_u = enc.units.get("pc")
             length = max(2, area.get("radius", 2))
             hit = [u for u in foes if pc_u and enc.dist(pc_u, u) <= length] if pc_u else foes[:3]
@@ -105,7 +106,7 @@ def _apply_law(law: dict, target, out: dict, people, crof, loc) -> None:
             for u in hit:
                 _spell_hit(u, dmg, out, u.id)
             out["combat_refresh"] = True
-        elif t and t.side == "foes" and not t.down():        # одиночный снаряд
+        elif t and t.side == "foes" and not t.down():  # одиночный снаряд
             _spell_hit(t, dmg, out, target)
             out["combat_refresh"] = True
         else:
@@ -118,7 +119,9 @@ def _apply_law(law: dict, target, out: dict, people, crof, loc) -> None:
         kind, turns = st.get("kind", "bound"), st.get("turns", 1)
         if enc and t and t.side == "foes" and not t.down():
             t.status[kind] = max(t.status.get(kind, 0), turns)
-            word = {"bound": "спутан", "asleep": "усыплён", "afraid": "объят ужасом"}.get(kind, kind)
+            word = {"bound": "спутан", "asleep": "усыплён", "afraid": "объят ужасом"}.get(
+                kind, kind
+            )
             out["narr"].append(f"{t.name} {word} ({turns} р.).")
             out["combat_refresh"] = True
         else:
@@ -129,21 +132,34 @@ def _apply_law(law: dict, target, out: dict, people, crof, loc) -> None:
     if law.get("law") and not known_mech:
         out["narr"].append(law["law"])
         out["refresh"] = True
-        for wpid in _here(loc, crof):                       # очевидцы freeform-чуда запоминают его
+        for wpid in _here(loc, crof):  # очевидцы freeform-чуда запоминают его
             people[wpid].state.memory.add(
-                f"видел(а) волшбу чужака: {law['law'][:90]}", _mt(), 0.55, about=[PLAYER])
+                f"видел(а) волшбу чужака: {law['law'][:90]}", _mt(), 0.55, about=[PLAYER]
+            )
             _npc_save(wpid)
     _pc_remember(f"сотворил «{law['name']}»: {law.get('law', '')[:80]}", 0.5)
 
-_ELEM_DMG = {"огонь": "fire", "лёд": "cold", "яд": "poison",
-             "свет": "radiant", "тьма": "necrotic", "камень": "bludgeoning"}
+
+_ELEM_DMG = {
+    "огонь": "fire",
+    "лёд": "cold",
+    "яд": "poison",
+    "свет": "radiant",
+    "тьма": "necrotic",
+    "камень": "bludgeoning",
+}
+
 
 def _apply_wild(comp, reason: str, out: dict) -> None:
     """Дикий/сорванный круг (М-3): LLM выбирает исход из ОГРАНИЧЕННОГО меню — применяем механически.
     Меню безопасно (нельзя сломать мир): backfire | nothing | scorch | warp | boon."""
     cb = _S.get("combat")
     w = _inscriber().wild(comp, reason, bool(cb)) or {
-        "effect": "backfire", "magnitude": 2, "element": "", "text": f"Круг рвётся вразнос — {reason}."}
+        "effect": "backfire",
+        "magnitude": 2,
+        "element": "",
+        "text": f"Круг рвётся вразнос — {reason}.",
+    }
     mag = max(1, min(3, int(w.get("magnitude") or 1)))
     eff = w.get("effect", "backfire")
     out["cast"]["wild"] = True
@@ -157,7 +173,7 @@ def _apply_wild(comp, reason: str, out: dict) -> None:
         out["narr"].append(f"Нежданная удача — раны затягиваются (+{_pc_hp() - before} hp).")
         return
     if eff == "warp":
-        _gt_add(PB["act_min"])                             # искажение — странный сдвиг, без жёсткой механики
+        _gt_add(PB["act_min"])  # искажение — странный сдвиг, без жёсткой механики
         out["refresh"] = True
         return
     if eff == "scorch" and cb:
@@ -182,6 +198,7 @@ def _apply_wild(comp, reason: str, out: dict) -> None:
     _pc_hp(-2 * mag)
     out["narr"].append(f"Отдача калечит чертящего — {2 * mag} урона.")
 
+
 def _inscribe_law(comp, cls: dict):
     """Роль А: рисунок круга → ЗАКОН мира. Первый раз LLM-законописец ПРОЯВЛЯЕТ закон целиком
     (суть свободна, сила клампится бюджетом рисунка), кэш в гримуаре по хэшу РИСУНКА.
@@ -191,12 +208,32 @@ def _inscribe_law(comp, cls: dict):
     if entry:
         return entry, False
     law = _inscriber().scribe_law(comp, cls) or fallback_law(comp)
-    entry = {"hash": h, "comp": magic_normalize(comp), "descr": magic_describe(comp),
-             **{k: law.get(k) for k in ("name", "flavor", "sensory", "kind", "power", "target",
-                                        "range", "duration", "mech", "law", "taboo")},
-             "first_gt": _gt(), "casts": 0}
+    entry = {
+        "hash": h,
+        "comp": magic_normalize(comp),
+        "descr": magic_describe(comp),
+        **{
+            k: law.get(k)
+            for k in (
+                "name",
+                "flavor",
+                "sensory",
+                "kind",
+                "power",
+                "target",
+                "range",
+                "duration",
+                "mech",
+                "law",
+                "taboo",
+            )
+        },
+        "first_gt": _gt(),
+        "casts": 0,
+    }
     _grimoire_put(h, entry)
     return entry, True
+
 
 def _taboo(people, crof, loc, out: dict) -> int:
     """Открытая боевая/дикая магия среди горожан = ведьмовство → розыск (М-4, лёгкая версия;
@@ -207,17 +244,21 @@ def _taboo(people, crof, loc, out: dict) -> int:
     if not wit:
         return 0
     for w in wit:
-        people[w].state.memory.add("видел(а): чужак колдовал прямо у всех на виду", _mt(), 0.6, about=[PLAYER])
+        people[w].state.memory.add(
+            "видел(а): чужак колдовал прямо у всех на виду", _mt(), 0.6, about=[PLAYER]
+        )
         _npc_save(w)
     _wanted_add(PB["taboo_witness"] + min(2, len(wit)), "колдовал у всех на виду")
     out["narr"].append("Люди вокруг отшатываются и крестятся — ведьмовство не забудут.")
     return len(wit)
+
 
 def _draw_rate() -> float:
     """Скорость таяния свечи (мана/сек) при черчении: базовая, мягче от Инт+Мдр (усталость учтена)."""
     cap = _pc_cap_eff()
     soft = 1 + PB["draw_intwis_k"] * (cap.mod("int") + cap.mod("wis"))
     return round(PB["draw_drain_per_s"] / max(0.4, soft), 3)
+
 
 def _cast_cost(comp, draw_ms, known: bool):
     """Сколько маны сожжёт круг. Известный из гримуара — мгновенно за долю бюджета (М1a). Новый —
@@ -227,6 +268,7 @@ def _cast_cost(comp, draw_ms, known: bool):
         return max(1, round(budget * PB["known_cost_k"]))
     secs = max(0.0, float(draw_ms or 0) / 1000.0)
     return max(1, math.ceil(_draw_rate() * secs + budget))
+
 
 @router.post("/api/play/cast")
 async def cast(request: Request):
@@ -243,39 +285,68 @@ async def cast(request: Request):
     if locked:
         g = magic_load()
         names = ", ".join(g["all"][c].get("ru", c) for c in locked)
-        return {"cast": {"kind": "locked"}, "narr": [f"Ты не владеешь глифом: {names}. Выучи у наставника."],
-                "mana": _mana(), "gt": _gt()}
+        return {
+            "cast": {"kind": "locked"},
+            "narr": [f"Ты не владеешь глифом: {names}. Выучи у наставника."],
+            "mana": _mana(),
+            "gt": _gt(),
+        }
     cls = classify(comp)
     out = {"narr": [], "cast": {"kind": cls["kind"]}}
     if cls["kind"] == "empty":
-        return {**out, "narr": [f"Круг не сходится — {cls['reason']}."], "mana": _mana(), "gt": _gt()}
-    is_known = _grimoire_get(circle_hash(comp)) is not None   # рисунок уже вписан → мастерский каст
+        return {
+            **out,
+            "narr": [f"Круг не сходится — {cls['reason']}."],
+            "mana": _mana(),
+            "gt": _gt(),
+        }
+    is_known = _grimoire_get(circle_hash(comp)) is not None  # рисунок уже вписан → мастерский каст
     mana_before = _mana()
     cost = _cast_cost(comp, body.get("draw_ms"), is_known)
-    if is_known and mana_before < cost:                    # мастерский круг не запустить без маны
-        return {**out, "narr": [f"Маны мало: нужно {cost:g}, есть {mana_before:g}. Отдохни."],
-                "mana": mana_before, "mana_cap": _mana_cap(), "gt": _gt()}
-    guttered = (not is_known) and cost > mana_before       # свеча погасла посреди черчения — выброс
+    if is_known and mana_before < cost:  # мастерский круг не запустить без маны
+        return {
+            **out,
+            "narr": [f"Маны мало: нужно {cost:g}, есть {mana_before:g}. Отдохни."],
+            "mana": mana_before,
+            "mana_cap": _mana_cap(),
+            "gt": _gt(),
+        }
+    guttered = (not is_known) and cost > mana_before  # свеча погасла посреди черчения — выброс
     spend = min(mana_before, cost)
     _mana_spend(spend)
-    _mana_grow(spend)                                      # выжигание растит потолок маны
+    _mana_grow(spend)  # выжигание растит потолок маны
     _fat_add(spend * (PB["burnout_fat_mult"] if guttered else 1))  # выброс истощает сильнее
     _gt_add(PB["act_min"])
-    out["cast"].update({"mode": "known" if is_known else "drawn", "guttered": guttered,
-                        "cost": round(spend, 1), "budget": power_budget(comp)})
-    if cls["kind"] == "wild" or guttered:                  # противоречие/выброс → непредсказуемый исход
-        reason = ("свеча погасла — круг сорвался в руках" if guttered and cls["kind"] != "wild"
-                  else cls["reason"])
+    out["cast"].update(
+        {
+            "mode": "known" if is_known else "drawn",
+            "guttered": guttered,
+            "cost": round(spend, 1),
+            "budget": power_budget(comp),
+        }
+    )
+    if cls["kind"] == "wild" or guttered:  # противоречие/выброс → непредсказуемый исход
+        reason = (
+            "свеча погасла — круг сорвался в руках"
+            if guttered and cls["kind"] != "wild"
+            else cls["reason"]
+        )
         _apply_wild(comp, reason, out)
-        _taboo(people, crof, loc, out)                     # дикий выброс на людях — ведьмовство
+        _taboo(people, crof, loc, out)  # дикий выброс на людях — ведьмовство
         _pc_remember("круг ушёл вразнос", 0.4)
         _pc_save()
-        res = {**out, "mana": _mana(), "mana_cap": _mana_cap(), "hp": _pc_hp(),
-               "fatigue": _fatigue(), "gt": _gt()}
+        res = {
+            **out,
+            "mana": _mana(),
+            "mana_cap": _mana_cap(),
+            "hp": _pc_hp(),
+            "fatigue": _fatigue(),
+            "gt": _gt(),
+        }
         if out.get("combat_refresh") and _S.get("combat"):
             res["combat"] = _S["combat"]["enc"].view()
         return res
-    law, fresh = _inscribe_law(comp, cls)                  # чистый круг: закон (LLM/кэш гримуара)
+    law, fresh = _inscribe_law(comp, cls)  # чистый круг: закон (LLM/кэш гримуара)
     law["casts"] = law.get("casts", 0) + 1
     _grimoire_put(law["hash"], law)
     out["cast"]["name"] = law["name"]
@@ -285,15 +356,26 @@ async def cast(request: Request):
         if law.get("flavor"):
             head += f" — {law['flavor']}"
         out["narr"].append(head)
-    _apply_law(law, target, out, people, crof, loc)        # исполнение: механика + freeform-событие
-    if law.get("taboo") or (law.get("mech") or {}).get("damage") or (law.get("mech") or {}).get("status"):
-        _taboo(people, crof, loc, out)                     # тёмный/боевой закон на людях — ведьмовство
+    _apply_law(law, target, out, people, crof, loc)  # исполнение: механика + freeform-событие
+    if (
+        law.get("taboo")
+        or (law.get("mech") or {}).get("damage")
+        or (law.get("mech") or {}).get("status")
+    ):
+        _taboo(people, crof, loc, out)  # тёмный/боевой закон на людях — ведьмовство
     _pc_save()
-    res = {**out, "mana": _mana(), "mana_cap": _mana_cap(), "hp": _pc_hp(),
-           "fatigue": _fatigue(), "gt": _gt()}
+    res = {
+        **out,
+        "mana": _mana(),
+        "mana_cap": _mana_cap(),
+        "hp": _pc_hp(),
+        "fatigue": _fatigue(),
+        "gt": _gt(),
+    }
     if out.get("combat_refresh") and _S.get("combat"):
         res["combat"] = _S["combat"]["enc"].view()
     return res
+
 
 @router.get("/api/play/glyphs")
 def glyphs_list():
@@ -303,15 +385,23 @@ def glyphs_list():
     known = set(_glyphs_known())
     elems = [{**e, "known": e["id"] in known} for e in g["elements"].values()]
     glyphs = [{**s, "known": s["id"] in known} for s in g["glyphs"].values()]
-    return {"elements": elems, "glyphs": glyphs, "known": sorted(known),
-            "mana": _mana(), "mana_cap": _mana_cap(), "fatigue": _fatigue(),
-            "draw": {"rate": _draw_rate(), "known_k": PB["known_cost_k"]}}   # клиент тает свечу в такт
+    return {
+        "elements": elems,
+        "glyphs": glyphs,
+        "known": sorted(known),
+        "mana": _mana(),
+        "mana_cap": _mana_cap(),
+        "fatigue": _fatigue(),
+        "draw": {"rate": _draw_rate(), "known_k": PB["known_cost_k"]},
+    }  # клиент тает свечу в такт
+
 
 def _teachable(role: str) -> set:
     """Что учит наставник: маг — стихии/формы/моды; писец — глаголы/моды (не огонь)."""
     g = magic_load()
     axes = {"маг": {"element", "form", "mod"}}.get(role, {"verb", "mod"})
     return {gid for gid, e in g["all"].items() if e.get("axis") in axes}
+
 
 @router.post("/api/play/learn")
 async def learn_glyph(request: Request):
@@ -329,7 +419,11 @@ async def learn_glyph(request: Request):
     if p.role not in TEACHER_ROLES:
         return {"error": f"{p.name} не учит магии"}
     if gid not in _teachable(p.role):
-        kind = "стихиям и формам — ищи мага в башне" if p.role != "маг" else "глаголам письма — это к писцу"
+        kind = (
+            "стихиям и формам — ищи мага в башне"
+            if p.role != "маг"
+            else "глаголам письма — это к писцу"
+        )
         return {"error": f"{p.name} не обучает этому ({kind})"}
     if gid in _glyphs_known():
         return {"error": "ты уже владеешь этим глифом"}
@@ -351,11 +445,23 @@ async def learn_glyph(request: Request):
     _pc_remember(f"выучил глиф «{ru}» у {p.name}", 0.5, about=[teacher])
     _npc_save(teacher)
     _pc_save()
-    line = _voice(p, rel, "reply",
-                  f"(Ты обучил игрока чертить глиф «{ru}»{' за ' + str(price) + ' зм' if price else ' безвозмездно, по дружбе'}. "
-                  f"Скажи что-нибудь наставническое, по своему характеру.)")
-    return {"learned": gid, "ru": ru, "price": price, "line": line,
-            "coins": _store().purse_get(_wid(), "pc"), "known": sorted(_glyphs_known()), "gt": _gt()}
+    line = _voice(
+        p,
+        rel,
+        "reply",
+        f"(Ты обучил игрока чертить глиф «{ru}»{' за ' + str(price) + ' зм' if price else ' безвозмездно, по дружбе'}. "
+        f"Скажи что-нибудь наставническое, по своему характеру.)",
+    )
+    return {
+        "learned": gid,
+        "ru": ru,
+        "price": price,
+        "line": line,
+        "coins": _store().purse_get(_wid(), "pc"),
+        "known": sorted(_glyphs_known()),
+        "gt": _gt(),
+    }
+
 
 @router.get("/api/play/teachers")
 def teachers_here():
@@ -365,17 +471,36 @@ def teachers_here():
     for pid in _here(loc, crof):
         p = people[pid]
         if p.role in TEACHER_ROLES and (pid in _met() or p.work):
-            out.append({"id": pid, "name": p.name, "role": p.role,
-                        "teaches": sorted(_teachable(p.role) - set(_glyphs_known()))})
+            out.append(
+                {
+                    "id": pid,
+                    "name": p.name,
+                    "role": p.role,
+                    "teaches": sorted(_teachable(p.role) - set(_glyphs_known())),
+                }
+            )
     return {"teachers": out}
+
 
 @router.get("/api/play/grimoire")
 def grimoire_list():
     """Вписанные в мир законы (гримуар игрока): имя, состав, флейвор, число сотворений."""
     _play()
     laws = _grimoire_list()
-    return {"laws": [{"name": e.get("name"), "comp": e.get("comp", []), "flavor": e.get("flavor", ""),
-                      "sensory": e.get("sensory", ""), "law": e.get("law", ""),
-                      "kind": e.get("kind", ""), "power": e.get("power"),
-                      "descr": e.get("descr", ""), "casts": e.get("casts", 0)} for e in laws],
-            "count": len(laws)}
+    return {
+        "laws": [
+            {
+                "name": e.get("name"),
+                "comp": e.get("comp", []),
+                "flavor": e.get("flavor", ""),
+                "sensory": e.get("sensory", ""),
+                "law": e.get("law", ""),
+                "kind": e.get("kind", ""),
+                "power": e.get("power"),
+                "descr": e.get("descr", ""),
+                "casts": e.get("casts", 0),
+            }
+            for e in laws
+        ],
+        "count": len(laws),
+    }

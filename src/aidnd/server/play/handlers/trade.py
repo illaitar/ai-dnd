@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from ...items import rarity_price
-from .core import (
+from aidnd.items import rarity_price
+from aidnd.server.play.engine.core import (
     PB,
     PLAYER,
     _gt,
@@ -18,13 +18,21 @@ from .core import (
     _wid,
     router,
 )
-from .items import _CRAFT, _item_card, _materialize_npc, _npc_cap, _npc_sees, _pc_coins
-from .world import _play, _voice
+from aidnd.server.play.engine.world import _play, _voice
+from aidnd.server.play.mechanics.items import (
+    _CRAFT,
+    _item_card,
+    _materialize_npc,
+    _npc_cap,
+    _npc_sees,
+    _pc_coins,
+)
 
 
 def _merchant(people, npc):
     p = people.get(npc)
     return p if (p and (p.role in _CRAFT or p.role == "лавочник")) else None
+
 
 @router.post("/api/play/askkey")
 async def askkey(request: Request):
@@ -39,19 +47,29 @@ async def askkey(request: Request):
     if _spurns(p):
         return {"error": f"{p.name} не желает иметь с тобой дела"}
     _materialize_npc(npc, "visible")
-    want = str(b.get("key") or "").strip()                 # какой именно ключ просим (имя с чипа)
-    keys = [(_store().get_item(r["item_id"]), r["item_id"])
-            for r in _store().inventory(_wid(), npc)]
-    keys = [(it, iid) for it, iid in keys if it and it["kind"] == "key"
-            and (not want or it["name"] == want)]
+    want = str(b.get("key") or "").strip()  # какой именно ключ просим (имя с чипа)
+    keys = [
+        (_store().get_item(r["item_id"]), r["item_id"]) for r in _store().inventory(_wid(), npc)
+    ]
+    keys = [
+        (it, iid)
+        for it, iid in keys
+        if it and it["kind"] == "key" and (not want or it["name"] == want)
+    ]
     if not keys:
         return {"error": f"у {p.name} нет такого ключа при себе"}
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     tr = p.state.config.traits
-    bar = PB["askkey_base"] + PB["askkey_greed"] * tr.get("greed", 0.5) + PB["askkey_honesty"] * tr.get("honesty", 0.5)
+    bar = (
+        PB["askkey_base"]
+        + PB["askkey_greed"] * tr.get("greed", 0.5)
+        + PB["askkey_honesty"] * tr.get("honesty", 0.5)
+    )
     if rel.get("affinity", 0) + rel.get("trust", 0) < bar:
         line = _voice(p, rel, "reply", "Одолжи мне свой ключ.")
-        p.state.memory.add("незнакомец просил у меня ключ — я не дал(а)", _mt(), 0.5, about=[PLAYER])
+        p.state.memory.add(
+            "незнакомец просил у меня ключ — я не дал(а)", _mt(), 0.5, about=[PLAYER]
+        )
         _npc_save(npc)
         return {"given": False, "line": line}
     it, iid = keys[0]
@@ -59,8 +77,12 @@ async def askkey(request: Request):
     p.state.memory.add(f"я доверил(а) игроку свой ключ «{it['name']}»", _mt(), 0.6, about=[PLAYER])
     _pc_remember(f"{p.name} доверил(а) мне ключ «{it['name']}»", 0.5, about=[npc])
     _npc_save(npc)
-    return {"given": True, "item": _item_card(it, set()),
-            "line": _voice(p, rel, "reply", "Спасибо, что доверяешь мне ключ.")}
+    return {
+        "given": True,
+        "item": _item_card(it, set()),
+        "line": _voice(p, rel, "reply", "Спасибо, что доверяешь мне ключ."),
+    }
+
 
 @router.post("/api/play/offer")
 async def offer(request: Request):
@@ -80,12 +102,23 @@ async def offer(request: Request):
     seen = _npc_sees(it, _npc_cap(p), npc)
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
-    price = max(0, round(rarity_price(seen["worth"], it.get("rarity", "common")) * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)))
+    price = max(
+        0,
+        round(
+            rarity_price(seen["worth"], it.get("rarity", "common"))
+            * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)
+        ),
+    )
     price = min(price, _store().purse_get(_wid(), npc))
-    line = _voice(p, rel, "reply",
-                  f"(Я предлагаю тебе купить у меня «{it['name']}». Ты осмотрел вещь и даёшь {price} зм — "
-                  f"назови эту цену вслух по-своему.)")
+    line = _voice(
+        p,
+        rel,
+        "reply",
+        f"(Я предлагаю тебе купить у меня «{it['name']}». Ты осмотрел вещь и даёшь {price} зм — "
+        f"назови эту цену вслух по-своему.)",
+    )
     return {"price": price, "line": line, "sees_worth": seen["worth"], "gt": _gt()}
+
 
 @router.post("/api/play/sell")
 async def sell(request: Request):
@@ -103,16 +136,25 @@ async def sell(request: Request):
     seen = _npc_sees(it, _npc_cap(p), npc)
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
-    price = max(0, round(rarity_price(seen["worth"], it.get("rarity", "common")) * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)))
+    price = max(
+        0,
+        round(
+            rarity_price(seen["worth"], it.get("rarity", "common"))
+            * (PB["sell_base"] + PB["sell_aff"] * rel.get("affinity", 0) + PB["sell_greed"] * greed)
+        ),
+    )
     price = min(price, _store().purse_get(_wid(), npc))
     _store().inv_move(_wid(), iid, npc)
     _store().purse_add(_wid(), npc, -price)
     coins = _store().purse_add(_wid(), "pc", price)
     _gt_add(PB["trade_min"])
-    p.state.memory.add(f"купил(а) у игрока «{it['name']}» за {price} зм", _mt(), 0.4, about=[PLAYER])
+    p.state.memory.add(
+        f"купил(а) у игрока «{it['name']}» за {price} зм", _mt(), 0.4, about=[PLAYER]
+    )
     _pc_remember(f"продал {p.name} «{it['name']}» за {price} зм", 0.4, about=[npc])
     _npc_save(npc)
     return {"sold": True, "price": price, "coins": coins, "gt": _gt()}
+
 
 @router.get("/api/play/wares")
 def wares(npc: str):
@@ -131,11 +173,22 @@ def wares(npc: str):
     for r in _store().inventory(_wid(), npc):
         it = _store().get_item(r["item_id"])
         if not it or it["kind"] in ("key", "valuable"):
-            continue                                       # ключи и ЛИЧНОЕ ценное не продаются (то — красть)
+            continue  # ключи и ЛИЧНОЕ ценное не продаются (то — красть)
         seen = _npc_sees(it, _npc_cap(p), npc)
-        price = max(1, round(rarity_price(seen["worth"], it.get("rarity", "common")) * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))))
+        price = max(
+            1,
+            round(
+                rarity_price(seen["worth"], it.get("rarity", "common"))
+                * (
+                    PB["buy_base"]
+                    + PB["buy_greed"] * greed
+                    + PB["buy_aff"] * rel.get("affinity", 0)
+                )
+            ),
+        )
         out.append({**_item_card(it, set()), "price": price})
     return {"items": out, "coins": _pc_coins()}
+
 
 @router.post("/api/play/buy")
 async def buy(request: Request):
@@ -152,7 +205,13 @@ async def buy(request: Request):
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     greed = p.state.config.traits.get("greed", 0.5)
     seen = _npc_sees(it, _npc_cap(p), npc)
-    price = max(1, round(rarity_price(seen["worth"], it.get("rarity", "common")) * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))))
+    price = max(
+        1,
+        round(
+            rarity_price(seen["worth"], it.get("rarity", "common"))
+            * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))
+        ),
+    )
     if _pc_coins() < price:
         return {"error": f"не хватает монет (нужно {price})"}
     _store().inv_move(_wid(), iid, "pc")
@@ -162,4 +221,10 @@ async def buy(request: Request):
     p.state.memory.add(f"продал(а) игроку «{it['name']}» за {price} зм", _mt(), 0.4, about=[PLAYER])
     _pc_remember(f"купил у {p.name} «{it['name']}» за {price} зм", 0.4, about=[npc])
     _npc_save(npc)
-    return {"bought": True, "item": _item_card(it, set()), "price": price, "coins": coins, "gt": _gt()}
+    return {
+        "bought": True,
+        "item": _item_card(it, set()),
+        "price": price,
+        "coins": coins,
+        "gt": _gt(),
+    }

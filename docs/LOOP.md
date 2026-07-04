@@ -70,26 +70,30 @@ context_assembler · consequence. Все [LLM] → без модели raise.
    ОГРАНИЧЕННОГО меню (hp±/предмет/отношение/флаг/перемещение/раскрытие), код валидирует (как магия).
 4. **interrupts в походе:** встреча(бой)/стража/сюжетный удар → ПАУЗА (выбор); амбиент/вывески → лента.
 
-## Карта распила main.py (2340 → модули)
+## Раскладка пакета server/play/ (распил main.py 2340 → сделано)
 
 ```
-play/world.py     ЯДРО-сцена: _play/_fill_from_pool/_assign_key_buildings/_build_geom/_scene_dict/
-                  _live_build/_live_tick/_world_tick/_world_events/_apply_routine/_voice/_watch_check/
-                  _world_lookup/_live_affordances/_gossip/_mind_scene  (импортит items/contracts/combat)
-play/loop.py      оркестратор тика (game_tick) + session_step (durative-циклы)
-play/resolve.py   arbiter + context_assembler + consequence (freeform-резолвер, бывш. _intent/_attempt)
-play/actions/
-  travel.py       /move /enter /exit /room /sign_ack /live /map + _path_interrupt
-  dialogue.py     /talk /say
-  magic.py        /cast /glyphs /learn /teachers /grimoire + spell-хелперы
-  trade.py        /offer /sell /wares /buy /askkey + _merchant
-  crime.py        /steal
-  item.py         /loot /inspect /inventory /commission /repair /use /give
-  observe.py      /look
-  freeform.py     /act (арбитр→нарратор→consequence)
-  board.py        /board /guild_redeem /board_take /delve /surrender /watch_flee
-  misc.py         /scene /hero /debuglog
+engine/                ядро (импорты внутри play — абсолютные)
+  core.py              сессия _S/PB/router/время/мана/гримуар/розыск + базовые хелперы
+  world.py             ЯДРО-сцена: _play/_scene_dict/_live_build/_live_tick/_world_tick/
+                       _world_events/_apply_routine/_voice/_world_lookup/_watch_check
+  worldsim.py          адаптер society (рутина NPC из нужд)
+mechanics/             домены-механики (логика над aidnd.items/combat, без эндпоинтов)
+  items.py · contracts.py · combat.py
+handlers/              доменные хендлеры (эндпоинты /api/play/*)
+  travel.py            /map /move /enter /exit /room /sign_ack /live + _path_interrupt
+  dialogue.py          /talk /say
+  magic.py             /cast /glyphs /learn /teachers /grimoire + spell-хелперы
+  trade.py             /offer /sell /wares /buy /askkey
+  crime.py             /steal
+  inventory.py         /loot /inspect /inventory /commission /repair /use /give
+  observe.py           /look
+  freeform.py          /act (арбитр→нарратор→consequence)
+  board.py             /board /guild_redeem /board_take /delve /surrender /watch_flee
+  misc.py              /hero /debuglog
+__init__.py            сборка router (импорт хендлеров = регистрация эндпоинтов)
 ```
 
-Распил — механический (перенос функций, поведение неизменно), зелёный после каждого домена.
-Логику (характеристики, привязка к mind, локации) правим ПОСЛЕ, по этой карте.
+Ещё не выделено (по мере правки логики): `engine/loop.py` (game_tick + session_step durative-циклы),
+`engine/resolve.py` (arbiter/context_assembler/consequence — сейчас в handlers/freeform).
+Правки логики (характеристики, привязка к mind, локации) — по этой карте.

@@ -7,11 +7,9 @@ import random
 
 from fastapi import Request
 
-from ...combat import Encounter
-from ...items import use as item_use
-from .combat import _combatant_from_npc, _pc_combatant
-from .contracts import _contract_on_give
-from .core import (
+from aidnd.combat import Encounter
+from aidnd.items import use as item_use
+from aidnd.server.play.engine.core import (
     _DM_SYS,
     _PC_CAP,
     _S,
@@ -32,8 +30,17 @@ from .core import (
     _witness_crime,
     router,
 )
-from .items import _do_craft, _materialize_npc, _pc_coins
-from .world import _INTENT_SYS, _apply_routine, _play, _scene_dict, _voice, _world_tick
+from aidnd.server.play.engine.world import (
+    _INTENT_SYS,
+    _apply_routine,
+    _play,
+    _scene_dict,
+    _voice,
+    _world_tick,
+)
+from aidnd.server.play.mechanics.combat import _combatant_from_npc, _pc_combatant
+from aidnd.server.play.mechanics.contracts import _contract_on_give
+from aidnd.server.play.mechanics.items import _do_craft, _materialize_npc, _pc_coins
 
 
 def _intent(text: str, sc: dict) -> dict | None:
@@ -41,20 +48,35 @@ def _intent(text: str, sc: dict) -> dict | None:
     if not mgr.available():
         return None
     here = "; ".join(f"{h['id']}={h['name']} ({h['role']})" for h in sc["here"]) or "никого"
-    conts = "; ".join(c["name"] + (" [заперто]" if c["locked"] else "")
-                      for c in sc["location"]["containers"]) or "нет"
-    bag = "; ".join(f"{r['item_id']}={(_store().get_item(r['item_id']) or {}).get('name', '?')}"
-                    for r in _store().inventory(_wid(), "pc")) or "пусто"
+    conts = (
+        "; ".join(
+            c["name"] + (" [заперто]" if c["locked"] else "") for c in sc["location"]["containers"]
+        )
+        or "нет"
+    )
+    bag = (
+        "; ".join(
+            f"{r['item_id']}={(_store().get_item(r['item_id']) or {}).get('name', '?')}"
+            for r in _store().inventory(_wid(), "pc")
+        )
+        or "пусто"
+    )
     keys_pl = ", ".join(k["label"] for k in _S["geom"]["keys"])
-    user = (f"МЕСТО: {sc['location']['name']}. ЛЮДИ ЗДЕСЬ: {here}. ЁМКОСТИ: {conts}. "
-            f"СУМКА ИГРОКА: {bag}. МЕСТА ГОРОДА: {keys_pl}.\nФРАЗА ИГРОКА: «{text}»")
-    resp = mgr.call("narrator", [{"role": "system", "content": _INTENT_SYS},
-                                 {"role": "user", "content": user}], options={"temperature": 0.2})
+    user = (
+        f"МЕСТО: {sc['location']['name']}. ЛЮДИ ЗДЕСЬ: {here}. ЁМКОСТИ: {conts}. "
+        f"СУМКА ИГРОКА: {bag}. МЕСТА ГОРОДА: {keys_pl}.\nФРАЗА ИГРОКА: «{text}»"
+    )
+    resp = mgr.call(
+        "narrator",
+        [{"role": "system", "content": _INTENT_SYS}, {"role": "user", "content": user}],
+        options={"temperature": 0.2},
+    )
     t = (resp.get("content") if resp else "").strip()
     try:
-        return json.loads(t[t.find("{"):t.rfind("}") + 1])
+        return json.loads(t[t.find("{") : t.rfind("}") + 1])
     except (json.JSONDecodeError, ValueError):
         return None
+
 
 def _attempt(intent: dict, sc: dict) -> dict:
     """ОДИН резолвер на все действия игрока: гейты, броски, перенос, память, последствия.
@@ -63,8 +85,11 @@ def _attempt(intent: dict, sc: dict) -> dict:
     verb = intent.get("verb") or "wait"
     manner = intent.get("manner") or "openly"
     raw_npc = str(intent.get("npc") or "").strip()
-    npc = raw_npc if raw_npc in people else next(
-        (pid for pid, pp in people.items() if pp.name.lower() == raw_npc.lower()), None)
+    npc = (
+        raw_npc
+        if raw_npc in people
+        else next((pid for pid, pp in people.items() if pp.name.lower() == raw_npc.lower()), None)
+    )
     detail = str(intent.get("detail") or "")
     out: dict = {"narr": [], "refresh": False}
 
@@ -74,9 +99,16 @@ def _attempt(intent: dict, sc: dict) -> dict:
 
     if verb == "move" and intent.get("place"):
         want = str(intent["place"]).lower()
-        tgt = next((k for k in _S["geom"]["keys"] if k["label"].lower() in want or want in k["label"].lower()), None)
+        tgt = next(
+            (
+                k
+                for k in _S["geom"]["keys"]
+                if k["label"].lower() in want or want in k["label"].lower()
+            ),
+            None,
+        )
         if tgt:
-            out["goto"] = tgt["node"]                       # фронт выполнит обычный move (с ходьбой)
+            out["goto"] = tgt["node"]  # фронт выполнит обычный move (с ходьбой)
         else:
             out["narr"].append("Ты не знаешь, где это. Спроси у людей.")
         return out
@@ -87,21 +119,34 @@ def _attempt(intent: dict, sc: dict) -> dict:
     if verb == "take" and npc:
         p = people[npc]
         _materialize_npc(npc, "pockets")
-        if manner == "forcefully":                          # отнять силой: сила против храбрости
+        if manner == "forcefully":  # отнять силой: сила против храбрости
             n = int(_store().flag_get(_wid(), f"rob|{npc}") or 0) + 1
             _store().flag_set(_wid(), f"rob|{npc}", str(n))
             roll = random.Random(f"rob|{npc}|{n}").randint(1, 20)
             brav = p.state.config.traits.get("bravery", 0.5)
             _gt_add(PB["act_min"])
             if roll + _PC_CAP.mod("str") >= PB["rob_dc_base"] + round(brav * PB["rob_dc_brav"]):
-                take = max(1, _store().purse_get(_wid(), npc) * PB["rob_cut_num"] // PB["rob_cut_den"])
+                take = max(
+                    1, _store().purse_get(_wid(), npc) * PB["rob_cut_num"] // PB["rob_cut_den"]
+                )
                 _store().purse_add(_wid(), npc, -take)
                 _store().purse_add(_wid(), "pc", take)
                 p.state.rel(PLAYER)["fear"] = max(p.state.rel(PLAYER)["fear"], 0.8)
-                w = _witness_crime(people, crof, loc, npc, "силой отнял у меня кошель", weight=PB["crime_rob"])
-                out["narr"].append(f"Ты вытрясаешь из {p.name} {take} зм. Свидетелей: {w}. Город такое помнит.")
+                w = _witness_crime(
+                    people, crof, loc, npc, "силой отнял у меня кошель", weight=PB["crime_rob"]
+                )
+                out["narr"].append(
+                    f"Ты вытрясаешь из {p.name} {take} зм. Свидетелей: {w}. Город такое помнит."
+                )
             else:
-                w = _witness_crime(people, crof, loc, npc, "пытался отнять моё силой", weight=PB["crime_pickpocket"])
+                w = _witness_crime(
+                    people,
+                    crof,
+                    loc,
+                    npc,
+                    "пытался отнять моё силой",
+                    weight=PB["crime_pickpocket"],
+                )
                 out["narr"].append(f"{p.name} вырывается и поднимает крик! Свидетелей: {w}.")
             out["refresh"] = True
             return out
@@ -109,19 +154,28 @@ def _attempt(intent: dict, sc: dict) -> dict:
         n = int(_store().flag_get(_wid(), f"steal|{npc}") or 0) + 1
         _store().flag_set(_wid(), f"steal|{npc}", str(n))
         lv = _S.get("live") or {}
-        body = (lv.get("world").bodies.get(npc) if lv.get("world") else None)
+        body = lv.get("world").bodies.get(npc) if lv.get("world") else None
         att = body.attention if body else 0.65
         roll = random.Random(f"steal|{npc}|{n}").randint(1, 20)
         _gt_add(PB["act_min"])
         if roll + _PC_CAP.mod("dex") < PB["steal_dc_base"] + round(att * PB["steal_dc_att"]):
-            w = _witness_crime(people, crof, loc, npc, "лез мне в карман", weight=PB["crime_pickpocket"])
+            w = _witness_crime(
+                people, crof, loc, npc, "лез мне в карман", weight=PB["crime_pickpocket"]
+            )
             rel = p.state.relationships.get(PLAYER, {})
             out["narr"].append(f"Тебя ловят за руку! Свидетелей: {w}.")
-            out["line"] = {"who": p.name, "npc": npc,
-                           "text": _voice(p, rel, "reply", "(Ты поймал этого человека за руку в своём кармане!)")}
+            out["line"] = {
+                "who": p.name,
+                "npc": npc,
+                "text": _voice(
+                    p, rel, "reply", "(Ты поймал этого человека за руку в своём кармане!)"
+                ),
+            }
         else:
-            rows = [(r["item_id"], _store().get_item(r["item_id"]))
-                    for r in _store().inventory(_wid(), npc)]
+            rows = [
+                (r["item_id"], _store().get_item(r["item_id"]))
+                for r in _store().inventory(_wid(), npc)
+            ]
             rows = [(i, it) for i, it in rows if it and it["kind"] != "key"]
             coins_np = _store().purse_get(_wid(), npc)
             if coins_np > 0 and (not rows or roll % 2 == 0):
@@ -141,7 +195,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         return out
 
     if verb == "say" and npc and manner == "persuasively":
-        out["open_talk"] = npc                              # уговоры — это диалог; ключ просится там
+        out["open_talk"] = npc  # уговоры — это диалог; ключ просится там
         out["say_first"] = detail or None
         return out
 
@@ -154,7 +208,11 @@ def _attempt(intent: dict, sc: dict) -> dict:
         p = people[npc]
         _store().inv_move(_wid(), iid, npc)
         rel = p.state.rel(PLAYER)
-        rel["affinity"] = min(1.0, rel["affinity"] + min(PB["gift_aff_cap"], PB["gift_aff_base"] + it["worth"] / PB["gift_aff_div"]))
+        rel["affinity"] = min(
+            1.0,
+            rel["affinity"]
+            + min(PB["gift_aff_cap"], PB["gift_aff_base"] + it["worth"] / PB["gift_aff_div"]),
+        )
         p.state.memory.add(f"игрок подарил мне «{it['name']}»", _mt(), 0.55, about=[PLAYER])
         _pc_remember(f"подарил {p.name} «{it['name']}»", 0.4, about=[npc])
         _npc_save(npc)
@@ -172,13 +230,14 @@ def _attempt(intent: dict, sc: dict) -> dict:
             return out
         _gt_add(PB["give_min"])
         if it["kind"] == "consumable" or not it.get("durability"):
-            _store().inv_move(_wid(), iid, "used")     # выпито/израсходовано — вещь уходит
+            _store().inv_move(_wid(), iid, "used")  # выпито/израсходовано — вещь уходит
             out["narr"].append(f"«{it['name']}» — израсходовано.")
         else:
             ev = item_use(it, 1)
             _store().save_item(it)
-            out["narr"].append(f"«{it['name']}» ломается." if ev["broke"]
-                               else f"«{it['name']}»: {ev['label']}.")
+            out["narr"].append(
+                f"«{it['name']}» ломается." if ev["broke"] else f"«{it['name']}»: {ev['label']}."
+            )
         out["refresh"] = True
         return out
 
@@ -208,11 +267,13 @@ def _attempt(intent: dict, sc: dict) -> dict:
         if wake <= now:
             wake += 1440
         _S["gt"] = wake
-        _mana_sleep((wake - now) / 60.0)                   # сон наполняет свечу ×3
+        _mana_sleep((wake - now) / 60.0)  # сон наполняет свечу ×3
         _apply_routine()
         _pc_hp(set_to=PB["pc_max_hp"])
         _pc_save()
-        out["narr"].append(f"Ты снимаешь тюфяк за {PB['rest_cost']} зм и спишь до утра. Силы вернулись.")
+        out["narr"].append(
+            f"Ты снимаешь тюфяк за {PB['rest_cost']} зм и спишь до утра. Силы вернулись."
+        )
         out["refresh"] = True
         return out
 
@@ -222,25 +283,43 @@ def _attempt(intent: dict, sc: dict) -> dict:
         foe = _combatant_from_npc(npc, p)
         foe.side = "foes"
         enc = Encounter([_pc_combatant()], [foe], seed=f"duel|{npc}|{_mt()}", w=9, h=7)
-        _S["combat"] = {"enc": enc, "npc": npc, "loc": loc,
-                        "head": {"name": f"Стычка: {p.name}", "sub": _binfo(cr2b.get(loc))["name"] if cr2b.get(loc) else "улица"}}
-        _witness_crime(people, crof, loc, npc, "бросился на меня с оружием", weight=PB["crime_assault"])
+        _S["combat"] = {
+            "enc": enc,
+            "npc": npc,
+            "loc": loc,
+            "head": {
+                "name": f"Стычка: {p.name}",
+                "sub": _binfo(cr2b.get(loc))["name"] if cr2b.get(loc) else "улица",
+            },
+        }
+        _witness_crime(
+            people, crof, loc, npc, "бросился на меня с оружием", weight=PB["crime_assault"]
+        )
         out["combat"] = True
         out["narr"].append(f"Ты бросаешься на {p.name}. Назад дороги нет.")
         return out
 
-    mgr = _model()                                         # не-действие: сухой отклик мастера, мир не меняется
+    mgr = _model()  # не-действие: сухой отклик мастера, мир не меняется
     text = str(intent.get("_text") or detail or "")
     if mgr.available() and text:
-        resp = mgr.call("narrator", [{"role": "system", "content": _DM_SYS},
-                                     {"role": "user", "content": f"Сцена: {sc.get('location', {}).get('name', 'улица')}. "
-                                                                 f"Игрок: «{text}»"}],
-                        options={"temperature": 0.5})
+        resp = mgr.call(
+            "narrator",
+            [
+                {"role": "system", "content": _DM_SYS},
+                {
+                    "role": "user",
+                    "content": f"Сцена: {sc.get('location', {}).get('name', 'улица')}. "
+                    f"Игрок: «{text}»",
+                },
+            ],
+            options={"temperature": 0.5},
+        )
         line = (resp.get("content") if resp else "").strip()
         out["narr"].append(line or "Ничего не происходит.")
     else:
         out["narr"].append("Ничего не происходит.")
     return out
+
 
 @router.post("/api/play/act")
 async def act(request: Request):

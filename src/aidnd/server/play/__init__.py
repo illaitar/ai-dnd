@@ -1,23 +1,27 @@
-"""Игровой контур /api/play — пакет. Слои: core (ядро) < items/contracts/combat (домены-механики)
-< world (ядро-сцена: сессия/тик/живая сцена/голос) < доменные хендлеры (регистрируют эндпоинты).
-См. docs/LOOP.md. Импорт подмодулей регистрирует эндпоинты на общем router.
+"""Игровой контур /api/play — пакет со слоями (см. docs/LOOP.md):
+
+    engine/     ядро-сцена: core (сессия/состояние/роутер/время/мана) · world (сцена/тик/голос) · worldsim
+    mechanics/  домены-механики: items · contracts · combat
+    handlers/   доменные хендлеры (эндпоинты): magic · dialogue · trade · crime · inventory ·
+                observe · misc · board · travel · freeform
+
+Импорт подмодулей регистрирует эндпоинты на общем router (лежит в engine.core).
 """
-from . import (  # noqa: F401 — ядро-сцена + механики  # noqa: F401 — доменные хендлеры
+
+from .engine import world  # noqa: F401 — ядро-сцена (тик/живая сцена)
+from .engine.core import router
+from .handlers import (
     board,
-    combat,
-    contracts,
     crime,
     dialogue,
     freeform,
-    item,
-    items,
+    inventory,
     magic,
-    misc,
+    misc,  # noqa: F401
     observe,
     trade,
     travel,
-    world,
 )
-from .core import router
+from .mechanics import combat, contracts, items  # noqa: F401 — механики
 
 __all__ = ["router"]

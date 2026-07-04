@@ -27,11 +27,29 @@ def test_catalog_kinds_valid():
 def test_every_key_type_gets_zones():
     for bt in KEY_TYPES:
         zs = zones_for(bt, {}, "key")
-        assert 2 <= len(zs) <= 5, bt
+        assert 2 <= len(zs) <= 20, bt
         assert all(z["id"] and z["kind"] and z["name"] and "noise" in z for z in zs), bt
     # у таверны — стойка с постом, не generic
     tav = zones_for("Таверна", {}, "key")
     assert tav[0]["kind"] == "bar" and tav[0]["post"]
+
+
+def test_group_instances():
+    """Групповые якоря: каждый стол — СВОЯ зона (атом разговора), положение двигает приватность."""
+    tav = zones_for("Таверна", {"size": "medium", "name": "Зубр"}, "key")
+    tables = [z for z in tav if z.get("group") == "стол"]
+    assert 5 <= len(tables) <= 9
+    assert len({z["name"] for z in tables}) == len(tables)          # имена-положения уникальны
+    assert len({z["privacy"] for z in tables}) > 1                  # угол приватнее прохода
+    small = zones_for("Таверна", {"size": "small", "name": "Зубр"}, "key")
+    large = zones_for("Таверна", {"size": "large", "name": "Зубр"}, "key")
+    assert (len([z for z in small if z.get("group")])
+            <= len([z for z in large if z.get("group")]))           # размер здания → больше столов
+    inn = zones_for("Трактир с комнатами", {"size": "medium"}, "key")
+    rooms = [z for z in inn if z["kind"] == "beds"]
+    assert rooms and all(r.get("lockable") and r.get("group") for r in rooms)
+    # детерминизм: тот же вход → тот же состав
+    assert zones_for("Таверна", {"size": "medium", "name": "Зубр"}, "key") == tav
 
 
 def test_res_and_street():

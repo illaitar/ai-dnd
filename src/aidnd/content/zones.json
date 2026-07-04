@@ -19,10 +19,29 @@
     "stalls":   {"noise": 0.8, "privacy": 0.0, "cap": 10},
     "yard":     {"noise": 0.3, "privacy": 0.4, "cap": 6}
   },
+  "spots": {
+    "table": [
+      {"name": "у окна", "privacy": 0.05, "noise": 0.0},
+      {"name": "в тёмном углу", "privacy": 0.25, "noise": -0.15},
+      {"name": "у очага", "privacy": 0.0, "noise": 0.05},
+      {"name": "посреди зала", "privacy": -0.15, "noise": 0.1},
+      {"name": "у двери", "privacy": -0.1, "noise": 0.1},
+      {"name": "у стены", "privacy": 0.1, "noise": -0.05},
+      {"name": "под лестницей", "privacy": 0.2, "noise": -0.1},
+      {"name": "у бочек", "privacy": 0.1, "noise": 0.0}
+    ]
+  },
   "templates": [
-    {"match": ["таверн", "трактир", "питейн", "корчм"], "zones": [
+    {"match": ["трактир"], "zones": [
       {"kind": "bar", "name": "стойка", "post": "трактирщик"},
-      {"kind": "tables", "name": "столы зала"},
+      {"kind": "tables", "name": "стол", "count": [5, 8], "spots": "table", "cap": 4},
+      {"kind": "hearth", "name": "очаг"},
+      {"kind": "beds", "name": "комната постоя", "count": [3, 5], "lockable": true},
+      {"kind": "private", "name": "задняя комната"},
+      {"kind": "storage", "name": "кладовая"}]},
+    {"match": ["таверн", "питейн", "корчм"], "zones": [
+      {"kind": "bar", "name": "стойка", "post": "трактирщик"},
+      {"kind": "tables", "name": "стол", "count": [5, 9], "spots": "table", "cap": 4},
       {"kind": "hearth", "name": "очаг"},
       {"kind": "private", "name": "задняя комната"},
       {"kind": "storage", "name": "кладовая"}]},
@@ -50,7 +69,7 @@
       {"kind": "bath", "name": "парная"},
       {"kind": "hearth", "name": "предбанник"}]},
     {"match": ["игорн"], "zones": [
-      {"kind": "games", "name": "игровые столы"},
+      {"kind": "games", "name": "игровой стол", "count": [3, 5], "spots": "table", "cap": 6},
       {"kind": "bar", "name": "стойка"},
       {"kind": "private", "name": "кабинет хозяина"}]},
     {"match": ["конюшн"], "zones": [

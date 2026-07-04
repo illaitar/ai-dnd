@@ -42,13 +42,17 @@ def _store() -> WorldStore:
     return _STORE
 
 
-def _gate(user: CurrentUser) -> User:
-    if user.email not in _ALLOWED:
-        raise HTTPException(403, "дебаг-граф доступен только владельцу")
-    return user
+if os.environ.get("AIDND_OPEN_PLAY"):                    # дев-режим: стенд без входа (как в /play)
+    def _gate() -> User | None:
+        return None
+else:
+    def _gate(user: CurrentUser) -> User | None:
+        if user.email not in _ALLOWED:
+            raise HTTPException(403, "дебаг-граф доступен только владельцу")
+        return user
 
 
-Owner = Annotated[User, Depends(_gate)]
+Owner = Annotated[User | None, Depends(_gate)]
 
 
 def _city(seed: int, key_buildings: int, river: bool, walls: bool, segment):
@@ -168,6 +172,30 @@ def citydebug_building(_: Owner, bid: str, seed: int = 7, key_buildings: int = 8
     return {"id": bid, "is_key": is_key, "node": node, "kind": str(city.node_kind(node) or ""),
             "world": wid, "sign": sign, "landmarks": landmarks, "data": data,
             "exits": [{"kind": mv.kind, "heading": mv.heading, "name": mv.name} for mv in city.exits(node)]}
+
+
+@router.get("/api/citydebug/pool")
+def citydebug_pool(_: Owner, kind: str = "key", furnished: bool = True) -> dict:
+    """Браузер ПУЛА зданий (worlds.db): список для дебага обстановки зон (docs/locations.md шаг 1)."""
+    rows = _store().pool_buildings(kind)
+    out = []
+    for r in rows:
+        zs = r["data"].get("zones") or []
+        if furnished and not zs:
+            continue
+        out.append({"id": r["id"], "btype": r["btype"], "name": r["data"].get("name") or r["btype"],
+                    "zones": len(zs), "objects": sum(len(z.get("objects") or []) for z in zs)})
+    return {"total": len(rows), "furnished": out}
+
+
+@router.get("/api/citydebug/poolbuilding")
+def citydebug_poolbuilding(_: Owner, bid: str) -> dict:
+    """Полный фактшит здания из пула — с зонами и предметами обстановки."""
+    for kind in ("key", "res"):
+        for r in _store().pool_buildings(kind):
+            if r["id"] == bid:
+                return {"id": r["id"], "kind": r["kind"], "btype": r["btype"], "data": r["data"]}
+    return {"error": "нет такого здания в пуле"}
 
 
 @router.get("/api/citydebug/subspace")

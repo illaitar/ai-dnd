@@ -1,0 +1,95 @@
+{
+  "kinds": {
+    "bar":      {"noise": 0.7, "privacy": 0.1, "cap": 6},
+    "tables":   {"noise": 0.6, "privacy": 0.3, "cap": 12},
+    "hearth":   {"noise": 0.4, "privacy": 0.4, "cap": 4},
+    "counter":  {"noise": 0.5, "privacy": 0.1, "cap": 4},
+    "shelves":  {"noise": 0.2, "privacy": 0.2, "cap": 3},
+    "storage":  {"noise": 0.1, "privacy": 0.8, "cap": 2},
+    "workshop": {"noise": 0.8, "privacy": 0.3, "cap": 3},
+    "altar":    {"noise": 0.2, "privacy": 0.2, "cap": 8},
+    "pews":     {"noise": 0.2, "privacy": 0.3, "cap": 12},
+    "beds":     {"noise": 0.2, "privacy": 0.7, "cap": 4},
+    "private":  {"noise": 0.2, "privacy": 0.9, "cap": 3},
+    "bath":     {"noise": 0.5, "privacy": 0.6, "cap": 6},
+    "games":    {"noise": 0.8, "privacy": 0.2, "cap": 8},
+    "door":     {"noise": 0.5, "privacy": 0.0, "cap": 2},
+    "well":     {"noise": 0.4, "privacy": 0.0, "cap": 4},
+    "post":     {"noise": 0.5, "privacy": 0.0, "cap": 6},
+    "stalls":   {"noise": 0.8, "privacy": 0.0, "cap": 10},
+    "yard":     {"noise": 0.3, "privacy": 0.4, "cap": 6}
+  },
+  "templates": [
+    {"match": ["таверн", "трактир", "питейн", "корчм"], "zones": [
+      {"kind": "bar", "name": "стойка", "post": "трактирщик"},
+      {"kind": "tables", "name": "столы зала"},
+      {"kind": "hearth", "name": "очаг"},
+      {"kind": "private", "name": "задняя комната"},
+      {"kind": "storage", "name": "кладовая"}]},
+    {"match": ["кузниц", "оружейн"], "zones": [
+      {"kind": "workshop", "name": "горн и наковальня", "post": "кузнец"},
+      {"kind": "counter", "name": "прилавок"},
+      {"kind": "storage", "name": "угол заготовок"}]},
+    {"match": ["лавк", "ломбард", "менял"], "zones": [
+      {"kind": "counter", "name": "прилавок", "post": "лавочник"},
+      {"kind": "shelves", "name": "полки товара"},
+      {"kind": "storage", "name": "кладовая"}]},
+    {"match": ["храм", "часовн", "святилищ"], "zones": [
+      {"kind": "altar", "name": "алтарь", "post": "жрец"},
+      {"kind": "pews", "name": "скамьи"},
+      {"kind": "private", "name": "притвор"}]},
+    {"match": ["пекарн", "мясн", "рыбн"], "zones": [
+      {"kind": "workshop", "name": "печь и разделка", "post": "мастер"},
+      {"kind": "counter", "name": "прилавок"},
+      {"kind": "storage", "name": "кладовая"}]},
+    {"match": ["целебниц", "знахар", "зели", "трав"], "zones": [
+      {"kind": "beds", "name": "лежанки хворых"},
+      {"kind": "workshop", "name": "стол трав и котелок", "post": "знахарка"},
+      {"kind": "shelves", "name": "шкаф снадобий"}]},
+    {"match": ["баня"], "zones": [
+      {"kind": "bath", "name": "парная"},
+      {"kind": "hearth", "name": "предбанник"}]},
+    {"match": ["игорн"], "zones": [
+      {"kind": "games", "name": "игровые столы"},
+      {"kind": "bar", "name": "стойка"},
+      {"kind": "private", "name": "кабинет хозяина"}]},
+    {"match": ["конюшн"], "zones": [
+      {"kind": "yard", "name": "стойла", "post": "конюх"},
+      {"kind": "storage", "name": "сеновал"}]},
+    {"match": ["гильди"], "zones": [
+      {"kind": "post", "name": "доска заказов"},
+      {"kind": "counter", "name": "конторка", "post": "клерк"},
+      {"kind": "tables", "name": "зал сборов"}]},
+    {"match": ["склад", "мельниц", "пивоварн"], "zones": [
+      {"kind": "storage", "name": "хранилище"},
+      {"kind": "workshop", "name": "рабочее место", "post": "мастер"}]},
+    {"match": ["мастерск", "швейн", "свечн", "гончарн", "плотниц", "кожевен", "сапожн"], "zones": [
+      {"kind": "workshop", "name": "верстак", "post": "мастер"},
+      {"kind": "counter", "name": "прилавок"},
+      {"kind": "storage", "name": "кладовая"}]},
+    {"match": ["старост", "купеческ", "книжн", "писц"], "zones": [
+      {"kind": "counter", "name": "приёмная"},
+      {"kind": "private", "name": "кабинет", "post": "хозяин"},
+      {"kind": "hearth", "name": "гостиная"}]}
+  ],
+  "generic_key": [
+    {"kind": "counter", "name": "рабочее место", "post": "хозяин"},
+    {"kind": "tables", "name": "общее помещение"},
+    {"kind": "storage", "name": "кладовая"}
+  ],
+  "residential": [
+    {"kind": "hearth", "name": "очаг и стол"},
+    {"kind": "beds", "name": "лежанки"},
+    {"kind": "storage", "name": "кладовка"}
+  ],
+  "street": [
+    {"match": ["площад"], "zones": [
+      {"kind": "post", "name": "столб объявлений"},
+      {"kind": "well", "name": "колодец"},
+      {"kind": "stalls", "name": "лотки"}]},
+    {"match": ["двор"], "zones": [{"kind": "yard", "name": "двор"}]},
+    {"match": [""], "zones": [
+      {"kind": "door", "name": "обочина"},
+      {"kind": "private", "name": "подворотня"}]}
+  ]
+}

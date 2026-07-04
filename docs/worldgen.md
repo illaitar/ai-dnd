@@ -21,6 +21,7 @@ segment=16)` → узлы/рёбра улиц, дома-полигоны (~24% �
 | здания (599) | по типам-хинтам | location_writer | фактшит: ярус/размер/возраст/состояние/фичи/услуги/sub_rooms/containers (enum-теги, не проза) |
 | имена городов (100) | — | — | kind `city_name` в building_pool |
 | предметы | сид-шаблоны | — | данные с весами редкости ([items.md](items.md)) |
+| обстановка зон | `scripts/furnish.py` | furnisher | зоны локаций + каждый предмет отдельной записью ([locations.md](locations.md)) |
 
 Портреты — `data/portraits/` (НЕ гит; на прод rsync). Догенерация: `scripts/portraits_topup.py`.
 `enrich_city` (worldgen/enrichment.py): параллельность по бэкенду (облако — параллелим,

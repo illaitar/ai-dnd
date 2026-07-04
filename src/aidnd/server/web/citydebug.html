@@ -90,6 +90,11 @@
       <input type="text" id="sub-name" value="Подвал">
       <button class="alt" id="add-sub">+ под-здание к выбранному</button>
     </section>
+    <section>
+      <h2>Пул: обстановка зон</h2>
+      <div class="hint">Обставленные здания пула (scripts/furnish.py) — дебаг шага 1 locations.md.</div>
+      <div id="pool-list" style="font-size:12px">загрузка…</div>
+    </section>
     <section><h2>Статистика</h2><div id="stats">—</div></section>
   </aside>
   <main>
@@ -246,7 +251,52 @@ async function openBuilding(id) {
   if (e.valuables && e.valuables.length) b += `<div class="cl">💰 ${e.valuables.join(", ")}</div>`;
   if (e.rumors && e.rumors.length) b += `<div class="cl g">слухи: ${e.rumors.join("; ")}</div>`;
   if (e.sub_rooms && e.sub_rooms.length) b += `<div class="cl"><span class="g">помещения:</span>${e.sub_rooms.map(s => `<div class="sub">└ <b>${s.name}</b> <span class="g">[${s.kind}/${s.access}]</span>${s.features && s.features.length ? " " + s.features.join(", ") : ""}${s.contents && s.contents.length ? " <span class='g'>· " + s.contents.join(", ") + "</span>" : ""}</div>`).join("")}</div>`;
+  b += zonesHtml(e);
   b += `<div class="cl g" style="margin-top:6px;border-top:1px solid #2a3040;padding-top:5px">узел ${d.node} · ${d.kind}${d.landmarks && d.landmarks.length ? " · " + d.landmarks.map(t => LM[t] || t).join(", ") : ""} · ${d.world ? "из БД мира " + d.world : "сгенерено"}</div>`;
+  $("card-body").innerHTML = b;
+}
+
+const AFF_RU = { fatigue:"сон", hunger:"еда", social:"общение", purpose:"дело", wealth:"нажива", comfort:"уют", novelty:"новизна" };
+function zonesHtml(e) {
+  if (!e.zones || !e.zones.length) return "";
+  const conts = e.containers || [];
+  let b = `<div class="cl" style="margin-top:6px"><span class="g">ЗОНЫ (${e.zones.length}):</span>`;
+  for (const z of e.zones) {
+    const meta = `${z.kind} · шум ${z.noise} · приват ${z.privacy} · мест ${z.cap}` + (z.post ? ` · пост: ${z.post}` : "");
+    b += `<div class="sub" style="margin-top:5px"><b style="color:#9fd0a6">▣ ${z.name}</b> <span class="g">[${meta}]</span>`;
+    for (const o of z.objects || []) {
+      const aff = Object.entries(o.afford || {}).map(([k, v]) => `<span class="pill">${AFF_RU[k] || k} ${v}</span>`).join("");
+      const hid = (o.hidden && o.hidden.length) ? " 🔒" : "";
+      b += `<div class="sub">${o.fixed ? "📌" : "·"} <b>${o.name}</b>${hid} <span class="g">(${o.quality}${o.material ? ", " + o.material : ""} · ${o.worth ?? o.apparent_worth}м)</span> ${aff}</div>`;
+    }
+    for (const c of conts.filter(c => c.zone === z.id))
+      b += `<div class="sub">🧰 <b>${c.name}</b> <span class="g">[${c.access}]</span>${c.contents && c.contents.length ? " <span class='g'>· " + c.contents.join(", ") + "</span>" : ""}</div>`;
+    b += `</div>`;
+  }
+  return b + `</div>`;
+}
+
+async function loadPool() {
+  const box = $("pool-list");
+  try {
+    const d = await fetch("/api/citydebug/pool?kind=key").then(r => r.json());
+    if (!d.furnished || !d.furnished.length) { box.innerHTML = `<span class="g">пока пусто (${d.total} в пуле) — запусти scripts/furnish.py</span>`; return; }
+    box.innerHTML = d.furnished.map(p =>
+      `<div class="step" style="cursor:pointer" data-pool="${p.id}">▣ <b>${p.name}</b> <span class="g">· ${p.btype} · ${p.zones} зон, ${p.objects} предм.</span></div>`).join("") +
+      `<div class="hint">обставлено ${d.furnished.length} из ${d.total}</div>`;
+    box.querySelectorAll("[data-pool]").forEach(el => el.onclick = () => openPoolBuilding(el.dataset.pool));
+  } catch (e) { box.innerHTML = "<span class='g'>ошибка загрузки пула</span>"; }
+}
+
+async function openPoolBuilding(bid) {
+  $("card-name").textContent = "…"; $("card-body").innerHTML = "<span class='g'>загрузка…</span>"; $("card").classList.remove("hidden");
+  const d = await fetch("/api/citydebug/poolbuilding?bid=" + encodeURIComponent(bid)).then(r => r.json());
+  if (d.error) { $("card-body").innerHTML = d.error; return; }
+  const e = d.data || {};
+  $("card-name").textContent = (e.name || d.btype) + " · ПУЛ";
+  let b = `<div class="cl g">${d.id} · ${d.btype} · ${[e.tier, e.size, e.condition].filter(Boolean).join(" · ")}</div>`;
+  if (e.atmosphere) b += `<div class="cl g">${e.atmosphere}</div>`;
+  b += zonesHtml(e);
   $("card-body").innerHTML = b;
 }
 
@@ -312,6 +362,7 @@ $("add-sub").onclick = addSubspace;
 document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => setPreset(b.dataset.preset));
 buildLayerToggles();
 generate();
+loadPool();
 </script>
 </body>
 </html>

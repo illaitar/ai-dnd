@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "aidnd-web",
-      "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "uvicorn", "aidnd.server.app:app", "--host", "127.0.0.1", "--port", "8099", "--reload", "--reload-dir", "src"],
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["AIDND_OPEN_PLAY=1", ".venv/bin/python", "-m", "uvicorn", "aidnd.server.app:app", "--host", "127.0.0.1", "--port", "8099", "--reload", "--reload-dir", "src"],
       "port": 8099
     }
   ]

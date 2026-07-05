@@ -297,6 +297,11 @@ def _plan_payload() -> dict:
     here.sort(key=lambda i: (people[i].work != bid, i))      # работники дома — первыми
     more = max(0, len(here) - PB["here_show_cap"])           # LOD сцены: как «кто здесь»
     here = here[: PB["here_show_cap"]]
+    from aidnd.server.play.engine.world import _looked_level
+
+    if _looked_level(loc, bid) < 1:                          # туман людей — как в сцене:
+        more += len(here)                                    # не осмотрелся → лишь «сколько душ»
+        here = []
     lv = _S.get("live")
     if lv and lv.get("loc") == loc and lv.get("zonemap"):    # живая сцена = истина позиций
         seats = {p: z for p, z in lv["zonemap"].items() if p in here and z}
@@ -356,12 +361,20 @@ async def play_zone(request: Request):
     cur = _plan_payload()
     if not cur.get("plan") or zid not in (cur.get("zones") or {}):
         return {"error": "тут такого места нет"}
-    zname = cur["zones"][zid]
+    return {**_plan_payload(), "narr": [_zone_go(zid, cur["zones"][zid])], "gt": _gt()}
+
+
+def _zone_go(zid: str, zname: str) -> str:
+    """Переезд игрока в зону: позиция + живая сцена (тело и события) + время + память."""
     _S["zone"] = zid
     lv = _S.get("live")
     if lv is not None:                          # сцена видит перемещение чужака
-        lv.setdefault("zonemap", {})["pc"] = zid
-        lv["last"]["pc"] = f"перешёл — {zname}"
+        lv.setdefault("zonemap", {})[PLAYER] = zid
+        lv["last"][PLAYER] = f"перешёл — {zname}"
+        body = lv["world"].bodies.get(PLAYER)
+        znm_place = (lv.get("zone_names") or {}).get(zid)
+        if body is not None and znm_place and znm_place in lv["world"].places:
+            body.place = znm_place              # тело игрока в мире сцены (волна 2: зоны=места)
     _gt_add(PB["step_min"])
     _pc_remember(f"подошёл: {zname}", 0.1)
-    return {**_plan_payload(), "narr": [f"Ты подходишь — {zname}."], "gt": _gt()}
+    return f"Ты подходишь — {zname}."

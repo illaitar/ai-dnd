@@ -99,6 +99,17 @@ def _attempt(intent: dict, sc: dict) -> dict:
 
     if verb == "move" and intent.get("place"):
         want = str(intent["place"]).lower()
+        if _S.get("inside"):  # внутри здания «сесть/подойти к…» = переезд в ЗОНУ
+            from aidnd.server.play.engine.zones import building_zones
+            from aidnd.server.play.handlers.travel import _zone_go
+
+            _bz, zones = building_zones(_S["inside"])
+            wtok = _tokens_ru(want)
+            zbest = max(zones, key=lambda z: len(_tokens_ru(z["name"]) & wtok), default=None)
+            if zbest and _tokens_ru(zbest["name"]) & wtok:
+                out["narr"].append(_zone_go(zbest["id"], zbest["name"]))
+                out["refresh"] = True
+                return out
         tgt = next(
             (
                 k
@@ -336,4 +347,4 @@ async def act(request: Request):
     res = _attempt(it, sc)
     _pc_remember(f"я: {text[:80]}", 0.2)
     t = _world_tick() if not res.get("combat") else {"feed": [], "address": []}
-    return {**res, **t, "gt": _gt(), "coins": _pc_coins()}
+    return {**res, **t, "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}

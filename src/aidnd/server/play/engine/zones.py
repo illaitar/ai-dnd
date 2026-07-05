@@ -12,6 +12,7 @@ import random
 POST_BONUS = 3.0            # рабочий пост держит работника
 CROWD_PENALTY = 0.35        # толчея сверх вместимости отталкивает
 MOVE_HYSTERESIS = 0.22      # пересаживаемся, только если новая зона ЗАМЕТНО лучше
+SERVICE_KINDS = {"private", "storage", "cell"}   # служебные зоны — не для посетителей
 
 
 def building_zones(bid) -> tuple[dict, list]:
@@ -61,7 +62,10 @@ def choose_zone(state, zones: list, load: dict, rng: random.Random,
                    if z.get("post") and (z["post"] in rl or rl in z["post"])), None)
         if zp is not None:
             return zp["id"]
-    open_z = [z for z in zones if not z.get("lockable")]
+    open_z = [z for z in zones if not z.get("lockable")
+              and (works_here or z["kind"] not in SERVICE_KINDS)]
+    if not open_z:
+        open_z = [z for z in zones if not z.get("lockable")]
     if not open_z:
         return None
     best = max(open_z,

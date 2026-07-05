@@ -896,9 +896,31 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     bid = cr2b.get(loc)
     place = _binfo(bid)["name"] if bid else "улица"
     data = ((_store().get_building(_wid(), bid) or {}).get("data")) if bid else {}
+    from aidnd.server.play.engine.zones import assign_zones, building_zones
+
+    _zd, zones = building_zones(bid)
+    zone_names = {z["id"]: z["name"] for z in zones}
+    zone_ids = {v: k for k, v in zone_names.items()}
     w = MWorld()
-    w.link(place, "улица")
-    w.ground[place] = _live_affordances(bid)
+    if zones:  # ВОЛНА 2: зоны = МЕСТА разума — move сам переезжает, use ест ресурс СВОЕЙ зоны
+        znames = list(zone_names.values())
+        w.link("у входа", "улица")
+        for i, za in enumerate(znames):
+            w.link(za, "улица")
+            w.link("у входа", za)
+            for zb in znames[i + 1:]:
+                w.link(za, zb)
+        for z in zones:
+            itms = []
+            for o in z.get("objects") or []:
+                aff = o.get("afford") or {}
+                if aff:
+                    need, rate = max(aff.items(), key=lambda kv: kv[1])
+                    itms.append(MItem(o["name"], min(0.5, round(rate * 2.2, 2)), satisfies=need))
+            w.ground[zone_names[z["id"]]] = itms[:6]
+    else:
+        w.link(place, "улица")
+        w.ground[place] = _live_affordances(bid)
     hero = _pc_name()
     names = {PLAYER: hero if hero != "Странник" else "чужак"}  # NPC зовут по имени, если знают
     known_by = {
@@ -926,6 +948,11 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         rest = [i for i in here_all if i not in core]
         rng.shuffle(rest)
         here_all = (core + rest)[: PB["live_llm_cap"]]
+    workers = {pid for pid in here_all if people[pid].work == bid}
+    zonemap = assign_zones({pid: people[pid].state for pid in here_all}, zones,
+                           f"zones|{_wid()}|{bid}|{_phase()}",
+                           roles={pid: people[pid].role for pid in here_all},
+                           workers=workers) if zones else {}
     for pid in here_all:
         p = people[pid]
         _materialize_npc(pid, "visible")  # у присутствующих настоящие вещи при себе
@@ -947,7 +974,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         w.add(
             Body(
                 id=pid,
-                place=place,
+                place=(zone_names.get(zonemap.get(pid)) or "у входа") if zones else place,
                 charisma=p.charisma,
                 appearance=p.appearance,
                 attention=round(rng.uniform(0.45, 0.85), 2),
@@ -970,7 +997,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     w.add(
         Body(
             id=PLAYER,
-            place=place,
+            place=(zone_names.get(_S.get("zone")) or "у входа") if zones else place,
             charisma=0.45,
             appearance=min(0.8, 0.25 + coins / 60),
             attention=0.85,
@@ -1007,8 +1034,30 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         if bits:
             personas[pid] = ". ".join(bits)
     here = _here(loc, crof)
+    # ПРЕДЗНАКОМСТВО: жители одного городка знакомы (родня > коллеги > соседи).
+    # Сеем только отсутствующие связи — прожитые отношения не трогаем.
+    for i, a in enumerate(here_all):
+        for b in here_all[i + 1:]:
+            pa, pb = people[a], people[b]
+            if b in pa.state.relationships or a in pb.state.relationships:
+                continue
+            sur_a = pa.name.split()[-1] if len(pa.name.split()) > 1 else ""
+            sur_b = pb.name.split()[-1] if len(pb.name.split()) > 1 else ""
+            if sur_a and sur_a == sur_b:                       # родня
+                aff, tr, note = 0.45, 0.5, f"{{}} — моя родня (мы {sur_a}ы)"
+            elif pa.work and pa.work == pb.work:               # коллеги по месту
+                aff, tr, note = 0.3, 0.35, "{} — работаем бок о бок"
+            else:                                              # соседи по городку
+                aff, tr, note = 0.15, 0.2, None
+            for x, xid, y, yid in ((pa, a, pb, b), (pb, b, pa, a)):
+                rel = x.state.rel(yid)
+                rel["affinity"] = max(rel.get("affinity", 0.0), aff)
+                rel["trust"] = max(rel.get("trust", 0.0), tr)
+                if note:
+                    x.state.memory.add(note.format(y.name), _mt(), 0.5, kind="fact",
+                                       about=[yid])
     mgr = _model()
-    todo = [pid for pid in here if not (people[pid].state.agendas or [])][:4]
+    todo = [pid for pid in here_all if not (people[pid].state.agendas or [])]
     if todo:  # долгая цель для placed NPC (редкий вызов)
 
         def plan_one(pid):
@@ -1019,16 +1068,8 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
 
         from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(max_workers=4) as ex:
+        with ThreadPoolExecutor(max_workers=8) as ex:
             list(ex.map(plan_one, todo))
-    from aidnd.server.play.engine.zones import assign_zones, building_zones
-
-    _zd, zones = building_zones(bid)
-    workers = {pid for pid in here_all if people[pid].work == bid}
-    zonemap = assign_zones({pid: people[pid].state for pid in here_all}, zones,
-                           f"zones|{_wid()}|{bid}|{_phase()}",
-                           roles={pid: people[pid].role for pid in here_all},
-                           workers=workers) if zones else {}
     _S["live"] = {
         "world": w,
         "loc": loc,
@@ -1044,9 +1085,12 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         "roles": roles,
         "personas": personas,
         "zones": zones,
-        "zone_names": {z["id"]: z["name"] for z in zones},
+        "zone_names": zone_names,
+        "zone_ids": zone_ids,
+        "zone_places": set(zone_names.values()) | {"у входа"},
         "zonemap": zonemap,
         "workers": workers,
+        "rumors": list(((data or {}).get("rumors") or [])[:3]),
         "pdesc": (f"Город «{_city_name()}». " + ((data or {}).get("notable") or "")).strip(),
     }
     import logging as _logging
@@ -1085,10 +1129,12 @@ def _gossip(actor_st, actor_name: str, target_st) -> None:
 def _live_tick(people) -> tuple:
     lv, mgr = _S["live"], _model()
     w = lv["world"]
+    inz = lv.get("zone_places")
     order = [
         pid
         for pid in w.npc_minds
-        if not w.bodies[pid].down() and w.bodies[pid].place == lv["place"]
+        if not w.bodies[pid].down()
+        and (w.bodies[pid].place in inz if inz else w.bodies[pid].place == lv["place"])
     ]
     random.Random(f"tick|{lv['clock']}").shuffle(order)
     # МОЛЧАНИЕ — тоже сигнал: окликнул чужака, а тот не ответил → это факт мира, NPC его помнит
@@ -1120,47 +1166,40 @@ def _live_tick(people) -> tuple:
             "в разговоре: НЕ окликай и не приветствуй заново; отвечай на его слова, "
             "а если он молчит — не дёргай, дай ему выпить/подумать, займись делом"
         ).lstrip(". ")
-    # ЗОНЫ: позиции — состояние сцены; переезды по нуждам (рекурсия society-скоринга, кейс 13)
-    from aidnd.server.play.engine.zones import choose_zone
-
+    # ВОЛНА 2: позиция = ТЕЛО в зоне-месте (двигает сам разум move'ом); zonemap — производная
     zones_l = lv.get("zones") or []
     zmap = lv.setdefault("zonemap", {})
     zone_feed = []
     if zones_l:
+        pbody = w.bodies.get(PLAYER)
+        if pbody is not None:  # позиция игрока — из его состояния (клик по плану/фриформ)
+            pbody.place = lv["zone_names"].get(_S.get("zone")) or "у входа"
+        for pid in list(w.npc_minds):
+            zmap[pid] = lv["zone_ids"].get(w.bodies[pid].place)
         zmap[PLAYER] = _S.get("zone")
-        zload: dict = {}
-        for z in zmap.values():
-            if z:
-                zload[z] = zload.get(z, 0) + 1
-        rng_z = random.Random(f"zmove|{lv['clock']}")
-        for pid in order:
-            cur = zmap.get(pid)
-            new_z = choose_zone(w.npc_minds[pid], zones_l, zload, rng_z,
-                                role=lv["roles"].get(pid, ""),
-                                works_here=pid in (lv.get("workers") or set()), current=cur)
-            if new_z and new_z != cur:
-                zmap[pid] = new_z
-                zload[new_z] = zload.get(new_z, 0) + 1
-                if cur:
-                    zload[cur] = zload.get(cur, 1) - 1
-                znm = lv["zone_names"].get(new_z, "")
-                if lv["clock"] > 0:  # первый тик — рассадка, не событие
-                    zone_feed.append({"k": "deed", "who": _display(pid, people),
-                                      "text": f"перебирается — {znm}"})
-                    w.npc_minds[pid].memory.add(f"я перебрался: {znm}", lv["clock"], 0.15,
-                                                kind="note")
-    zname_of = {pid: lv["zone_names"].get(z) for pid, z in zmap.items() if z}
+    zname_of = {}
+    if zones_l and w.bodies.get(PLAYER) and w.bodies[PLAYER].place != "у входа":
+        zname_of[PLAYER] = w.bodies[PLAYER].place
+    if lv["clock"] >= 3 and "незнакомец" in str(roles.get(PLAYER, "")):
+        # к чужаку ПРИГЛЯДЕЛИСЬ — состояние сцены, не кулдаун: он больше не главное событие зала
+        roles[PLAYER] = ("чужак, который тут уже посидел — к нему пригляделись и вернулись "
+                         "к своим делам; лезть к нему без причины незачем")
     if zname_of.get(PLAYER):
         roles[PLAYER] = f"{roles.get(PLAYER, 'чужак')}; он сейчас — {zname_of[PLAYER]}"
+    news = [str(x) for x in ((_S.get("guild_news") or []) + (_S.get("board_news") or []))[-2:]]
+    news += lv.get("rumors") or []
     ctx = {
         "roles": roles,
         "names": lv["names"],
         "last_actions": lv["last"],
         "history": lv["hist"],
         "clock": lv["clock"],
-        "place_desc": {lv["place"]: lv["pdesc"]},
+        "place_desc": ({p_: f"Это часть зала «{lv['place']}». {lv['pdesc']}"
+                        for p_ in (lv.get("zone_places") or ())}
+                       if zones_l else {lv["place"]: lv["pdesc"]}),
         "personas": personas,
         "zones": zname_of,
+        "news": news[:4],
         "time": f"{_PHASE_RU[_phase()]}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}",
     }
 
@@ -1190,7 +1229,7 @@ def _live_tick(people) -> tuple:
             st = w.npc_minds[pid]
             d = decisions[pid]
             nm = lv["names"].get(pid, pid)
-            zn = zname_of.get(pid, "—")
+            zn = w.bodies[pid].place if zones_l else "—"
             needs = ", ".join(f"{k}:{v:.2f}" for k, v in st.needs.items() if v >= 0.35) or "норма"
             emo = ", ".join(f"{k}:{v:.2f}" for k, v in st.emotion.items() if v >= 0.2) or "спокоен"
             ag = st.agendas[0].summary if st.agendas else "—"
@@ -1322,7 +1361,8 @@ def _live_tick(people) -> tuple:
                     )  # ответит ли чужак — узнаем следующим тиком
                 else:
                     # СЛЫШИМОСТЬ (docs/locations.md): своя зона — полностью; чужая — обрывком
-                    same_zone = (not zones_l) or (zmap.get(pid) and zmap.get(pid) == zmap.get(PLAYER))
+                    same_zone = (not zones_l) or (
+                        PLAYER in w.bodies and w.bodies[pid].place == w.bodies[PLAYER].place)
                     if same_zone:
                         feed.append(
                             {
@@ -1340,7 +1380,7 @@ def _live_tick(people) -> tuple:
                             about=[pid],
                         )
                     else:
-                        znm = lv["zone_names"].get(zmap.get(pid), "в стороне")
+                        znm = w.bodies[pid].place
                         feed.append(
                             {
                                 "k": "speech",
@@ -1357,7 +1397,8 @@ def _live_tick(people) -> tuple:
                             about=[pid],
                         )
                     spoke.append(f"сказал(а) {lv['names'].get(tid, tgt)}: «{txt[:50]}»")
-                    if tid in w.npc_minds and ((not zones_l) or zmap.get(tid) == zmap.get(pid)):
+                    if tid in w.npc_minds and ((not zones_l)
+                                               or w.bodies[tid].place == w.bodies[pid].place):
                         _gossip(st, lv["names"].get(pid, pid), w.npc_minds[tid])
                     if tid in w.npc_minds:  # обращение доходит и через зал (окликнули)
                         w.npc_minds[tid].memory.add(
@@ -1372,6 +1413,9 @@ def _live_tick(people) -> tuple:
         does = (d.get("does") or "").strip()
         if does and not said:  # реплика сама несёт момент — не дублируем
             feed.append({"k": "deed", "who": who, "text": does[:150]})
+    if zones_l:
+        for pid in order:
+            zmap[pid] = lv["zone_ids"].get(w.bodies[pid].place)
     lv["clock"] += 1
     _gt_add(PB["live_tick_min"])  # тик мира (игровые минуты)
     _pc_save()

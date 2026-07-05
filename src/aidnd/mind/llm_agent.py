@@ -128,6 +128,9 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
             f"«{i.name}»" + (f" (закрывает: {NEED_RU.get(i.satisfies, i.satisfies)})" if i.satisfies else "")
             for i in res) + ".")
     lines.append("  Выходы: " + (", ".join(percept.exits) or "нет") + ".")
+    news = ctx.get("news") or []
+    if news:
+        lines.append("  О ЧЁМ СУДАЧИТ ГОРОД (годные темы для беседы): " + "; ".join(news) + ".")
 
     if percept.present:
         lines.append("")

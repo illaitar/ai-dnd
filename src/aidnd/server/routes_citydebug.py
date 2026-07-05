@@ -188,6 +188,26 @@ def citydebug_pool(_: Owner, kind: str = "key", furnished: bool = True) -> dict:
     return {"total": len(rows), "furnished": out}
 
 
+@router.get("/citydebug/plans")
+def citydebug_plans_page(_: Owner) -> HTMLResponse:
+    """Галерея бумажных планов всех обставленных зданий пула — стенд вкуса рендера."""
+    with open(os.path.join(WEB_DIR, "plansdebug.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@router.get("/api/citydebug/planart")
+def citydebug_planart(_: Owner, bid: str) -> dict:
+    """Бумажный (пергаментный) рендер плана здания пула."""
+    from ..worldgen.floorart import paper_svg
+    from ..worldgen.floorplan import plan_location
+    for kind in ("key", "res"):
+        for r in _store().pool_buildings(kind):
+            if r["id"] == bid and r["data"].get("zones"):
+                plan = plan_location(r["data"], seed_key=bid)
+                return {"id": bid, "svg": paper_svg(plan, r["data"], seed_key=bid)}
+    return {"error": "нет такого здания в пуле (или не обставлено)"}
+
+
 @router.get("/api/citydebug/poolbuilding")
 def citydebug_poolbuilding(_: Owner, bid: str) -> dict:
     """Полный фактшит здания из пула — с зонами, предметами обстановки и планом-SVG."""

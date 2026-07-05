@@ -11,6 +11,7 @@ import random
 from fastapi import Request
 
 from aidnd import society
+from aidnd.inference import LLMBadOutput, LLMUnavailable
 from aidnd.citygraph import CityParams, generate, visual
 from aidnd.citygraph.model import NodeKind
 from aidnd.mind import Body, NpcConfig, NpcState, advance_agendas
@@ -1020,6 +1021,14 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
 
         with ThreadPoolExecutor(max_workers=4) as ex:
             list(ex.map(plan_one, todo))
+    from aidnd.server.play.engine.zones import assign_zones, building_zones
+
+    _zd, zones = building_zones(bid)
+    workers = {pid for pid in here_all if people[pid].work == bid}
+    zonemap = assign_zones({pid: people[pid].state for pid in here_all}, zones,
+                           f"zones|{_wid()}|{bid}|{_phase()}",
+                           roles={pid: people[pid].role for pid in here_all},
+                           workers=workers) if zones else {}
     _S["live"] = {
         "world": w,
         "loc": loc,
@@ -1034,6 +1043,10 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         "names": names,
         "roles": roles,
         "personas": personas,
+        "zones": zones,
+        "zone_names": {z["id"]: z["name"] for z in zones},
+        "zonemap": zonemap,
+        "workers": workers,
         "pdesc": (f"Город «{_city_name()}». " + ((data or {}).get("notable") or "")).strip(),
     }
 
@@ -1092,6 +1105,38 @@ def _live_tick(people) -> tuple:
             "в разговоре: НЕ окликай и не приветствуй заново; отвечай на его слова, "
             "а если он молчит — не дёргай, дай ему выпить/подумать, займись делом"
         ).lstrip(". ")
+    # ЗОНЫ: позиции — состояние сцены; переезды по нуждам (рекурсия society-скоринга, кейс 13)
+    from aidnd.server.play.engine.zones import choose_zone
+
+    zones_l = lv.get("zones") or []
+    zmap = lv.setdefault("zonemap", {})
+    zone_feed = []
+    if zones_l:
+        zmap[PLAYER] = _S.get("zone")
+        zload: dict = {}
+        for z in zmap.values():
+            if z:
+                zload[z] = zload.get(z, 0) + 1
+        rng_z = random.Random(f"zmove|{lv['clock']}")
+        for pid in order:
+            cur = zmap.get(pid)
+            new_z = choose_zone(w.npc_minds[pid], zones_l, zload, rng_z,
+                                role=lv["roles"].get(pid, ""),
+                                works_here=pid in (lv.get("workers") or set()), current=cur)
+            if new_z and new_z != cur:
+                zmap[pid] = new_z
+                zload[new_z] = zload.get(new_z, 0) + 1
+                if cur:
+                    zload[cur] = zload.get(cur, 1) - 1
+                znm = lv["zone_names"].get(new_z, "")
+                if lv["clock"] > 0:  # первый тик — рассадка, не событие
+                    zone_feed.append({"k": "deed", "who": _display(pid, people),
+                                      "text": f"перебирается — {znm}"})
+                    w.npc_minds[pid].memory.add(f"я перебрался: {znm}", lv["clock"], 0.15,
+                                                kind="note")
+    zname_of = {pid: lv["zone_names"].get(z) for pid, z in zmap.items() if z}
+    if zname_of.get(PLAYER):
+        roles[PLAYER] = f"{roles.get(PLAYER, 'чужак')}; он сейчас — {zname_of[PLAYER]}"
     ctx = {
         "roles": roles,
         "names": lv["names"],
@@ -1100,6 +1145,7 @@ def _live_tick(people) -> tuple:
         "clock": lv["clock"],
         "place_desc": {lv["place"]: lv["pdesc"]},
         "personas": personas,
+        "zones": zname_of,
         "time": f"{_PHASE_RU[_phase()]}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}",
     }
 
@@ -1115,7 +1161,7 @@ def _live_tick(people) -> tuple:
     with ThreadPoolExecutor(max_workers=8) as ex:
         decisions = dict(ex.map(think_one, order))
 
-    feed, address = [], []
+    feed, address = list(zone_feed), []
     said_n = 0  # LOD-кэп реплик ленты
     topics = lv.setdefault("topics", [])  # анти-эхо ПОМНИТ прошлые тики (хвост сигнатур)
     pc = _pc()
@@ -1225,24 +1271,45 @@ def _live_tick(people) -> tuple:
                         pid
                     )  # ответит ли чужак — узнаем следующим тиком
                 else:
-                    feed.append(
-                        {
-                            "k": "speech",
-                            "who": who,
-                            "to": _display(tid, people) if tid in people else tgt,
-                            "text": txt,
-                        }
-                    )
-                    pc.memory.add(
-                        f"слышал в «{lv['place']}»: {who} — {txt[:90]}",
-                        _mt(),
-                        0.18,
-                        kind="heard",
-                        about=[pid],
-                    )
+                    # СЛЫШИМОСТЬ (docs/locations.md): своя зона — полностью; чужая — обрывком
+                    same_zone = (not zones_l) or (zmap.get(pid) and zmap.get(pid) == zmap.get(PLAYER))
+                    if same_zone:
+                        feed.append(
+                            {
+                                "k": "speech",
+                                "who": who,
+                                "to": _display(tid, people) if tid in people else tgt,
+                                "text": txt,
+                            }
+                        )
+                        pc.memory.add(
+                            f"слышал в «{lv['place']}»: {who} — {txt[:90]}",
+                            _mt(),
+                            0.18,
+                            kind="heard",
+                            about=[pid],
+                        )
+                    else:
+                        znm = lv["zone_names"].get(zmap.get(pid), "в стороне")
+                        feed.append(
+                            {
+                                "k": "speech",
+                                "who": who,
+                                "to": _display(tid, people) if tid in people else tgt,
+                                "text": f"({znm}, краем уха) …{txt[:34]}…",
+                            }
+                        )
+                        pc.memory.add(
+                            f"краем уха ({znm}): {who} о чём-то говорил — …{txt[:36]}…",
+                            _mt(),
+                            0.08,
+                            kind="heard",
+                            about=[pid],
+                        )
                     spoke.append(f"сказал(а) {lv['names'].get(tid, tgt)}: «{txt[:50]}»")
-                    if tid in w.npc_minds:  # адресату — сплетня + нудж «ответь»
+                    if tid in w.npc_minds and ((not zones_l) or zmap.get(tid) == zmap.get(pid)):
                         _gossip(st, lv["names"].get(pid, pid), w.npc_minds[tid])
+                    if tid in w.npc_minds:  # обращение доходит и через зал (окликнули)
                         w.npc_minds[tid].memory.add(
                             f"ко мне обратился {who}: «{txt[:80]}» — стоит ответить",
                             lv["clock"],
@@ -1280,7 +1347,9 @@ def _world_tick() -> dict:
         _live_build(city, people, crof, cr2b, loc)
     try:
         feed, address = _live_tick(people)  # живая сцена: те, кто рядом
-    except Exception:  # noqa: BLE001 — тик не роняет действие
+    except (LLMUnavailable, LLMBadOutput):  # без модели не притворяемся — честная ошибка игроку
+        raise
+    except Exception:  # noqa: BLE001 — прочие баги тика не роняют действие игрока
         import logging
 
         logging.getLogger("aidnd").warning("live tick failed", exc_info=True)

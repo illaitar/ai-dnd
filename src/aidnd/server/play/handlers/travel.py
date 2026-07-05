@@ -281,7 +281,7 @@ async def live(request: Request):
 
 def _plan_payload() -> dict:
     """Бумажный план текущего здания с людьми по зонам. Нет зон (не из дебаг-партии) → None."""
-    from aidnd.server.play.engine.core import _pool
+    from aidnd.server.play.engine.zones import building_zones
     from aidnd.worldgen.floorart import paper_svg
     from aidnd.worldgen.floorplan import plan_location
 
@@ -289,19 +289,7 @@ def _plan_payload() -> dict:
     bid = _S.get("inside")
     if not bid:
         return {"plan": None}
-    data = (_store().get_building(_wid(), bid) or {}).get("data") or {}
-    if not data.get("zones"):  # мир собран до обстановки → обстановка из пула: имя, потом тип
-        t = str(data.get("type") or "").lower()
-        cand = [r for r in _pool().pool_buildings("key") if r["data"].get("zones")]
-        row = (next((r for r in cand if r["data"].get("name") == data.get("name")), None)
-               or next((r for r in cand
-                        if t and str(r["data"].get("type") or "").lower() == t), None)
-               or next((r for r in cand
-                        if t and (t in r["btype"].lower() or r["btype"].lower() in t)), None))
-        if row:
-            data = {**data, "zones": row["data"]["zones"],
-                    "layout": row["data"].get("layout")}
-    zones = data.get("zones") or []
+    data, zones = building_zones(bid)
     if not zones:
         return {"plan": None}
     plan = plan_location(data, seed_key=f"{_wid()}|{bid}")
@@ -309,7 +297,14 @@ def _plan_payload() -> dict:
     here.sort(key=lambda i: (people[i].work != bid, i))      # работники дома — первыми
     more = max(0, len(here) - PB["here_show_cap"])           # LOD сцены: как «кто здесь»
     here = here[: PB["here_show_cap"]]
-    seats = _zone_seats(people, here, zones, f"seats|{_wid()}|{bid}")
+    lv = _S.get("live")
+    if lv and lv.get("loc") == loc and lv.get("zonemap"):    # живая сцена = истина позиций
+        seats = {p: z for p, z in lv["zonemap"].items() if p in here and z}
+        for pid in here:                                     # хвост вне LLM-ядра — рассадка
+            if pid not in seats:
+                seats.update(_zone_seats(people, [pid], zones, f"seats|{_wid()}|{bid}"))
+    else:
+        seats = _zone_seats(people, here, zones, f"seats|{_wid()}|{bid}")
     npcs = [{"id": pid, "name": people[pid].name, "init": people[pid].name[:1],
              "zone": seats.get(pid),
              "color": f"hsl({(hash(pid) % 360)} 55% 45%)"} for pid in here]
@@ -363,6 +358,10 @@ async def play_zone(request: Request):
         return {"error": "тут такого места нет"}
     zname = cur["zones"][zid]
     _S["zone"] = zid
+    lv = _S.get("live")
+    if lv is not None:                          # сцена видит перемещение чужака
+        lv.setdefault("zonemap", {})["pc"] = zid
+        lv["last"]["pc"] = f"перешёл — {zname}"
     _gt_add(PB["step_min"])
     _pc_remember(f"подошёл: {zname}", 0.1)
     return {**_plan_payload(), "narr": [f"Ты подходишь — {zname}."], "gt": _gt()}

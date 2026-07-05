@@ -118,7 +118,10 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     lines.append(f"Эмоции: {_emo_line(state.emotion, state.emotion_target)}.")
 
     lines.append("")
-    lines.append(f"МЕСТО: {me.place}. {place_desc.get(me.place, '')}")
+    zones = ctx.get("zones", {})                   # id → имя зоны («стол у окна») — где кто в помещении
+    my_zone = zones.get(cfg.id)
+    lines.append(f"МЕСТО: {me.place}. {place_desc.get(me.place, '')}"
+                 + (f" Ты сейчас — {my_zone}." if my_zone else ""))
     res = world.ground.get(me.place, [])
     if res:
         lines.append("  Здесь можно воспользоваться: " + ", ".join(
@@ -133,7 +136,9 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
             wealth = "богато одет" if b.appearance >= .6 else "прилично" if b.appearance >= .4 else "простак"
             st = "повержен" if b.down() else f"HP {b.hp}"
             act = last.get(b.id, "—")
-            lines.append(f"  • {nm(b.id)} ({roles.get(b.id, '?')}, {wealth}, {st}). "
+            zb = zones.get(b.id)
+            lines.append(f"  • {nm(b.id)} ({roles.get(b.id, '?')}, {wealth}, {st}"
+                         + (f", {zb}" if zb else "") + f"). "
                          f"Прошлый ход: {act}. Твоё отношение: {_rel_line(state, b.id)}.")
     if percept.nearby:
         lines.append("")

@@ -11,9 +11,9 @@ import random
 from fastapi import Request
 
 from aidnd import society
-from aidnd.inference import LLMBadOutput, LLMUnavailable
 from aidnd.citygraph import CityParams, generate, visual
 from aidnd.citygraph.model import NodeKind
+from aidnd.inference import LLMBadOutput, LLMUnavailable
 from aidnd.mind import Body, NpcConfig, NpcState, advance_agendas
 from aidnd.mind import Item as MItem
 from aidnd.mind import World as MWorld
@@ -1049,7 +1049,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                 aff, tr, note = 0.3, 0.35, "{} — работаем бок о бок"
             else:                                              # соседи по городку
                 aff, tr, note = 0.15, 0.2, None
-            for x, xid, y, yid in ((pa, a, pb, b), (pb, b, pa, a)):
+            for x, y, yid in ((pa, pb, b), (pb, pa, a)):
                 rel = x.state.rel(yid)
                 rel["affinity"] = max(rel.get("affinity", 0.0), aff)
                 rel["trust"] = max(rel.get("trust", 0.0), tr)

@@ -14,16 +14,21 @@ src/aidnd/
                      llm_agent (decide_hybrid) / trade / tools / world (микромир тестов)
   society/     235   нужды · места · рутина (декларативные каталоги)
   citygraph/   850   генерация графа · A* · модель · параметры
-  worldgen/   1100   store (обе sqlite) · enrich зданий · персоны · imagegen · enrichment
+  worldgen/   1800   store (обе sqlite) · enrich зданий · персоны · imagegen · enrichment ·
+                     furnish (роль furnisher: зоны+предметы) · floorplan (футпринт+annealing) ·
+                     floorart (бумажный рендер плана: пергамент/штрих/хэтчинг/глифы)
   items/       560   модель фактшита · smith · inspect · craft (граф материалов) · durability · loot_pool
   combat/      620   Combatant · Encounter · auto · encounters · dungeon
   magic/       390   grammar (бюджет/хэш/base_law) · inscribe (scribe_law/wild)
   plot/        260   bible · architect · casting (НЕ в рантайме)
   play/        130   population (Townsperson)                        ← близнец-огрызок
-  content/           bestiary.json (322) · glyphs · материалы
-  server/     8000   app · auth · db(postgres) · usage · debug-стенды · web/ (play.html,
-                     citygen.py-рендер 1055) · play/: engine{core 802, world 1307, worldsim} ·
-                     mechanics{items, contracts, combat} · handlers{10 доменных}
+  content/           bestiary.json (322) · glyphs · материалы · zones.json (шаблоны зон локаций)
+  server/     8700   app · auth · db(postgres) · usage · debug-стенды (+plansdebug: галерея
+                     планов) · web/ (play.html, citygen.py-рендер 1055) ·
+                     play/: engine{core 802, world 1400, worldsim, zones (выбор зоны нуждами)} ·
+                     mechanics{items, contracts, combat} · handlers{10 доменных: +план здания
+                     /plan /zone в travel}
+scripts/            furnish.py (обстановка пула зонами) · peoplegen · buildinggen · bench …
 ```
 
 ## Болячки (по данным ревизии 2026-07-04)

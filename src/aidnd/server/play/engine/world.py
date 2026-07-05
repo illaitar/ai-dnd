@@ -1204,8 +1204,13 @@ def _live_tick(people) -> tuple:
     }
 
     # ── ДИРИЖЁР: LLM-ход получает тот, кому ЕСТЬ ЗАЧЕМ (долг > эмоция > нужда > беседа > фон)
-    from aidnd.server.play.engine.convo import (conv_block, conv_debt_to, conv_note_say,
-                                                conv_of, conv_tick)
+    from aidnd.server.play.engine.convo import (
+        conv_block,
+        conv_debt_to,
+        conv_note_say,
+        conv_of,
+        conv_tick,
+    )
 
     conv_tick(lv, lambda m: w.bodies[m].place if m in w.bodies else None)
     impulses: dict = {}

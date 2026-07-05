@@ -47,6 +47,11 @@ LOCATION_MODEL: str = os.environ.get("AIDND_LOCATION_MODEL", "qwen3:14b")
 # local (по умолчанию, тюненое в Ollama) | deepseek (всё в DeepSeek) | hybrid (мозги в DeepSeek)
 LLM_PROFILE: str = os.environ.get("AIDND_PROFILE", "local")
 DEEPSEEK_API_KEY: str = os.environ.get("DEEPSEEK_API_KEY", "")
+if not DEEPSEEK_API_KEY:                # дев-удобство: ключ из .secrets, если env пуст
+    _KEY_PATH = os.path.join(os.path.dirname(__file__), "..", "..", ".secrets", "deepseek.key")
+    if os.path.exists(_KEY_PATH):
+        with open(_KEY_PATH, encoding="utf-8") as _f:
+            DEEPSEEK_API_KEY = _f.read().strip()
 DEEPSEEK_BASE: str = os.environ.get("DEEPSEEK_BASE", "https://api.deepseek.com")
 DEEPSEEK_MODEL: str = os.environ.get("AIDND_DEEPSEEK_MODEL", "deepseek-chat")
 # параллельность enrich: облако (network-bound) параллелим, локальная Ollama — нет (своп на 1 GPU)

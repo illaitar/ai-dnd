@@ -138,6 +138,8 @@ def _cost(assign: dict, groups: list[dict], fp: dict, pois: dict, windows: str,
             d = abs(a[0] - b[0]) + abs(a[1] - b[1])
             if d < 3:
                 c += W_SPREAD * (3 - d)
+            if a[0] == b[0] or a[1] == b[1]:                 # дисциплина рядов: общие оси — награда
+                c -= 0.55
     for x, y in poss:                                        # clearance: свободный сосед
         if not any((x + dx, y + dy) in occupied_free
                    for dx, dy in ((-1, 0), (2, 0), (0, -1), (0, 2))):
@@ -305,7 +307,7 @@ def plan_location(data: dict, seed_key: str = "") -> dict:
                 put(z, spot[0], spot[1], zsize[0], zsize[1])
 
     floors = [{"label": "", "w": fp["W"], "h": H, "zones": rects,
-               "outline": fp["outline"], "hall": hall,
+               "outline": fp["outline"], "hall": hall, "wing": fp.get("wing"),
                "door": {"x": aisle_x, "y": H - 1}, "aisle_x": aisle_x,
                "windows": lay["windows"], "stairs": pois.get("stairs"),
                "stairs_approach": pois.get("stairs_approach")}]

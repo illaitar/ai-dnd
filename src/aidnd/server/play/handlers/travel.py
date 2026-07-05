@@ -164,6 +164,7 @@ async def enter(request: Request):
         return {"error": "тут не во что входить"}
     _S["inside"] = bid
     _S["room"] = None
+    _S["zone"] = None
     _S["dlg"] = None  # вошёл внутрь — уличный разговор оборвался
     _gt_add(PB["give_min"])
     _pc_remember(f"вошёл в {_binfo(bid)['name']}", 0.25)
@@ -254,6 +255,7 @@ async def go_room(request: Request):
 async def exit_building(request: Request):
     city, people, crof, cr2b, loc = _play()
     _S["inside"] = None
+    _S["zone"] = None
     _S["dlg"] = None  # вышел — разговор в зале оборвался
     _gt_add(PB["give_min"])
     t = _world_tick()
@@ -273,3 +275,94 @@ async def live(request: Request):
     _play()
     t = _world_tick()
     return {**t, "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}
+
+
+# ─────────────────────────── ПЛАН ЗДАНИЯ (бумажный, docs/locations.md этап C) ──
+
+def _plan_payload() -> dict:
+    """Бумажный план текущего здания с людьми по зонам. Нет зон (не из дебаг-партии) → None."""
+    from aidnd.server.play.engine.core import _pool
+    from aidnd.worldgen.floorart import paper_svg
+    from aidnd.worldgen.floorplan import plan_location
+
+    city, people, crof, cr2b, loc = _play()
+    bid = _S.get("inside")
+    if not bid:
+        return {"plan": None}
+    data = (_store().get_building(_wid(), bid) or {}).get("data") or {}
+    if not data.get("zones"):  # мир собран до обстановки → обстановка из пула: имя, потом тип
+        t = str(data.get("type") or "").lower()
+        cand = [r for r in _pool().pool_buildings("key") if r["data"].get("zones")]
+        row = (next((r for r in cand if r["data"].get("name") == data.get("name")), None)
+               or next((r for r in cand
+                        if t and str(r["data"].get("type") or "").lower() == t), None)
+               or next((r for r in cand
+                        if t and (t in r["btype"].lower() or r["btype"].lower() in t)), None))
+        if row:
+            data = {**data, "zones": row["data"]["zones"],
+                    "layout": row["data"].get("layout")}
+    zones = data.get("zones") or []
+    if not zones:
+        return {"plan": None}
+    plan = plan_location(data, seed_key=f"{_wid()}|{bid}")
+    here = [pid for pid in _here(loc, crof) if pid != PLAYER]
+    here.sort(key=lambda i: (people[i].work != bid, i))      # работники дома — первыми
+    more = max(0, len(here) - PB["here_show_cap"])           # LOD сцены: как «кто здесь»
+    here = here[: PB["here_show_cap"]]
+    seats = _zone_seats(people, here, zones, f"seats|{_wid()}|{bid}")
+    npcs = [{"id": pid, "name": people[pid].name, "init": people[pid].name[:1],
+             "zone": seats.get(pid),
+             "color": f"hsl({(hash(pid) % 360)} 55% 45%)"} for pid in here]
+    npcs.append({"id": "pc", "name": _S.get("pc_name") or "ты", "init": "☉",
+                 "zone": _S.get("zone"), "color": "#b08a2e", "is_player": True})
+    hidden = [z["id"] for z in zones if z.get("lockable")]  # комнаты постоя: пока не снял — туман
+    svg = paper_svg(plan, data, seed_key=f"{_wid()}|{bid}",
+                    game={"npcs": npcs, "hidden_zones": hidden, "interactive": True,
+                          "more": more})
+    znames = {z["id"]: z["name"] for z in zones}
+    return {"plan": svg, "zones": znames, "zone": _S.get("zone")}
+
+
+def _zone_seats(people, here, zones, seed: str) -> dict:
+    """Рассадка NPC по зонам: пост — по роли, прочие — детерминированно по вместимости.
+    (Временная механика до шага 2 материализации: тогда зоны станут позициями мира.)"""
+    rng = random.Random(seed)
+    out, load = {}, {z["id"]: 0 for z in zones}
+    posts = [z for z in zones if z.get("post")]
+    sit = [z for z in zones
+           if z.get("group") or z["kind"] in ("bar", "tables", "hearth", "pews", "games")]
+    sit = sit or [z for z in zones if not z.get("lockable")] or zones
+    for pid in sorted(here):
+        role = (people[pid].role or "").lower()
+        zp = next((z for z in posts
+                   if z.get("post") and (z["post"] in role or role in z["post"])), None)
+        if zp and load[zp["id"]] == 0:
+            out[pid] = zp["id"]
+            load[zp["id"]] += 1
+            continue
+        cand = [z for z in sit if load[z["id"]] < z.get("cap", 4) and not z.get("lockable")]
+        z = rng.choice(cand or sit)
+        out[pid] = z["id"]
+        load[z["id"]] += 1
+    return out
+
+
+@router.get("/api/play/plan")
+async def play_plan():
+    """План текущего здания (пергамент, люди по зонам, туман на запертом)."""
+    return _plan_payload()
+
+
+@router.post("/api/play/zone")
+async def play_zone(request: Request):
+    """Подойти к зоне на плане: позиция игрока внутри здания (время из PB)."""
+    b = await request.json()
+    zid = str(b.get("zid") or "")
+    cur = _plan_payload()
+    if not cur.get("plan") or zid not in (cur.get("zones") or {}):
+        return {"error": "тут такого места нет"}
+    zname = cur["zones"][zid]
+    _S["zone"] = zid
+    _gt_add(PB["step_min"])
+    _pc_remember(f"подошёл: {zname}", 0.1)
+    return {**_plan_payload(), "narr": [f"Ты подходишь — {zname}."], "gt": _gt()}

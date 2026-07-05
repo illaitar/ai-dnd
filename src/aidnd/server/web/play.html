@@ -80,7 +80,11 @@
   .invcard:hover{border-color:var(--gold-dim)}
   .invcard .bn{font-size:13.5px;color:var(--ink)}
   .invcard .bw{font-size:11px;color:var(--faint);margin-top:3px}
-  .map.inside svg{pointer-events:none;filter:brightness(.45) saturate(.5)}
+  .map.inside svg#mapsvg{pointer-events:none;filter:brightness(.45) saturate(.5)}
+  .map .planbox{position:absolute;inset:0;overflow:auto;opacity:0;pointer-events:none;background:#151009;padding:6px}
+  .map.inside.hasplan .planbox{opacity:1;pointer-events:auto}
+  .map.inside.hasplan .insidemsg{opacity:0}
+  .planbox .zone:hover{fill:#5aa0ff22}
   .map .insidemsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     color:var(--dim);font:13px var(--serif);font-style:italic;pointer-events:none;opacity:0}
   .map.inside .insidemsg{opacity:1}
@@ -317,6 +321,7 @@
       <div class="cap">карта <span id="here-lbl" style="color:var(--gold)"></span></div>
       <div class="map" id="mapbox"><svg id="mapsvg"></svg>
         <div class="insidemsg">ты внутри — карта подождёт снаружи</div>
+        <div class="planbox" id="planbox"></div>
         <div class="zoom"><button onclick="zoomBy(1/1.4)" aria-label="отдалить">&#8722;</button>
           <span id="zlvl">100%</span>
           <button onclick="zoomBy(1.4)" aria-label="приблизить">&#43;</button>
@@ -662,7 +667,31 @@ function renderWays(){
   b.push(`<button class="gray" onclick="waitTurn()">&#8987; ждать</button>`);
   el.innerHTML=b.join('');
   $('mapbox').classList.toggle('inside',!!SCENE.inside);
+  loadPlan();
   renderEnterPulse();
+}
+let PLANBID=null;
+async function loadPlan(){
+  if(!SCENE.inside){PLANBID=null;$('mapbox').classList.remove('hasplan');$('planbox').innerHTML='';return;}
+  if(PLANBID===SCENE.inside&&$('planbox').innerHTML)return;   // уже показан этот дом
+  PLANBID=SCENE.inside;
+  const d=await api('/api/play/plan');
+  if(d&&d.plan){$('planbox').innerHTML=d.plan;$('mapbox').classList.add('hasplan');wirePlan();}
+  else{$('mapbox').classList.remove('hasplan');}
+}
+function wirePlan(){
+  const box=$('planbox');
+  box.querySelectorAll('[data-zid]').forEach(el=>el.onclick=async()=>{
+    const r=await api('/api/play/zone',{zid:el.dataset.zid});
+    if(r.error){push('sys',esc(r.error));return;}
+    (r.narr||[]).forEach(t=>push('narr',esc(t)));
+    if(r.plan){$('planbox').innerHTML=r.plan;wirePlan();}
+    if(r.gt!=null){GT=r.gt;setClock();}
+  });
+  box.querySelectorAll('.npc[data-pid]').forEach(el=>el.onclick=ev=>{
+    ev.stopPropagation();const pid=el.dataset.pid;
+    if(pid&&pid!=='pc')talk(pid);
+  });
 }
 async function goRoom(room){
   const r=await api('/api/play/room',{room});

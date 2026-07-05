@@ -306,8 +306,73 @@ def _defs(seed: int) -> str:
 </defs>"""
 
 
-def paper_svg(plan: dict, data: dict, seed_key: str = "") -> str:
-    """План (floorplan.plan_location) → пергаментный лист с глифами, хэтчингом и легендой."""
+def _fillers(out, fl, rng, ox, hall_oy):
+    """Обжитость: коврик у входа, дрова у очага, пятна/трещины на свободном полу."""
+    occ = {(r["x"] + i, r["y"] + j) for r in fl["zones"]
+           for i in range(r["w"]) for j in range(r["h"])}
+    d = fl.get("door")
+    if d:                                                    # коврик у входа
+        cx, cy = ox + d["x"] * CELL + CELL / 2, hall_oy + (fl["h"] - 1.6) * CELL
+        _wcircle(out, cx, cy, 8, rng, width=0.8, opacity=0.7)
+        _wcircle(out, cx, cy, 5, rng, width=0.5, opacity=0.5)
+    hearth = next((r for r in fl["zones"] if r["kind"] == "hearth"), None)
+    if hearth:                                               # дрова у очага
+        hx = ox + hearth["x"] * CELL + (hearth["w"] * CELL + 6 if hearth["x"] < fl["w"] / 2
+                                        else -10)
+        hy = hall_oy + (hearth["y"] + hearth["h"]) * CELL - 6
+        for i in range(3):
+            _wcircle(out, hx + (i % 2) * 5, hy - i * 4, 2.6, rng, width=0.7, opacity=0.8)
+    hall = fl.get("hall") or {"x": 0, "w": fl["w"]}
+    for _ in range(3):                                       # пятна/трещины пола
+        x = rng.randint(hall["x"] + 1, hall["x"] + hall["w"] - 2)
+        y = rng.randint(1, fl["h"] - 2)
+        if (x, y) in occ:
+            continue
+        px, py = ox + x * CELL + CELL / 2, hall_oy + y * CELL + CELL / 2
+        if rng.random() < 0.5:                               # пятно
+            _wcircle(out, px, py, rng.uniform(4, 8), rng, width=0.0,
+                     fill=INK, opacity=0.05)
+        else:                                                # трещина
+            pts = [(px, py)]
+            for _k in range(3):
+                pts.append((pts[-1][0] + rng.uniform(-9, 9), pts[-1][1] + rng.uniform(3, 8)))
+            _stroke(out, pts, rng, width=0.5, w=0.4, opacity=0.35)
+
+
+def _npc_markers(out, fl, game, ox, oy, hall_oy):
+    """Метки людей на плане: кружок-инициал у своей зоны; игрок — жирное кольцо.
+    Зоны зала рисуются от hall_oy, комнаты пристройки — от oy (верхняя полоса)."""
+    back_ids = {r["id"] for r in fl.get("back", {}).get("rooms", [])}
+    zid2rect = {r["id"]: r for r in fl["zones"]}
+    zid2rect.update({r["id"]: r for r in fl.get("back", {}).get("rooms", [])})
+    by_zone: dict = {}
+    for p in game.get("npcs") or []:
+        by_zone.setdefault(p.get("zone"), []).append(p)
+    for zid, ps in by_zone.items():
+        r = zid2rect.get(zid)
+        for i, p in enumerate(ps):
+            if r:
+                base_y = oy if r["id"] in back_ids else hall_oy
+                cx = ox + (r["x"] + r["w"] / 2) * CELL + (i - (len(ps) - 1) / 2) * 13
+                cy = base_y + (r["y"] + r["h"] - 0.45) * CELL
+            else:                                            # без зоны — у входа
+                d = fl.get("door") or {"x": 2}
+                cx = ox + d["x"] * CELL + CELL / 2 + (i - (len(ps) - 1) / 2) * 13
+                cy = hall_oy + (fl["h"] - 2.2) * CELL
+            col = p.get("color") or "#7a5a3a"
+            sw = 2.4 if p.get("is_player") else 1.1
+            out.append(f'<g class="npc" data-pid="{p.get("id", "")}" style="cursor:pointer">'
+                       f'<circle cx="{cx:.0f}" cy="{cy:.0f}" r="7.5" fill="{PAPER}" '
+                       f'stroke="{col}" stroke-width="{sw}"/>'
+                       f'<text x="{cx:.0f}" y="{cy + 3:.0f}" text-anchor="middle" font-size="8" '
+                       f'font-family="Georgia, serif" fill="{INK}">{p.get("init", "?")}</text>'
+                       f'<title>{p.get("name", "")}</title></g>')
+
+
+def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = None) -> str:
+    """План (floorplan.plan_location) → пергаментный лист с глифами, хэтчингом и легендой.
+    game (игровой режим): {npcs: [{id, name, init, color, zone, is_player}], locked_hidden:
+    bool, interactive: bool} — метки людей, туман на запертых, кликабельные зоны."""
     rng = _rng(seed_key or plan.get("name", ""))
     seed = int(hashlib.md5((seed_key or "x").encode()).hexdigest()[:6], 16)
     fl = plan["floors"][0]
@@ -407,11 +472,15 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "") -> str:
             out.append(f'<path d="M {dx - 7} {hall_oy} A 14 14 0 0 1 {dx + 7} {hall_oy + 14}" '
                        f'fill="none" stroke="{INK}" stroke-width="0.7" opacity="0.7"/>')
 
-    # окна: двойные засечки в стене
+    # окна: двойные засечки — ТОЛЬКО на внешних стенах (у L-крыла стена зала внутренняя)
     win = fl.get("windows")
+    wing = fl.get("wing")
     wx0, wx1 = ox + hall["x"] * CELL, ox + (hall["x"] + hall["w"]) * CELL
     for k in range(2, fl["h"] - 2, 3):
-        for side_x, on in ((wx0, win in ("left", "both")), (wx1, win in ("right", "both"))):
+        left_ext = not (wing and wing["side"] == "left" and k >= wing["y"])
+        right_ext = not (wing and wing["side"] == "right" and k >= wing["y"])
+        for side_x, on in ((wx0, win in ("left", "both") and left_ext),
+                           (wx1, win in ("right", "both") and right_ext)):
             if not on:
                 continue
             y1 = hall_oy + k * CELL + 4
@@ -438,27 +507,58 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "") -> str:
         for k in range(1, 5):
             _stroke(out, [(x0 + 2, y0 + k * 8), (x0 + 2 * CELL - 4, y0 + k * 8)], rng, width=0.8)
 
-    # глифы зон + номера
+    # глифы зон + номера (+игровой режим: туман скрытых, интерактивные оверлеи)
+    hidden_zones = set((game or {}).get("hidden_zones") or ())
+    interactive = bool((game or {}).get("interactive"))
+
+    def _fog(rr):
+        for k in range(0, int(rr["pw"] + rr["ph"]), 7):      # диагональная штриховка тумана
+            x1 = rr["px"] + max(0, k - rr["ph"])
+            y1 = rr["py"] + min(k, rr["ph"])
+            x2 = rr["px"] + min(k, rr["pw"])
+            y2 = rr["py"] + max(0, k - rr["pw"])
+            out.append(f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" '
+                       f'stroke="{INK}" stroke-width="0.5" opacity="0.18"/>')
+        out.append(f'<text x="{rr["cx"]:.0f}" y="{rr["cy"] + 4:.0f}" text-anchor="middle" '
+                   f'font-size="11">🔒</text>')
+
+    def _overlay(rr, zid, name):
+        if interactive:
+            out.append(f'<rect class="zone" data-zid="{zid}" x="{rr["px"]}" y="{rr["py"]}" '
+                       f'width="{rr["pw"]}" height="{rr["ph"]}" fill="transparent" '
+                       f'style="cursor:pointer"><title>{name}</title></rect>')
+
     num = 1
     for r in rooms:
-        ctx = {"left": True, "small": True}
         rr = px(r, oy)
-        GLYPHS.get(r["kind"], lambda *a: None)(out, rr, rng, ctx)
+        if r["id"] in hidden_zones:
+            _fog(rr)
+        else:
+            GLYPHS.get(r["kind"], lambda *a: None)(out, rr, rng, {"left": True, "small": True})
+            if r.get("lock"):
+                out.append(f'<text x="{rr["px"] + rr["pw"] - 12}" y="{rr["py"] + 12}" font-size="8">🔒</text>')
         _wcircle(out, rr["px"] + 8, rr["py"] + 8, 6, rng, width=0.8, fill=PAPER)
         out.append(f'<text x="{rr["px"] + 8}" y="{rr["py"] + 11}" text-anchor="middle" '
                    f'font-size="8" font-family="Georgia, serif" fill="{INK}">{num}</text>')
-        if r.get("lock"):
-            out.append(f'<text x="{rr["px"] + rr["pw"] - 10} " y="{rr["py"] + 12}" font-size="8">🔒</text>')
+        _overlay(rr, r["id"], r["name"])
         num += 1
     mid_x = ox + (hall["x"] + hall["w"] / 2) * CELL
     for r in fl["zones"]:
         rr = px(r, hall_oy)
-        ctx = {"left": rr["cx"] < mid_x, "small": False}
-        GLYPHS.get(r["kind"], lambda *a: None)(out, rr, rng, ctx)
+        GLYPHS.get(r["kind"], lambda *a: None)(out, rr, rng,
+                                               {"left": rr["cx"] < mid_x, "small": False})
         _wcircle(out, rr["px"] + 7, rr["py"] + 7, 6, rng, width=0.8, fill=PAPER)
         out.append(f'<text x="{rr["px"] + 7}" y="{rr["py"] + 10}" text-anchor="middle" '
                    f'font-size="8" font-family="Georgia, serif" fill="{INK}">{num}</text>')
+        _overlay(rr, r["id"], r["name"])
         num += 1
+    _fillers(out, fl, rng, ox, hall_oy)
+    if game:
+        _npc_markers(out, fl, game, ox, oy, hall_oy)
+        if game.get("more"):
+            out.append(f'<text x="{ox + 4}" y="{hall_oy + (fl["h"] - 0.4) * CELL}" '
+                       f'font-size="9" font-family="Georgia, serif" font-style="italic" '
+                       f'fill="{INK}" opacity="0.75">…и ещё {game["more"]} душ в зале</text>')
 
     # 2-й этаж — отдельный блок справа
     if up:
@@ -476,7 +576,11 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "") -> str:
                   "cx": ux + (r["x"] + r["w"] / 2) * CELL, "cy": uy + (r["y"] + r["h"] / 2) * CELL}
             if r["x"] > 0:
                 _stroke(out, [(rr["px"], uy + 2), (rr["px"], uy + up["h"] * CELL - 2)], rng, width=1.4)
-            _g_bed(out, rr, rng, small=True)
+            if r["id"] in hidden_zones:
+                _fog(rr)
+            else:
+                _g_bed(out, rr, rng, small=True)
+            _overlay(rr, r["id"], r["name"])
             out.append(f'<line x1="{rr["px"] + rr["pw"] / 2 - 6}" y1="{uy + up["h"] * CELL}" '
                        f'x2="{rr["px"] + rr["pw"] / 2 + 6}" y2="{uy + up["h"] * CELL}" '
                        f'stroke="{PAPER}" stroke-width="4"/>')

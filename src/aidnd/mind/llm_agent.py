@@ -131,6 +131,10 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     news = ctx.get("news") or []
     if news:
         lines.append("  О ЧЁМ СУДАЧИТ ГОРОД (годные темы для беседы): " + "; ".join(news) + ".")
+    conv = ctx.get("convs", {}).get(cfg.id)
+    if conv:
+        lines.append("")
+        lines.append(conv)
 
     if percept.present:
         lines.append("")

@@ -1203,6 +1203,39 @@ def _live_tick(people) -> tuple:
         "time": f"{_PHASE_RU[_phase()]}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}",
     }
 
+    # ── ДИРИЖЁР: LLM-ход получает тот, кому ЕСТЬ ЗАЧЕМ (долг > эмоция > нужда > беседа > фон)
+    from aidnd.server.play.engine.convo import (conv_block, conv_debt_to, conv_note_say,
+                                                conv_of, conv_tick)
+
+    conv_tick(lv, lambda m: w.bodies[m].place if m in w.bodies else None)
+    impulses: dict = {}
+    for pid in order:
+        st = w.npc_minds[pid]
+        imp, why = 0.35, "фон"
+        c = conv_of(lv, pid)
+        if conv_debt_to(lv, pid):
+            imp, why = 4.0, "долг ответа"
+        elif max(st.emotion.get("fear", 0), st.emotion.get("anger", 0)) >= 0.5:
+            imp, why = 3.0, "эмоция"
+        elif c is not None and c.get("quiet", 9) <= 1:
+            imp, why = 1.6, "беседа"
+        else:
+            hot = max(st.needs.values(), default=0.0)
+            if hot >= 0.65:
+                imp, why = 1.2 + hot, "нужда"
+            elif st.agendas:
+                jit = random.Random(f"agimp|{pid}|{lv['clock']}").random()
+                imp, why = 0.6 + 0.7 * jit, "агенда"
+        imp += (st.config.traits.get("sociability", 0.5) - 0.5) * 0.5
+        impulses[pid] = (round(imp, 2), why)
+    ranked_imp = sorted(order, key=lambda p: -impulses[p][0])
+    actors = [p for p in ranked_imp if impulses[p][0] >= PB["impulse_llm"]][: PB["live_llm_cap"]]
+    if not actors and order:
+        actors = ranked_imp[:1]                       # зал не замирает совсем
+    background = [p for p in order if p not in actors]
+    ctx["convs"] = {pid: b for pid in actors
+                    if (b := conv_block(lv, pid, lv["names"]))}
+
     def think_one(pid):  # решения параллельно, снимок мира один
         st = w.npc_minds[pid]
         _decay_needs(st)
@@ -1213,19 +1246,42 @@ def _live_tick(people) -> tuple:
     from concurrent.futures import ThreadPoolExecutor
 
     with ThreadPoolExecutor(max_workers=8) as ex:
-        decisions = dict(ex.map(think_one, order))
+        decisions = dict(ex.map(think_one, actors))
+
+    # фоновые ЖИВУТ без LLM: заняты предметом своей зоны, нужды закрываются, зал их видит
+    bg_feed = []
+    rng_bg = random.Random(f"bg|{lv['clock']}")
+    for pid in background:
+        st = w.npc_minds[pid]
+        _decay_needs(st)
+        _decay_emotion(st)
+        body = w.bodies[pid]
+        itms = [i for i in w.ground.get(body.place, []) if i.satisfies]
+        if itms:
+            it = max(itms, key=lambda i: st.needs.get(i.satisfies or "", 0.0))
+            st.needs[it.satisfies] = max(0.0, st.needs.get(it.satisfies, 0.0) - 0.12)
+            act = f"занят своим: {it.name}"
+        else:
+            act = "сидит, поглядывая на зал"
+        lv["last"][pid] = act
+        if rng_bg.random() < PB["bg_feed_p"]:
+            bg_feed.append({"k": "deed", "who": _display(pid, people), "text": act})
 
     # ── подробный лог сцены (data/debug/play.log): «почему» каждого NPC за тик ──
     import logging as _logging
 
     _slog = _logging.getLogger("aidnd.scene")
     if _slog.isEnabledFor(_logging.DEBUG):
-        _slog.debug("─── ТИК %s · %s · «%s» · душ=%d ───",
-                    lv["clock"], ctx["time"], lv["place"], len(order))
-        if zone_feed:
-            _slog.debug("  переезды по нуждам: %s",
-                        "; ".join(f["text"] for f in zone_feed))
-        for pid in order:
+        _slog.debug("─── ТИК %s · %s · «%s» · душ=%d · LLM-актёров=%d · разговоров=%d ───",
+                    lv["clock"], ctx["time"], lv["place"], len(order), len(actors),
+                    len(lv.get("convs") or []))
+        for pid in background:
+            im, why = impulses[pid]
+            _slog.debug("  · фон %s [%s] зона=%s имп=%.2f(%s) → %s",
+                        lv["names"].get(pid, pid), lv["roles"].get(pid, "?"),
+                        w.bodies[pid].place if zones_l else "—", im, why,
+                        lv["last"].get(pid, "—"))
+        for pid in actors:
             st = w.npc_minds[pid]
             d = decisions[pid]
             nm = lv["names"].get(pid, pid)
@@ -1239,18 +1295,19 @@ def _live_tick(people) -> tuple:
                  + (f" item={a.get('item')}" if a.get("item") else "")
                  + (f" need={a.get('need')}={a.get('value')}" if a.get("need") else ""))
                 for a in (d.get("actions") or []) if isinstance(a, dict)) or "—"
+            im, why = impulses[pid]
             _slog.debug(
-                "  ▸ %s [%s] зона=%s\n"
+                "  ▸ %s [%s] зона=%s имп=%.2f(%s)\n"
                 "      нужды: %s | эмоции: %s | агенда: %s\n"
                 "      src=%s think=«%s» does=«%s»\n"
                 "      prefs=%s\n"
                 "      actions: %s",
-                nm, lv["roles"].get(pid, "?"), zn, needs, emo, ag,
+                nm, lv["roles"].get(pid, "?"), zn, im, why, needs, emo, ag,
                 d.get("src", "?"), str(d.get("think", ""))[:120], str(d.get("does", ""))[:120],
                 "; ".join(f"{p[0]}({p[1]},{p[2]:.2f})" for p in (d.get("prefs") or [])[:5]),
                 acts)
 
-    feed, address = list(zone_feed), []
+    feed, address = list(zone_feed) + bg_feed, []
     said_n = 0  # LOD-кэп реплик ленты
     topics = lv.setdefault("topics", [])  # анти-эхо ПОМНИТ прошлые тики (хвост сигнатур)
     pc = _pc()
@@ -1267,7 +1324,7 @@ def _live_tick(people) -> tuple:
         said_n += 1
         return True
 
-    for pid in order:  # применяем последовательно (честный порядок)
+    for pid in actors:  # применяем последовательно (честный порядок)
         d = decisions[pid]
         st = w.npc_minds[pid]
         before = {vid: {i.name for i in b.loot} for vid, b in w.bodies.items() if vid != pid}
@@ -1347,6 +1404,7 @@ def _live_tick(people) -> tuple:
                     continue
                 said = True
                 if tid == PLAYER:  # решение «заговорить с чужаком» — за самим NPC
+                    conv_note_say(lv, pid, PLAYER, txt, w.bodies[pid].place)
                     address.append({"npc": pid, "who": who, "text": txt})
                     pc.memory.add(f"{who} обратился ко мне: «{txt[:100]}»", _mt(), 0.4, about=[pid])
                     spoke.append(f"я сам(а) заговорил(а) с чужаком: «{txt[:60]}»")
@@ -1360,6 +1418,7 @@ def _live_tick(people) -> tuple:
                         pid
                     )  # ответит ли чужак — узнаем следующим тиком
                 else:
+                    conv_note_say(lv, pid, tid, txt, w.bodies[pid].place)
                     # СЛЫШИМОСТЬ (docs/locations.md): своя зона — полностью; чужая — обрывком
                     same_zone = (not zones_l) or (
                         PLAYER in w.bodies and w.bodies[pid].place == w.bodies[PLAYER].place)

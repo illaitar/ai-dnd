@@ -50,9 +50,13 @@ async def talk(request: Request):
     first = npc not in _met()
     _pc().rel(npc)  # заговорил = познакомился (имя открыто)
     _S["dlg"] = npc  # мир знает: чужак занят ЭТИМ разговором
-    if _S.get("live"):  # сцена видит действие игрока
-        _S["live"]["last"][PLAYER] = f"подошёл и заговорил с {p.name}"
-        _S["live"]["pc_spoke"] = True
+    lv = _S.get("live")
+    if lv:  # сцена видит действие игрока
+        lv["last"][PLAYER] = f"подошёл и заговорил с {p.name}"
+        lv["pc_spoke"] = True
+        from aidnd.server.play.engine.convo import conv_note_say
+        zplace = lv["world"].bodies[PLAYER].place if PLAYER in lv["world"].bodies else None
+        conv_note_say(lv, PLAYER, npc, "(подходит и заговаривает)", zplace)
     _gt_add(PB["talk_min"])
     st = p.state
     st.needs["social"] = max(st.needs.get("social", 0.0), 0.4)
@@ -116,9 +120,13 @@ async def say(request: Request):
     rel = p.state.relationships.setdefault(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     text = str(b.get("text", ""))
     _S["dlg"] = npc  # разговор продолжается
-    if _S.get("live"):  # сцена видит: чужак беседует
-        _S["live"]["last"][PLAYER] = f"беседует с {p.name}: «{text[:50]}»"
-        _S["live"]["pc_spoke"] = True
+    lv = _S.get("live")
+    if lv:  # сцена видит: чужак беседует (реплика — в разговор-объект)
+        lv["last"][PLAYER] = f"беседует с {p.name}: «{text[:50]}»"
+        lv["pc_spoke"] = True
+        from aidnd.server.play.engine.convo import conv_note_say
+        zplace = lv["world"].bodies[PLAYER].place if PLAYER in lv["world"].bodies else None
+        conv_note_say(lv, PLAYER, npc, text[:100], zplace)
     _gt_add(PB["talk_min"])
     line = _voice(p, rel, "reply", text)
     tone = _S.get("last_tone", "neutral")  # тон слов игрока — из уст самого NPC

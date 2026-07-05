@@ -1049,6 +1049,21 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         "workers": workers,
         "pdesc": (f"Город «{_city_name()}». " + ((data or {}).get("notable") or "")).strip(),
     }
+    import logging as _logging
+
+    _slog = _logging.getLogger("aidnd.scene")
+    if _slog.isEnabledFor(_logging.DEBUG):
+        znm = {z["id"]: z["name"] for z in zones}
+        _slog.debug("═══ СБОРКА СЦЕНЫ «%s» (%s) · зон=%d · душ=%d · работников=%d ═══",
+                    place, ("зоны" if zones else "без зон"), len(zones), len(here_all), len(workers))
+        for pid in here_all:
+            p = people[pid]
+            tr = p.state.config.traits
+            hot = ", ".join(f"{k} {v:.1f}" for k, v in tr.items() if v >= 0.65 or v <= 0.3)
+            _slog.debug("  • %s [%s]%s → %s | черты: %s | персона: %s",
+                        p.name, p.role, " (РАБ)" if pid in workers else "",
+                        znm.get(zonemap.get(pid), "—"), hot or "ровные",
+                        (personas.get(pid) or "—")[:100])
 
 
 def _gossip(actor_st, actor_name: str, target_st) -> None:
@@ -1160,6 +1175,41 @@ def _live_tick(people) -> tuple:
 
     with ThreadPoolExecutor(max_workers=8) as ex:
         decisions = dict(ex.map(think_one, order))
+
+    # ── подробный лог сцены (data/debug/play.log): «почему» каждого NPC за тик ──
+    import logging as _logging
+
+    _slog = _logging.getLogger("aidnd.scene")
+    if _slog.isEnabledFor(_logging.DEBUG):
+        _slog.debug("─── ТИК %s · %s · «%s» · душ=%d ───",
+                    lv["clock"], ctx["time"], lv["place"], len(order))
+        if zone_feed:
+            _slog.debug("  переезды по нуждам: %s",
+                        "; ".join(f["text"] for f in zone_feed))
+        for pid in order:
+            st = w.npc_minds[pid]
+            d = decisions[pid]
+            nm = lv["names"].get(pid, pid)
+            zn = zname_of.get(pid, "—")
+            needs = ", ".join(f"{k}:{v:.2f}" for k, v in st.needs.items() if v >= 0.35) or "норма"
+            emo = ", ".join(f"{k}:{v:.2f}" for k, v in st.emotion.items() if v >= 0.2) or "спокоен"
+            ag = st.agendas[0].summary if st.agendas else "—"
+            acts = " | ".join(
+                (a.get("tool", "?") + (f"→{a.get('to')}" if a.get("to") else "")
+                 + (f":«{str(a.get('text'))[:60]}»" if a.get("text") else "")
+                 + (f" item={a.get('item')}" if a.get("item") else "")
+                 + (f" need={a.get('need')}={a.get('value')}" if a.get("need") else ""))
+                for a in (d.get("actions") or []) if isinstance(a, dict)) or "—"
+            _slog.debug(
+                "  ▸ %s [%s] зона=%s\n"
+                "      нужды: %s | эмоции: %s | агенда: %s\n"
+                "      src=%s think=«%s» does=«%s»\n"
+                "      prefs=%s\n"
+                "      actions: %s",
+                nm, lv["roles"].get(pid, "?"), zn, needs, emo, ag,
+                d.get("src", "?"), str(d.get("think", ""))[:120], str(d.get("does", ""))[:120],
+                "; ".join(f"{p[0]}({p[1]},{p[2]:.2f})" for p in (d.get("prefs") or [])[:5]),
+                acts)
 
     feed, address = list(zone_feed), []
     said_n = 0  # LOD-кэп реплик ленты

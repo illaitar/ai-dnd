@@ -1,17 +1,26 @@
-"""План локации v2: LLM решает ВКУС (пресет data["layout"]), код — ГЕОМЕТРИЮ с гарантиями.
+"""План локации v3: футпринт + cost-функция + simulated annealing (docs/locations.md).
 
-Гарантии кода (docs/locations.md): мебель на выровненной сетке слотов (ряды, не россыпь);
-главный проход от входа через зал; свободная клетка перед КАЖДОЙ дверью (пристройки,
-лестница); финальная BFS-проверка достижимости. Спот-зоны («у окна», «в тёмном углу»)
-раздаются по слотам МАТЧИНГОМ предпочтений — семантика спота = функция расстояния до
-окна/угла/очага/лестницы, а не жёсткая точка.
+Разделение по ресёрчу (Make It Home, LayoutVLM): LLM/данные дают ВКУС и ОТНОШЕНИЯ
+(пресет layout, споты «у окна»/«в тёмном углу», privacy зон) — КОД решает геометрию
+оптимизатором и даёт гарантии.
 
-Пресет layout (LLM-роль layout_architect, клампится enum'ами, кэш в пуле):
-  windows: left|right|both|none · bar_wall: left|right · tables: rows|perimeter|mixed ·
-  density: airy|normal|packed
+Устройство:
+- ФУТПРИНТ: детерминированный архетип по сиду здания — прямоугольный зал или L (зал+крыло-
+  альков); контур-полигон рисуется стенами. (Крюк на будущее: миры смогут подставлять
+  растеризованный полигон реального дома с карты города.)
+- ЯКОРЯ (стойка/очаг/верстак/алтарь/лестница) — правилами по пресету, замораживаются.
+- ГРУППЫ (столы/лежанки/стойла) — на РЕШЁТКЕ-латтисе (ряды гарантированы конструкцией),
+  раскладку по латтису ищет simulated annealing (Metropolis) с термами:
+  предпочтение спота · privacy↔дистанция-от-прохода · разрежённость · clearance.
+- ГАРАНТИИ: главный проход и клетка перед каждой дверью зарезервированы; финальный
+  reachable() (BFS). Решается ОФЛАЙН (пул/ленивая материализация), рантайм только рисует.
 """
 
 from __future__ import annotations
+
+import hashlib
+import math
+import random
 
 CELL = 22
 HALL = {"small": (11, 8), "medium": (13, 9), "large": (15, 10)}
@@ -30,51 +39,74 @@ PALETTE = {
     "cell": ("#8b96ab", .22),
 }
 
+# веса термов cost-функции (вкус раскладчика, не геймплей)
+W_PREF, W_PRIV, W_SPREAD, W_CLEAR = 1.0, 2.5, 1.6, 3.0
+ANNEAL_ITERS, T0, T1 = 4000, 1.2, 0.02
+
 
 def clamp_layout(d: dict | None) -> dict:
-    """Пресет от LLM → строго в enum'ы (принцип 2: LLM предлагает, код клампит)."""
     d = d if isinstance(d, dict) else {}
     return {k: (d.get(k) if d.get(k) in LAYOUT_ENUMS[k] else v)
             for k, v in LAYOUT_DEFAULTS.items()}
 
 
-# ── геометрия ────────────────────────────────────────────────────────────────
-
-def _slot_grid(w: int, h: int, blocked: set, aisle_x: int, density: str,
-               size: tuple[int, int] = (2, 2)) -> list[tuple[int, int]]:
-    """Выровненные слоты под мебель: колонки с шагом, ряды с шагом — РЯДЫ, не россыпь."""
-    zw, zh = size
-    step_x = zw + (2 if density == "airy" else 1)
-    step_y = zh + (2 if density == "airy" else 1 if density == "normal" else 0)
-    slots = []
-    for y in range(2, h - 1 - zh, step_y):
-        for x in range(2, w - 1 - zw, step_x):
-            cells = {(x + i, y + j) for i in range(zw) for j in range(zh)}
-            if any(c in blocked for c in cells):
-                continue
-            if any(abs(cx - aisle_x) < 1 for cx in range(x, x + zw)):    # главный проход свят
-                continue
-            slots.append((x, y))
-    return slots
+def _seed_int(key: str) -> int:
+    return int(hashlib.md5(key.encode()).hexdigest()[:8], 16)
 
 
-def _pref(spot_name: str, slot: tuple[int, int], w: int, h: int, pois: dict,
-          windows: str) -> float:
-    """Скор слота для спота: чем МЕНЬШЕ, тем лучше (расстояние до сути спота)."""
-    x, y = slot
+# ── футпринт: прямоугольный зал ИЛИ L (зал + крыло-альков) ──────────────────
+
+def canonical_footprint(size: str, seed_key: str) -> dict:
+    """Детерминированный архетип формы. mask — клетки ВНУТРИ (интерьер), outline — полигон стен."""
+    w, h = HALL.get(str(size), HALL["medium"])
+    rng = random.Random(_seed_int("fp|" + seed_key))
+    wing = None
+    if rng.random() < 0.45:                                  # L: крыло-альков справа или слева
+        ww = rng.randint(4, 5)
+        wh = rng.randint(3, 4)
+        side = rng.choice(("right", "left"))
+        wing = {"side": side, "w": ww, "h": wh, "y": h - wh}  # крыло у нижнего края
+    mask = {(x, y) for x in range(1, w - 1) for y in range(1, h - 1)}
+    ox = 0
+    if wing:
+        if wing["side"] == "right":
+            mask |= {(x, y) for x in range(w - 1, w - 1 + wing["w"])
+                     for y in range(wing["y"] + 1, h - 1)}
+            outline = [(0, 0), (w, 0), (w, wing["y"]), (w + wing["w"], wing["y"]),
+                       (w + wing["w"], h), (0, h)]
+            total_w = w + wing["w"]
+        else:                                                # крыло слева → сдвигаем зал вправо
+            ox = wing["w"]
+            mask = {(x + ox, y) for x, y in mask}
+            mask |= {(x, y) for x in range(1, ox + 1) for y in range(wing["y"] + 1, h - 1)}
+            outline = [(ox, 0), (ox + w, 0), (ox + w, h), (0, h), (0, wing["y"]),
+                       (ox, wing["y"])]
+            total_w = w + wing["w"]
+    else:
+        outline = [(0, 0), (w, 0), (w, h), (0, h)]
+        total_w = w
+    return {"hall": {"x": ox, "w": w, "h": h}, "wing": wing, "mask": mask,
+            "outline": outline, "W": total_w, "H": h}
+
+
+# ── семантика спотов как непрерывная цена (чем меньше — тем лучше) ──────────
+
+def _pref(spot_name: str, pos: tuple[int, int], fp: dict, pois: dict, windows: str) -> float:
+    x, y = pos
+    hall = fp["hall"]
+    hx0, hx1, hh = hall["x"], hall["x"] + hall["w"], hall["h"]
     n = spot_name.lower()
 
     def dist(p):
-        return abs(x - p[0]) + abs(y - p[1]) if p else 99
-
-    win_x = {"left": 1, "right": w - 2, "both": 1, "none": None}[windows]
+        return abs(x - p[0]) + abs(y - p[1]) if p else 30
+    win_x = {"left": hx0 + 1, "right": hx1 - 2, "both": hx0 + 1, "none": None}[windows]
     if "у окна" in n:
-        return abs(x - win_x) if win_x is not None else 50
-    if "тёмном углу" in n or "дальнем углу" in n:      # дальний от входа угол НЕоконной стороны
-        cx = w - 3 if windows in ("left", "both") else 1
+        return abs(x - win_x) if win_x is not None else 15
+    if "тёмном углу" in n or "дальнем углу" in n:
+        cx = hx1 - 3 if windows in ("left", "both") else hx0 + 1
         return abs(x - cx) + y
     if "посреди" in n:
-        return abs(x - w // 2) + abs(y - h // 2)
+        return abs(x - (hx0 + hall["w"] // 2)) + abs(y - hh // 2)
     if "у двери" in n or "у входа" in n or "у ворот" in n:
         return dist(pois.get("door"))
     if "под лестницей" in n:
@@ -84,25 +116,113 @@ def _pref(spot_name: str, slot: tuple[int, int], w: int, h: int, pois: dict,
     if "у бочек" in n:
         return dist(pois.get("storage_door"))
     if "у стены" in n or "за ширмой" in n or "крайн" in n or "тёмное" in n:
-        return min(x - 1, (w - 2) - x)                  # к любой боковой стене
-    return abs(y - h // 2)                              # номерные — просто ровным рядом
+        return min(abs(x - hx0), abs(hx1 - 2 - x))
+    return abs(y - hh // 2) * 0.5                            # номерные — ровный средний ряд
 
 
-def plan_location(data: dict) -> dict:
-    """Фактшит (+data['layout']) → план. Детерминирован; проходы и двери гарантированы."""
+# ── cost-функция раскладки групп на латтисе ─────────────────────────────────
+
+def _cost(assign: dict, groups: list[dict], fp: dict, pois: dict, windows: str,
+          aisle_x: int, occupied_free: set) -> float:
+    c = 0.0
+    poss = list(assign.values())
+    for z in groups:
+        x, y = assign[z["id"]]
+        c += W_PREF * _pref(z["name"], (x, y), fp, pois, windows)
+        # privacy ↔ дистанция от прохода/двери: приватному столу — подальше
+        d_aisle = min(abs(x - aisle_x), abs(x + 1 - aisle_x)) + max(0, (fp["H"] - 3) - y) * 0.3
+        want = 1.0 + z.get("privacy", 0.3) * 7.0
+        c += W_PRIV * abs(d_aisle - want) * 0.5
+    for i, a in enumerate(poss):                             # разрежённость: не слипаться
+        for b in poss[i + 1:]:
+            d = abs(a[0] - b[0]) + abs(a[1] - b[1])
+            if d < 3:
+                c += W_SPREAD * (3 - d)
+    for x, y in poss:                                        # clearance: свободный сосед
+        if not any((x + dx, y + dy) in occupied_free
+                   for dx, dy in ((-1, 0), (2, 0), (0, -1), (0, 2))):
+            c += W_CLEAR
+    return c
+
+
+def _lattice(fp: dict, blocked: set, aisle_x: int, density: str,
+             zsize: tuple[int, int], pitches=None) -> list[tuple[int, int]]:
+    """Решётка слотов по всему футпринту (включая крыло) — ряды гарантированы конструкцией."""
+    zw, zh = zsize
+    pitch_x = pitches[0] if pitches else zw + (2 if density == "airy" else 1)
+    pitch_y = pitches[1] if pitches else zh + (2 if density == "airy" else 1 if density == "normal" else 0)
+    slots = []
+    xs = range(1, fp["W"] - 1)
+    for y in range(2, fp["H"] - zh, pitch_y):
+        for x in xs:
+            if (x - 1) % pitch_x:
+                continue
+            cells = {(x + i, y + j) for i in range(zw) for j in range(zh)}
+            if not cells <= fp["mask"] or cells & blocked:
+                continue
+            if any(abs(cx - aisle_x) < 1 for cx in range(x, x + zw)):
+                continue
+            slots.append((x, y))
+    return slots
+
+
+def _anneal(groups: list[dict], slots: list[tuple[int, int]], fp: dict, pois: dict,
+            windows: str, aisle_x: int, rng: random.Random) -> dict:
+    """Simulated annealing на латтисе: переезд на свободный слот или своп двух групп."""
+    assign = {}
+    free = list(slots)
+    for z in groups:                                         # инициализация — жадная по споту
+        if not free:
+            break
+        best = min(free, key=lambda s: _pref(z["name"], s, fp, pois, windows))
+        free.remove(best)
+        assign[z["id"]] = best
+    placed = [z for z in groups if z["id"] in assign]
+    if len(placed) < 2 or not slots:
+        return assign
+    occ_free = fp["mask"] - set()                            # для clearance: весь mask минус занятое якорями
+    cur = _cost(assign, placed, fp, pois, windows, aisle_x, occ_free)
+    for it in range(ANNEAL_ITERS):
+        t = T0 * (T1 / T0) ** (it / ANNEAL_ITERS)
+        cand = dict(assign)
+        if free and rng.random() < 0.55:                     # переезд
+            z = rng.choice(placed)
+            cand[z["id"]] = rng.choice(free)
+        else:                                                # своп
+            a, b = rng.sample(placed, 2)
+            cand[a["id"]], cand[b["id"]] = cand[b["id"]], cand[a["id"]]
+        if len(set(cand.values())) < len(placed):
+            continue
+        new = _cost(cand, placed, fp, pois, windows, aisle_x, occ_free)
+        if new < cur or rng.random() < math.exp((cur - new) / max(t, 1e-6)):
+            if free and assign != cand:
+                used = set(cand.values())
+                free = [s for s in slots if s not in used]
+            assign, cur = cand, new
+    return assign
+
+
+# ── сборка плана ────────────────────────────────────────────────────────────
+
+def plan_location(data: dict, seed_key: str = "") -> dict:
+    """Фактшит (+layout) → план: якоря правилами, группы отжигом, гарантии кодом.
+    Детерминирован по (данные, seed_key). Решать ОФЛАЙН, результат хранить."""
     zones = data.get("zones") or []
     lay = clamp_layout(data.get("layout"))
+    key = seed_key or f"{data.get('name', '')}|{len(zones)}"
+    rng = random.Random(_seed_int("plan|" + key))
     back = [z for z in zones if z["kind"] in ("private", "storage", "cell")]
     upstairs = [z for z in zones if z["kind"] == "beds" and z.get("lockable")]
     hall_z = [z for z in zones if z not in back and z not in upstairs]
     groups = [z for z in hall_z if z.get("group")]
     anchors = [z for z in hall_z if not z.get("group")]
 
-    w, h = HALL.get(str(data.get("size")), HALL["medium"])
-    w = max(w, 7 + 3 * min(len(groups) // 2 + 1, 4))    # столам нужны ряды — ширим зал
-    aisle_x = w // 2
+    fp = canonical_footprint(str(data.get("size")), key)
+    hall = fp["hall"]
+    hx0, hx1, H = hall["x"], hall["x"] + hall["w"], fp["H"]
+    aisle_x = hx0 + hall["w"] // 2
     blocked: set = set()
-    pois: dict = {"door": (aisle_x, h - 2)}
+    pois: dict = {"door": (aisle_x, H - 2)}
     rects: list[dict] = []
 
     def put(z, x, y, zw, zh, lock=False):
@@ -112,90 +232,89 @@ def plan_location(data: dict) -> dict:
                       "fixed": sum(1 for o in z.get("objects") or [] if o.get("fixed")),
                       "loose": sum(1 for o in z.get("objects") or [] if not o.get("fixed"))})
 
-    # двери пристроек — на верхней стене; клетка перед каждой дверью свободна
     doors_back = []
-    if back:
+    if back:                                                 # пристройки — полоса за верхней стеной зала
         n = len(back)
-        rw = max(2, w // n)
+        rw = max(2, hall["w"] // n)
         for i, z in enumerate(back):
-            x0 = i * rw
-            ww = rw if i < n - 1 else w - rw * (n - 1)
-            dx = min(w - 2, x0 + ww // 2)
-            doors_back.append({"x": dx, "zone": z["id"]})
-            blocked.add((dx, 1))                        # зазор перед дверью
+            x0 = hx0 + i * rw
+            ww = rw if i < n - 1 else hall["w"] - rw * (n - 1)
+            dx = min(hx1 - 2, x0 + ww // 2)
+            doors_back.append({"x": dx, "zone": z["id"], "x0": x0, "w": ww})
+            blocked.add((dx, 1))
             if z["kind"] == "storage" and "storage_door" not in pois:
                 pois["storage_door"] = (dx, 1)
-    for c in range(aisle_x, aisle_x + 1):               # главный проход: вход → верхняя стена
-        blocked.update((c, yy) for yy in range(1, h - 1))
-    aisle_cells = {(aisle_x, yy) for yy in range(1, h - 1)}
+    blocked.update((aisle_x, yy) for yy in range(1, H - 1))  # главный проход свят
 
-    # крупные якоря: стойка вдоль стены пресета, очаг напротив, лестница в углу
-    side = {"left": 1, "right": w - 3}
+    side = {"left": hx0 + 1, "right": hx1 - 3}
     for z in anchors:
         k = z["kind"]
         if k in ("bar", "counter"):
-            bx = side[lay["bar_wall"]]
-            bh_ = max(3, (h - 4) // 2)
-            put(z, bx, 2, 2, bh_)
+            put(z, side[lay["bar_wall"]], 2, 2, max(3, (H - 4) // 2))
         elif k == "hearth":
             hx = side["right" if lay["bar_wall"] == "left" else "left"]
-            put(z, hx, h // 2 - 1, 2, 2)
-            pois["hearth"] = (hx, h // 2)
+            put(z, hx, H // 2 - 1, 2, 2)
+            pois["hearth"] = (hx, H // 2)
         elif k in ("workshop", "bath"):
-            put(z, side[lay["bar_wall"]], h - 4, 3, 2)
+            put(z, side[lay["bar_wall"]], H - 4, 3, 2)
         elif k == "altar":
-            put(z, max(1, w // 2 - 3), 1, 3, 2)         # слева от прохода у дальней стены
+            put(z, max(hx0 + 1, aisle_x - 4), 1, 3, 2)
         elif k == "pews":
-            put(z, max(1, w // 2 - 4), 4, 3, min(4, h - 6))
+            put(z, max(hx0 + 1, aisle_x - 4), 4, 3, min(4, H - 6))
         elif k == "shelves":
-            put(z, side["right" if lay["bar_wall"] == "left" else "left"], 2, 1, min(4, h - 4))
+            put(z, side["right" if lay["bar_wall"] == "left" else "left"], 2, 1, min(4, H - 4))
         elif k in ("well", "post"):
-            put(z, w // 2 + 1, h // 2 - 1, 2, 2)
+            put(z, aisle_x + 1, H // 2 - 1, 2, 2)
         elif k == "door":
-            put(z, aisle_x + 1, h - 3, 1, 1)
+            put(z, aisle_x + 1, H - 3, 1, 1)
     if upstairs:
-        sx = w - 3 if lay["bar_wall"] == "left" else 1
-        pois["stairs"] = (sx, h - 3)
-        blocked.update((sx + i, h - 3 + j) for i in range(2) for j in range(2))
-        apx = sx + 2 if sx == 1 else sx - 1             # подход к лестнице — со свободной стороны
-        pois["stairs_approach"] = (apx, h - 3)
-        blocked.add((apx, h - 3))
+        sx = hx1 - 3 if lay["bar_wall"] == "left" else hx0 + 1
+        pois["stairs"] = (sx, H - 3)
+        blocked.update((sx + i, H - 3 + j) for i in range(2) for j in range(2))
+        apx = sx + 2 if sx == hx0 + 1 else sx - 1
+        pois["stairs_approach"] = (apx, H - 3)
+        blocked.add((apx, H - 3))
 
-    # групповые инстансы: сетка слотов → матчинг предпочтений спотов (жадный)
     zsize = (1, 2) if (groups and groups[0]["kind"] == "beds") else (2, 2)
-    slots = _slot_grid(w, h, blocked, aisle_x, lay["density"], zsize)
-    if lay["tables"] == "perimeter":                    # периметр: центр зала — только танцы
-        slots = [s for s in slots if s[0] <= 3 or s[0] >= w - 3 - zsize[0] or s[1] <= 3]
-    free = list(slots)
-    unplaced = []
+    slots = _lattice(fp, blocked, aisle_x, lay["density"], zsize)
+    if len(slots) < len(groups):                             # тесно → уплотняем решётку (лавки впритык)
+        slots = _lattice(fp, blocked, aisle_x, lay["density"], zsize,
+                         pitches=(zsize[0] + 1, zsize[1]))
+    if len(slots) < len(groups):
+        slots = _lattice(fp, blocked, aisle_x, lay["density"], zsize,
+                         pitches=(zsize[0], zsize[1]))
+    if lay["tables"] == "perimeter" and len(slots) >= len(groups) + 2:
+        per = [s for s in slots
+               if s[0] <= hx0 + 3 or s[0] >= hx1 - 3 - zsize[0] or s[1] <= 3
+               or s[0] >= hx1 - 1]                           # крыло целиком годится
+        if len(per) >= len(groups):
+            slots = per
+    assign = _anneal(groups, slots, fp, pois, lay["windows"], aisle_x, rng)
     for z in groups:
-        if not free:
-            unplaced.append(z)
-            continue
-        best = min(free, key=lambda s: _pref(z["name"], s, w, h, pois, lay["windows"]))
-        free.remove(best)
-        put(z, best[0], best[1], zsize[0], zsize[1])
-    for z in unplaced:                                  # слоты кончились → плотный скан (мимо прохода)
-        zw, zh = zsize
-        spot = next(((x, y) for y in range(2, h - 1 - zh) for x in range(1, w - 1 - zw)
-                     if all((x + i, y + j) not in blocked
-                            for i in range(zw) for j in range(zh))
-                     and not any(abs(cx - aisle_x) < 1 for cx in range(x, x + zw))), None)
-        if spot:
-            put(z, spot[0], spot[1], zw, zh)
+        if z["id"] in assign:
+            x, y = assign[z["id"]]
+            put(z, x, y, zsize[0], zsize[1])
+        else:                                                # переполнение — плотный скан
+            spot = next(((x, y) for y in range(2, fp["H"] - zsize[1])
+                         for x in range(1, fp["W"] - zsize[0])
+                         if {(x + i, y + j) for i in range(zsize[0]) for j in range(zsize[1])}
+                         <= fp["mask"] - blocked
+                         and not any(abs(cx - aisle_x) < 1 for cx in range(x, x + zsize[0]))),
+                        None)
+            if spot:
+                put(z, spot[0], spot[1], zsize[0], zsize[1])
 
-    floors = [{"label": "", "w": w, "h": h, "zones": rects, "aisle": sorted(aisle_cells),
-               "door": {"x": aisle_x, "y": h - 1}, "windows": lay["windows"],
-               "stairs": pois.get("stairs"), "stairs_approach": pois.get("stairs_approach")}]
+    floors = [{"label": "", "w": fp["W"], "h": H, "zones": rects,
+               "outline": fp["outline"], "hall": hall,
+               "door": {"x": aisle_x, "y": H - 1}, "aisle_x": aisle_x,
+               "windows": lay["windows"], "stairs": pois.get("stairs"),
+               "stairs_approach": pois.get("stairs_approach")}]
     if back:
-        n = len(back)
-        rw = max(2, w // n)
         rooms = []
-        for i, z in enumerate(back):
+        for d, z in zip(doors_back, back):
             rooms.append({"id": z["id"], "name": z["name"], "kind": z["kind"],
-                          "x": i * rw, "y": 0, "w": rw if i < n - 1 else w - rw * (n - 1),
-                          "h": 3, "post": z.get("post"), "lock": bool(z.get("lockable")),
-                          "door_x": doors_back[i]["x"],
+                          "x": d["x0"], "y": 0, "w": d["w"], "h": 3, "post": z.get("post"),
+                          "lock": bool(z.get("lockable")), "door_x": d["x"],
                           "fixed": sum(1 for o in z.get("objects") or [] if o.get("fixed")),
                           "loose": sum(1 for o in z.get("objects") or [] if not o.get("fixed"))})
         floors[0]["back"] = {"h": 3, "rooms": rooms}
@@ -210,17 +329,18 @@ def plan_location(data: dict) -> dict:
 
 
 def reachable(plan: dict) -> bool:
-    """BFS от входа: достижимы ли все двери пристроек и лестница (гарантия «не заставлено»)."""
+    """BFS от входа по клеткам футпринта: все двери пристроек и подход к лестнице достижимы."""
     fl = plan["floors"][0]
-    w, h = fl["w"], fl["h"]
+    hall = fl.get("hall") or {"x": 0, "w": fl["w"], "h": fl["h"]}
+    mask = canonical_mask_from(fl)
     occ = {(r["x"] + i, r["y"] + j) for r in fl["zones"]
            for i in range(r["w"]) for j in range(r["h"])}
-    start = (fl["door"]["x"], h - 2)
+    start = (fl["door"]["x"], fl["h"] - 2)
     seen, queue = {start}, [start]
     while queue:
         x, y = queue.pop()
         for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-            if 1 <= nx <= w - 2 and 1 <= ny <= h - 2 and (nx, ny) not in occ and (nx, ny) not in seen:
+            if (nx, ny) in mask and (nx, ny) not in occ and (nx, ny) not in seen:
                 seen.add((nx, ny))
                 queue.append((nx, ny))
     targets = [(r["door_x"], 1) for r in fl.get("back", {}).get("rooms", [])]
@@ -228,6 +348,31 @@ def reachable(plan: dict) -> bool:
         targets.append(tuple(fl.get("stairs_approach") or
                              (fl["stairs"][0] - 1, fl["stairs"][1])))
     return all(t in seen for t in targets)
+
+
+def canonical_mask_from(fl: dict) -> set:
+    """Маска интерьера из сохранённого плана (по outline/hall)."""
+    hall = fl.get("hall") or {"x": 0, "w": fl["w"], "h": fl["h"]}
+    mask = {(x, y) for x in range(hall["x"] + 1, hall["x"] + hall["w"] - 1)
+            for y in range(1, fl["h"] - 1)}
+    # клетки вне зала (крыло) восстанавливаем по outline-полигону (point-in-poly на клетках)
+    pts = fl.get("outline")
+    if pts and len(pts) > 4:
+        for x in range(0, fl["w"]):
+            for y in range(0, fl["h"]):
+                if (x, y) in mask:
+                    continue
+                cx, cy = x + 0.5, y + 0.5
+                inside = False
+                for i in range(len(pts)):
+                    x1, y1 = pts[i]
+                    x2, y2 = pts[(i + 1) % len(pts)]
+                    if (y1 > cy) != (y2 > cy) and cx < x1 + (x2 - x1) * (cy - y1) / (y2 - y1):
+                        inside = not inside
+                if inside and 0 < x < fl["w"] - 0 and 0 < y < fl["h"]:
+                    # границу (клетки, чей центр внутри, но у самой стены) оставляем интерьером
+                    mask.add((x, y))
+    return mask
 
 
 # ── SVG ──────────────────────────────────────────────────────────────────────
@@ -271,32 +416,40 @@ def plan_svg(plan: dict) -> str:
             out.append(f'<text x="{ox}" y="{oy + 8}" font-size="9" fill="#8b96ab">{fl["label"]}</text>')
             oy += 12
         back_h = fl.get("back", {}).get("h", 0) * CELL
-        out.append(f'<rect x="{ox}" y="{oy}" width="{bw}" height="{bh}" fill="none" '
-                   f'stroke="#5b6578" stroke-width="2" rx="3"/>')
+        hall_oy = oy + back_h
+        if fl.get("outline"):                                # контур футпринта (форма дома!)
+            pts = " ".join(f"{ox + px * CELL},{hall_oy + py * CELL}" for px, py in fl["outline"])
+            out.append(f'<polygon points="{pts}" fill="#161a22" stroke="#5b6578" stroke-width="2"/>')
+        else:
+            out.append(f'<rect x="{ox}" y="{oy}" width="{bw}" height="{bh}" fill="none" '
+                       f'stroke="#5b6578" stroke-width="2" rx="3"/>')
         if fl.get("back"):
+            hall = fl.get("hall") or {"x": 0, "w": fl["w"]}
+            bx0 = ox + hall["x"] * CELL
+            bw_h = hall["w"] * CELL
+            out.append(f'<rect x="{bx0}" y="{oy}" width="{bw_h}" height="{back_h}" '
+                       f'fill="#161a22" stroke="#5b6578" stroke-width="2"/>')
             for r in fl["back"]["rooms"]:
                 _rect_svg(r, ox, oy, out)
-                dx = ox + r["door_x"] * CELL             # дверь пристройки — проём в её стене
+                dx = ox + r["door_x"] * CELL
                 out.append(f'<line x1="{dx - 6}" y1="{oy + back_h}" x2="{dx + 6}" y2="{oy + back_h}" '
                            f'stroke="#12151c" stroke-width="4"/>')
-            out.append(f'<line x1="{ox}" y1="{oy + back_h}" x2="{ox + bw}" y2="{oy + back_h}" '
-                       f'stroke="#3a4356" stroke-width="2"/>')
-        hall_oy = oy + back_h
-        # окна — штрихи на оконной стене; проход — едва заметная дорожка
         win = fl.get("windows")
-        hh = fl["h"] * CELL
+        hall = fl.get("hall") or {"x": 0, "w": fl["w"]}
+        wx0 = ox + hall["x"] * CELL
+        wx1 = ox + (hall["x"] + hall["w"]) * CELL
         if win in ("left", "both"):
             for k in range(2, fl["h"] - 2, 3):
-                out.append(f'<line x1="{ox}" y1="{hall_oy + k * CELL}" x2="{ox}" '
+                out.append(f'<line x1="{wx0}" y1="{hall_oy + k * CELL}" x2="{wx0}" '
                            f'y2="{hall_oy + (k + 1) * CELL}" stroke="#5aa0ff" stroke-width="3" opacity=".7"/>')
         if win in ("right", "both"):
             for k in range(2, fl["h"] - 2, 3):
-                out.append(f'<line x1="{ox + bw}" y1="{hall_oy + k * CELL}" x2="{ox + bw}" '
+                out.append(f'<line x1="{wx1}" y1="{hall_oy + k * CELL}" x2="{wx1}" '
                            f'y2="{hall_oy + (k + 1) * CELL}" stroke="#5aa0ff" stroke-width="3" opacity=".7"/>')
-        if fl.get("aisle"):
-            ax = fl["aisle"][0][0]
-            out.append(f'<rect x="{ox + ax * CELL + 6}" y="{hall_oy + CELL}" width="{CELL - 12}" '
-                       f'height="{(fl["h"] - 2) * CELL}" fill="#dfe5ef" fill-opacity=".03"/>')
+        if fl.get("aisle_x") is not None:
+            out.append(f'<rect x="{ox + fl["aisle_x"] * CELL + 6}" y="{hall_oy + CELL}" '
+                       f'width="{CELL - 12}" height="{(fl["h"] - 2) * CELL}" '
+                       f'fill="#dfe5ef" fill-opacity=".03"/>')
         for r in fl["zones"]:
             _rect_svg(r, ox, hall_oy if not fl["label"] else oy, out)
         if fl.get("stairs"):
@@ -309,9 +462,10 @@ def plan_svg(plan: dict) -> str:
         d = fl.get("door")
         if d:
             dx = ox + d["x"] * CELL + CELL // 2
-            out.append(f'<line x1="{dx - 9}" y1="{oy + bh}" x2="{dx + 9}" y2="{oy + bh}" '
-                       f'stroke="#12151c" stroke-width="5"/>')
-            out.append(f'<text x="{dx - 10}" y="{oy + bh - 4}" font-size="8" fill="#8b96ab">вход</text>')
+            out.append(f'<line x1="{dx - 9}" y1="{hall_oy + fl["h"] * CELL}" x2="{dx + 9}" '
+                       f'y2="{hall_oy + fl["h"] * CELL}" stroke="#12151c" stroke-width="5"/>')
+            out.append(f'<text x="{dx - 10}" y="{hall_oy + fl["h"] * CELL - 4}" font-size="8" '
+                       f'fill="#8b96ab">вход</text>')
         oy += bh + gap
     out.append("</svg>")
     return "".join(out)

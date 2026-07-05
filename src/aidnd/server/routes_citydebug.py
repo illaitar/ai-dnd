@@ -195,7 +195,7 @@ def citydebug_poolbuilding(_: Owner, bid: str) -> dict:
     for kind in ("key", "res"):
         for r in _store().pool_buildings(kind):
             if r["id"] == bid:
-                svg = plan_svg(plan_location(r["data"])) if r["data"].get("zones") else None
+                svg = plan_svg(plan_location(r["data"], seed_key=bid)) if r["data"].get("zones") else None
                 return {"id": r["id"], "kind": r["kind"], "btype": r["btype"],
                         "data": r["data"], "plan": svg}
     return {"error": "нет такого здания в пуле"}

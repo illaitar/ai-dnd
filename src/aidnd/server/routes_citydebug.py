@@ -204,10 +204,14 @@ def citydebug_dungeons_page(_: Owner) -> HTMLResponse:
 
 @router.get("/api/citydebug/dungeonart")
 def citydebug_dungeonart(_: Owner, seed: str, env: str = "Ruin") -> dict:
-    """Данж по сиду: скелет + бумажный черновик (детерминированно, без LLM)."""
+    """Данж по сиду: скелет + наполнение + бриф из пула (детерминированно, LLM в рантайме нет)."""
+    import random as _random
+
     from ..worldgen.dungeongen import dungeon_svg, generate
-    d = generate(seed, env=env)
-    return {"seed": seed, "metrics": d["metrics"],
+    briefs = [r["data"] for r in _store().pool_buildings("dungeon") if r["btype"] == env]
+    brief = (_random.Random(f"pickbrief|{seed}").choice(briefs)) if briefs else None
+    d = generate(seed, env=env, cr=1.5, brief=brief)
+    return {"seed": seed, "metrics": d["metrics"], "name": d.get("name"),
             "locks": sum(1 for e in d["edges"] if e["kind"] == "locked"),
             "secrets": sum(1 for e in d["edges"] if e["kind"] == "secret"),
             "svg": dungeon_svg(d, f"Подземелье «{seed}»")}

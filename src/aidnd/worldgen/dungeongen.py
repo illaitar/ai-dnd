@@ -360,13 +360,111 @@ def _metrics(rooms, edges) -> dict:
             "deadends": len(dead), "bad_deadends": bad}
 
 
-def generate(seed: str, env: str = "Ruin") -> dict:
-    """Данж по сиду: под-сиды до прохождения фильтра качества (детерминированная цепочка)."""
+def generate(seed: str, env: str = "Ruin", cr: float = 1.0, brief: dict | None = None) -> dict:
+    """Данж по сиду: под-сиды до прохождения фильтра качества (детерминированная цепочка);
+    скелет сразу НАПОЛНЯЕТСЯ (stock — квоты B/X + машины + фракция), бриф из пула (если
+    дан) раздаёт комнатам имена/описания/улики истории (apply_brief, детерминированно)."""
     for i in range(RETRY):
         d = _attempt(f"{seed}|{i}", env)
         if d is not None:
+            stock(d, cr)
+            if brief:
+                from .dungeonlore import apply_brief
+                apply_brief(d, brief, random.Random(f"brief|{seed}"))
             return d
     raise ValueError(f"данж не собрался за {RETRY} под-сидов: {seed}")  # практически недостижимо
+
+
+_MCAT: dict | None = None
+
+
+def _machines() -> dict:
+    global _MCAT
+    if _MCAT is None:
+        p = os.path.join(os.path.dirname(__file__), "..", "content", "dungeon_machines.json")
+        with open(p, encoding="utf-8") as f:
+            _MCAT = json.load(f)
+    return _MCAT
+
+
+# Квоты наполнения B/X (Молдвей 1981): треть монстры, шестая ловушки, шестая особенности,
+# треть пусто; шанс клада при каждом виде — классика (см. docs/dungeons.md).
+_STOCK_Q = (("monster", 0.33), ("trap", 0.17), ("special", 0.17), ("empty", 0.33))
+_TREASURE_P = {"monster": 0.5, "trap": 0.33, "special": 0.17, "empty": 0.17}
+
+
+def stock(d: dict, cr: float = 1.0) -> None:
+    """Наполнение скелета: КВОТЫ — таблица, содержимое — из данных (машины/ловушки/бестиарий).
+    Теги дуг двигают вероятности (danger → монстры), тупики-награды всегда с кладом,
+    зал цели — вождь на полном CR. Фракционные роли комнат — пост/склад/логово вождя."""
+    from aidnd.combat.encounters import pick_encounter
+
+    rng = random.Random(f"stock|{d['seed']}")
+    cat = _machines()
+    env = d["env"]
+    deg: dict = {}
+    for e in d["edges"]:
+        if e["kind"] != "window":
+            deg[e["a"]] = deg.get(e["a"], 0) + 1
+            deg[e["b"]] = deg.get(e["b"], 0) + 1
+    post_done = False
+    for r in d["rooms"]:
+        if r["kind"] == "entrance":
+            r["content"] = {"kind": "empty", "flavor": dict(rng.choice(cat["flavors"]))}
+            continue
+        if r["kind"] == "goal":                       # логово вождя: полный CR + клад логова
+            units = pick_encounter(cr, env, seed=f"boss|{d['seed']}")
+            r["content"] = {"kind": "monster", "boss": True, "units": _unit_names(units),
+                            "cr": cr, "treasure": _treasure(rng, cr, guarded=True)}
+            r["frole"] = "вождь"
+            continue
+        roll, acc, kind = rng.random(), 0.0, "empty"
+        for k, q in _STOCK_Q:
+            acc += q
+            if roll < acc:
+                kind = k
+                break
+        if "danger" in r["tags"] and kind == "empty":
+            kind = "monster"                          # опасная дуга не пустует
+        if "treasure" in r["tags"]:
+            kind = "treasure"                         # тупик-награда осмыслен по построению
+        c: dict = {"kind": kind}
+        if kind == "monster":
+            units = pick_encounter(cr * rng.uniform(0.25, 0.5), env,
+                                   seed=f"mob|{d['seed']}|{r['id']}")
+            c["units"] = _unit_names(units)
+            if not post_done and deg.get(r["id"], 0) >= 2:
+                r["frole"] = "пост"                   # первый обитаемый узел — сторожевой
+                post_done = True
+        elif kind == "trap":
+            t = dict(rng.choice(cat["traps"]))
+            c["trap"] = t                             # телеграф в САМОЙ комнате — честно
+        elif kind == "special":
+            c["machine"] = dict(_pick(rng, cat["machines"]))
+        elif kind == "empty":
+            c["flavor"] = dict(rng.choice(cat["flavors"]))
+        if kind == "treasure" or rng.random() < _TREASURE_P.get(kind, 0):
+            c["treasure"] = _treasure(rng, cr, guarded=(kind == "monster"))
+            if kind == "treasure":
+                r["frole"] = "склад"
+        r["content"] = c
+
+
+def _unit_names(units) -> list:
+    out: dict = {}
+    for u in units:                                   # pick_encounter отдаёт Combatant-ов
+        nm = getattr(u, "name", None) or "тварь"
+        out[nm] = out.get(nm, 0) + 1
+    return [f"{nm} ×{n}" if n > 1 else nm for nm, n in out.items()]
+
+
+def _treasure(rng, cr: float, guarded: bool) -> dict:
+    """Клад по классике: контейнер × сокрытие; ценность от CR (материализация — этап C)."""
+    return {"worth": max(2, int(cr * rng.uniform(6, 14))),
+            "container": rng.choice(("сундук", "урна", "мешок", "россыпь", "ларец")),
+            "concealment": rng.choice(("на виду", "под плитой", "двойное дно",
+                                       "в нише за камнем", "среди мусора", "на дне воды")),
+            "guarded": guarded}
 
 
 # ── бумажный черновик (полный Dyson-рендер — этап C) ─────────────────────────
@@ -433,6 +531,19 @@ def dungeon_svg(d: dict, title: str = "") -> str:
         if r["kind"] == "goal":
             out.append(f'<text x="{mx}" y="{my - 6}" font-size="15" text-anchor="middle" '
                        f'fill="{INK}">☠</text>')
+        c = r.get("content") or {}
+        if c.get("kind") == "monster" and not c.get("boss"):
+            out.append(f'<text x="{mx}" y="{my - 6}" font-size="10" text-anchor="middle" '
+                       f'fill="{INK}" opacity="0.9">⚔</text>')
+        elif c.get("kind") == "trap":
+            out.append(f'<text x="{mx}" y="{my - 5}" font-size="11" text-anchor="middle" '
+                       f'fill="{INK}">^</text>')
+        elif c.get("kind") == "special":
+            out.append(f'<text x="{mx}" y="{my - 5}" font-size="10" text-anchor="middle" '
+                       f'fill="{INK}">✷</text>')
+        if c.get("treasure"):
+            out.append(f'<circle cx="{mx + 8}" cy="{my + 8}" r="2.4" fill="{INK}" '
+                       f'opacity="0.85"/>')
         if any(k["room"] == r["id"] for k in d["keys"]):
             out.append(f'<text x="{mx}" y="{my + 4}" font-size="12" text-anchor="middle" '
                        f'fill="{INK}">⚷</text>')
@@ -441,6 +552,10 @@ def dungeon_svg(d: dict, title: str = "") -> str:
                        f'stroke="{INK}" stroke-width="1"/>')
         out.append(f'<text x="{x0 + 5}" y="{y0 + 12}" font-size="9" fill="{INK}" '
                    f'opacity="0.75">{r["id"] + 1}</text>')
+        if r.get("name"):                             # виньетка брифа — тултип комнаты
+            tip = f"{r['id'] + 1}. {r['name']} — {r.get('desc', '')}"
+            out.append(f'<rect x="{x0}" y="{y0}" width="{x1 - x0}" height="{y1 - y0}" '
+                       f'fill="transparent"><title>{tip}</title></rect>')
 
     # пометки рёбер: замок / S / окно-решётка
     for e in d["edges"]:
@@ -463,8 +578,10 @@ def dungeon_svg(d: dict, title: str = "") -> str:
                        f'font-style="italic" fill="{INK}">S</text>')
 
     m = d["metrics"]
+    label = d.get("name") or title or "Подземелье"
+    hist = (d.get("history") or {}).get("now", "")
     out.append(f'<text x="{pad}" y="{H - 9}" font-size="12" font-style="italic" fill="{INK}" '
-               f'opacity="0.85">{title or "Подземелье"} · комнат {m["rooms"]} · '
-               f'циклов {m["cyclomatic"]}</text>')
+               f'opacity="0.85">{label} · комнат {m["rooms"]} · циклов {m["cyclomatic"]}'
+               + (f' — {hist[:80]}' if hist else "") + '</text>')
     out.append("</svg>")
     return "".join(out)

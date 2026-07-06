@@ -54,3 +54,39 @@ def _is_ragged(r) -> bool:
     xs = [t[0] for t in r["tiles"]]
     ys = [t[1] for t in r["tiles"]]
     return len(r["tiles"]) < (max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1)
+
+
+def test_stock_quotas_and_boss():
+    import collections
+
+    kinds = collections.Counter()
+    for i in range(20):
+        d = generate(f"sq|{i}", "Ruin", cr=2.0)
+        boss = next(r for r in d["rooms"] if r["kind"] == "goal")
+        assert boss["content"]["boss"] and boss["content"]["units"]
+        assert boss["content"]["treasure"]["guarded"]
+        for r in d["rooms"]:
+            kinds[(r.get("content") or {}).get("kind", "?")] += 1
+            if (r.get("content") or {}).get("kind") == "trap":
+                assert r["content"]["trap"]["telegraph"]  # ловушка всегда телеграфирует
+    total = sum(kinds.values())
+    assert 0.25 < kinds["monster"] / total < 0.45      # квоты B/X дышат, но держатся
+    assert 0.2 < kinds["empty"] / total < 0.45
+
+
+def test_brief_applies_without_dangling_clues():
+    from aidnd.worldgen.dungeonlore import apply_brief
+
+    import random as _r
+
+    brief = {"name": "Тест-склеп", "history": {"built": "x", "happened": "y", "now": "z"},
+             "bits": [{"id": "b1", "text": "след"}], "chief": "Вожак",
+             "rooms": [{"arch": a, "name": f"к-{a}", "desc": "d", "clue": "b1"}
+                       for a in ("entrance", "hall", "cave", "chief", "store", "post",
+                                 "danger", "treasure", "secret")]}
+    d = generate("bf|1", "Caverns", cr=1.0)
+    apply_brief(d, brief, _r.Random(1))
+    named = [r for r in d["rooms"] if r.get("name")]
+    assert len(named) == len(d["rooms"])               # все комнаты получили виньетку
+    assert d["name"] == "Тест-склеп"
+    assert all(r.get("clue") == "b1" for r in named)

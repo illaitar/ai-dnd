@@ -22,7 +22,6 @@ from aidnd.mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
 from aidnd.mind.tick import _decay_emotion, _decay_needs
 from aidnd.play.population import Townsperson
 from aidnd.server.play.engine.core import (
-    _scene_descriptors,
     _COLORS,
     _PHASE_RU,
     _S,
@@ -54,6 +53,7 @@ from aidnd.server.play.engine.core import (
     _portrait_url,
     _role_at,
     _role_for_building,
+    _scene_descriptors,
     _spurns,
     _store,
     _tokens_ru,
@@ -94,9 +94,10 @@ def _world_events() -> None:
     if _wanted() > 0:  # розыск остывает — память не вечна
         _wanted_add(-PB["wanted_decay"])
     try:
+        from aidnd.server.play.engine.incidents import gang_morning, incident_spawn
         from aidnd.server.play.mechanics.deals import _deal_jobs
 
-        news = _npc_delves() + _deal_jobs()
+        news = _npc_delves() + _deal_jobs() + incident_spawn() + gang_morning()
         if news:
             _S["guild_news"] = (_S.get("guild_news") or [])[-2:] + news
     except Exception:  # noqa: BLE001 — вылазка не роняет мир
@@ -339,7 +340,8 @@ def _fill_from_pool(city, keynode, kps):
         store.clear_placements(_wid())  # граф города изменился — узлы протухли
         placed = {}  # пере-размещаем заново (память NPC цела)
     if placed:  # уже наполнен — восстановить тех же людей
-        dead = {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "dead|")}  # 1 запрос, не N
+        dead = {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "dead|")} | \
+            {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "captive|")}  # пленники не гуляют
         by_id = {r["id"]: r for r in _pool().list_people(limit=100000)}  # 1 запрос, не N
         for pid, pl in placed.items():
             if pid in dead:

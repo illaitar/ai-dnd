@@ -104,12 +104,16 @@ def _mk_room(rid, cell, kind, env, rng, tags=None) -> dict:
 # ── скелет: кольцо + роли дуг + вложения ────────────────────────────────────
 
 
-def _ring_cells(rng) -> tuple:
+def _ring_cells(rng, small: bool = False) -> tuple:
     """Кольцо на курс-гриде: периметр прямоугольника, обход по часовой."""
     x0 = rng.randint(1, 2)
     y0 = rng.randint(1, 2)
-    x1 = rng.randint(COARSE_W - 3, COARSE_W - 2)
-    y1 = rng.randint(COARSE_H - 3, COARSE_H - 2)
+    if small:                                         # городской данж: дом/подвал, 8-12 комнат
+        x1 = x0 + rng.randint(2, 3)
+        y1 = y0 + rng.randint(2, 3)
+    else:
+        x1 = rng.randint(COARSE_W - 3, COARSE_W - 2)
+        y1 = rng.randint(COARSE_H - 3, COARSE_H - 2)
     top = [(x, y0) for x in range(x0, x1 + 1)]
     right = [(x1, y) for y in range(y0 + 1, y1 + 1)]
     bottom = [(x, y1) for x in range(x1 - 1, x0 - 1, -1)]
@@ -117,10 +121,10 @@ def _ring_cells(rng) -> tuple:
     return top + right + bottom + left
 
 
-def _attempt(seed: str, env: str) -> dict | None:
+def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
     rng = random.Random(f"dgen|{seed}")
     cat = _catalog()
-    ring = _ring_cells(rng)
+    ring = _ring_cells(rng, small)
     n = len(ring)
     ei = 0                                            # вход — первый узел (лево-верх)
     gi = n // 2                                       # цель — напротив по кольцу
@@ -194,7 +198,7 @@ def _attempt(seed: str, env: str) -> dict | None:
 
     # вложения: подциклы и отростки-награды (тупик всегда осмыслен)
     taken = set(r_at)
-    for _ in range(rng.randint(NEST_MIN, NEST_MAX)):
+    for _ in range(rng.randint(1, 2) if small else rng.randint(NEST_MIN, NEST_MAX)):
         anchors = [c for c in list(r_at) if c not in (ring[ei], ring[gi])]
         if not anchors:
             break
@@ -360,12 +364,13 @@ def _metrics(rooms, edges) -> dict:
             "deadends": len(dead), "bad_deadends": bad}
 
 
-def generate(seed: str, env: str = "Ruin", cr: float = 1.0, brief: dict | None = None) -> dict:
+def generate(seed: str, env: str = "Ruin", cr: float = 1.0, brief: dict | None = None,
+             small: bool = False) -> dict:
     """Данж по сиду: под-сиды до прохождения фильтра качества (детерминированная цепочка);
     скелет сразу НАПОЛНЯЕТСЯ (stock — квоты B/X + машины + фракция), бриф из пула (если
     дан) раздаёт комнатам имена/описания/улики истории (apply_brief, детерминированно)."""
     for i in range(RETRY):
-        d = _attempt(f"{seed}|{i}", env)
+        d = _attempt(f"{seed}|{i}", env, small)
         if d is not None:
             stock(d, cr)
             if brief:

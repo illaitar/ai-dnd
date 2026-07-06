@@ -1,0 +1,247 @@
+"""ПРОИСШЕСТВИЯ города — данжи ВНУТРИ города, рождённые общегородской симуляцией NPC.
+
+Каждое происшествие привязано к живым нитям мира (docs/dungeons.md «город»):
+- место = дом/работа РЕАЛЬНОГО жителя (его узел, его имя в заголовке заказа);
+- заказчик = живой NPC — награду платит из СВОЕГО кошелька (гильдейские — из кассы гильдии);
+- банда (gang) = сами горожане с гнильцой (malice): днём мельник — ночью грабит; бой с ними
+  реален (смерть = flag dead, город теряет человека); каждое утро банда ВОРУЕТ у соседей
+  (deeds theft от реального актора → сплетни town_talk, общак-стэш растёт, заказ дорожает);
+- haunt = дом того, кто РЕАЛЬНО умер в этом мире (dead-флаги — в т.ч. жертвы заказных
+  убийств игрока: заказал душегубство → в доме жертвы завелась нечисть → новый заказ);
+- missing = житель похищен (flag captive — исчезает из сцен города честно), спасение
+  возвращает; stash = схрон краденого ИЗ deed-журнала (возврат жертвам — реальные кошельки).
+Сам данж — маленький dungeongen (городской масштаб) с брифом пула. LLM в рантайме нет.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import random
+
+from aidnd.server.play.engine.core import (
+    _S,
+    PB,
+    _gt,
+    _store,
+    _wid,
+)
+
+_ICAT: dict | None = None
+
+
+def _cat() -> list:
+    global _ICAT
+    if _ICAT is None:
+        p = os.path.join(os.path.dirname(__file__), "..", "..", "..", "content",
+                         "incidents.json")
+        with open(p, encoding="utf-8") as f:
+            _ICAT = json.load(f)
+    return _ICAT["types"]
+
+
+def incidents_active() -> list:
+    return _store().contracts(_wid(), "incident")
+
+
+def _flags(prefix: str) -> set:
+    return {k.split("|", 1)[1] for k in _store().flags_prefix(_wid(), prefix)}
+
+
+def _fam(name: str) -> str:
+    return (name or "").split()[-1]
+
+
+def incident_spawn() -> list:
+    """Утро: мир порождает происшествие из ЖИЗНИ города (≤2 активных, шанс за день)."""
+    people = _S.get("people") or {}
+    if not people:
+        return []
+    act = incidents_active()
+    day = _gt() // 1440
+    if len(act) >= 2 or random.Random(f"incday|{_wid()}|{day}").random() > PB["incident_p"]:
+        return []
+    rng = random.Random(f"inc|{_wid()}|{day}")
+    dead = _flags("dead|")
+    gone = dead | _flags("captive|")
+    alive = {pid: p for pid, p in sorted(people.items()) if pid not in gone}
+    types = list(_cat())
+    rng.shuffle(types)
+    types.sort(key=lambda t: -t["w"] * rng.random())
+    for t in types:
+        inc = _try_build(t, alive, dead, rng)
+        if inc:
+            iid = f"inc|{day}|{t['key']}"
+            _store().save_contract(_wid(), iid, "incident", inc)
+            if inc.get("captive"):
+                _store().flag_set(_wid(), f"captive|{inc['captive']}")
+            return [inc["news"]]
+    return []
+
+
+def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
+    people = _S.get("people") or {}
+    cr = round(rng.uniform(*t["cr"]), 2)
+    inc = {"type": t["key"], "goal": t["goal"], "env": t["env"], "cr": cr,
+           "esc": t.get("esc", False), "made_gt": _gt(), "stash": 0, "members": [],
+           "captive": None, "patron": None, "giver": "guild"}
+    if t["victim"] == "dead_home":                    # дом реально умершего в ЭТОМ мире
+        if not dead:
+            return None
+        vid = rng.choice(sorted(dead))
+        vic = people.get(vid)
+        if vic is None:
+            return None
+        inc["place"] = f"дом, где жил {vic.name}"
+        inc["dead_name"] = vic.name
+        kin = [pid for pid, p in alive.items()
+               if _fam(p.name) == _fam(vic.name) and pid != vid]
+        inc["patron"] = kin[0] if kin else None
+    elif t["victim"] in ("home", "work"):             # дом/подворье реального жителя
+        pool_p = [pid for pid, p in alive.items()
+                  if p.persona and (t["victim"] == "home" or p.work)]
+        if not pool_p:
+            return None
+        pid = rng.choice(pool_p)
+        p = people[pid]
+        inc["patron"] = pid
+        inc["giver"] = pid                            # платит из СВОЕГО кошелька
+        inc["place"] = (f"подворье, где трудится {p.name}" if t["victim"] == "work"
+                        else f"дом семьи {_fam(p.name)}")
+        if t["goal"] == "rescue":                     # похищен родич заказчика
+            kin = [k for k, pp in alive.items()
+                   if _fam(pp.name) == _fam(p.name) and k != pid]
+            if not kin:
+                return None
+            inc["captive"] = rng.choice(kin)
+            inc["captive_name"] = people[inc["captive"]].name
+    elif t["victim"] == "vacant":
+        inc["place"] = "заброшенный дом у стены"
+    if t["foe"] == "citizens":                        # шайка из СВОИХ: горожане с гнильцой
+        rogues = [pid for pid, p in alive.items()
+                  if p.state.config.traits.get("malice", 0.5) >= PB["incident_gang_malice"]
+                  and p.role not in ("стражник",) and pid != inc.get("patron")]
+        if len(rogues) < 2:
+            return None
+        inc["members"] = rng.sample(rogues, min(4, max(2, len(rogues) // 3 or 2)))
+        inc["chief"] = max(inc["members"],
+                           key=lambda m: people[m].state.config.traits.get("malice", 0))
+    if t["key"] == "stash":                           # схрон вора из deed-журнала
+        thefts = [d for d in _store().deeds(_wid(), verb="theft", limit=30)
+                  if d["actor"] in alive]
+        if not thefts:
+            return None
+        thief = thefts[0]["actor"]
+        inc["members"] = [thief]
+        inc["chief"] = thief
+        inc["stash"] = 6 + int(cr * 8)
+        inc["victims"] = list({d["obj"] for d in thefts if d["actor"] == thief
+                               and d["obj"] in alive})[:3]
+    pn = people.get(inc["patron"])
+    subs = {"patron": pn.name if pn else "гильдия", "place": inc.get("place", ""),
+            "dead": inc.get("dead_name", ""), "captive": inc.get("captive_name", "")}
+    inc["title"] = t["title"].format(**subs)
+    inc["pitch"] = t["pitch"].format(**subs)
+    reward = max(2, round(cr * PB["guild_reward_per_cr"]))
+    if inc["giver"] != "guild":                       # личный заказ — кламп по кошельку
+        reward = max(2, min(reward, _store().purse_get(_wid(), inc["giver"])))
+    inc["reward"] = reward
+    inc["news"] = f"Город гудит: {inc['title']} — {subs['patron']} ищет смельчака"
+    return inc
+
+
+def gang_morning() -> list:
+    """Эскалация: активная шайка ворует у СОСЕДЕЙ — реальные монеты, реальные deeds."""
+    from aidnd.server.play.engine import deeds as _deeds
+
+    people = _S.get("people") or {}
+    news = []
+    for inc in incidents_active():
+        if not inc.get("esc") or not inc.get("members"):
+            continue
+        day = _gt() // 1440
+        rng = random.Random(f"gangsteal|{inc['id']}|{day}")
+        marks = [pid for pid in sorted(people)
+                 if pid not in inc["members"] and _store().purse_get(_wid(), pid) > 2]
+        if not marks:
+            continue
+        mark = rng.choice(marks)
+        take = min(3, _store().purse_get(_wid(), mark))
+        _store().purse_add(_wid(), mark, -take)
+        actor = rng.choice(inc["members"])
+        d = {k: v for k, v in inc.items() if k not in ("id", "status")}
+        d["stash"] = d.get("stash", 0) + take
+        d["reward"] = d.get("reward", 4) + 1          # город злится — заказ дорожает
+        _store().save_contract(_wid(), inc["id"], "incident", d)
+        _deeds.record(actor, "theft", obj=mark, place="ночная улица", witnesses=[],
+                      data={"coins": take, "gang": inc["id"]})
+        people[mark].state.memory.add("ночью обчистили мой дом — шайка распоясалась",
+                                      _gt() // 10, 0.8)
+        news.append(f"ночью обчистили дом ({people[mark].name}) — шайка наглеет")
+    return news
+
+
+def incident_jobs() -> list:
+    """Заказы происшествий для доски гильдии (рядом с логовищами)."""
+    people = _S.get("people") or {}
+    out = []
+    for inc in incidents_active():
+        pn = people.get(inc.get("patron"))
+        out.append({"id": f"ct:inc:{inc['id']}", "lair": inc["id"], "name": inc["title"],
+                    "cr": inc["cr"], "reward": inc.get("reward", 4),
+                    "kind": inc["goal"], "pitch": inc["pitch"],
+                    "giver_name": pn.name if pn else "гильдия", "incident": True})
+    return out
+
+
+def incident_resolve(inc_id: str, fell_members: list) -> list:
+    """Цель достигнута: награда (кошелёк заказчика/гильдии), пленник домой, краденое —
+    жертвам, память города. Павшие члены шайки — реальные мертвецы города."""
+    from aidnd.server.play.engine import deeds as _deeds
+
+    people = _S.get("people") or {}
+    inc = next((x for x in incidents_active() if x["id"] == inc_id), None)
+    if not inc:
+        return []
+    narr = []
+    reward = inc.get("reward", 4)
+    giver = inc.get("giver", "guild")
+    pay = min(reward, _store().purse_get(_wid(), giver)) if giver != "guild" else reward
+    src = people[giver].name if giver in people else "Гильдия"
+    _store().purse_add(_wid(), giver if giver != "guild" else "guild", -pay)
+    total = _store().purse_add(_wid(), "pc", pay)
+    narr.append(f"{src} платит уговорённое: +{pay} зм (кошель: {total}).")
+    if inc.get("captive"):
+        _store().flag_del(_wid(), f"captive|{inc['captive']}")
+        nm = inc.get("captive_name", "спасённый")
+        narr.append(f"{nm} на свободе — сам доберётся до родни, а те не забудут.")
+        for pid, p in people.items():
+            if _fam(p.name) == _fam(nm):
+                rel = p.state.rel("pc")
+                rel["affinity"] = min(1.0, rel["affinity"] + 0.35)
+                p.state.memory.add(f"этот человек вернул нам {nm}", _gt() // 10, 0.9,
+                                   about=["pc"])
+    if inc.get("stash"):
+        cut = inc["stash"] // 3
+        back = inc["stash"] - cut
+        for vid in inc.get("victims") or []:
+            _store().purse_add(_wid(), vid, back // max(1, len(inc.get("victims") or [1])))
+            if vid in people:
+                people[vid].state.memory.add("мне вернули украденное!", _gt() // 10, 0.8,
+                                             about=["pc"])
+        _store().purse_add(_wid(), "pc", cut)
+        narr.append(f"Схрон: {back} зм возвращаются людям, твоя доля — {cut} зм.")
+    for pid in fell_members:                          # павшие — настоящие покойники города
+        if pid in people:
+            _store().flag_set(_wid(), f"dead|{pid}")
+            _deeds.record("pc", "clear", obj=pid, place=inc.get("place", ""),
+                          witnesses=[], data={"incident": inc_id})
+    if inc.get("patron") in people:
+        p = people[inc["patron"]]
+        rel = p.state.rel("pc")
+        rel["affinity"] = min(1.0, rel["affinity"] + 0.3)
+        p.state.memory.add(f"он разобрался: {inc['title']}", _gt() // 10, 0.85, about=["pc"])
+    _deeds.record("pc", "clear", obj=inc["title"], place=inc.get("place", ""), witnesses=[])
+    d = {k: v for k, v in inc.items() if k not in ("id", "status")}
+    _store().save_contract(_wid(), inc["id"], "inc_done", d)
+    return narr

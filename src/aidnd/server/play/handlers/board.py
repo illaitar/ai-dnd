@@ -6,7 +6,7 @@ import random
 
 from fastapi import Request
 
-from aidnd.combat import Encounter, dungeon
+from aidnd.combat import Encounter
 from aidnd.server.play.engine.core import (
     _PC_CAP,
     _S,
@@ -25,7 +25,6 @@ from aidnd.server.play.engine.core import (
 )
 from aidnd.server.play.engine.world import _apply_routine, _play, _scene_dict, _watch_check
 from aidnd.server.play.mechanics.combat import (
-    _combat_wrapup,
     _combatant_from_npc,
     _guild_bid,
     _guild_board,
@@ -125,6 +124,16 @@ async def delve(request: Request):
     """Отправиться к логову и вступить в бой (время на дорогу честное)."""
     _play()
     lid = (await request.json()).get("lair")
+    if str(lid).startswith("inc|"):                   # городское происшествие — свой вход
+        from aidnd.server.play.engine.incidents import incidents_active
+        from aidnd.server.play.handlers.dungeon import incident_delve
+
+        inc = next((x for x in incidents_active() if x["id"] == lid), None)
+        if not inc:
+            return {"error": "там уже разобрались"}
+        if _pc_hp() <= 1:
+            return {"error": "ты еле стоишь — сперва отлежись"}
+        return incident_delve(inc)
     l = next((x for x in _lairs() if x["id"] == lid), None)
     if not l:
         return {"error": "нет такого места"}

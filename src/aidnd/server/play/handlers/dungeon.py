@@ -35,6 +35,11 @@ from aidnd.server.play.mechanics.combat import _pc_combatant
 from aidnd.server.play.mechanics.items import _pool_add_new, _pool_draw, _rar_tag
 from aidnd.worldgen.dungeongen import dungeon_svg, generate
 
+
+def _inc_active() -> list:
+    from aidnd.server.play.engine.incidents import incidents_active
+    return incidents_active()
+
 _HINTS = {"monster": "из-за прохода — возня и рык", "trap": "",
           "special": "оттуда тянет странным отсветом", "treasure": "в темноте что-то блестит",
           "empty": "тихо, тянет сквозняком"}
@@ -51,12 +56,56 @@ def build_dungeon(l: dict) -> dict:
     return generate(f"dng|{_wid()}|{l['id']}", l["env"], cr=l["cr"], brief=brief)
 
 
+def incident_delve(inc: dict) -> dict:
+    """Вход в ГОРОДСКОЕ происшествие: маленький данж; шайка = РЕАЛЬНЫЕ горожане по комнатам
+    (глава — в комнате цели), пленник — в кладовой; резолв цели закрывает происшествие."""
+    people = _S.get("people") or {}
+    briefs = [r["data"] for r in _pool().pool_buildings("dungeon")
+              if r["btype"] == inc["env"]]
+    brief = (random.Random(f"ibrief|{_wid()}|{inc['id']}").choice(briefs)
+             if briefs else None)
+    d = generate(f"inc|{_wid()}|{inc['id']}", inc["env"], cr=inc["cr"], brief=brief,
+                 small=True)
+    d["name"] = inc["title"]
+    st = {"lair": {"id": inc["id"], "name": inc["title"], "cr": inc["cr"],
+                   "env": inc["env"]},
+          "d": d, "room": d["entrance"], "seen": {d["entrance"]}, "cleared": set(),
+          "looted": set(), "keys": set(), "found": set(), "sprung": set(), "steps": 0,
+          "inc": inc["id"], "is_lair": False, "npc_at": {}, "captive_at": None}
+    dead = {k.split("|", 1)[1] for k in _store().flags_prefix(_wid(), "dead|")}
+    members = [m for m in (inc.get("members") or []) if m in people and m not in dead]
+    if members:                                       # горожане-разбойники по комнатам
+        chief = inc.get("chief") if inc.get("chief") in members else members[0]
+        st["npc_at"][d["goal"]] = [chief]
+        rest = [m for m in members if m != chief]
+        mob_rooms = [r["id"] for r in d["rooms"]
+                     if (r.get("content") or {}).get("kind") == "monster"
+                     and r["kind"] == "room"]
+        for m, rid in zip(rest, mob_rooms):
+            st["npc_at"][rid] = st["npc_at"].get(rid, []) + [m]
+        for r in d["rooms"]:                          # прочих тварей из дома выметаем
+            c = r.get("content") or {}
+            if c.get("kind") == "monster" and r["id"] not in st["npc_at"]:
+                r["content"] = {"kind": "empty"}
+    if inc.get("captive"):                            # пленник — в кладовой/схроне
+        spot = next((r["id"] for r in d["rooms"]
+                     if "treasure" in r["tags"] or r.get("frole") == "склад"), d["goal"])
+        st["captive_at"] = spot
+    _S["dungeon"] = st
+    _gt_add(PB["lair_travel_min"])
+    narr = [f"{inc['title']}: {inc['pitch']}",
+            (d["rooms"][d["entrance"]].get("desc") or "").strip()]
+    _pc_remember(f"взялся: {inc['title']}", 0.5)
+    return {**dungeon_payload(), "narr": [n for n in narr if n], "gt": _gt()}
+
+
 def delve_enter(l: dict) -> dict:
     """Вход в логово: строим данж, ставим игрока на лестницу входа."""
     d = build_dungeon(l)
     _S["dungeon"] = {"lair": l, "d": d, "room": d["entrance"], "seen": {d["entrance"]},
                      "cleared": set(), "looted": set(), "keys": set(), "found": set(),
-                     "sprung": set(), "steps": 0}
+                     "sprung": set(), "steps": 0, "is_lair": True, "npc_at": {},
+                     "captive_at": None}
     _gt_add(PB["lair_travel_min"])
     r0 = d["rooms"][d["entrance"]]
     narr = [f"{d.get('name', l['name'])}: вниз уводят стёртые ступени. "
@@ -197,7 +246,29 @@ async def dungeon_move(request: Request):
         narr.append(f"{c['flavor']['name']}: {c['flavor']['note']}.")
     if c.get("kind") == "special" and first:
         narr.append(f"{c['machine']['name']}: {c['machine']['note']}.")
-    if c.get("kind") == "monster" and to not in st["cleared"]:
+    if to == st.get("captive_at") and first:
+        people = _S.get("people") or {}
+        inc = next((x for x in _inc_active() if x["id"] == st.get("inc")), {})
+        nm = inc.get("captive_name") or "пленник"
+        narr.append(f"В углу, связанный — {nm}. Живой. Глаза кричат: доведи дело до конца.")
+    if to in (st.get("npc_at") or {}) and to not in st["cleared"]:
+        people = _S.get("people") or {}
+        from aidnd.server.play.mechanics.combat import _combatant_from_npc
+
+        pids = [p_ for p_ in st["npc_at"][to] if p_ in people]
+        units = [_combatant_from_npc(p_, people[p_]) for p_ in pids]
+        for u in units:
+            u.side = "foes"
+        if units:
+            names = ", ".join(people[p_].name for p_ in pids)
+            narr.append(f"Здесь СВОИ — {names}. Узнав тебя, хватаются за оружие: "
+                        f"свидетели им не нужны.")
+            st.setdefault("fall_pending", {})[to] = pids
+            return {**_room_fight(to, units, st["d"].get("name", ""),
+                                  bool(to == st["d"]["goal"] and st.get("is_lair", True))),
+                    "narr": narr}
+    if c.get("kind") == "monster" and to not in st["cleared"] \
+            and to not in (st.get("npc_at") or {}):
         seed = (f"boss|{st['d']['seed']}" if c.get("boss")
                 else f"mob|{st['d']['seed']}|{to}")
         cr = st["lair"]["cr"] * (1.0 if c.get("boss") else 0.35)
@@ -205,7 +276,8 @@ async def dungeon_move(request: Request):
         if units:
             narr.append("Хозяева комнаты поднимаются навстречу!" if not c.get("boss")
                         else f"{st['d'].get('chief') or 'Хозяин логова'} здесь.")
-            return {**_room_fight(to, units, st["d"].get("name", ""), bool(c.get("boss"))),
+            return {**_room_fight(to, units, st["d"].get("name", ""),
+                                  bool(c.get("boss")) and st.get("is_lair", True)),
                     "narr": narr}
         st["cleared"].add(to)
     # блуждающие: цена времени (1-к-6 каждые 2 перехода)

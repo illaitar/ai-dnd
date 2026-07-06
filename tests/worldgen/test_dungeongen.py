@@ -75,9 +75,9 @@ def test_stock_quotas_and_boss():
 
 
 def test_brief_applies_without_dangling_clues():
-    from aidnd.worldgen.dungeonlore import apply_brief
-
     import random as _r
+
+    from aidnd.worldgen.dungeonlore import apply_brief
 
     brief = {"name": "Тест-склеп", "history": {"built": "x", "happened": "y", "now": "z"},
              "bits": [{"id": "b1", "text": "след"}], "chief": "Вожак",

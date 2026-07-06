@@ -340,6 +340,10 @@ class WorldStore:
             r = c.execute("SELECT val FROM flags WHERE world_id=? AND key=?", (world_id, key)).fetchone()
         return r["val"] if r else None
 
+    def flag_del(self, world_id: int, key: str) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM flags WHERE world_id=? AND key=?", (world_id, key))
+
     def flag_set(self, world_id: int, key: str, val: str = "1") -> None:
         with self._conn() as c:
             c.execute("INSERT OR REPLACE INTO flags (world_id,key,val) VALUES (?,?,?)", (world_id, key, val))

@@ -10,7 +10,6 @@ from aidnd.mind import NpcConfig, NpcState
 from aidnd.server.play.engine import core
 from aidnd.server.play.mechanics import deals
 
-
 _ORIG_RANDOM = random.Random
 
 

@@ -231,6 +231,11 @@ def _guild_board() -> list:
                 "reward": max(3, round(l["cr"] * PB["guild_reward_per_cr"])),
             }
         )
+    from aidnd.server.play.engine.incidents import incident_jobs
+
+    for j in incident_jobs():                         # городские происшествия — тот же лист
+        if j["lair"] not in taken:
+            out.append(j)
     return out
 
 
@@ -410,6 +415,16 @@ def _droom_wrapup(enc, cb) -> dict:
         total = _store().purse_add(_wid(), "pc", coins)
         out["narr"].append(f"Комната отбита. С тел — {coins} зм (кошель: {total}).")
         out["coins"] = _pc_coins()
+        if st_d.get("inc") and cb["droom"] == st_d["d"]["goal"]:
+            from aidnd.server.play.engine.incidents import incident_resolve
+            out["narr"] += incident_resolve(st_d["inc"], [])  # цель взята — город расплатится
+            ct = next((c for c in _store().contracts(_wid(), "active")
+                       if c.get("target") == st_d["inc"]), None)
+            if ct:
+                _store().save_contract(_wid(), ct["id"], "done",
+                                       {k: v for k, v in ct.items()
+                                        if k not in ("id", "status")})
+            out["coins"] = _pc_coins()
     else:
         out["narr"].append("Ты пятишься из комнаты — они не преследуют дальше своих стен.")
     _pc_save()
@@ -425,6 +440,8 @@ def _combat_wrapup(enc, cb) -> dict:
         st = _S.get("dungeon")
         if st is not None and enc.status() == "won":
             st["cleared"].add(cb["droom"])            # комната данжа зачищена (босс — тоже)
+            for pid in (st.pop("fall_pending", {}) or {}).get(cb["droom"], []):
+                _store().flag_set(_wid(), f"dead|{pid}")  # горожанин-разбойник пал ВЗАПРАВДУ
         if "lair" not in cb:                          # рядовой бой комнаты — свой итог
             return _droom_wrapup(enc, cb)
     l = cb["lair"] if isinstance(cb, dict) and "lair" in cb else cb

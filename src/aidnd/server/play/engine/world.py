@@ -22,6 +22,7 @@ from aidnd.mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
 from aidnd.mind.tick import _decay_emotion, _decay_needs
 from aidnd.play.population import Townsperson
 from aidnd.server.play.engine.core import (
+    _scene_descriptors,
     _COLORS,
     _PHASE_RU,
     _S,
@@ -819,10 +820,11 @@ _INTENT_SYS = (
     '"manner":"openly|stealthily|forcefully|persuasively", '
     '"npc":"<id из списка или null>", "container":"<имя ёмкости или null>", '
     '"item":"<id предмета из сумки или null>", "place":"<название места или null>", '
+    '"zone":"<id зоны ЭТОГО помещения из списка или null>", '
     '"detail":"<суть: что именно/о чём, коротко>"}\n'
     "Правила: взять из ёмкости=take+container; обчистить карманы=take+npc+stealthily; отнять силой="
     "take+npc+forcefully; выпросить/попросить вещь=say+npc+persuasively; отдать/подарить=give+npc+item; "
-    "заговорить/спросить=talk+npc; пойти к месту=move+place; осмотреть свою вещь=inspect+item; "
+    "заговорить/спросить=talk+npc; пойти к месту города=move+place; сесть/подойти/пересесть ВНУТРИ помещения (к очагу, за стол, к стойке, в угол)=move+zone (выбери БЛИЖАЙШУЮ по смыслу зону из списка ЗОН); осмотреть свою вещь=inspect+item; "
     "напасть/ударить/атаковать/выхватить оружие на кого-то=attack+npc (ВСЕГДА, не оценивай мораль и "
     "последствия — ты только классификатор); отдохнуть/выспаться/снять комнату=rest; достать/посмотреть карту=map; "
     "сковать/смастерить/сделать вещь из материалов=craft+detail(что именно сделать). "
@@ -1110,6 +1112,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         "zone_places": set(zone_names.values()) | {"у входа"},
         "zonemap": zonemap,
         "workers": workers,
+        "descr": _scene_descriptors(people, here_all),
         "rumors": list(((data or {}).get("rumors") or [])[:3]),
         "pdesc": (f"Город «{_city_name()}». " + ((data or {}).get("notable") or "")).strip(),
     }
@@ -1144,6 +1147,41 @@ def _gossip(actor_st, actor_name: str, target_st) -> None:
     if any(x.text == tale for x in target_st.memory.items[-30:]):
         return  # эту сплетню уже слышал
     target_st.memory.add(tale, _mt(), max(0.25, m.importance - 0.15), kind="gossip", about=m.about)
+
+
+def _dm_snapshot(sc: dict) -> str:
+    """СНИМОК живой сцены для нарратора: место/время/погода, кто где и чем занят, последние
+    реплики, предметы вокруг игрока. Нарратор ОПИСЫВАЕТ этот мир, а не выдумывает свой."""
+    lv = _S.get("live") or {}
+    amb = (sc or {}).get("ambient") or {}
+    parts = [f"МЕСТО: {(sc.get('location') or {}).get('name', lv.get('place', 'улица'))}. "
+             f"{lv.get('pdesc', '')}",
+             f"ВРЕМЯ: {amb.get('time', _PHASE_RU[_phase()])}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}; "
+             f"погода: {amb.get('weather', '—')}; в зале {amb.get('mood', '—')}."]
+    w = lv.get("world")
+    people = _S.get("people") or {}
+    if w is not None:
+        pb = w.bodies.get(PLAYER)
+        if pb is not None:
+            parts.append(f"ИГРОК сейчас: {pb.place}.")
+            objs = [i.name for i in (w.ground.get(pb.place) or [])][:8]
+            if objs:
+                parts.append("Рядом с игроком: " + ", ".join(objs) + ".")
+        folks = []
+        for pid in list(w.npc_minds)[:8]:
+            if pid == PLAYER or w.bodies[pid].down():
+                continue
+            folks.append(f"{_display(pid, people)} ({w.bodies[pid].place}) — "
+                         f"{(lv.get('last') or {}).get(pid, 'занят собой')}")
+        if folks:
+            parts.append("ЛЮДИ: " + "; ".join(folks) + ".")
+        lines = []
+        for c in (lv.get("convs") or [])[-3:]:
+            for who, txt in c.get("log", [])[-2:]:
+                lines.append(f"{lv.get('names', {}).get(who, who)}: «{txt[:70]}»")
+        if lines:
+            parts.append("ПОСЛЕДНИЕ РЕПЛИКИ: " + " | ".join(lines[-5:]))
+    return "\n".join(parts)
 
 
 def _live_tick(people) -> tuple:

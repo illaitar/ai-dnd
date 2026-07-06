@@ -63,9 +63,16 @@ def _intent(text: str, sc: dict) -> dict | None:
         or "пусто"
     )
     keys_pl = ", ".join(k["label"] for k in _S["geom"]["keys"])
+    zones_line = "нет"
+    if _S.get("inside"):
+        from aidnd.server.play.engine.zones import building_zones
+
+        _bz, zs = building_zones(_S["inside"])
+        zones_line = "; ".join(f"{z['id']}={z['name']}" for z in zs) or "нет"
     user = (
         f"МЕСТО: {sc['location']['name']}. ЛЮДИ ЗДЕСЬ: {here}. ЁМКОСТИ: {conts}. "
-        f"СУМКА ИГРОКА: {bag}. МЕСТА ГОРОДА: {keys_pl}.\nФРАЗА ИГРОКА: «{text}»"
+        f"СУМКА ИГРОКА: {bag}. МЕСТА ГОРОДА: {keys_pl}. ЗОНЫ ПОМЕЩЕНИЯ: {zones_line}.\n"
+        f"ФРАЗА ИГРОКА: «{text}»"
     )
     resp = mgr.call(
         "narrator",
@@ -98,19 +105,22 @@ def _attempt(intent: dict, sc: dict) -> dict:
         out["open_talk"] = npc
         return out
 
+    if verb == "move" and intent.get("zone") and _S.get("inside"):
+        from aidnd.server.play.engine.zones import building_zones
+        from aidnd.server.play.handlers.travel import _zone_go
+
+        _bz, zones = building_zones(_S["inside"])
+        zn = {z["id"]: z["name"] for z in zones}
+        zid = str(intent["zone"])
+        if zid in zn:                                # зону сматчил LLM-интент, не токены
+            out["narr"].append(_zone_go(zid, zn[zid]))
+            out["refresh"] = True
+            return out
+        out["narr"].append("Такого места в этом помещении нет.")
+        return out
+
     if verb == "move" and intent.get("place"):
         want = str(intent["place"]).lower()
-        if _S.get("inside"):  # внутри здания «сесть/подойти к…» = переезд в ЗОНУ
-            from aidnd.server.play.engine.zones import building_zones
-            from aidnd.server.play.handlers.travel import _zone_go
-
-            _bz, zones = building_zones(_S["inside"])
-            wtok = _tokens_ru(want)
-            zbest = max(zones, key=lambda z: len(_tokens_ru(z["name"]) & wtok), default=None)
-            if zbest and _tokens_ru(zbest["name"]) & wtok:
-                out["narr"].append(_zone_go(zbest["id"], zbest["name"]))
-                out["refresh"] = True
-                return out
         tgt = next(
             (
                 k
@@ -314,17 +324,18 @@ def _attempt(intent: dict, sc: dict) -> dict:
         out["narr"].append(f"Ты бросаешься на {p.name}. Назад дороги нет.")
         return out
 
-    mgr = _model()  # не-действие: сухой отклик мастера, мир не меняется
+    mgr = _model()  # не-действие: отклик мастера ПО ФАКТАМ живой сцены (снимок, не выдумка)
     text = str(intent.get("_text") or detail or "")
     if text:
+        from aidnd.server.play.engine.world import _dm_snapshot
+
         resp = mgr.call(
             "narrator",
             [
                 {"role": "system", "content": _DM_SYS},
                 {
                     "role": "user",
-                    "content": f"Сцена: {sc.get('location', {}).get('name', 'улица')}. "
-                    f"Игрок: «{text}»",
+                    "content": f"{_dm_snapshot(sc)}\n\nИГРОК ЗАЯВЛЯЕТ: «{text}»",
                 },
             ],
             options={"temperature": 0.5},

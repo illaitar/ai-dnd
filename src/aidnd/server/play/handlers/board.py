@@ -137,37 +137,9 @@ async def delve(request: Request):
         gate = _guild_gate(l["cr"])
         if gate and gate.get("error"):
             return {"error": gate["error"], "dice": gate.get("dice")}
-    _gt_add(PB["lair_travel_min"])
-    lseed = lid.split(":")[1]
-    wv = dungeon.waves(l["cr"] + 0.01, l["env"], seed=lseed, n=PB["dungeon_waves"])
-    obs = dungeon.obstacles(12, 9, l["env"], seed=lseed)  # процедурная раскладка логова
-    enc = Encounter(
-        [_pc_combatant()], wv[0], seed=f"fight|{lid}|{_mt()}", obstacles=obs, waves=wv[1:]
-    )
-    _S["combat"] = {
-        "enc": enc,
-        "lair": l,
-        "head": {"name": l["name"], "sub": f"{l['env']} · CR {l['cr']} · накатов {len(wv)}"},
-    }
-    guard = 0
-    while enc.status() == "active" and guard < 50:  # докрутить ИИ до хода игрока
-        c0 = enc.current()
-        if c0 is None or c0.id == "pc":
-            break
-        enc.ai_turn(c0)
-        guard += 1
-    _pc_remember(f"пришёл к месту: {l['name']}", 0.4)
-    if enc.status() != "active":
-        return {
-            "combat": enc.view(),
-            "over": _combat_wrapup(enc, _S["combat"]),
-            "lair": l,
-            "gt": _gt(),
-        }
-    pc_u = enc.units.get("pc")
-    if pc_u:
-        _pc_hp(set_to=max(0, pc_u.hp))
-    return {"combat": enc.view(), "lair": l, "gt": _gt(), "hp": _pc_hp()}
+    from aidnd.server.play.handlers.dungeon import delve_enter
+
+    return delve_enter(l)  # логово = НАСТОЯЩИЙ данж (docs/dungeons.md, этап C)
 
 
 @router.post("/api/play/surrender")

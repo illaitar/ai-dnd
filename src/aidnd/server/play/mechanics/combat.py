@@ -393,10 +393,40 @@ def _duel_wrapup(enc, cb) -> dict:
     return out
 
 
+def _droom_wrapup(enc, cb) -> dict:
+    """Итог боя КОМНАТЫ данжа: без зачистки логова — только hp/время/скромный лут."""
+    st_d = _S.get("dungeon") or {}
+    lair = st_d.get("lair") or {}
+    stt = enc.status()
+    if stt == "lost":
+        return _death(f"Тьма смыкается в {st_d.get('d', {}).get('name', 'подземелье')}.")
+    _gt_add(max(1, enc.round * PB["combat_round_s"] // 60))
+    pc_u = enc.units.get("pc")
+    if pc_u:
+        _pc_hp(set_to=max(1, pc_u.hp))
+    out = {"status": stt, "narr": [], "hp": _pc_hp()}
+    if stt == "won":
+        coins = max(1, round(lair.get("cr", 1) * PB["loot_coin_per_cr"] * 0.3))
+        total = _store().purse_add(_wid(), "pc", coins)
+        out["narr"].append(f"Комната отбита. С тел — {coins} зм (кошель: {total}).")
+        out["coins"] = _pc_coins()
+    else:
+        out["narr"].append("Ты пятишься из комнаты — они не преследуют дальше своих стен.")
+    _pc_save()
+    _S["combat"] = None
+    return out
+
+
 def _combat_wrapup(enc, cb) -> dict:
     """Итог боя: лут/награды/hp/последствия. Один путь для победы/бегства/поражения."""
     if isinstance(cb, dict) and cb.get("npc"):
         return _duel_wrapup(enc, cb)
+    if isinstance(cb, dict) and cb.get("droom") is not None:
+        st = _S.get("dungeon")
+        if st is not None and enc.status() == "won":
+            st["cleared"].add(cb["droom"])            # комната данжа зачищена (босс — тоже)
+        if "lair" not in cb:                          # рядовой бой комнаты — свой итог
+            return _droom_wrapup(enc, cb)
     l = cb["lair"] if isinstance(cb, dict) and "lair" in cb else cb
     st = enc.status()
     if st == "lost":  # герой пал в логове — мир кончился

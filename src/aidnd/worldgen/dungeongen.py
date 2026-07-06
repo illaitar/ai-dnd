@@ -470,10 +470,32 @@ def _treasure(rng, cr: float, guarded: bool) -> dict:
 # ── бумажный черновик (полный Dyson-рендер — этап C) ─────────────────────────
 
 
-def dungeon_svg(d: dict, title: str = "") -> str:
+def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
+    """Бумажная карта. game-режим: туман (рисуем только seen), соседние неизведанные —
+    призраки-«?», маркер игрока, кликабельные data-room; секретки — только найденные."""
     from .floorart import INK, _defs, _hatch_segments, _outline_segs, _stroke
 
     rng = random.Random(f"dart|{d['seed']}")
+    seen = set(game["seen"]) if game else {r["id"] for r in d["rooms"]}
+    found = set(game.get("found") or ()) if game else None
+    ghosts: set = set()
+    if game:
+        for eid, e in enumerate(d["edges"]):
+            if e["kind"] == "window" or (e["kind"] == "secret"
+                                         and found is not None and eid not in found):
+                continue
+            if (e["a"] in seen) != (e["b"] in seen):
+                ghosts.add(e["b"] if e["a"] in seen else e["a"])
+
+    def _vis_edge(eid, e) -> bool:
+        if e["kind"] == "secret" and found is not None and eid not in found:
+            return False
+        if not game:
+            return True
+        if e["kind"] == "window":
+            return e["a"] in seen and e["b"] in seen
+        return (e["a"] in seen and e["b"] in seen | ghosts) or \
+               (e["b"] in seen and e["a"] in seen | ghosts)
     S = 11                                            # тайл → пиксели
     pad = 26
     W, H = d["tile_w"] * S + pad * 2, d["tile_h"] * S + pad * 2
@@ -488,8 +510,8 @@ def dungeon_svg(d: dict, title: str = "") -> str:
            f'<rect width="{W}" height="{H}" fill="none" filter="url(#grain)"/>']
 
     # коридоры — двойной штрих вдоль пути
-    for e in d["edges"]:
-        if e["kind"] == "window" or not e.get("path"):
+    for eid, e in enumerate(d["edges"]):
+        if e["kind"] == "window" or not e.get("path") or not _vis_edge(eid, e):
             continue
         pts = [px(t) for t in [e["path"][0]] + e["path"] + [e["path"][-1]]]
         dash = ' stroke-dasharray="4 5"' if e["kind"] == "secret" else ""
@@ -503,6 +525,18 @@ def dungeon_svg(d: dict, title: str = "") -> str:
 
     # комнаты: контур + лёгкий хэтч наружу + сетка пола
     for r in d["rooms"]:
+        if game and r["id"] not in seen:
+            if r["id"] in ghosts:                     # призрак: пунктир + «?» (кликабелен)
+                gx, gy = px((r["cell"][0] * CELL + 2, r["cell"][1] * CELL + 2))
+                click = (' class="droom" style="cursor:pointer"'
+                         if r["id"] in (game.get("next") or ()) else "")
+                out.append(f'<g data-room="{r["id"]}"{click}>'
+                           f'<rect x="{gx}" y="{gy}" width="{3 * S}" height="{3 * S}" '
+                           f'fill="none" stroke="{INK}" stroke-width="1.1" '
+                           f'stroke-dasharray="4 4" opacity="0.5"/>'
+                           f'<text x="{gx + 1.5 * S}" y="{gy + 1.9 * S}" font-size="14" '
+                           f'text-anchor="middle" fill="{INK}" opacity="0.6">?</text></g>')
+            continue
         tiles = {tuple(t) for t in r["tiles"]}
         xs = [t[0] for t in tiles]
         ys = [t[1] for t in tiles]
@@ -552,14 +586,23 @@ def dungeon_svg(d: dict, title: str = "") -> str:
                        f'stroke="{INK}" stroke-width="1"/>')
         out.append(f'<text x="{x0 + 5}" y="{y0 + 12}" font-size="9" fill="{INK}" '
                    f'opacity="0.75">{r["id"] + 1}</text>')
-        if r.get("name"):                             # виньетка брифа — тултип комнаты
-            tip = f"{r['id'] + 1}. {r['name']} — {r.get('desc', '')}"
+        if game and r["id"] == game.get("cur"):       # маркер игрока
+            out.append(f'<circle cx="{mx}" cy="{my}" r="4.5" fill="none" stroke="#7a1f1f" '
+                       f'stroke-width="2"/><circle cx="{mx}" cy="{my}" r="1.6" '
+                       f'fill="#7a1f1f"/>')
+        if r.get("name") or game:                     # тултип + клик по соседям
+            tip = f"{r['id'] + 1}. {r.get('name') or 'комната'} — {r.get('desc', '')}"
+            click = (' class="droom" style="cursor:pointer"'
+                     if game and r["id"] in (game.get("next") or ()) else "")
             out.append(f'<rect x="{x0}" y="{y0}" width="{x1 - x0}" height="{y1 - y0}" '
-                       f'fill="transparent"><title>{tip}</title></rect>')
+                       f'fill="transparent" data-room="{r["id"]}"{click}>'
+                       f'<title>{tip}</title></rect>')
 
     # пометки рёбер: замок / S / окно-решётка
-    for e in d["edges"]:
+    for eid, e in enumerate(d["edges"]):
         if e["kind"] == "door" or not (e.get("path") or e["kind"] == "window"):
+            continue
+        if not _vis_edge(eid, e):
             continue
         if e["kind"] == "window":
             ax, ay = px(_center(d["rooms"][e["a"]]))

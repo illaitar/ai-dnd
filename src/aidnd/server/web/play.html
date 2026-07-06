@@ -651,10 +651,16 @@ function applyWorld(r){
     renderAmb();renderLoc(r.location);renderWays();
     $('locname').textContent=r.location.name;}
   if(r.watch)renderWatch(r.watch);
+  if(r.dungeon&&!DNG)refreshDungeon();               // страницу перезагрузили в данже
+  else if(r.dungeon===null&&DNG){DNG=null;renderDungeon();}
 }
 const ROOM_KD={cellar:'подвал',backroom:'задняя комната',attic:'чердак',quarters:'жильё',hidden:'тайник'};
 function renderWays(){
   const el=$('waybtns');if(!el)return;
+  if(typeof DNG!=='undefined'&&DNG){
+    el.innerHTML=`<button onclick="dloot()">&#128269; обыскать</button>`+
+      `<button class="gray" onclick="dexit()">&#8593; наружу</button>`;
+    return;}
   const b=[];
   if(SCENE.inside)b.push(`<button onclick="exitB()">&#8592; выйти наружу</button>`);
   else if(SCENE.enterable)b.push(`<button onclick="enterB()">войти: ${esc(SCENE.enterable.name)}</button>`);
@@ -1078,8 +1084,60 @@ async function delve(lair){
   if(r.dice)showDice(r.dice);
   if(r.error){push('sys',esc(r.error));return;}
   if(r.gt!=null){GT=r.gt;setClock();}
-  openCombat(r.combat,{name:r.lair.name,sub:r.lair.env+' · CR '+r.lair.cr});
-  if(r.over)handleOver(r.over);          // погиб на подкрутке ИИ до своего хода
+  if(r.dungeon){openDungeon(r);return;}  // логово = данж (обход комната-за-комнатой)
+  if(r.combat){openCombat(r.combat,{name:'бой',sub:''});if(r.over)handleOver(r.over);}
+}
+
+// ─── ПОДЗЕМЕЛЬЕ: пергамент с туманом, ходьба кликами, обыск/выход ───
+let DNG=null;
+function openDungeon(r){
+  DNG=r.dungeon;
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  dngHints(r.dungeon);
+  renderDungeon();
+}
+function dngHints(dg){
+  (dg&&dg.exits||[]).forEach(x=>{if(x.hint&&!x.known)push('sys','&#128066; '+esc(x.hint));});
+}
+function renderDungeon(){
+  const box=$('planbox');
+  if(!DNG){$('mapbox').classList.remove('hasplan','inside');box.innerHTML='';renderWays();return;}
+  box.innerHTML=`<div style="color:#d9c9a0;font:italic 12px Georgia;margin:2px 6px">${esc(DNG.name||'Подземелье')}${DNG.room_name?' — '+esc(DNG.room_name):''}</div>`+DNG.svg;
+  $('mapbox').classList.add('hasplan','inside');
+  box.querySelectorAll('[data-room].droom').forEach(el=>el.onclick=()=>dmove(+el.dataset.room));
+  renderWays();
+}
+async function refreshDungeon(){
+  const r=await api('/api/play/dungeon');
+  DNG=r&&r.dungeon||null;renderDungeon();
+}
+async function dmove(room){
+  const r=await api('/api/play/dungeon_move',{room});
+  if(r.error){push('sys',esc(r.error));return;}
+  if(r.dice)showDice(r.dice);
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  if(r.gt!=null){GT=r.gt;setClock();}
+  if(r.hp!=null)setHp(r.hp);
+  if(r.death){showDeath(r.death);return;}
+  if(r.combat){openCombat(r.combat,{name:(DNG&&DNG.name)||'бой',sub:'подземелье'});if(r.over)handleOver(r.over);return;}
+  if(r.dungeon){DNG=r.dungeon;dngHints(r.dungeon);renderDungeon();}
+}
+async function dloot(){
+  const r=await api('/api/play/dungeon_loot',{});
+  if(r.error){push('sys',esc(r.error));return;}
+  if(r.dice)showDice(r.dice);
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  if(r.gt!=null){GT=r.gt;setClock();}
+  if(r.combat){openCombat(r.combat,{name:(DNG&&DNG.name)||'бой',sub:'потревожил'});if(r.over)handleOver(r.over);return;}
+  if(r.dungeon){DNG=r.dungeon;renderDungeon();}
+}
+async function dexit(){
+  const r=await api('/api/play/dungeon_exit',{});
+  if(r.error){push('sys',esc(r.error));return;}
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  if(r.gt!=null){GT=r.gt;setClock();}
+  DNG=null;renderDungeon();
+  applyWorld(await api('/api/play/scene'));
 }
 function renderLoc(loc){
   document.querySelector('.locard .nm').textContent=loc.name;
@@ -1164,8 +1222,8 @@ function handleOver(over){
   (over.narr||[]).forEach(t=>push('narr',esc(t)));
   if(over.hp!=null)setHp(over.hp);
   if(over.coins!=null)setCoins(over.coins);
-  if(over.death){closeCombat();showDeath(over.death);return;}
-  setTimeout(closeCombat, 1200);
+  if(over.death){DNG=null;closeCombat();showDeath(over.death);return;}
+  setTimeout(()=>{closeCombat();if(DNG)refreshDungeon();}, 1200);
 }
 function showDeath(d){
   $('deathtext').textContent=(d&&d.text)||'Тьма.';

@@ -540,6 +540,9 @@ def _scene_dict(city, people, crof, cr2b, loc):
             ),
             "containers": (_building_containers(inside, room) if (inside and lvl >= 1) else []),
         },
+        "dungeon": ({"name": (_S.get("dungeon") or {}).get("d", {}).get("name"),
+                     "room": (_S.get("dungeon") or {}).get("room")}
+                    if _S.get("dungeon") else None),
         "ambient": {
             "time": _PHASE_RU[_phase()],
             "weather": "дождь",

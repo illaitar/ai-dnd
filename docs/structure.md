@@ -38,8 +38,9 @@ scripts/            furnish.py (обстановка пула зонами) · p
 2. **`_S` — нетипизированный dict-блоб** в contextvar, трогается из 50+ функций; выходы LLM —
    сырые dict без схем.
 3. **mechanics → core напрямую** (`_S`, `PB`, `_store`) — механики приварены к сессии.
-4. **Захардкоженный список глаголов** в промпте `_INTENT_SYS` + раздельные `_intent`/`_attempt`
-   вместо решённого единого `resolve()` ([loop.md](loop.md)).
+4. ✔ ЧАСТИЧНО (2026-07-06): `engine/resolve.py` есть — арбитр `resolve(text)` + контекст-
+   сборщик, промпт из реестра PRIMITIVES (`_INTENT_SYS` умер). Осталось: переезд
+   consequence/voice/world_lookup из world.py и `engine/loop.py`.
 5. **Близнецы**: `aidnd/play` (130 строк) рядом с `server/play`; SVG-рендер города
    (`citygen.py`, 1055 строк) живёт в `server/web/`.
 6. Нет deed-журнала: лента/сплетни/розыск/хроника — пять ad-hoc механизмов.
@@ -78,7 +79,8 @@ src/aidnd/
    (structured.py становится тонким парсером под схемами).
 3. **Типизированная `Session`** — за фасадом `_S` (инкрементально: поле за полем), механики
    переводятся на параметры.
-4. **Единый `resolve()`** — убить верб-лист `_INTENT_SYS`, слить recognition⊕arbiter.
+4. ✔ (2026-07-06) **Единый `resolve()`** — арбитр+контекст в `engine/resolve.py`,
+   промпт из реестра примитивов; исполнители пока в `freeform._attempt`.
 5. **Переезды**: `aidnd/play` → `worldgen/population.py`; `server/web/citygen.py` →
    `citygraph/render.py`.
 6. **`deeds.py`** — журнал дел + перевод сплетен/розыска/хроники/обращений на него

@@ -1194,11 +1194,18 @@ def _dm_snapshot(sc: dict) -> str:
         if folks:
             parts.append("ЛЮДИ: " + "; ".join(folks) + ".")
         lines = []
+        my = (lv.get("zonemap") or {}).get(PLAYER)
+        ev = _S.get("eaves") or {}
         for c in (lv.get("convs") or [])[-3:]:
+            znm = (lv.get("zone_names") or {}).get(c.get("zone"))
+            audible = (PLAYER in (c.get("members") or []) or c.get("zone") == my
+                       or (znm and znm == ev.get("place")))
+            if not audible:                          # чужой стол — нарратору не дарим
+                continue
             for who, txt in c.get("log", [])[-2:]:
                 lines.append(f"{lv.get('names', {}).get(who, who)}: «{txt[:70]}»")
         if lines:
-            parts.append("ПОСЛЕДНИЕ РЕПЛИКИ: " + " | ".join(lines[-5:]))
+            parts.append("ПОСЛЕДНИЕ РЕПЛИКИ (что игроку слышно): " + " | ".join(lines[-5:]))
     return "\n".join(parts)
 
 
@@ -1548,19 +1555,24 @@ def _live_tick(people) -> tuple:
                     # СЛЫШИМОСТЬ (docs/locations.md): своя зона — полностью; чужая — обрывком
                     same_zone = (not zones_l) or (
                         PLAYER in w.bodies and w.bodies[pid].place == w.bodies[PLAYER].place)
-                    if same_zone:
+                    ev = _S.get("eaves") or {}
+                    eaves_on = (zones_l and not same_zone
+                                and ev.get("place") == w.bodies[pid].place
+                                and lv["clock"] <= ev.get("until", -1))
+                    if same_zone or eaves_on:        # прослушка = честно добытый ярус слуха
                         feed.append(
                             {
                                 "k": "speech",
                                 "who": who,
                                 "to": _display(tid, people) if tid in people else tgt,
-                                "text": txt,
+                                "text": txt if same_zone
+                                else f"(подслушано — {w.bodies[pid].place}) {txt}",
                             }
                         )
                         pc.memory.add(
                             f"слышал в «{lv['place']}»: {who} — {txt[:90]}",
                             _mt(),
-                            0.18,
+                            0.18 if same_zone else 0.3,
                             kind="heard",
                             about=[pid],
                         )

@@ -269,6 +269,38 @@ def _attempt(intent: dict, sc: dict) -> dict:
     if verb == "inspect" and intent.get("item"):
         return {"inspect": intent["item"], "narr": [], "refresh": True}
 
+    if verb == "listen":
+        lv = _S.get("live") or {}
+        zones_l = lv.get("zones") or []
+        zn = {z["id"]: z for z in zones_l}
+        zid = str(intent.get("zone") or "")
+        if zid not in zn:                            # цели нет — ближайший чужой разговор
+            my = (lv.get("zonemap") or {}).get(PLAYER)
+            c = next((c for c in (lv.get("convs") or []) if c.get("zone") != my), None)
+            zid = c.get("zone") if c else None
+        if not zid or zid not in zn:
+            out["narr"].append("Прислушиваться не к кому — рядом никто не шепчется.")
+            out["fail"] = True
+            return out
+        z = zn[zid]
+        n = int(_store().flag_get(_wid(), "listen") or 0) + 1
+        _store().flag_set(_wid(), "listen", str(n))
+        roll = random.Random(f"listen|{n}").randint(1, 20)
+        mod = _PC_CAP.mod("wis")
+        dc = round(PB["listen_dc_base"] + float(z.get("noise", 0.4)) * PB["listen_noise_k"])
+        _gt_add(PB["step_min"])
+        if roll + mod >= dc:
+            _S["eaves"] = {"place": (lv.get("zone_names") or {}).get(zid, z["name"]),
+                           "until": (lv.get("clock") or 0) + PB["listen_ticks"]}
+            out["narr"].append(f"Восприятие: {roll}+{mod} против {dc} — ты замираешь словно "
+                               f"невзначай, и слова от «{z['name']}» долетают ясно.")
+        else:
+            _S.pop("eaves", None)
+            out["narr"].append(f"Восприятие: {roll}+{mod} против {dc} — гул зала глотает "
+                               f"чужие слова.")
+            out["fail"] = True
+        return out
+
     if verb == "map":
         out["map_open"] = True
         out["narr"].append("Ты разворачиваешь карту.")

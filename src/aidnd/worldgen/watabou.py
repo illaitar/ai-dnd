@@ -70,7 +70,8 @@ class Room:
 
 class Layout:
     def __init__(self, seed: str, rooms_target: int = 18, order_p: float = 0.75,
-                 corridor_p: float = 0.3, string: bool = False):
+                 corridor_p: float = 0.3, string: bool = False, hall_p: float = 0.15,
+                 rotunda_p: float = 0.45, water_p: float = 0.45):
         self.rng = random.Random(f"wtb|{seed}")
         self.rooms: list[Room] = []
         self.occ: dict = {}                           # клетка → id комнаты
@@ -80,6 +81,9 @@ class Layout:
         self.order_p = order_p                        # доля симметричных спавнов
         self.corridor_p = corridor_p
         self.string = string                          # цепочка без ветвления
+        self.hall_p = hall_p
+        self.rotunda_p = rotunda_p
+        self.water_p = water_p
         self.groups: dict = {}                        # group → [room ids]
 
     # ── аккреция: очередь близнецов + ДОБОР случайной комнатой (как у автора:
@@ -121,6 +125,7 @@ class Layout:
         self._grow()
         self._create_loops()
         self._clean_up()
+        self._create_loops(min_run=2, min_dist=5)     # добрать петли на выжившей укладке
         self._shape_rooms()
         self.backdoor = None                          # addBackdoor: запасной вход с края
         if self.rng.random() < 0.6 and len(self.rooms) > 6:
@@ -185,7 +190,7 @@ class Layout:
             roll = rng.random()
             if roll < self.corridor_p:
                 return 2 if rng.random() < 0.7 else 3
-            return 1 if roll > 0.85 else 0
+            return 1 if roll > 1.0 - self.hall_p else 0
 
         if self.string:
             return [fwd_task(rng.random(), child_size())]
@@ -284,9 +289,9 @@ class Layout:
                     break
             if not placed:
                 runs.append([p])
-        return [r for r in runs if len(r) >= 3]
+        return runs
 
-    def _create_loops(self):
+    def _create_loops(self, min_run: int = 3, min_dist: int = 6):
         guard = 0
         while guard < 30:
             guard += 1
@@ -297,9 +302,9 @@ class Layout:
                 for b in self.rooms:
                     if b.id <= a.id or frozenset((a.id, b.id)) in linked:
                         continue
-                    if dist.get(b.id, 99) <= 5:
+                    if dist.get(b.id, 99) < min_dist:
                         continue
-                    runs = self._shared_runs(a, b)
+                    runs = [r_ for r_ in self._shared_runs(a, b) if len(r_) >= min_run]
                     if runs:
                         best = (a.id, b.id, runs[0])
                         break
@@ -359,7 +364,7 @@ class Layout:
                 continue
             can = all(r.size <= 1 and r.w >= 5 and abs(r.w - r.d) <= 2
                       and deg.get(r.id, 0) <= 2 for r in rs)
-            if can and self.rng.random() < 0.45:
+            if can and self.rng.random() < self.rotunda_p:
                 for r in rs:
                     r.round = True
 
@@ -385,7 +390,7 @@ class Layout:
         # вода: value-шум + порог, только внутри комнат
         water = []
         wseed = self.rng.random()
-        if self.rng.random() < 0.45:
+        if self.rng.random() < self.water_p:
             level = self.rng.uniform(0.62, 0.78)
             for r in rooms:
                 for (x, y) in r["tiles"]:
@@ -418,6 +423,8 @@ class Layout:
 
 
 def layout(seed: str, rooms_target: int = 18, order_p: float = 0.75,
-           corridor_p: float = 0.3, string: bool = False) -> dict | None:
-    lay = Layout(seed, rooms_target, order_p, corridor_p, string)
+           corridor_p: float = 0.3, string: bool = False, hall_p: float = 0.15,
+           rotunda_p: float = 0.45, water_p: float = 0.45) -> dict | None:
+    lay = Layout(seed, rooms_target, order_p, corridor_p, string, hall_p,
+                 rotunda_p, water_p)
     return lay.export() if lay.build() else None

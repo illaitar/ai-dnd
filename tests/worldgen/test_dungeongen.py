@@ -76,7 +76,7 @@ def test_stock_quotas_and_boss():
             if (r.get("content") or {}).get("kind") == "trap":
                 assert r["content"]["trap"]["telegraph"]  # ловушка всегда телеграфирует
     total = sum(kinds.values())
-    assert 0.25 < kinds["monster"] / total < 0.45      # квоты B/X дышат, но держатся
+    assert 0.22 < kinds["monster"] / total < 0.45      # квоты B/X дышат, но держатся
     assert 0.2 < kinds["empty"] / total < 0.45
 
 

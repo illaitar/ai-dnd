@@ -50,10 +50,12 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
     from .watabou import layout
 
     rng = random.Random(f"dgen|{seed}")
-    cavey = any(k in (env or "").lower() for k in _CAVE_ENV)
+    types = [t for t in _dtypes() if env in t["envs"]] or _dtypes()
+    dt = rng.choices(types, weights=[t["w"] for t in types])[0]
     lay = layout(seed, rooms_target=(10 if small else rng.randint(16, 26)),
-                 order_p=(0.45 if cavey else 0.8),
-                 corridor_p=(0.42 if cavey else 0.28))
+                 order_p=dt["order_p"], corridor_p=dt["corridor_p"],
+                 string=(rng.random() < dt.get("string_p", 0)),
+                 hall_p=dt["hall_p"], rotunda_p=dt["rotunda_p"], water_p=dt["water_p"])
     if lay is None:
         return None
     rooms, edges = lay["rooms"], lay["edges"]
@@ -179,9 +181,9 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
         rooms[before_goal]["tags"].append("approach")
     if lay.get("backdoor") is not None and lay["backdoor"] != goal:
         rooms[lay["backdoor"]]["tags"].append("backdoor")
-    # ступени-перепады (оригинал: шанс 0.5) + осмысленные тупики
+    # ступени-перепады (шанс из профиля типа) + осмысленные тупики
     for e in edges:
-        if e["kind"] == "door" and rng.random() < 0.5:
+        if e["kind"] == "door" and rng.random() < dt["steps_p"]:
             e["kind"] = "steps"
     deg: dict = {}
     for e in edges:
@@ -192,6 +194,19 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
                 and r["id"] != goal and "treasure" not in r["tags"]:
             r["tags"].append("treasure")
 
+    for r in rooms:                                   # реквизит по словарю типа
+        if r["kind"] in ("corridor", "entrance"):
+            continue
+        props = []
+        if r["id"] == goal:
+            props.append(dt["goal_prop"])
+        if "treasure" in r["tags"] and rng.random() < 0.7:
+            props.append("chest")
+        for glyph, pp in dt["props"].items():
+            if rng.random() < pp and glyph not in props:
+                props.append(glyph)
+        r["props"] = props[:3]
+
     if not _solvable(rooms, edges, keys, 0, goal, use_secret=False):
         return None
     if not _solvable(rooms, edges, keys, 0, goal, use_secret=True):
@@ -201,10 +216,23 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
         return None
     tw = max(t[0] for r in rooms for t in r["tiles"]) + 2
     th = max(t[1] for r in rooms for t in r["tiles"]) + 2
-    return {"seed": seed, "env": env, "rooms": rooms, "edges": edges, "keys": keys,
+    return {"seed": seed, "env": env, "dtype": dt["key"], "dtype_name": dt["name"],
+            "rooms": rooms, "edges": edges, "keys": keys,
             "entrance": 0, "goal": goal, "metrics": met,
             "water": lay["water"], "columns": lay["columns"],
             "tile_w": tw, "tile_h": th}
+
+
+_DT: list | None = None
+
+
+def _dtypes() -> list:
+    global _DT
+    if _DT is None:
+        p = os.path.join(os.path.dirname(__file__), "..", "content", "dungeon_types.json")
+        with open(p, encoding="utf-8") as f:
+            _DT = json.load(f)["types"]
+    return _DT
 
 
 def _reachable_without(rooms, edges, cut) -> set:
@@ -409,6 +437,77 @@ def _treasure(rng, cr: float, guarded: bool) -> dict:
 
 
 # ── бумажный черновик (полный Dyson-рендер — этап C) ─────────────────────────
+
+
+def _glyph(out, kind, cx, cy, S, rng, ink):
+    """Чернильные глифы реквизита (drawings.* оригинала), вид сверху."""
+    if kind == "sarcophagus":
+        w, h = S * 1.7, S * 0.95
+        out.append(f'<rect x="{cx - w / 2:.1f}" y="{cy - h / 2:.1f}" width="{w:.1f}" '
+                   f'height="{h:.1f}" fill="#f3ecd8" stroke="{ink}" stroke-width="1.4"/>'
+                   f'<rect x="{cx - w / 2 + 3:.1f}" y="{cy - h / 2 + 3:.1f}" '
+                   f'width="{w - 6:.1f}" height="{h - 6:.1f}" fill="none" stroke="{ink}" '
+                   f'stroke-width="0.8"/>')
+    elif kind == "throne":
+        out.append(f'<rect x="{cx - S * 0.35:.1f}" y="{cy - S * 0.3:.1f}" '
+                   f'width="{S * 0.7:.1f}" height="{S * 0.6:.1f}" fill="none" '
+                   f'stroke="{ink}" stroke-width="1.3"/>'
+                   f'<line x1="{cx - S * 0.45:.1f}" y1="{cy - S * 0.3:.1f}" '
+                   f'x2="{cx + S * 0.45:.1f}" y2="{cy - S * 0.3:.1f}" stroke="{ink}" '
+                   f'stroke-width="2.4"/>')
+    elif kind == "altar":
+        out.append(f'<rect x="{cx - S * 0.6:.1f}" y="{cy - S * 0.35:.1f}" '
+                   f'width="{S * 1.2:.1f}" height="{S * 0.7:.1f}" fill="#f3ecd8" '
+                   f'stroke="{ink}" stroke-width="1.4"/>')
+        for dx in (-S * 0.3, 0, S * 0.3):
+            out.append(f'<circle cx="{cx + dx:.1f}" cy="{cy:.1f}" r="1.1" fill="{ink}"/>')
+    elif kind == "statue":
+        out.append(f'<rect x="{cx - S * 0.3:.1f}" y="{cy - S * 0.3:.1f}" '
+                   f'width="{S * 0.6:.1f}" height="{S * 0.6:.1f}" fill="none" '
+                   f'stroke="{ink}" stroke-width="0.9"/>'
+                   f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{S * 0.16:.1f}" fill="{ink}"/>')
+    elif kind == "chest":
+        out.append(f'<rect x="{cx - S * 0.42:.1f}" y="{cy - S * 0.28:.1f}" '
+                   f'width="{S * 0.84:.1f}" height="{S * 0.56:.1f}" fill="#f3ecd8" '
+                   f'stroke="{ink}" stroke-width="1.3"/>'
+                   f'<line x1="{cx - S * 0.42:.1f}" y1="{cy - S * 0.08:.1f}" '
+                   f'x2="{cx + S * 0.42:.1f}" y2="{cy - S * 0.08:.1f}" stroke="{ink}" '
+                   f'stroke-width="0.9"/>')
+    elif kind == "barrel":
+        out.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{S * 0.3:.1f}" fill="none" '
+                   f'stroke="{ink}" stroke-width="1.2"/>'
+                   f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{S * 0.12:.1f}" fill="none" '
+                   f'stroke="{ink}" stroke-width="0.7"/>')
+    elif kind == "box":
+        out.append(f'<rect x="{cx - S * 0.28:.1f}" y="{cy - S * 0.28:.1f}" '
+                   f'width="{S * 0.56:.1f}" height="{S * 0.56:.1f}" fill="none" '
+                   f'stroke="{ink}" stroke-width="1.1"/>'
+                   f'<line x1="{cx - S * 0.28:.1f}" y1="{cy - S * 0.28:.1f}" '
+                   f'x2="{cx + S * 0.28:.1f}" y2="{cy + S * 0.28:.1f}" stroke="{ink}" '
+                   f'stroke-width="0.7"/>')
+    elif kind in ("fountain", "well"):
+        out.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{S * 0.42:.1f}" fill="none" '
+                   f'stroke="{ink}" stroke-width="1.3"/>')
+        if kind == "fountain":
+            out.append(f'<path d="M {cx - S * 0.22:.1f} {cy:.1f} q {S * 0.11:.1f} -2.4 '
+                       f'{S * 0.22:.1f} 0 t {S * 0.22:.1f} 0" fill="none" stroke="{ink}" '
+                       f'stroke-width="0.8"/>')
+        else:
+            out.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{S * 0.2:.1f}" '
+                       f'fill="{ink}" opacity="0.75"/>')
+    elif kind == "dais":
+        for k2, wd in ((0.7, 1.1), (0.45, 0.8)):
+            out.append(f'<rect x="{cx - S * wd / 2:.1f}" y="{cy - S * k2 / 2:.1f}" '
+                       f'width="{S * wd:.1f}" height="{S * k2:.1f}" fill="none" '
+                       f'stroke="{ink}" stroke-width="0.9"/>')
+    elif kind == "boulder":
+        pts = []
+        for a2 in range(6):
+            ang = a2 * 1.047 + rng.uniform(-0.2, 0.2)
+            rr = S * rng.uniform(0.22, 0.38)
+            pts.append(f"{cx + rr * math.cos(ang):.1f},{cy + rr * math.sin(ang):.1f}")
+        out.append(f'<polygon points="{" ".join(pts)}" fill="none" stroke="{ink}" '
+                   f'stroke-width="1.1"/>')
 
 
 def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
@@ -684,6 +783,14 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
                 out.append(f'<line x1="{mx - ww / 2:.0f}" y1="{y0 + 4 + i2 * 5}" '
                            f'x2="{mx + ww / 2:.0f}" y2="{y0 + 4 + i2 * 5}" '
                            f'stroke="{INK}" stroke-width="1.5"/>')
+        for pi, prop in enumerate(r.get("props") or []):
+            if pi == 0 and r["kind"] == "goal":
+                gxp, gyp = mx, my + S * 0.9
+            else:
+                corners = [(x0 + S * 1.1, y0 + S * 1.1), (x1 - S * 1.1, y0 + S * 1.1),
+                           (x0 + S * 1.1, y1 - S * 1.1), (x1 - S * 1.1, y1 - S * 1.1)]
+                gxp, gyp = corners[(pi + r["id"]) % 4]
+            _glyph(out, prop, gxp, gyp, S, rng, INK)
         if c.get("boss"):
             out.append(f'<text x="{mx}" y="{my - S * 0.25}" font-size="{S * 1.15:.0f}" '
                        f'text-anchor="middle" fill="{INK}">☠</text>')

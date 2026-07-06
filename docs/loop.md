@@ -75,11 +75,14 @@ game_tick(action) → response
 
 ## Дальше
 
-- **Единый `resolve(text) → {домен, цели, args, verdict}`** — один тяжёлый контекстный вызов
-  (арбитр сам парсит намерение); убивает захардкоженный список глаголов в промпте `_intent`
-  (`_INTENT_SYS`, world.py) — известное нарушение [принципа 3](README.md).
-- Выделить `engine/loop.py` (game_tick + durative-циклы) и `engine/resolve.py`
-  (arbiter/context_assembler/consequence) — карта в [structure.md](structure.md).
+- ✔ (2026-07-06) **Единый `resolve(text)`** — `engine/resolve.py`: реестр PRIMITIVES
+  (глагол+цели+«когда») — единственная истина, промпт арбитра ГЕНЕРИТСЯ из реестра
+  (добавить примитив = одна запись; рукописный `_INTENT_SYS` умер); контекст-сборщик
+  отдаёт максимум фактов сцены (люди/ёмкости/сумка/зоны/предметы рядом/места/время);
+  вердикт do|narrate (не-действие → DM-нарратор со снимком). Исполнители остались в
+  `handlers/freeform._attempt` (примитив×манера×гейты).
+- Выделить `engine/loop.py` (game_tick + durative-циклы); consequence-слой в
+  `engine/resolve.py` — карта в [structure.md](structure.md).
 - Deed-журнал как субстрат ленты/сплетен/стражи ([entities.md](entities.md)).
 
 Связано: [mind.md](mind.md) (кольцо A изнутри) · [entities.md](entities.md) ·

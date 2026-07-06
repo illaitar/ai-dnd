@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import random
 
 from fastapi import Request
@@ -31,8 +30,8 @@ from aidnd.server.play.engine.core import (
     _witness_crime,
     router,
 )
+from aidnd.server.play.engine.resolve import resolve
 from aidnd.server.play.engine.world import (
-    _INTENT_SYS,
     _apply_routine,
     _play,
     _scene_dict,
@@ -42,51 +41,6 @@ from aidnd.server.play.engine.world import (
 from aidnd.server.play.mechanics.combat import _combatant_from_npc, _pc_combatant
 from aidnd.server.play.mechanics.contracts import _contract_on_give
 from aidnd.server.play.mechanics.items import _do_craft, _materialize_npc, _pc_coins
-
-
-def _intent(text: str, sc: dict) -> dict | None:
-    """LLM-разбор фразы игрока. None — ТОЛЬКО «не понял фразу» (игроку честно так и скажем);
-    недоступность модели летит исключением из mgr.call."""
-    mgr = _model()
-    here = "; ".join(f"{h['id']}={h['name']} ({h['role']})" for h in sc["here"]) or "никого"
-    conts = (
-        "; ".join(
-            c["name"] + (" [заперто]" if c["locked"] else "") for c in sc["location"]["containers"]
-        )
-        or "нет"
-    )
-    bag = (
-        "; ".join(
-            f"{r['item_id']}={(_store().get_item(r['item_id']) or {}).get('name', '?')}"
-            for r in _store().inventory(_wid(), "pc")
-        )
-        or "пусто"
-    )
-    keys_pl = ", ".join(k["label"] for k in _S["geom"]["keys"])
-    from aidnd.server.play.engine.world import _scene_zones
-
-    zones_line = "; ".join(f"{z['id']}={z['name']}" for z in _scene_zones()) or "нет"
-    lv = _S.get("live") or {}
-    pl = (lv.get("zone_names") or {}).get(_S.get("zone")) or lv.get("ent", "у входа")
-    near = [f"{iid}={nm}" for nm, iid in (lv.get("zone_items", {}).get(pl) or {}).items()][:10]
-    near += [f"{iid}={nm} [прибито]"
-             for nm, iid in (lv.get("zone_fixed", {}).get(pl) or {}).items()][:4]
-    user = (
-        f"МЕСТО: {sc['location']['name']}. ЛЮДИ ЗДЕСЬ: {here}. ЁМКОСТИ: {conts}. "
-        f"СУМКА ИГРОКА: {bag}. МЕСТА ГОРОДА: {keys_pl}. ЗОНЫ ПОМЕЩЕНИЯ: {zones_line}. "
-        f"ПРЕДМЕТЫ РЯДОМ (твоя зона — {pl}): {'; '.join(near) or 'ничего приметного'}.\n"
-        f"ФРАЗА ИГРОКА: «{text}»"
-    )
-    resp = mgr.call(
-        "narrator",
-        [{"role": "system", "content": _INTENT_SYS}, {"role": "user", "content": user}],
-        options={"temperature": 0.2},
-    )
-    t = (resp.get("content") or "").strip()
-    try:
-        return json.loads(t[t.find("{") : t.rfind("}") + 1])
-    except (json.JSONDecodeError, ValueError):
-        return None
 
 
 def _attempt(intent: dict, sc: dict) -> dict:
@@ -390,7 +344,7 @@ async def act(request: Request):
     if not text:
         return {"narr": []}
     sc = _scene_dict(city, people, crof, cr2b, loc)
-    it = _intent(text, sc)
+    it = resolve(text, sc)
     if it is None:
         return {"narr": ["(мир задумался и не понял — попробуй иначе)"], "gt": _gt()}
     it["_text"] = text

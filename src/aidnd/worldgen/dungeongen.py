@@ -173,9 +173,15 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
             continue
         keys.append({"id": e["lock"], "room": rng.choice(spots)})
 
-    # ступени-перепады + осмысленные тупики
+    # ante-room: подводка перед кульминацией (buildApproach) — страж/предвестие
+    before_goal = prev.get(goal)
+    if before_goal is not None and rooms[before_goal]["kind"] in ("room", "hall"):
+        rooms[before_goal]["tags"].append("approach")
+    if lay.get("backdoor") is not None and lay["backdoor"] != goal:
+        rooms[lay["backdoor"]]["tags"].append("backdoor")
+    # ступени-перепады (оригинал: шанс 0.5) + осмысленные тупики
     for e in edges:
-        if e["kind"] == "door" and rng.random() < 0.18:
+        if e["kind"] == "door" and rng.random() < 0.5:
             e["kind"] = "steps"
     deg: dict = {}
     for e in edges:
@@ -347,6 +353,11 @@ def stock(d: dict, cr: float = 1.0) -> None:
             r["content"] = {"kind": "monster", "boss": True, "units": _unit_names(units),
                             "cr": cr, "treasure": _treasure(rng, cr, guarded=True)}
             r["frole"] = "вождь"
+            continue
+        if "approach" in r["tags"] and rng.random() < 0.6:
+            units = pick_encounter(cr * 0.45, env, seed=f"guard|{d['seed']}|{r['id']}")
+            r["content"] = {"kind": "monster", "units": _unit_names(units)}
+            r["frole"] = "пост"
             continue
         roll, acc, kind = rng.random(), 0.0, "empty"
         for k, q in _STOCK_Q:
@@ -544,22 +555,42 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
         (x1, y1), (x2, y2) = _edge_px(t, dxy)
         out.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{INK}" '
                    f'stroke-width="3" stroke-linecap="square"/>')
-        L = math.hypot(x2 - x1, y2 - y1)
-        dx_, dy_ = (x2 - x1) / L, (y2 - y1) / L
-        k = 1.5
-        while k < L - 1:                              # дайсон-хэтч: кластеры по 3 штриха
-            if rng.random() > 0.12:
-                for j3 in range(3):
-                    ln = rng.uniform(4.5, 9.5)
-                    a = rng.uniform(-0.22, 0.22)
-                    hx = nrm[0] * math.cos(a) - nrm[1] * math.sin(a)
-                    hy = nrm[0] * math.sin(a) + nrm[1] * math.cos(a)
-                    sx = x1 + dx_ * min(L - 1, k + j3 * 1.9)
-                    sy = y1 + dy_ * min(L - 1, k + j3 * 1.9)
-                    out.append(f'<line x1="{sx:.1f}" y1="{sy:.1f}" '
-                               f'x2="{sx + hx * ln:.1f}" y2="{sy + hy * ln:.1f}" '
-                               f'stroke="{INK}" stroke-width="0.8" opacity="0.62"/>')
-            k += rng.uniform(5.5, 8.5)
+
+    # дайсон-хэтч по Watabou: точки Пуассона вокруг силуэта → кластеры изогнутых штрихов,
+    # угол на ближайшего соседа, длина до соседа, подрезка друг о друга (упрощённая: кап)
+    pts = []
+    for (t, dxy, nrm) in ext_edges:
+        (x1, y1), (x2, y2) = _edge_px(t, dxy)
+        for f in (0.25, 0.75):
+            pts.append((x1 + (x2 - x1) * f + nrm[0] * rng.uniform(3, 7),
+                        y1 + (y2 - y1) * f + nrm[1] * rng.uniform(3, 7), nrm))
+    keep = []
+    for p_ in pts:                                    # пуассон-прореживание
+        if all((p_[0] - q[0]) ** 2 + (p_[1] - q[1]) ** 2 > 7 ** 2 for q in keep):
+            keep.append(p_)
+    for (px_, py_, nrm) in keep:
+        near = min((q for q in keep if q is not (px_, py_, nrm)
+                    and (q[0] - px_) ** 2 + (q[1] - py_) ** 2 > 0.1),
+                   key=lambda q: (q[0] - px_) ** 2 + (q[1] - py_) ** 2,
+                   default=None)
+        dist_n = math.hypot(near[0] - px_, near[1] - py_) if near else 10
+        ang = math.atan2(near[1] - py_, near[0] - px_) if near else \
+            math.atan2(nrm[1], nrm[0])
+        ang += rng.uniform(-0.3, 0.3)
+        ln = min(11.0, max(4.0, dist_n * 0.8))
+        step = ln / 3.2
+        for j3 in range(rng.randint(2, 4)):           # кластер изогнутых штрихов
+            ox_ = px_ + math.cos(ang + 1.5708) * (j3 - 1) * step
+            oy_ = py_ + math.sin(ang + 1.5708) * (j3 - 1) * step
+            l2 = ln * rng.uniform(0.7, 1.0)
+            mx_ = ox_ + math.cos(ang) * l2 / 2 + rng.uniform(-1, 1)
+            my_ = oy_ + math.sin(ang) * l2 / 2 + rng.uniform(-1, 1)
+            ex_ = ox_ + math.cos(ang) * l2
+            ey_ = oy_ + math.sin(ang) * l2
+            out.append(f'<path d="M {ox_:.1f} {oy_:.1f} Q {mx_:.1f} {my_:.1f} '
+                       f'{ex_:.1f} {ey_:.1f}" fill="none" stroke="{INK}" '
+                       f'stroke-width="{rng.uniform(0.7, 1.1):.2f}" opacity="0.6"/>')
+
     for (t, dxy) in int_edges:
         (x1, y1), (x2, y2) = _edge_px(t, dxy)
         out.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{INK}" '
@@ -601,6 +632,10 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
         elif kind == "secret":
             out.append(f'<text x="{mxp}" y="{myp + 3.8}" font-size="10.5" '
                        f'text-anchor="middle" font-style="italic" fill="{INK}">S</text>')
+            tw_, th_ = (2.6, S * 0.9) if horiz else (S * 0.9, 2.6)  # гобелен ЗАКРЫВАЕТ ход
+            out.append(f'<rect x="{mxp - tw_ / 2:.1f}" y="{myp - th_ / 2:.1f}" '
+                       f'width="{tw_:.1f}" height="{th_:.1f}" fill="none" stroke="{INK}" '
+                       f'stroke-width="1" stroke-dasharray="1.5 1.8"/>')
 
     # нумерация по ЧАСОВОЙ вокруг центра карты (Watabou), коридоры не нумеруются
     ctr_x = sum(t[0] for t in floor) / max(1, len(floor))

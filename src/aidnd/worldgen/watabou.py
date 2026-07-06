@@ -91,8 +91,12 @@ class Layout:
         guard = 0
         while len(self.rooms) < self.target and guard < self.target * 40:
             guard += 1
-            if not q:                                 # дерево заглохло — добираем от живых
-                r = self.rng.choice(self.rooms)
+            if not q:                                 # дерево заглохло — добираем К ЦЕНТРУ
+                cx = sum(c[0] for c in self.occ) / max(1, len(self.occ))
+                cy = sum(c[1] for c in self.occ) / max(1, len(self.occ))
+                pool = sorted(self.rooms, key=lambda rr: abs(rr.door[0] - cx)
+                              + abs(rr.door[1] - cy))[:max(3, len(self.rooms) // 3)]
+                r = self.rng.choice(pool)
                 rng = random.Random(f"re|{self.rng.random()}")
                 q += self._plan_children(rng, r, self.target - len(self.rooms),
                                          force=True)
@@ -118,6 +122,12 @@ class Layout:
         self._create_loops()
         self._clean_up()
         self._shape_rooms()
+        self.backdoor = None                          # addBackdoor: запасной вход с края
+        if self.rng.random() < 0.6 and len(self.rooms) > 6:
+            per = [r for r in self.rooms if r.size < 2 and r.id != self.rooms[0].id]
+            if per:
+                far = max(per, key=lambda rr: abs(rr.door[0]) + abs(rr.door[1]))
+                self.backdoor = far.id
         return True
 
     def _place(self, t) -> Room | None:
@@ -287,7 +297,7 @@ class Layout:
                 for b in self.rooms:
                     if b.id <= a.id or frozenset((a.id, b.id)) in linked:
                         continue
-                    if dist.get(b.id, 99) <= 4:
+                    if dist.get(b.id, 99) <= 5:
                         continue
                     runs = self._shared_runs(a, b)
                     if runs:
@@ -403,7 +413,8 @@ class Layout:
                     for off in (min(ys) + 1, max(ys) - 1) if horiz \
                             else (min(xs) + 1, max(xs) - 1):
                         columns.append([i, off] if horiz else [off, i])
-        return {"rooms": rooms, "edges": edges, "water": water, "columns": columns}
+        return {"rooms": rooms, "edges": edges, "water": water, "columns": columns,
+                "backdoor": id_map.get(getattr(self, "backdoor", None))}
 
 
 def layout(seed: str, rooms_target: int = 18, order_p: float = 0.75,

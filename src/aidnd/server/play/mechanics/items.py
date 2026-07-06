@@ -231,6 +231,43 @@ def _cont_holder(bid: str, name: str) -> str:
     return f"cont:{bid}:{name}"
 
 
+def _zone_holder(bid: str, zid: str) -> str:
+    return f"zone:{bid}/{zid}"
+
+
+def _materialize_zones(bid: str) -> None:
+    """Обстановка здания → НАСТОЯЩИЕ предметы live.db (holder=zone:<bid>/<zid>), лениво при
+    первом входе. Идемпотентно: id из сида, inv_add OR IGNORE — взятое НЕ возвращается
+    на место (PK world+item хранит нового держателя). Последний слой «всё настоящее»."""
+    from aidnd.server.play.engine.zones import building_zones
+
+    _zd, zones = building_zones(bid)
+    for z in zones:
+        holder = _zone_holder(bid, z["id"])
+        for i, o in enumerate(z.get("objects") or []):
+            if not isinstance(o, dict) or not o.get("name"):
+                continue
+            iid = "it:" + hashlib.md5(
+                f"zone|{_wid()}|{bid}|{z['id']}|{i}|{o['name']}".encode()).hexdigest()[:10]
+            if not _store().get_item(iid):
+                it = item_normalize(o)
+                it["id"] = iid
+                it["fixed"] = bool(o.get("fixed"))    # роли зоны едут с предметом
+                it["afford"] = dict(o.get("afford") or {})
+                _store().save_item(it)
+            _store().inv_add(_wid(), iid, holder=holder)
+
+
+def _zone_stock(bid: str, zid: str) -> list[tuple[str, dict]]:
+    """Что СЕЙЧАС лежит в зоне (после всех краж/взятий) — [(item_id, фактшит)]."""
+    out = []
+    for r in _store().inventory(_wid(), _zone_holder(bid, zid)):
+        it = _store().get_item(r["item_id"])
+        if it:
+            out.append((r["item_id"], it))
+    return out
+
+
 def _put_item(
     seed: str,
     name: str,

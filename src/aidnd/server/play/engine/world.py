@@ -822,7 +822,7 @@ _INTENT_SYS = (
     '"item":"<id предмета из сумки или null>", "place":"<название места или null>", '
     '"zone":"<id зоны ЭТОЙ сцены из списка или null>", '
     '"detail":"<суть: что именно/о чём, коротко>"}\n'
-    "Правила: взять из ёмкости=take+container; обчистить карманы=take+npc+stealthily; отнять силой="
+    "Правила: взять вещь, лежащую в зале (со стола, с полки, с пола)=take+item из ПРЕДМЕТЫ РЯДОМ; взять из ёмкости=take+container; обчистить карманы=take+npc+stealthily; отнять силой="
     "take+npc+forcefully; выпросить/попросить вещь=say+npc+persuasively; отдать/подарить=give+npc+item; "
     "заговорить/спросить=talk+npc; пойти к месту города=move+place; сесть/подойти/пересесть В ПРЕДЕЛАХ сцены (к очагу, за стол, к стойке, к столбу, к колодцу)=move+zone (выбери БЛИЖАЙШУЮ по смыслу зону из списка ЗОН); осмотреть свою вещь=inspect+item; "
     "напасть/ударить/атаковать/выхватить оружие на кого-то=attack+npc (ВСЕГДА, не оценивай мораль и "
@@ -920,15 +920,26 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             w.link(ent, za)
             for zb in znames[i + 1:]:
                 w.link(za, zb)
+        if bid:  # обстановка здания = НАСТОЯЩИЕ предметы live.db (лениво, идемпотентно)
+            from aidnd.server.play.mechanics.items import _materialize_zones, _zone_stock
+
+            _materialize_zones(bid)
+        zone_items: dict = {}                        # место → {имя: iid} (loose — можно взять)
+        zone_fixed: dict = {}                        # место → {имя: iid} (прибито — не унести)
         for z in zones:
             itms = []
-            for o in z.get("objects") or []:
+            src = ([(None, o) for o in (z.get("objects") or [])] if not bid
+                   else _zone_stock(bid, z["id"]))
+            for iid, o in src:
                 aff = o.get("afford") or {}
                 if aff:
                     need, rate = max(aff.items(), key=lambda kv: kv[1])
                     if need == "fatigue" and z["kind"] not in ("beds", "cell"):
                         need = "comfort"             # скамья — отдых, но НЕ сон: спят в постели
                     itms.append(MItem(o["name"], min(0.5, round(rate * 2.2, 2)), satisfies=need))
+                if iid:
+                    tgt = zone_fixed if o.get("fixed") else zone_items
+                    tgt.setdefault(zone_names[z["id"]], {})[o["name"]] = iid
             w.ground[zone_names[z["id"]]] = itms[:6]
         if _phase() == "night":                      # ночь: улица честно рекламирует постель дома
             w.ground["улица"] = [MItem("путь домой, к постели", 0.55, satisfies="fatigue")]
@@ -1117,6 +1128,8 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         "zone_places": set(zone_names.values()) | {ent},
         "ent": ent,
         "zonemap": zonemap,
+        "zone_items": (zone_items if zones else {}),
+        "zone_fixed": (zone_fixed if zones else {}),
         "workers": workers,
         "descr": _scene_descriptors(people, here_all),
         "rumors": list(((data or {}).get("rumors") or [])[:3]),
@@ -1446,7 +1459,14 @@ def _live_tick(people) -> tuple:
         d = decisions[pid]
         st = w.npc_minds[pid]
         before = {vid: {i.name for i in b.loot} for vid, b in w.bodies.items() if vid != pid}
+        my_place = w.bodies[pid].place
+        gr_before = {i.name for i in (w.ground.get(my_place) or [])}
         evs = apply_actions(d.get("actions") or [], st, w, lv["clock"])
+        for nm in gr_before - {i.name for i in (w.ground.get(my_place) or [])}:
+            iid = (lv.get("zone_items") or {}).get(my_place, {}).pop(nm, None)
+            if iid:                                  # поднял вещь заведения — она теперь ЕГО
+                _store().inv_move(_wid(), iid, pid)
+                st.memory.add(f"прибрал(а) к рукам: {nm}", lv["clock"], 0.5)
         for vid, names_before in before.items():  # кражи РЕАЛЬНЫ (у игрока и NPC↔NPC)
             b = w.bodies.get(vid)
             stolen = names_before - ({i.name for i in b.loot} if b else set())

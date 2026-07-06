@@ -66,9 +66,15 @@ def _intent(text: str, sc: dict) -> dict | None:
     from aidnd.server.play.engine.world import _scene_zones
 
     zones_line = "; ".join(f"{z['id']}={z['name']}" for z in _scene_zones()) or "нет"
+    lv = _S.get("live") or {}
+    pl = (lv.get("zone_names") or {}).get(_S.get("zone")) or lv.get("ent", "у входа")
+    near = [f"{iid}={nm}" for nm, iid in (lv.get("zone_items", {}).get(pl) or {}).items()][:10]
+    near += [f"{iid}={nm} [прибито]"
+             for nm, iid in (lv.get("zone_fixed", {}).get(pl) or {}).items()][:4]
     user = (
         f"МЕСТО: {sc['location']['name']}. ЛЮДИ ЗДЕСЬ: {here}. ЁМКОСТИ: {conts}. "
-        f"СУМКА ИГРОКА: {bag}. МЕСТА ГОРОДА: {keys_pl}. ЗОНЫ ПОМЕЩЕНИЯ: {zones_line}.\n"
+        f"СУМКА ИГРОКА: {bag}. МЕСТА ГОРОДА: {keys_pl}. ЗОНЫ ПОМЕЩЕНИЯ: {zones_line}. "
+        f"ПРЕДМЕТЫ РЯДОМ (твоя зона — {pl}): {'; '.join(near) or 'ничего приметного'}.\n"
         f"ФРАЗА ИГРОКА: «{text}»"
     )
     resp = mgr.call(
@@ -133,6 +139,39 @@ def _attempt(intent: dict, sc: dict) -> dict:
 
     if verb == "take" and intent.get("container"):
         return {"loot": intent["container"], "narr": [], "refresh": True}
+
+    if verb == "take" and intent.get("item"):
+        iid = str(intent["item"])
+        lv = _S.get("live") or {}
+        pl = (lv.get("zone_names") or {}).get(_S.get("zone")) or lv.get("ent", "у входа")
+        if iid in (lv.get("zone_fixed", {}).get(pl) or {}).values():
+            out["narr"].append("Не унести — вещь прибита к месту или слишком громоздка.")
+            return out
+        imap = lv.get("zone_items", {}).get(pl) or {}
+        if iid in imap.values():
+            it = _store().get_item(iid) or {}
+            nm = it.get("name", "вещь")
+            wrk = next((wp for wp in (lv.get("workers") or {}) if wp in people), None)
+            caught = False
+            if wrk and manner == "stealthily":       # тайком при хозяине — ловкость против глаз
+                n = int(_store().flag_get(_wid(), f"zsteal|{loc}") or 0) + 1
+                _store().flag_set(_wid(), f"zsteal|{loc}", str(n))
+                roll = random.Random(f"zsteal|{loc}|{n}").randint(1, 20)
+                caught = roll + _PC_CAP.mod("dex") < PB["steal_dc_base"]
+            _store().inv_move(_wid(), iid, "pc")
+            imap.pop(nm, None)
+            _gt_add(PB["act_min"])
+            if wrk and (manner != "stealthily" or caught):
+                wn = _witness_crime(people, crof, loc, wrk,
+                                    f"взял «{nm}» — добро заведения!",
+                                    weight=PB["crime_pickpocket"])
+                out["narr"].append(f"Ты берёшь «{nm}». {people[wrk].name} это видит — "
+                                   f"добро-то заведения. Свидетелей: {wn}.")
+            else:
+                out["narr"].append(f"«{nm}» тихо перекочёвывает в твою сумку.")
+            _pc_remember(f"взял со стола «{nm}»", 0.3)
+            out["refresh"] = True
+            return out
 
     if verb == "take" and npc:
         p = people[npc]

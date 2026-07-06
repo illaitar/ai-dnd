@@ -73,6 +73,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             out["refresh"] = True
             return out
         out["narr"].append("Такого места в этом помещении нет.")
+        out["fail"] = True
         return out
 
     if verb == "move" and intent.get("place"):
@@ -89,6 +90,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             out["goto"] = tgt["node"]  # фронт выполнит обычный move (с ходьбой)
         else:
             out["narr"].append("Ты не знаешь, где это. Спроси у людей.")
+            out["fail"] = True
         return out
 
     if verb == "take" and intent.get("container"):
@@ -100,6 +102,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         pl = (lv.get("zone_names") or {}).get(_S.get("zone")) or lv.get("ent", "у входа")
         if iid in (lv.get("zone_fixed", {}).get(pl) or {}).values():
             out["narr"].append("Не унести — вещь прибита к месту или слишком громоздка.")
+            out["fail"] = True
             return out
         imap = lv.get("zone_items", {}).get(pl) or {}
         if iid in imap.values():
@@ -159,6 +162,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
                     weight=PB["crime_pickpocket"],
                 )
                 out["narr"].append(f"{p.name} вырывается и поднимает крик! Свидетелей: {w}.")
+            out["fail"] = True
             out["refresh"] = True
             return out
         # stealthily (по умолчанию для take+npc): карманная кража — тот же гейт, что был кнопкой
@@ -175,6 +179,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             )
             rel = p.state.relationships.get(PLAYER, {})
             out["narr"].append(f"Тебя ловят за руку! Свидетелей: {w}.")
+            out["fail"] = True
             out["line"] = {
                 "who": p.name,
                 "npc": npc,
@@ -215,6 +220,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         it = _store().get_item(iid)
         if not it or not any(r["item_id"] == iid for r in _store().inventory(_wid(), "pc")):
             out["narr"].append("У тебя нет этой вещи.")
+            out["fail"] = True
             return out
         p = people[npc]
         _store().inv_move(_wid(), iid, npc)
@@ -238,6 +244,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         it = _store().get_item(iid)
         if not it or not any(r["item_id"] == iid for r in _store().inventory(_wid(), "pc")):
             out["narr"].append("У тебя нет этой вещи.")
+            out["fail"] = True
             return out
         _gt_add(PB["give_min"])
         if it["kind"] == "consumable" or not it.get("durability"):
@@ -268,13 +275,16 @@ def _attempt(intent: dict, sc: dict) -> dict:
         data = ((_store().get_building(_wid(), bid) or {}).get("data")) if bid else {}
         if "lodging" not in ((data or {}).get("services") or []):
             out["narr"].append("Здесь не переночуешь — ищи место с ночлегом.")
+            out["fail"] = True
             return out
         if _pc_coins() < PB["rest_cost"]:
             out["narr"].append(f"Ночлег стоит {PB['rest_cost']} зм — а у тебя пусто.")
+            out["fail"] = True
             return out
         now = _gt()
         if _phase(now) == "morning":                 # уже утро — сутки напролёт не спят
             out["narr"].append("Утро на дворе — какой сон? Разве что вздремнуть, да жалко дня.")
+            out["fail"] = True
             return out
         _store().purse_add(_wid(), "pc", -PB["rest_cost"])
         wake = (now // 1440) * 1440 + PB["rest_until_h"] * 60
@@ -347,8 +357,30 @@ async def act(request: Request):
     it = resolve(text, sc)
     if it is None:
         return {"narr": ["(мир задумался и не понял — попробуй иначе)"], "gt": _gt()}
-    it["_text"] = text
-    res = _attempt(it, sc)
+    steps = it.get("plan") or [it]
+    res: dict = {"narr": [], "refresh": False}
+    import logging
+
+    logging.getLogger("aidnd.scene").debug(
+        "план игрока: %s ← «%s»",
+        " → ".join(str(st.get("verb")) for st in steps[:PB["plan_cap"]]), text[:80])
+    for i, step in enumerate(steps[:PB["plan_cap"]]):  # ЦЕПЬ: рвётся там, где рвётся
+        step["_text"] = text
+        if (len(steps) > 1 and step.get("verb") in ("take", "give", "use", "inspect")
+                and not any(step.get(k) for k in ("item", "container", "npc"))):
+            res["narr"].append("Этого нет под рукой — план обрывается.")
+            break                                     # в цепи нарратор НЕ дарит несуществующее
+        r = _attempt(step, sc)
+        narr, refresh = res["narr"] + (r.get("narr") or []), res["refresh"] or bool(
+            r.get("refresh"))
+        res.update(r)
+        res["narr"], res["refresh"] = narr, refresh
+        if r.get("fail") or any(
+            k in r for k in ("open_talk", "goto", "combat", "loot", "inspect", "map_open")
+        ):
+            if r.get("fail") and i + 1 < len(steps):
+                res["narr"].append("Задуманное дальше не идёт — план оборвался здесь.")
+            break
     _pc_remember(f"я: {text[:80]}", 0.2)
     t = _world_tick() if not res.get("combat") else {"feed": [], "address": []}
     return {**res, **t, "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}

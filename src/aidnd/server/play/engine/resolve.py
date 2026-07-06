@@ -59,14 +59,17 @@ def _sys_prompt() -> str:
         )
         for p in PRIMITIVES
     )
+    step = ('{"verb":"' + verbs + '", "manner":"' + manners + '", '
+            + ", ".join(_FIELD_HINT.values())
+            + ', "detail":"<суть: что именно/о чём, коротко>"}')
     return (
         "Ты — арбитр намерения игрока в тёмно-фэнтезийной игре. По фразе и обстановке верни "
-        "СТРОГО JSON с ОДНИМ действием:\n"
-        '{"verb":"' + verbs + '", "verdict":"do|narrate", "manner":"' + manners + '", '
-        + ", ".join(_FIELD_HINT.values())
-        + ', "detail":"<суть: что именно/о чём, коротко>"}\n'
-        "Соответствия: " + rules + ". "
-        'verdict: "do" — исполняем примитив; "narrate" — не-действие (тогда verb=wait). '
+        "СТРОГО JSON — ПЛАН из 1-3 звеньев в порядке исполнения:\n"
+        '{"verdict":"do|narrate", "plan":[' + step + ', ...]}\n'
+        "Каждое звено — ОДИН инструмент. Фраза с несколькими действиями («беру кружку и сажусь "
+        "к очагу») = несколько звеньев по порядку. Вещь/человек в ДРУГОЙ зоне — сначала "
+        "move+zone туда, потом дело. Соответствия: " + rules + ". "
+        'verdict: "do" — исполняем; "narrate" — не-действие (план из одного wait). '
         "Только перечисленные id/имена, ничего не выдумывай."
     )
 
@@ -91,12 +94,22 @@ def assemble_context(sc: dict) -> str:
     near = [f"{iid}={nm}" for nm, iid in (lv.get("zone_items", {}).get(pl) or {}).items()][:10]
     near += [f"{iid}={nm} [прибито]"
              for nm, iid in (lv.get("zone_fixed", {}).get(pl) or {}).items()][:4]
+    zid_of = {v: k for k, v in (lv.get("zone_names") or {}).items()}
+    afar, total = [], 0
+    for zpl, imap in (lv.get("zone_items") or {}).items():   # видимое ГЛАЗАМИ по чужим зонам
+        if zpl == pl or total >= 18:
+            continue
+        row = [f"{iid}={nm}" for nm, iid in list(imap.items())[:3]]
+        total += len(row)
+        if row:
+            afar.append(f"{zid_of.get(zpl, '?')} ({zpl}): " + ", ".join(row))
     amb = sc.get("ambient") or {}
     return (
         f"МЕСТО: {sc['location']['name']}. ВРЕМЯ: {amb.get('time', '')} "
         f"{_gt() // 60 % 24:02d}:{_gt() % 60:02d}. ЛЮДИ ЗДЕСЬ: {here}. ЁМКОСТИ: {conts}. "
         f"СУМКА ИГРОКА: {bag}. МЕСТА ГОРОДА: {keys_pl}. ЗОНЫ: {zones_line}. "
-        f"ПРЕДМЕТЫ РЯДОМ (твоя зона — {pl}): {'; '.join(near) or 'ничего приметного'}."
+        f"ПРЕДМЕТЫ РЯДОМ (твоя зона — {pl}): {'; '.join(near) or 'ничего приметного'}. "
+        f"ВИДНО В ДРУГИХ ЗОНАХ: {'; '.join(afar) or '—'}."
     )
 
 
@@ -114,6 +127,19 @@ def resolve(text: str, sc: dict) -> dict | None:
         out = json.loads(t[t.find("{"): t.rfind("}") + 1])
     except (json.JSONDecodeError, ValueError):
         return None
-    if str(out.get("verdict") or "") == "narrate":   # не-действие → нарратор (DM-ветка)
-        out["verb"] = "wait"
-    return out
+    return normalize_plan(out)
+
+
+def normalize_plan(out: dict, cap: int = 3) -> dict:
+    """Ответ арбитра → честный план: список звеньев-словарей, кап длины, wait-балласт
+    выброшен из цепочек (wait осмыслен только соло — как не-действие для нарратора)."""
+    steps = out.get("plan") if isinstance(out.get("plan"), list) else None
+    if steps is None:
+        steps = [out]                                # обратная совместимость: один шаг
+    steps = [s for s in steps if isinstance(s, dict)]
+    if str(out.get("verdict") or "") == "narrate":
+        d = next((s.get("detail") for s in steps if s.get("detail")), out.get("detail"))
+        steps = [{"verb": "wait", "detail": d or ""}]
+    if len(steps) > 1:
+        steps = [s for s in steps if (s.get("verb") or "wait") != "wait"] or steps[:1]
+    return {"verdict": out.get("verdict") or "do", "plan": steps[:cap]}

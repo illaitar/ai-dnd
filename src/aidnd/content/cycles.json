@@ -1,0 +1,17 @@
+{
+  "_": "Словарь циклов (Дорманс/Unexplored): паттерн = роли двух дуг кольца вход→цель. Роли: open — обычный маршрут; key_far — ключ в середине дуги; locked_goal — замок на подходе к цели с ЭТОЙ дуги; danger — дуга помечена опасной (стокинг усилит, этап B); long_safe — длинная безопасная; secret — середина дуги спрятана (шорткат за секреткой); window — если найдётся соседство между дугами, прорубается окно-предвестие (видна цель, не пройти).",
+  "cycles": [
+    {"key": "two_paths",       "w": 3, "arcs": ["open", "open"]},
+    {"key": "lock_and_key",    "w": 3, "arcs": ["locked_goal", "key_far"]},
+    {"key": "short_danger",    "w": 2, "arcs": ["danger", "long_safe"]},
+    {"key": "hidden_shortcut", "w": 2, "arcs": ["open", "secret"]},
+    {"key": "foreshadow",      "w": 2, "arcs": ["window", "open"]},
+    {"key": "double_key",      "w": 1, "arcs": ["key_far", "key_far"], "double_lock": true}
+  ],
+  "nests": [
+    {"key": "loop",        "w": 3},
+    {"key": "stub",        "w": 3},
+    {"key": "secret_stub", "w": 2},
+    {"key": "locked_stub", "w": 2}
+  ]
+}

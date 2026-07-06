@@ -195,6 +195,24 @@ def citydebug_plans_page(_: Owner) -> HTMLResponse:
         return HTMLResponse(f.read())
 
 
+@router.get("/citydebug/dungeons")
+def citydebug_dungeons_page(_: Owner) -> HTMLResponse:
+    """Галерея скелетов подземелий — стенд циклической генерации (этап A)."""
+    with open(os.path.join(WEB_DIR, "dungeonsdebug.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@router.get("/api/citydebug/dungeonart")
+def citydebug_dungeonart(_: Owner, seed: str, env: str = "Ruin") -> dict:
+    """Данж по сиду: скелет + бумажный черновик (детерминированно, без LLM)."""
+    from ..worldgen.dungeongen import dungeon_svg, generate
+    d = generate(seed, env=env)
+    return {"seed": seed, "metrics": d["metrics"],
+            "locks": sum(1 for e in d["edges"] if e["kind"] == "locked"),
+            "secrets": sum(1 for e in d["edges"] if e["kind"] == "secret"),
+            "svg": dungeon_svg(d, f"Подземелье «{seed}»")}
+
+
 @router.get("/api/citydebug/planart")
 def citydebug_planart(_: Owner, bid: str) -> dict:
     """Бумажный (пергаментный) рендер плана здания пула."""

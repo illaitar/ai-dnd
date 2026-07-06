@@ -210,6 +210,13 @@ def _attempt(intent: dict, sc: dict) -> dict:
         out["refresh"] = True
         return out
 
+    if verb == "say" and npc and isinstance(intent.get("deal"), dict):
+        from aidnd.server.play.mechanics.deals import deal_attempt
+
+        r = deal_attempt(npc, intent["deal"], manner, out, people, crof, loc)
+        if r is not None:                            # не сделка (нет ставки) — обычный диалог
+            return r
+
     if verb == "say" and npc and manner == "persuasively":
         out["open_talk"] = npc  # уговоры — это диалог; ключ просится там
         out["say_first"] = detail or None

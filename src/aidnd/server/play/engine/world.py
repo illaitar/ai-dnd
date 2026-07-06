@@ -94,7 +94,9 @@ def _world_events() -> None:
     if _wanted() > 0:  # розыск остывает — память не вечна
         _wanted_add(-PB["wanted_decay"])
     try:
-        news = _npc_delves()
+        from aidnd.server.play.mechanics.deals import _deal_jobs
+
+        news = _npc_delves() + _deal_jobs()
         if news:
             _S["guild_news"] = (_S.get("guild_news") or [])[-2:] + news
     except Exception:  # noqa: BLE001 — вылазка не роняет мир

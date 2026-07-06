@@ -17,7 +17,11 @@ from aidnd.server.play.engine.core import _S, _gt, _model, _store, _wid
 PRIMITIVES = (
     {"verb": "talk", "targets": ("npc",), "when": "заговорить/спросить/обратиться к человеку"},
     {"verb": "say", "targets": ("npc",), "manner": "persuasively",
-     "when": "выпросить/попросить вещь, уговорить на что-то"},
+     "when": "выпросить/попросить вещь, уговорить на что-то БЕЗ платы"},
+    {"verb": "say", "targets": ("npc", "deal"),
+     "when": "предложить СДЕЛКУ со ставкой золота (заплачу/найму/дам N зм если…): deal.kind — "
+             "dead=убить, bring=принести/добыть, visit=прийти куда-то, befriend=подружиться; "
+             "шёпотом/на ухо/отведя в сторону = manner stealthily (никто не услышит)"},
     {"verb": "move", "targets": ("zone",),
      "when": "сесть/подойти/пересесть В ПРЕДЕЛАХ сцены (к очагу, за стол, к стойке, к столбу, "
              "к колодцу) — выбери БЛИЖАЙШУЮ по смыслу зону из ЗОН"},
@@ -46,6 +50,9 @@ _FIELD_HINT = {
     "item": '"item":"<id из СУМКА или ПРЕДМЕТЫ РЯДОМ, или null>"',
     "place": '"place":"<название из МЕСТА ГОРОДА или null>"',
     "zone": '"zone":"<id из ЗОНЫ или null>"',
+    "deal": '"deal":{"kind":"dead|bring|visit|befriend", "target":"<id человека-цели или '
+            'null>", "want":"<вещь/место, если цель не человек>", "stake_gold":<целое зм>} '
+            'или null',
 }
 
 

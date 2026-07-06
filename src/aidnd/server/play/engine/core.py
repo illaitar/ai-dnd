@@ -104,6 +104,28 @@ PB = {
     "live_llm_cap": 8,
     "impulse_llm": 1.0,  # дирижёр: LLM-ход только при импульсе выше порога (долг/нужда/беседа)
     "plan_cap": 3,  # цепочка звеньев из одной фразы: план длиннее — обрезаем
+    # СДЕЛКИ игрока (deal-гейт): базовые DC/цены по видам, веса нрава/адекватности ставки
+    "deal_dc_dead": 15,
+    "deal_dc_bring": 11,
+    "deal_dc_visit": 9,
+    "deal_dc_befriend": 10,
+    "deal_price_dead": 30,
+    "deal_price_bring": 8,
+    "deal_price_visit": 4,
+    "deal_price_befriend": 6,
+    "deal_honesty_k": 7,
+    "deal_honesty_dead_k": 12,
+    "deal_malice_dead_k": 8,
+    "deal_adq_k": 5,
+    "deal_adq_clamp": 6,  # адекватность ставки двигает DC максимум на ±6
+    "deal_aff_k": 6,
+    "deal_fear_k": 4,
+    "deal_flat_honesty": 0.75,
+    "deal_flat_malice": 0.35,  # честный и незлобный кровь не берёт БЕЗ броска
+    "deal_kin_aff": 0.3,  # тёплые отношения с целью — «своих не трону»
+    "deal_due_min": 1440,  # сутки на исполнение уговора
+    "deal_night_min": 300,  # на кровь идут не раньше чем через 5 часов (ночью)
+    "crime_solicit": 3,  # подстрекательство к убийству при отказе — розыск
     "bg_feed_p": 0.25,  # фоновое занятие попадает в ленту с этой вероятностью (LOD)
     "here_show_cap": 12,
     # подарок: прирост симпатии = min(cap, base + worth/div)

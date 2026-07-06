@@ -1346,17 +1346,41 @@ def _live_tick(people) -> tuple:
         ctx["event"] = salient
     ctx["oaths"] = oaths
 
-    def think_one(pid):  # решения параллельно, снимок мира один
+    def think_one(pid):  # внутри волны — параллельно; волны видят заявки предыдущих
         st = w.npc_minds[pid]
         _decay_needs(st)
         _decay_emotion(st)
         advance_agendas(st, w)  # долгие цели двигаются
         return pid, decide_hybrid(st, w, mind_perceive(st, w), mgr, ctx)
 
+    def _claim(pid, d) -> str:
+        """Заявка актёра для следующей волны: что он ПРЯМО СЕЙЧАС делает/говорит."""
+        bits = []
+        for a in (d.get("actions") or [])[:2]:
+            if not isinstance(a, dict):
+                continue
+            if a.get("tool") == "say" and a.get("text"):
+                bits.append(f"говорит: «{str(a['text'])[:48]}…»")
+            elif a.get("tool") == "use" and a.get("item"):
+                bits.append(f"занят: {a['item']}")
+            elif a.get("tool") == "move" and a.get("to"):
+                bits.append(f"идёт: {a['to']}")
+        what = "; ".join(bits) or str(d.get("does") or "")[:60]
+        return f"{lv['names'].get(pid, pid)} — {what}" if what else ""
+
     from concurrent.futures import ThreadPoolExecutor
 
+    # АНТИ-ХОР: волны решений — лидер (высший импульс) первым, свита видит его заявку
+    decisions: dict = {}
+    waves = [actors[:1], actors[1:]] if len(actors) > 1 else [actors]
     with ThreadPoolExecutor(max_workers=8) as ex:
-        decisions = dict(ex.map(think_one, actors))
+        for wave in waves:
+            if not wave:
+                continue
+            ctx["now"] = [c for pid_ in decisions
+                          if (c := _claim(pid_, decisions[pid_]))]
+            decisions.update(ex.map(think_one, wave))
+    ctx.pop("now", None)
 
     # фоновые ЖИВУТ без LLM: заняты предметом своей зоны, нужды закрываются, зал их видит
     bg_feed = []
@@ -1444,8 +1468,24 @@ def _live_tick(people) -> tuple:
         said_n += 1
         return True
 
+    used_items: set = set()                           # физика: один предмет — одни руки за тик
     for pid in actors:  # применяем последовательно (честный порядок)
         d = decisions[pid]
+        for a in d.get("actions") or []:
+            if not (isinstance(a, dict) and a.get("tool") == "use" and a.get("item")):
+                continue
+            key = (w.bodies[pid].place, str(a["item"]).lower())
+            if key not in used_items:
+                used_items.add(key)
+                continue
+            taken = {k[1] for k in used_items if k[0] == w.bodies[pid].place}
+            alt = next((i for i in w.ground.get(w.bodies[pid].place, [])
+                        if i.satisfies and i.name.lower() not in taken), None)
+            if alt is not None:                       # кружка занята — берёт соседнюю
+                a["item"] = alt.name
+                used_items.add((w.bodies[pid].place, alt.name.lower()))
+            else:
+                a["tool"] = "wait"                    # всё разобрано — ждёт своей очереди
         st = w.npc_minds[pid]
         before = {vid: {i.name for i in b.loot} for vid, b in w.bodies.items() if vid != pid}
         my_place = w.bodies[pid].place

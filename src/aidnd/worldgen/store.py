@@ -42,6 +42,9 @@ class WorldStore:
             c.execute("CREATE TABLE IF NOT EXISTS flags (world_id INT, key TEXT, val TEXT, "
                       "PRIMARY KEY(world_id, key))")
             # контракты: делегированные вехи агенд NPC (want-предикат + реальная награда)
+            c.execute("CREATE TABLE IF NOT EXISTS deeds (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                      "world_id INT, gt INT, actor TEXT, verb TEXT, obj TEXT, place TEXT, "
+                      "witnesses TEXT, status TEXT, data TEXT)")
             c.execute("CREATE TABLE IF NOT EXISTS contracts (world_id INT, id TEXT, status TEXT, "
                       "data TEXT, PRIMARY KEY(world_id, id))")
             # живое состояние placed NPC (память/отношения/нужды) — переживает рестарт
@@ -193,6 +196,42 @@ class WorldStore:
         with self._conn() as c:
             q = "SELECT COUNT(*) FROM building_pool" + (" WHERE kind=?" if kind else "")
             return c.execute(q, ((kind,) if kind else ())).fetchone()[0]
+
+    # ── ДЕЛА (deeds): append-only журнал мира — субстрат сплетен/стражи/хроники/обязательств ──
+    def deed_add(self, world_id: int, gt: int, actor: str, verb: str, obj: str = "",
+                 place: str = "", witnesses: list | None = None, status: str = "",
+                 data: dict | None = None) -> int:
+        with self._conn() as c:
+            cur = c.execute(
+                "INSERT INTO deeds (world_id, gt, actor, verb, obj, place, witnesses, status, data) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (world_id, gt, actor, verb, obj, place,
+                 json.dumps(witnesses or [], ensure_ascii=False), status,
+                 json.dumps(data or {}, ensure_ascii=False)))
+            return int(cur.lastrowid)
+
+    def deeds(self, world_id: int, verb: str | None = None, actor: str | None = None,
+              status: str | None = None, since_gt: int | None = None, limit: int = 20) -> list:
+        q, args = "SELECT id, gt, actor, verb, obj, place, witnesses, status, data FROM deeds "                   "WHERE world_id=?", [world_id]
+        if verb:
+            q += " AND verb=?"; args.append(verb)
+        if actor:
+            q += " AND actor=?"; args.append(actor)
+        if status:
+            q += " AND status=?"; args.append(status)
+        if since_gt is not None:
+            q += " AND gt>=?"; args.append(since_gt)
+        q += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+        with self._conn() as c:
+            rows = c.execute(q, args).fetchall()
+        return [{"id": r[0], "gt": r[1], "actor": r[2], "verb": r[3], "obj": r[4],
+                 "place": r[5], "witnesses": json.loads(r[6] or "[]"),
+                 "status": r[7], "data": json.loads(r[8] or "{}")} for r in rows]
+
+    def deed_status(self, world_id: int, deed_id: int, status: str) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE deeds SET status=? WHERE world_id=? AND id=?",
+                      (status, world_id, deed_id))
 
     def save_person(self, pid: str, role: str, name: str, charisma: float, appearance: float,
                     mech: dict, persona: dict, portraits: dict, seed: int) -> None:

@@ -80,6 +80,35 @@ def routine_step(people: dict, crof: dict) -> None:
     for kind, nodes in place_idx.items():
         for n in nodes:
             node2kind.setdefault(n, kind)
+    from aidnd.server.play.engine import deeds as _deeds
+
+    # обязательства: в СРОК рутина тянет обе стороны на место встречи; просрочка = слово нарушено
+    appts: dict = {}
+    for d in _deeds.promises_active():
+        node = d["data"].get("node")
+        due = d["data"].get("due")
+        if node is None:
+            continue
+        if due == phase:
+            appts.setdefault(d["actor"], node)
+            appts.setdefault(d["obj"], node)
+        elif gt > d["data"].get("made_gt", gt) + 300 and due != phase:
+            both = crof.get(d["actor"]) == node and crof.get(d["obj"]) == node
+            _deeds.promise_resolve(d, both)
+            actor_p, obj_p = people.get(d["actor"]), people.get(d["obj"])
+            if actor_p and obj_p:
+                if both:
+                    actor_p.state.memory.add(f"я сдержал(а) слово ({obj_p.name})", gt // 10, 0.55,
+                                             about=[d["obj"]])
+                    obj_p.state.memory.add(f"{actor_p.name} сдержал(а) слово", gt // 10, 0.55,
+                                           about=[d["actor"]])
+                    obj_p.state.rel(d["actor"])["trust"] = min(
+                        1.0, obj_p.state.rel(d["actor"]).get("trust", 0) + 0.15)
+                else:
+                    obj_p.state.memory.add(f"{actor_p.name} НЕ сдержал(а) слово", gt // 10, 0.6,
+                                           about=[d["actor"]])
+                    obj_p.state.rel(d["actor"])["trust"] = max(
+                        -1.0, obj_p.state.rel(d["actor"]).get("trust", 0) - 0.25)
     last = _S.setdefault("needs_gt", {})
     for pid, p in people.items():
         st = p.state
@@ -89,6 +118,8 @@ def routine_step(people: dict, crof: dict) -> None:
             here = "home"
         rng = random.Random(f"rout|{pid}|{phase}|{gt // 30}")
         cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds)
+        if pid in appts:                              # уговор в силе: место встречи зовёт
+            cands.append(society.Candidate("appointment", appts[pid]))
         node = society.step(st, cands, phase, mins, here, rng)
         if node is not None:
             crof[pid] = node

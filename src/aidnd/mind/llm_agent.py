@@ -40,6 +40,9 @@ TOOLSPEC = """ДОСТУПНЫЕ ИНСТРУМЕНТЫ (верни послед
   feel   {"emotion": "anger|fear|joy|distress", "value": 0.0-1.0} — изменить свою эмоцию
   need   {"need": "hunger|fatigue|social|purpose|wealth|comfort|novelty", "value": 0.0-1.0} — свою нужду
   note   {"text": "<мысль/намерение>"}          — записать замысел в память (увидишь в след. ходы)
+  promise {"to": "<имя>", "what": "<что сделаешь>", "when": "утром|днём|вечером|ночью|завтра",
+           "where": "<известное место или пусто>"} — дать СЛОВО (встреча/услуга). Мир ПОМНИТ
+           обещания: сдержишь — уважение, бросишь — дурная слава. Не обещай попусту.
   wait   {}                                     — наблюдать (только если правда нечего делать)
 Отвечай ОДНИМ JSON: {"think": "<короткая мысль>", "actions": [ {"tool": "...", ...}, ... ]}
 Только реально доступное: двигайся лишь в перечисленные выходы; атакуй/бери лишь тех, кто РЯДОМ (здесь же)."""
@@ -142,6 +145,13 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     if my_rumor:
         lines.append(f"  ТЫ слыхал здешний слух: «{my_rumor}» — поделишься или придержишь, "
                      "дело твоё (другие могут его и не знать).")
+    ev = ctx.get("event")
+    if ev:
+        lines.append(f"  ⚡ ТОЛЬКО ЧТО: {ev} — отреагируй по своему характеру (страх/любопытство/"
+                     "вмешаться/не моё дело).")
+    oath = ctx.get("oaths", {}).get(cfg.id)
+    if oath:
+        lines.append(f"  ⚑ {oath}")
     conv = ctx.get("convs", {}).get(cfg.id)
     if conv:
         lines.append("")
@@ -404,6 +414,18 @@ def apply_actions(actions, state, world, clock: int) -> list:
         elif tool == "note":
             state.memory.add(str(a.get("text", ""))[:120], clock, importance=0.5, kind="note")
             log.append("✎")
+        elif tool == "promise":                      # СЛОВО: память обеим сторонам; мир пишет deed
+            to = str(a.get("to") or "")
+            tid_ = _find_body(world, to)
+            what = str(a.get("what") or "")[:100]
+            when = str(a.get("when") or "")[:20]
+            state.memory.add(f"я дал(а) слово ({to}): {what} — {when}", clock, 0.7,
+                             kind="note", about=[tid_.id] if tid_ else [])
+            if tid_ is not None and tid_.id in getattr(world, "npc_minds", {}):
+                world.npc_minds[tid_.id].memory.add(
+                    f"{getattr(state.config, 'name', '?')} дал(а) мне слово: {what} — {when}",
+                    clock, 0.6, about=[state.config.id])
+            log.append(f"слово→{to}: {what[:40]}")
         elif tool == "wait":
             log.append("·")
     return log or ["·"]

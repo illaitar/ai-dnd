@@ -1147,6 +1147,8 @@ def _gossip(actor_st, actor_name: str, target_st) -> None:
 
 
 def _live_tick(people) -> tuple:
+    from aidnd.server.play.engine import deeds as _deeds
+
     lv, mgr = _S["live"], _model()
     w = lv["world"]
     inz = lv.get("zone_places")
@@ -1207,6 +1209,7 @@ def _live_tick(people) -> tuple:
     if zname_of.get(PLAYER):
         roles[PLAYER] = f"{roles.get(PLAYER, 'чужак')}; он сейчас — {zname_of[PLAYER]}"
     news = [str(x) for x in ((_S.get("guild_news") or []) + (_S.get("board_news") or []))[-2:]]
+    news += _deeds.town_talk(lv["names"], limit=2)     # свежие ДЕЛА города — в сплетни
     rums = lv.get("rumors") or []
     rumor_of = ({pid: rums[hash((pid, _gt() // 1440)) % len(rums)] for pid in order}
                 if rums else {})
@@ -1238,13 +1241,24 @@ def _live_tick(people) -> tuple:
     )
 
     conv_tick(lv, lambda m: w.bodies[m].place if m in w.bodies else None)
+    salient = lv.pop("salient", None)
+    oaths, oaths_due = {}, set()
+    for d_ in _deeds.promises_active():
+        if d_["actor"] in w.npc_minds:
+            oaths[d_["actor"]] = _deeds.promise_line(d_, lv["names"])
+            if d_["data"].get("due") == _phase():
+                oaths_due.add(d_["actor"])
     impulses: dict = {}
     for pid in order:
         st = w.npc_minds[pid]
         imp, why = 0.35, "фон"
         c = conv_of(lv, pid)
-        if conv_debt_to(lv, pid):
+        if salient:
+            imp, why = 3.5, "событие"
+        elif conv_debt_to(lv, pid):
             imp, why = 4.0, "долг ответа"
+        elif pid in oaths_due:
+            imp, why = 2.6, "слово"                    # срок пришёл — данное слово тянет
         elif max(st.emotion.get("fear", 0), st.emotion.get("anger", 0)) >= 0.5:
             imp, why = 3.0, "эмоция"
         elif c is not None and c.get("quiet", 9) <= 1:
@@ -1265,6 +1279,9 @@ def _live_tick(people) -> tuple:
     background = [p for p in order if p not in actors]
     ctx["convs"] = {pid: b for pid in actors
                     if (b := conv_block(lv, pid, lv["names"]))}
+    if salient:
+        ctx["event"] = salient
+    ctx["oaths"] = oaths
 
     def think_one(pid):  # решения параллельно, снимок мира один
         st = w.npc_minds[pid]
@@ -1403,6 +1420,10 @@ def _live_tick(people) -> tuple:
                     st.memory.add(
                         f"я обчистил(а) чужака: взял(а) {nm}", lv["clock"], 0.7, about=[PLAYER]
                     )
+                    _deeds.record(pid, "theft", obj=PLAYER, place=lv["place"],
+                                  witnesses=[o for o in order
+                                             if o != pid and w.bodies[o].place == w.bodies[pid].place],
+                                  data={"what": nm})
                 else:
                     if nm == "кошель":
                         take = max(1, _store().purse_get(_wid(), vid) // PB["purse_cut"])
@@ -1427,6 +1448,8 @@ def _live_tick(people) -> tuple:
                         w.npc_minds[vid].memory.add(
                             f"меня обокрали — пропало {nm}", lv["clock"], 0.7, about=[pid]
                         )
+                    _deeds.record(pid, "theft", obj=vid, place=lv["place"],
+                                  witnesses=[PLAYER], data={"what": nm})
                     _pc_remember(
                         f"видел, как {_display(pid, people)} обокрал {_display(vid, people)}",
                         0.5,
@@ -1509,6 +1532,21 @@ def _live_tick(people) -> tuple:
                             0.55,
                             about=[pid],
                         )
+        for a in d.get("actions") or []:                 # СЛОВО NPC → обязательство мира
+            if isinstance(a, dict) and a.get("tool") == "promise" and a.get("to"):
+                to_id = (w.aliases or {}).get(str(a["to"]).strip().lower(), str(a["to"]))
+                wtok = _tokens_ru(str(a.get("where") or ""))
+                spot = next((k for k in _S["geom"]["keys"]
+                             if wtok and _tokens_ru(k["label"]) & wtok), None)
+                _deeds.promise_make(pid, to_id, str(a.get("what") or ""),
+                                    str(a.get("when") or ""), str(a.get("where") or ""),
+                                    spot["node"] if spot else None,
+                                    spot["label"] if spot else str(a.get("where") or ""),
+                                    witnesses=[o for o in order if o != pid])
+                feed.append({"k": "deed", "who": who,
+                             "text": f"даёт слово: {str(a.get('what') or '')[:60]}"})
+        if any(isinstance(a, dict) and a.get("tool") == "attack" for a in d.get("actions") or []):
+            lv["salient"] = f"{who} бросается в драку!"     # событие: зал вздрогнет в след. тик
         # ЕДА НЕ БЕСПЛАТНА: use съестного при работнике заведения = заказ с оплатой
         owner = next((wk for wk in (lv.get("workers") or ()) if wk in order), None)
         if owner and owner != pid:

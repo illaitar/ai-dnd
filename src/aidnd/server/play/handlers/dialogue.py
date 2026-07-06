@@ -7,6 +7,7 @@ import os
 
 from fastapi import Request
 
+from aidnd.inference import LLMBadOutput, LLMUnavailable
 from aidnd.mind import Body, think
 from aidnd.mind import World as MWorld
 from aidnd.server.play.engine.core import (
@@ -17,6 +18,7 @@ from aidnd.server.play.engine.core import (
     _emo,
     _gt,
     _gt_add,
+    _here,
     _met,
     _mt,
     _npc_save,
@@ -42,10 +44,12 @@ def _mind_scene(npc_id, people) -> MWorld:
 
 @router.post("/api/play/talk")
 async def talk(request: Request):
-    _city, people, _crof, _cr2b, _loc = _play()
+    _city, people, crof_, _cr2b, loc_ = _play()
     npc = (await request.json()).get("npc")
     if npc not in people:
         return {"error": "нет такого"}
+    if npc not in _here(loc_, crof_):
+        return {"error": "его здесь нет — говорить можно с тем, кто рядом"}
     p = people[npc]
     first = npc not in _met()
     _pc().rel(npc)  # заговорил = познакомился (имя открыто)
@@ -81,7 +85,9 @@ async def talk(request: Request):
     ]  # что игрок ЗНАЕТ об этом человеке
     try:
         contract = _contract_offer(npc)  # у него может быть к тебе дело (из агенды)
-    except Exception:  # noqa: BLE001 — просьба не должна ломать диалог
+    except (LLMUnavailable, LLMBadOutput):  # без модели не притворяемся (принцип 1)
+        raise
+    except Exception:  # noqa: BLE001 — прочие сбои просьбы не ломают диалог
         contract = None
     return {
         "name": p.name,
@@ -111,11 +117,13 @@ async def talk(request: Request):
 
 @router.post("/api/play/say")
 async def say(request: Request):
-    _city, people, _crof, _cr2b, _loc = _play()
+    _city, people, crof_, _cr2b, loc_ = _play()
     b = await request.json()
     npc = b.get("npc")
     if npc not in people:
         return {"error": "нет такого"}
+    if npc not in _here(loc_, crof_):
+        return {"error": "он уже не рядом — разговор оборвался"}
     p = people[npc]
     rel = p.state.relationships.setdefault(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     text = str(b.get("text", ""))

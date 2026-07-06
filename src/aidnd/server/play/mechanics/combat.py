@@ -549,6 +549,8 @@ def _npc_delves() -> list:
     names = " и ".join(p.name for _pid, p in duo)
     if r["status"] == "won":
         _store().flag_set(_wid(), f"cleared|{l['id']}")
+        from aidnd.server.play.engine import deeds as _deeds
+        _deeds.record("guild", "clear", obj=l["name"], place=l["name"])
         for pid, p in duo:
             _store().purse_add(_wid(), pid, max(1, job["reward"] // 2))
             p.state.memory.add(

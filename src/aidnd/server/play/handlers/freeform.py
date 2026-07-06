@@ -25,6 +25,7 @@ from aidnd.server.play.engine.core import (
     _pc_hp,
     _pc_remember,
     _pc_save,
+    _phase,
     _store,
     _wid,
     _witness_crime,
@@ -272,8 +273,11 @@ def _attempt(intent: dict, sc: dict) -> dict:
         if _pc_coins() < PB["rest_cost"]:
             out["narr"].append(f"Ночлег стоит {PB['rest_cost']} зм — а у тебя пусто.")
             return out
-        _store().purse_add(_wid(), "pc", -PB["rest_cost"])
         now = _gt()
+        if _phase(now) == "morning":                 # уже утро — сутки напролёт не спят
+            out["narr"].append("Утро на дворе — какой сон? Разве что вздремнуть, да жалко дня.")
+            return out
+        _store().purse_add(_wid(), "pc", -PB["rest_cost"])
         wake = (now // 1440) * 1440 + PB["rest_until_h"] * 60
         if wake <= now:
             wake += 1440

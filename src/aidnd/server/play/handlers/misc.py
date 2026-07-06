@@ -41,3 +41,11 @@ def debug_log_clear():
     _play()
     clear_log()
     return {"ok": True}
+
+
+@router.get("/api/play/deeds")
+def deeds_list(limit: int = 12):
+    """Хроника мира: последние ДЕЛА (журнал deeds) — сырьё для UI-хроники и дебага."""
+    _play()
+    from aidnd.server.play.engine.core import _store, _wid
+    return {"deeds": _store().deeds(_wid(), limit=min(int(limit), 50))}

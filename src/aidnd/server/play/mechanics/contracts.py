@@ -137,14 +137,19 @@ def _contract_offer(npc: str) -> dict | None:
     """Личная просьба в разговоре: раз на человека (флаг coffer). Механика решает ЧТО можно,
     LLM просит В ХАРАКТЕРЕ."""
     p = _S["people"][npc]
-    if _store().flag_get(_wid(), f"coffer|{npc}"):
-        return None
+    last = _store().flag_get(_wid(), f"coffer|{npc}")
+    if last:
+        try:
+            if _gt() - int(last) < 2880:             # просил недавно — не канючит; 2 суток и можно снова
+                return None
+        except ValueError:                           # старый формат флага (без gt) — протух
+            pass
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
     if rel.get("affinity", 0) < PB["contract_enemy_aff"]:  # с явным недругом дел не ведут
         return None
     r = _make_contract(npc, "offered")
     if r:
-        _store().flag_set(_wid(), f"coffer|{npc}")
+        _store().flag_set(_wid(), f"coffer|{npc}", str(_gt()))
     return r
 
 
@@ -312,6 +317,10 @@ def _contract_complete(ct: dict) -> str:
     p.state.rel(PLAYER)["trust"] = min(1.0, p.state.rel(PLAYER)["trust"] + PB["complete_trust"])
     p.state.rel(PLAYER)["affinity"] = min(1.0, p.state.rel(PLAYER)["affinity"] + PB["complete_aff"])
     p.state.memory.add("чужак исполнил мою просьбу. Надёжный человек", _mt(), 0.85, about=[PLAYER])
+    from aidnd.server.play.engine import deeds as _deeds
+
+    _deeds.record(PLAYER, "favor", obj=giver, place=ct.get("where") or "",
+                  data={"kind": ct.get("kind"), "what": ct.get("want") or ct.get("target_name")})
     _pc_remember(
         f"исполнил просьбу {p.name} ({ct['kind']}: {ct.get('want') or ct.get('target_name')})",
         0.6,

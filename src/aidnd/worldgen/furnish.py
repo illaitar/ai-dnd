@@ -76,6 +76,8 @@ def zones_for(btype: str, data: dict, kind: str = "key") -> list[dict]:
              "noise": round(max(0.0, min(1.0, d["noise"] + noise_d)), 2),
              "privacy": round(max(0.0, min(1.0, d["privacy"] + priv_d)), 2),
              "cap": entry.get("cap", d["cap"])}
+        if entry.get("objects"):                     # уличные зоны: объекты из ДАННЫХ шаблона
+            z["objects"] = [dict(o) for o in entry["objects"]]
         if entry.get("lockable"):
             z["lockable"] = True
         if group:

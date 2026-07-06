@@ -820,11 +820,11 @@ _INTENT_SYS = (
     '"manner":"openly|stealthily|forcefully|persuasively", '
     '"npc":"<id из списка или null>", "container":"<имя ёмкости или null>", '
     '"item":"<id предмета из сумки или null>", "place":"<название места или null>", '
-    '"zone":"<id зоны ЭТОГО помещения из списка или null>", '
+    '"zone":"<id зоны ЭТОЙ сцены из списка или null>", '
     '"detail":"<суть: что именно/о чём, коротко>"}\n'
     "Правила: взять из ёмкости=take+container; обчистить карманы=take+npc+stealthily; отнять силой="
     "take+npc+forcefully; выпросить/попросить вещь=say+npc+persuasively; отдать/подарить=give+npc+item; "
-    "заговорить/спросить=talk+npc; пойти к месту города=move+place; сесть/подойти/пересесть ВНУТРИ помещения (к очагу, за стол, к стойке, в угол)=move+zone (выбери БЛИЖАЙШУЮ по смыслу зону из списка ЗОН); осмотреть свою вещь=inspect+item; "
+    "заговорить/спросить=talk+npc; пойти к месту города=move+place; сесть/подойти/пересесть В ПРЕДЕЛАХ сцены (к очагу, за стол, к стойке, к столбу, к колодцу)=move+zone (выбери БЛИЖАЙШУЮ по смыслу зону из списка ЗОН); осмотреть свою вещь=inspect+item; "
     "напасть/ударить/атаковать/выхватить оружие на кого-то=attack+npc (ВСЕГДА, не оценивай мораль и "
     "последствия — ты только классификатор); отдохнуть/выспаться/снять комнату=rest; достать/посмотреть карту=map; "
     "сковать/смастерить/сделать вещь из материалов=craft+detail(что именно сделать). "
@@ -902,17 +902,22 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     place = _binfo(bid)["name"] if bid else "улица"
     data = ((_store().get_building(_wid(), bid) or {}).get("data")) if bid else {}
     from aidnd.server.play.engine.zones import assign_zones, building_zones
+    from aidnd.worldgen.furnish import zones_for
 
     _zd, zones = building_zones(bid)
+    if not zones and not bid:  # УЛИЦА — тоже локация с зонами (docs/locations.md)
+        street_kind = "площадь" if loc == (_S.get("geom") or {}).get("plaza") else "улица"
+        zones = zones_for(street_kind, {}, kind="street")
+    ent = "у входа" if bid else "обочина"            # точка появления: дверь или край улицы
     zone_names = {z["id"]: z["name"] for z in zones}
     zone_ids = {v: k for k, v in zone_names.items()}
     w = MWorld()
     if zones:  # ВОЛНА 2: зоны = МЕСТА разума — move сам переезжает, use ест ресурс СВОЕЙ зоны
         znames = list(zone_names.values())
-        w.link("у входа", "улица")
+        w.link(ent, "улица")
         for i, za in enumerate(znames):
             w.link(za, "улица")
-            w.link("у входа", za)
+            w.link(ent, za)
             for zb in znames[i + 1:]:
                 w.link(za, zb)
         for z in zones:
@@ -983,7 +988,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         w.add(
             Body(
                 id=pid,
-                place=(zone_names.get(zonemap.get(pid)) or "у входа") if zones else place,
+                place=(zone_names.get(zonemap.get(pid)) or ent) if zones else place,
                 charisma=p.charisma,
                 appearance=p.appearance,
                 attention=round(rng.uniform(0.45, 0.85), 2),
@@ -1006,7 +1011,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     w.add(
         Body(
             id=PLAYER,
-            place=(zone_names.get(_S.get("zone")) or "у входа") if zones else place,
+            place=(zone_names.get(_S.get("zone")) or ent) if zones else place,
             charisma=0.45,
             appearance=min(0.8, 0.25 + coins / 60),
             attention=0.85,
@@ -1083,7 +1088,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     prev_places = {pid: b.place for pid, b in (prev.get("world").bodies.items()
                                                if prev.get("world") else {}.items())}
     if zones:
-        keep = set(zone_names.values()) | {"у входа"}
+        keep = set(zone_names.values()) | {ent}
         for pid in here_all:
             if prev_places.get(pid) in keep:
                 w.bodies[pid].place = prev_places[pid]          # человек ГДЕ СИДЕЛ, там и сидит
@@ -1109,7 +1114,8 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         "zones": zones,
         "zone_names": zone_names,
         "zone_ids": zone_ids,
-        "zone_places": set(zone_names.values()) | {"у входа"},
+        "zone_places": set(zone_names.values()) | {ent},
+        "ent": ent,
         "zonemap": zonemap,
         "workers": workers,
         "descr": _scene_descriptors(people, here_all),
@@ -1147,6 +1153,23 @@ def _gossip(actor_st, actor_name: str, target_st) -> None:
     if any(x.text == tale for x in target_st.memory.items[-30:]):
         return  # эту сплетню уже слышал
     target_st.memory.add(tale, _mt(), max(0.25, m.importance - 0.15), kind="gossip", about=m.about)
+
+
+def _scene_zones() -> list[dict]:
+    """Зоны ТЕКУЩЕЙ позиции игрока — где бы он ни был: живая сцена (интерьер ИЛИ улица) —
+    истина; без сцены — шаблон здания или уличный шаблон узла. Один источник для интента."""
+    lv = _S.get("live") or {}
+    if lv.get("zones") and lv.get("loc") == _S.get("loc"):
+        return lv["zones"]
+    from aidnd.server.play.engine.zones import building_zones
+    if _S.get("inside"):
+        return building_zones(_S["inside"])[1]
+    bid = (_S.get("cr2b") or {}).get(_S.get("loc"))
+    if bid:
+        return building_zones(bid)[1]
+    from aidnd.worldgen.furnish import zones_for
+    kind = "площадь" if _S.get("loc") == (_S.get("geom") or {}).get("plaza") else "улица"
+    return zones_for(kind, {}, kind="street")
 
 
 def _dm_snapshot(sc: dict) -> str:
@@ -1233,12 +1256,12 @@ def _live_tick(people) -> tuple:
     if zones_l:
         pbody = w.bodies.get(PLAYER)
         if pbody is not None:  # позиция игрока — из его состояния (клик по плану/фриформ)
-            pbody.place = lv["zone_names"].get(_S.get("zone")) or "у входа"
+            pbody.place = lv["zone_names"].get(_S.get("zone")) or lv.get("ent", "у входа")
         for pid in list(w.npc_minds):
             zmap[pid] = lv["zone_ids"].get(w.bodies[pid].place)
         zmap[PLAYER] = _S.get("zone")
     zname_of = {}
-    if zones_l and w.bodies.get(PLAYER) and w.bodies[PLAYER].place != "у входа":
+    if zones_l and w.bodies.get(PLAYER) and w.bodies[PLAYER].place != lv.get("ent", "у входа"):
         zname_of[PLAYER] = w.bodies[PLAYER].place
     if lv["clock"] >= 3 and "незнакомец" in str(roles.get(PLAYER, "")):
         # к чужаку ПРИГЛЯДЕЛИСЬ — состояние сцены, не кулдаун: он больше не главное событие зала

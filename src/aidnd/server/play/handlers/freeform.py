@@ -63,12 +63,9 @@ def _intent(text: str, sc: dict) -> dict | None:
         or "пусто"
     )
     keys_pl = ", ".join(k["label"] for k in _S["geom"]["keys"])
-    zones_line = "нет"
-    if _S.get("inside"):
-        from aidnd.server.play.engine.zones import building_zones
+    from aidnd.server.play.engine.world import _scene_zones
 
-        _bz, zs = building_zones(_S["inside"])
-        zones_line = "; ".join(f"{z['id']}={z['name']}" for z in zs) or "нет"
+    zones_line = "; ".join(f"{z['id']}={z['name']}" for z in _scene_zones()) or "нет"
     user = (
         f"МЕСТО: {sc['location']['name']}. ЛЮДИ ЗДЕСЬ: {here}. ЁМКОСТИ: {conts}. "
         f"СУМКА ИГРОКА: {bag}. МЕСТА ГОРОДА: {keys_pl}. ЗОНЫ ПОМЕЩЕНИЯ: {zones_line}.\n"
@@ -105,12 +102,11 @@ def _attempt(intent: dict, sc: dict) -> dict:
         out["open_talk"] = npc
         return out
 
-    if verb == "move" and intent.get("zone") and _S.get("inside"):
-        from aidnd.server.play.engine.zones import building_zones
+    if verb == "move" and intent.get("zone"):
+        from aidnd.server.play.engine.world import _scene_zones
         from aidnd.server.play.handlers.travel import _zone_go
 
-        _bz, zones = building_zones(_S["inside"])
-        zn = {z["id"]: z["name"] for z in zones}
+        zn = {z["id"]: z["name"] for z in _scene_zones()}
         zid = str(intent["zone"])
         if zid in zn:                                # зону сматчил LLM-интент, не токены
             out["narr"].append(_zone_go(zid, zn[zid]))

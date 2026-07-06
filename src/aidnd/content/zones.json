@@ -626,11 +626,42 @@
       "zones": [
         {
           "kind": "post",
-          "name": "столб объявлений"
+          "name": "столб объявлений",
+          "objects": [
+            {
+              "name": "столб с объявлениями",
+              "fixed": true,
+              "afford": {
+                "novelty": 0.12
+              }
+            },
+            {
+              "name": "свежая афиша глашатая",
+              "afford": {
+                "novelty": 0.08
+              }
+            }
+          ]
         },
         {
           "kind": "well",
-          "name": "колодец"
+          "name": "колодец",
+          "objects": [
+            {
+              "name": "колодец с воротом",
+              "fixed": true,
+              "afford": {
+                "social": 0.1,
+                "comfort": 0.06
+              }
+            },
+            {
+              "name": "общее ведро на верёвке",
+              "afford": {
+                "comfort": 0.05
+              }
+            }
+          ]
         },
         {
           "kind": "stalls",
@@ -640,7 +671,23 @@
             5
           ],
           "spots": "stall",
-          "cap": 3
+          "cap": 3,
+          "objects": [
+            {
+              "name": "лоток с горячими лепёшками",
+              "fixed": true,
+              "afford": {
+                "hunger": 0.16
+              }
+            },
+            {
+              "name": "разложенный товар",
+              "afford": {
+                "wealth": 0.1,
+                "novelty": 0.08
+              }
+            }
+          ]
         }
       ]
     },
@@ -651,7 +698,17 @@
       "zones": [
         {
           "kind": "yard",
-          "name": "двор"
+          "name": "двор",
+          "objects": [
+            {
+              "name": "старая скамья под деревом",
+              "fixed": true,
+              "afford": {
+                "comfort": 0.12,
+                "social": 0.06
+              }
+            }
+          ]
         }
       ]
     },
@@ -662,11 +719,29 @@
       "zones": [
         {
           "kind": "door",
-          "name": "обочина"
+          "name": "обочина",
+          "objects": [
+            {
+              "name": "коновязь у обочины",
+              "fixed": true,
+              "afford": {
+                "novelty": 0.05
+              }
+            }
+          ]
         },
         {
           "kind": "private",
-          "name": "подворотня"
+          "name": "подворотня",
+          "objects": [
+            {
+              "name": "тёмный проём подворотни",
+              "fixed": true,
+              "afford": {
+                "novelty": 0.04
+              }
+            }
+          ]
         }
       ]
     }

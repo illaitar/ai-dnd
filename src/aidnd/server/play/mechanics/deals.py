@@ -98,6 +98,9 @@ def deal_attempt(npc: str, deal: dict, manner: str, out: dict,
             _deeds.record(PLAYER, "solicit", obj=npc, place=str(loc), witnesses=wit,
                           data={"kind": kind, "target": target, "stake": stake})
             _npc_save(npc)
+            lv = _S.get("live")
+            if lv is not None:                       # зал вздрогнет: салиентное событие сцены
+                lv["salient"] = f"{p.name} кричит: чужак сулил золото за душегубство!"
             out["narr"].append(f"{p.name} отшатывается: «Да ты душегуб!» — и не понижает "
                                f"голоса. Свидетелей: {wn}. Город такое помнит.")
             out["fail"] = True

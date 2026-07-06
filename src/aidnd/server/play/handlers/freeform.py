@@ -385,6 +385,47 @@ def _attempt(intent: dict, sc: dict) -> dict:
     return out
 
 
+def _run_plan(steps: list, sc: dict, text: str) -> dict:
+    """Исполнитель цепи: звенья по порядку, БЕЗ отката. Рвёт план: провал звена, смена
+    контура (диалог/бой/лут/переход) и САЛИЕНТНОЕ событие сцены (зал взорвался — мир
+    вклинился, паттерн stopped/remaining городского маршрута)."""
+    import logging
+
+    logging.getLogger("aidnd.scene").debug(
+        "план игрока: %s ← «%s»",
+        " → ".join(str(st.get("verb")) for st in steps[:PB["plan_cap"]]), text[:80])
+    res: dict = {"narr": [], "refresh": False}
+    steps = steps[:PB["plan_cap"]]
+    sal0 = bool((_S.get("live") or {}).get("salient"))
+
+    def _cut(i, why):
+        if i + 1 < len(steps):
+            res["stopped"] = True
+            res["remaining"] = " → ".join(str(st.get("verb")) for st in steps[i + 1:])
+            res["narr"].append(why)
+
+    for i, step in enumerate(steps):
+        step["_text"] = text
+        if (len(steps) > 1 and step.get("verb") in ("take", "give", "use", "inspect")
+                and not any(step.get(k) for k in ("item", "container", "npc"))):
+            res["narr"].append("Этого нет под рукой — план обрывается.")
+            break                                     # в цепи нарратор НЕ дарит несуществующее
+        r = _attempt(step, sc)
+        narr, refresh = res["narr"] + (r.get("narr") or []), res["refresh"] or bool(
+            r.get("refresh"))
+        res.update(r)
+        res["narr"], res["refresh"] = narr, refresh
+        if not sal0 and (_S.get("live") or {}).get("salient"):
+            _cut(i, "Зал взрывается — не до задуманного: план обрывается.")
+            break                                     # мир вклинился — как события на дороге
+        if r.get("fail"):
+            _cut(i, "Задуманное дальше не идёт — план оборвался здесь.")
+            break
+        if any(k in r for k in ("open_talk", "goto", "combat", "loot", "inspect", "map_open")):
+            break
+    return res
+
+
 @router.post("/api/play/act")
 async def act(request: Request):
     """Свободное действие: текст → LLM-интент → единый резолвер. Никаких кнопок-глаголов."""
@@ -396,30 +437,7 @@ async def act(request: Request):
     it = resolve(text, sc)
     if it is None:
         return {"narr": ["(мир задумался и не понял — попробуй иначе)"], "gt": _gt()}
-    steps = it.get("plan") or [it]
-    res: dict = {"narr": [], "refresh": False}
-    import logging
-
-    logging.getLogger("aidnd.scene").debug(
-        "план игрока: %s ← «%s»",
-        " → ".join(str(st.get("verb")) for st in steps[:PB["plan_cap"]]), text[:80])
-    for i, step in enumerate(steps[:PB["plan_cap"]]):  # ЦЕПЬ: рвётся там, где рвётся
-        step["_text"] = text
-        if (len(steps) > 1 and step.get("verb") in ("take", "give", "use", "inspect")
-                and not any(step.get(k) for k in ("item", "container", "npc"))):
-            res["narr"].append("Этого нет под рукой — план обрывается.")
-            break                                     # в цепи нарратор НЕ дарит несуществующее
-        r = _attempt(step, sc)
-        narr, refresh = res["narr"] + (r.get("narr") or []), res["refresh"] or bool(
-            r.get("refresh"))
-        res.update(r)
-        res["narr"], res["refresh"] = narr, refresh
-        if r.get("fail") or any(
-            k in r for k in ("open_talk", "goto", "combat", "loot", "inspect", "map_open")
-        ):
-            if r.get("fail") and i + 1 < len(steps):
-                res["narr"].append("Задуманное дальше не идёт — план оборвался здесь.")
-            break
+    res = _run_plan(it.get("plan") or [it], sc, text)
     _pc_remember(f"я: {text[:80]}", 0.2)
     t = _world_tick() if not res.get("combat") else {"feed": [], "address": []}
     return {**res, **t, "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}

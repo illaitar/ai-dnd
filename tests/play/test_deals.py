@@ -80,3 +80,22 @@ def test_morning_resolves_kill(world, monkeypatch):
     if "mark" in dead:                                       # авторезолв — недетерминирован
         assert any("мёртв" in n for n in news)
         assert any(c.get("status") == "done" for c in st.contracts(1))
+
+
+def test_chain_cut_by_salient(monkeypatch):
+    from aidnd.server.play.handlers import freeform as ff
+
+    core._S["live"] = {"salient": None}
+    calls = []
+
+    def fake_attempt(step, sc):
+        calls.append(step["verb"])
+        if step["verb"] == "say":                    # звено будит зал (донос/драка)
+            core._S["live"]["salient"] = "крик"
+        return {"narr": [f"шаг {step['verb']}"], "refresh": True}
+
+    monkeypatch.setattr(ff, "_attempt", fake_attempt)
+    res = ff._run_plan([{"verb": "say"}, {"verb": "move"}, {"verb": "take"}], {}, "т")
+    assert calls == ["say"]                          # мир вклинился — остаток не исполнен
+    assert res.get("stopped") and res.get("remaining") == "move → take"
+    assert any("взрывается" in n for n in res["narr"])

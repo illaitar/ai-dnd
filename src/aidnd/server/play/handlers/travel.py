@@ -320,7 +320,7 @@ def _plan_payload() -> dict:
                     game={"npcs": npcs, "hidden_zones": hidden, "interactive": True,
                           "more": more})
     znames = {z["id"]: z["name"] for z in zones}
-    return {"plan": svg, "zones": znames, "zone": _S.get("zone")}
+    return {"plan": svg, "zones": znames, "zone": _S.get("zone"), "gt": _gt()}
 
 
 def _zone_seats(people, here, zones, seed: str) -> dict:
@@ -361,7 +361,8 @@ async def play_zone(request: Request):
     cur = _plan_payload()
     if not cur.get("plan") or zid not in (cur.get("zones") or {}):
         return {"error": "тут такого места нет"}
-    return {**_plan_payload(), "narr": [_zone_go(zid, cur["zones"][zid])], "gt": _gt()}
+    line = _zone_go(zid, cur["zones"][zid])       # сначала переезд — потом свежий план
+    return {**_plan_payload(), "narr": [line], "gt": _gt()}
 
 
 def _zone_go(zid: str, zname: str) -> str:

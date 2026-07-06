@@ -405,6 +405,7 @@ def _pc_save() -> None:
             "loc": _S.get("loc"),
             "inside": _S.get("inside"),
             "room": _S.get("room"),  # позиция переживает рестарт
+            "zone": _S.get("zone"),
             "memory": [
                 {
                     "text": m.text,
@@ -788,9 +789,19 @@ def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
 
 
 def _descriptor(p) -> str:
+    """Незнакомец различим ГЛАЗАМИ: пол + УНИКАЛЬНАЯ примета (look.marks/hair/face из персоны),
+    одежда — вторично. Три «мужика в балахонах» должны быть тремя разными людьми."""
     per = p.persona or {}
+    look = per.get("look") or {}
     sex = "женщина" if per.get("sex") == "f" else "мужчина"
-    cloth = ((per.get("look") or {}).get("clothing") or "").split(",")[0].strip()
+    mark = ""
+    for src in ((look.get("marks") or [None])[0], look.get("hair"), look.get("face")):
+        if src and str(src).strip():
+            mark = str(src).split(",")[0].strip().lower()
+            break
+    cloth = (look.get("clothing") or "").split(",")[0].strip()
+    if mark:
+        return f"{sex} — {mark}"
     return f"{sex} ({cloth})" if cloth else sex
 
 

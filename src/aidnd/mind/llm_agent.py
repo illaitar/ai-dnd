@@ -59,7 +59,9 @@ _SYS = (
     "• Хищник не только схемит, но и ДЕЙСТВУЕТ: если ты жаден/злонравен, а рядом уязвимая, богато одетая "
     "или отбившаяся цель и НЕТ свидетелей — не медли, лови момент. Это твоя роль в этой истории.\n"
     "• Боишься того, кто рядом — беги (move прочь) или бей, а не разговаривай.\n"
-    "• Не топчись в толпе без дела. Выбери 1–3 инструмента, которые РЕАЛЬНО продвинут тебя этот ход.")
+    "• Не топчись в толпе без дела. Выбери 1–3 инструмента, которые РЕАЛЬНО продвинут тебя этот ход.\n"
+    "• Жесты и словечки — ТОЛЬКО из своей персоны; НЕ повторяй жестов и оборотов из своих прошлых "
+    "ходов и из чужих реплик (все «потирают шрам» — это балаган).")
 
 
 def _lvl(x: float) -> str:
@@ -109,7 +111,12 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     place_desc = ctx.get("place_desc", {})
 
     lines = [f"ВРЕМЯ: {ctx.get('time', 'день')} (ход {ctx.get('clock', 0)}).", ""]
-    lines.append(f"ТЫ — {cfg.name}, {roles.get(cfg.id, cfg.role)}. HP {me.hp}/{me.max_hp}.")
+    sexes = ctx.get("sexes", {})
+    me_sex = sexes.get(cfg.id)
+    lines.append(f"ТЫ — {cfg.name}"
+                 + (f", {me_sex}" if me_sex else "")
+                 + f", {roles.get(cfg.id, cfg.role)}. HP {me.hp}/{me.max_hp}. "
+                 "Говори о себе и спрягай глаголы СТРОГО в своём роде.")
     lines.append(f"Черты: {_traits_line(cfg.traits)}.")
     persona = ctx.get("personas", {}).get(cfg.id)  # богатая персона из пула: манера/причуда/стремления
     if persona:
@@ -131,6 +138,10 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     news = ctx.get("news") or []
     if news:
         lines.append("  О ЧЁМ СУДАЧИТ ГОРОД (годные темы для беседы): " + "; ".join(news) + ".")
+    my_rumor = ctx.get("rumor_of", {}).get(cfg.id)
+    if my_rumor:
+        lines.append(f"  ТЫ слыхал здешний слух: «{my_rumor}» — поделишься или придержишь, "
+                     "дело твоё (другие могут его и не знать).")
     conv = ctx.get("convs", {}).get(cfg.id)
     if conv:
         lines.append("")
@@ -144,7 +155,9 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
             st = "повержен" if b.down() else f"HP {b.hp}"
             act = last.get(b.id, "—")
             zb = zones.get(b.id)
-            lines.append(f"  • {nm(b.id)} ({roles.get(b.id, '?')}, {wealth}, {st}"
+            bsx = sexes.get(b.id)
+            lines.append(f"  • {nm(b.id)} ({(bsx + ', ') if bsx else ''}{roles.get(b.id, '?')}, "
+                         f"{wealth}, {st}"
                          + (f", {zb}" if zb else "") + f"). "
                          f"Прошлый ход: {act}. Твоё отношение: {_rel_line(state, b.id)}.")
     if percept.nearby:

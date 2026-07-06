@@ -94,8 +94,11 @@ def affinity(kind: str, traits: dict) -> float:
     return max(0.1, 1.0 + sum(w * (traits.get(t, 0.5) - 0.5) for t, w in pk.likes.items()))
 
 
-def score(kind: str, pressured: dict, traits: dict, phase: str) -> float:
-    """Полезность пойти в место этого типа = окно суток × тяга-характера × Σ(реклама × давление)."""
+def score(kind: str, pressured: dict, traits: dict, phase: str,
+          window_kind: str | None = None) -> float:
+    """Полезность = окно суток × тяга-характера × Σ(реклама × давление).
+    window_kind: окно берётся от ДРУГОГО типа (работник таверны — от окна таверны)."""
     pk = PLACE[kind]
+    wk = PLACE.get(window_kind) if window_kind else None
     pull = sum(rate * pressured.get(need, 0.0) for need, rate in pk.sates.items())
-    return pk.window.get(phase, 0.2) * affinity(kind, traits) * pull
+    return (wk or pk).window.get(phase, 0.2) * affinity(kind, traits) * pull

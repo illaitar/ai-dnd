@@ -115,11 +115,13 @@ def _apply_routine() -> None:
     """Синхронизировать пассивный мир с текущим игровым временем: идемпотентно, дёшево — раз в фазу
     суток (ключ фаза+день). Рутина ВСЕХ жителей строится из НУЖД/характера/времени (society, через
     worldsim.routine_step), а не из хардкода ролей. На новой заре — суточные события."""
-    key = (_phase(), _gt() // 1440)
+    key = (_gt() // 30, _gt() // 1440)               # шаг рутины: каждые 30 игровых минут
     if _S.get("routine_key") == key or not _S.get("people"):
         return
     _S["routine_key"] = key
-    if key[0] == "morning":
+    mkey = (_phase(), _gt() // 1440)                 # суточные события — раз на утро
+    if mkey[0] == "morning" and _S.get("events_key") != mkey:
+        _S["events_key"] = mkey
         _world_events()
     routine_step(_S["people"], _S["crof"])
 
@@ -418,6 +420,7 @@ def _play():
         )
         if saved_loc in xy and row.get("inside") in n2b.values():
             _S["inside"], _S["room"] = row["inside"], row.get("room")
+            _S["zone"] = row.get("zone")             # и место в зале — тоже позиция
     _apply_routine()  # споты = f(время): распорядок дня
     return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]
 
@@ -916,8 +919,12 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                 aff = o.get("afford") or {}
                 if aff:
                     need, rate = max(aff.items(), key=lambda kv: kv[1])
+                    if need == "fatigue" and z["kind"] not in ("beds", "cell"):
+                        need = "comfort"             # скамья — отдых, но НЕ сон: спят в постели
                     itms.append(MItem(o["name"], min(0.5, round(rate * 2.2, 2)), satisfies=need))
             w.ground[zone_names[z["id"]]] = itms[:6]
+        if _phase() == "night":                      # ночь: улица честно рекламирует постель дома
+            w.ground["улица"] = [MItem("путь домой, к постели", 0.55, satisfies="fatigue")]
     else:
         w.link(place, "улица")
         w.ground[place] = _live_affordances(bid)
@@ -1070,11 +1077,24 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
 
         with ThreadPoolExecutor(max_workers=8) as ex:
             list(ex.map(plan_one, todo))
+    prev = _S.get("live") or {}
+    prev_places = {pid: b.place for pid, b in (prev.get("world").bodies.items()
+                                               if prev.get("world") else {}.items())}
+    if zones:
+        keep = set(zone_names.values()) | {"у входа"}
+        for pid in here_all:
+            if prev_places.get(pid) in keep:
+                w.bodies[pid].place = prev_places[pid]          # человек ГДЕ СИДЕЛ, там и сидит
+        zonemap = {pid: zone_ids.get(w.bodies[pid].place) for pid in here_all}
+    prev_convs = [c for c in (prev.get("convs") or [])
+                  if sum(1 for m in c["members"] if m in here_all or m == PLAYER) >= 2]
+    same_loc = prev.get("loc") == loc
     _S["live"] = {
         "world": w,
+        "convs": prev_convs,
+        "clock": (prev.get("clock", 0) if same_loc else 0),
         "loc": loc,
         "place": place,
-        "clock": 0,
         "ts": 0.0,
         "who": frozenset(here),
         "pc_map": pc_map,
@@ -1187,7 +1207,9 @@ def _live_tick(people) -> tuple:
     if zname_of.get(PLAYER):
         roles[PLAYER] = f"{roles.get(PLAYER, 'чужак')}; он сейчас — {zname_of[PLAYER]}"
     news = [str(x) for x in ((_S.get("guild_news") or []) + (_S.get("board_news") or []))[-2:]]
-    news += lv.get("rumors") or []
+    rums = lv.get("rumors") or []
+    rumor_of = ({pid: rums[hash((pid, _gt() // 1440)) % len(rums)] for pid in order}
+                if rums else {})
     ctx = {
         "roles": roles,
         "names": lv["names"],
@@ -1199,7 +1221,10 @@ def _live_tick(people) -> tuple:
                        if zones_l else {lv["place"]: lv["pdesc"]}),
         "personas": personas,
         "zones": zname_of,
-        "news": news[:4],
+        "news": news[:3],
+        "rumor_of": rumor_of,
+        "sexes": {pid: ("женщина" if (people[pid].persona or {}).get("sex") == "f" else "мужчина")
+                  for pid in order},
         "time": f"{_PHASE_RU[_phase()]}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}",
     }
 
@@ -1256,15 +1281,23 @@ def _live_tick(people) -> tuple:
     # фоновые ЖИВУТ без LLM: заняты предметом своей зоны, нужды закрываются, зал их видит
     bg_feed = []
     rng_bg = random.Random(f"bg|{lv['clock']}")
+    busy: set = set()                                 # одна кочерга — один ворошащий
+    for d_ in decisions.values():
+        for a_ in d_.get("actions") or []:
+            if isinstance(a_, dict) and a_.get("tool") == "use" and a_.get("item"):
+                busy.add(str(a_["item"]).lower())
     for pid in background:
         st = w.npc_minds[pid]
         _decay_needs(st)
         _decay_emotion(st)
         body = w.bodies[pid]
-        itms = [i for i in w.ground.get(body.place, []) if i.satisfies]
+        itms = [i for i in w.ground.get(body.place, [])
+                if i.satisfies and i.satisfies != "fatigue" and i.name.lower() not in busy]
         if itms:
             it = max(itms, key=lambda i: st.needs.get(i.satisfies or "", 0.0))
-            st.needs[it.satisfies] = max(0.0, st.needs.get(it.satisfies, 0.0) - 0.12)
+            busy.add(it.name.lower())
+            st.needs[it.satisfies] = max(0.35 if it.satisfies == "fatigue" else 0.0,
+                                          st.needs.get(it.satisfies, 0.0) - 0.12)
             act = f"занят своим: {it.name}"
         else:
             act = "сидит, поглядывая на зал"
@@ -1277,9 +1310,11 @@ def _live_tick(people) -> tuple:
 
     _slog = _logging.getLogger("aidnd.scene")
     if _slog.isEnabledFor(_logging.DEBUG):
-        _slog.debug("─── ТИК %s · %s · «%s» · душ=%d · LLM-актёров=%d · разговоров=%d ───",
+        _slog.debug("─── ТИК %s · %s · «%s» · душ=%d · LLM-актёров=%d · разговоров=%d · "
+                    "игрок@%s (zone=%s) ───",
                     lv["clock"], ctx["time"], lv["place"], len(order), len(actors),
-                    len(lv.get("convs") or []))
+                    len(lv.get("convs") or []),
+                    w.bodies[PLAYER].place if PLAYER in w.bodies else "?", _S.get("zone"))
         for pid in background:
             im, why = impulses[pid]
             _slog.debug("  · фон %s [%s] зона=%s имп=%.2f(%s) → %s",
@@ -1445,21 +1480,24 @@ def _live_tick(people) -> tuple:
                         )
                     else:
                         znm = w.bodies[pid].place
-                        feed.append(
-                            {
-                                "k": "speech",
-                                "who": who,
-                                "to": _display(tid, people) if tid in people else tgt,
-                                "text": f"({znm}, краем уха) …{txt[:34]}…",
-                            }
-                        )
-                        pc.memory.add(
-                            f"краем уха ({znm}): {who} о чём-то говорил — …{txt[:36]}…",
-                            _mt(),
-                            0.08,
-                            kind="heard",
-                            about=[pid],
-                        )
+                        if random.Random(f"hear|{lv['clock']}|{pid}").random() < 0.35:
+                            feed.append(
+                                {
+                                    "k": "speech",
+                                    "who": who,
+                                    "to": _display(tid, people) if tid in people else tgt,
+                                    "text": f"({znm}, краем уха) …{txt[:34]}…",
+                                }
+                            )
+                            pc.memory.add(
+                                f"краем уха ({znm}): {who} о чём-то говорил — …{txt[:36]}…",
+                                _mt(),
+                                0.08,
+                                kind="heard",
+                                about=[pid],
+                            )
+                        else:
+                            lv["murmur"] = lv.get("murmur", 0) + 1   # общий гул вместо прослушки
                     spoke.append(f"сказал(а) {lv['names'].get(tid, tgt)}: «{txt[:50]}»")
                     if tid in w.npc_minds and ((not zones_l)
                                                or w.bodies[tid].place == w.bodies[pid].place):
@@ -1471,12 +1509,27 @@ def _live_tick(people) -> tuple:
                             0.55,
                             about=[pid],
                         )
+        # ЕДА НЕ БЕСПЛАТНА: use съестного при работнике заведения = заказ с оплатой
+        owner = next((wk for wk in (lv.get("workers") or ()) if wk in order), None)
+        if owner and owner != pid:
+            for a in d.get("actions") or []:
+                if isinstance(a, dict) and a.get("tool") == "use" and a.get("item"):
+                    itm = next((i for i in w.ground.get(w.bodies[pid].place, [])
+                                if i.name == a["item"] and i.satisfies == "hunger"), None)
+                    if itm is not None and _store().purse_get(_wid(), pid) >= 2:
+                        _store().purse_add(_wid(), pid, -2)
+                        _store().purse_add(_wid(), owner, 2)
+                        if random.Random(f"pay|{pid}|{lv['clock']}").random() < 0.3:
+                            feed.append({"k": "deed", "who": _display(pid, people),
+                                         "text": f"кидает пару монет за {a['item']}"})
         acted = "; ".join(evs + spoke)  # NPC ПОМНИТ и дела, и слова — не повторяется
         lv["last"][pid] = acted[:110] or "—"
         lv["hist"].setdefault(pid, []).append(acted[:80])
         does = (d.get("does") or "").strip()
         if does and not said:  # реплика сама несёт момент — не дублируем
             feed.append({"k": "deed", "who": who, "text": does[:150]})
+    if lv.pop("murmur", 0) and lv["clock"] % 3 == 0:
+        feed.append({"k": "deed", "who": "зал", "text": "за столами гудит негромкий говор"})
     if zones_l:
         for pid in order:
             zmap[pid] = lv["zone_ids"].get(w.bodies[pid].place)

@@ -38,7 +38,8 @@ def _gate_ok(kind: str, p) -> bool:
     return True
 
 
-def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng) -> list:
+def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
+                work_kinds: dict | None = None) -> list:
     """Доступные этому NPC места как список society.Candidate. Дом/работа персональны;
     трактир/храм/рынок — «свой» из города (сидированный выбор); улица/дозор/промысел — точка графа."""
     out = []
@@ -46,7 +47,8 @@ def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng) -> list:
     if home is not None:
         out.append(society.Candidate("home", home))
     if p.work:
-        out.append(society.Candidate("work", keynode.get(p.work, home)))
+        wk = (work_kinds or {}).get(p.work)          # окно ЗАВЕДЕНИЯ: таверна зовёт вечером
+        out.append(society.Candidate("work", keynode.get(p.work, home), window_kind=wk))
     for kind in ("tavern", "temple", "market"):  # привязанные к зданиям места
         nodes = place_idx.get(kind)
         if nodes and _gate_ok(kind, p):
@@ -67,6 +69,12 @@ def routine_step(people: dict, crof: dict) -> None:
     keynode, kps = _S.get("keynode") or {}, _S.get("kps") or []
     phase = _phase()
     place_idx = _place_index(people, keynode)
+    work_kinds = {}                                  # bid → тип заведения (окно работы)
+    for bid in keynode:
+        data = (_store().get_building(_wid(), bid) or {}).get("data") or {}
+        ks = society.kinds_of(data)
+        if ks:
+            work_kinds[bid] = ks[0]
     day, gt = _gt() // 1440, _gt()
     node2kind = {}  # где сейчас стоит NPC → тип места (гасит нужды)
     for kind, nodes in place_idx.items():
@@ -79,8 +87,8 @@ def routine_step(people: dict, crof: dict) -> None:
         here = node2kind.get(crof.get(pid))  # где стоял → что гасил
         if here is None and crof.get(pid) == p.home:
             here = "home"
-        rng = random.Random(f"rout|{pid}|{phase}|{day}")
-        cands = _candidates(p, place_idx, keynode, kps, rng)
+        rng = random.Random(f"rout|{pid}|{phase}|{gt // 30}")
+        cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds)
         node = society.step(st, cands, phase, mins, here, rng)
         if node is not None:
             crof[pid] = node

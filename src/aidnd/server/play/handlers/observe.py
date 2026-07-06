@@ -31,7 +31,9 @@ async def look(request: Request):
     _store().flag_set(_wid(), f"lookn|{key}", str(n))
     roll = random.Random(f"look|{key}|{n}").randint(1, 20)
     mod = _PC_CAP.mod("wis")
-    total = roll + mod
+    stay = min(6, ((_S.get("live") or {}).get("clock", 0))
+               if (_S.get("live") or {}).get("loc") == loc else 0)   # час в зале = пригляделся
+    total = roll + mod + stay
     lvl = 2 if total >= PB["look_good"] else 1 if total >= PB["look_dc"] else 0
     prev = _looked_level(loc, inside)
     _S.setdefault("looked", {})[key] = max(prev, lvl, 1 if total >= PB["look_dc"] else prev)

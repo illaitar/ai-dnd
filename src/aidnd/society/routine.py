@@ -18,9 +18,11 @@ from . import places as _places
 
 @dataclass
 class Candidate:
-    """Доступное NPC место: тип (place-kind) + узел графа, куда идти."""
+    """Доступное NPC место: тип (place-kind) + узел графа, куда идти.
+    window_kind — чьё ОКНО суток применять (работник таверны живёт её вечерним окном)."""
     kind: str
     node: int
+    window_kind: str | None = None
 
 
 def step(state, candidates: list, phase: str, minutes: float, here_kind: str | None, rng) -> int:
@@ -36,7 +38,8 @@ def step(state, candidates: list, phase: str, minutes: float, here_kind: str | N
 def choose(needs: dict, traits: dict, candidates: list, phase: str, rng) -> int | None:
     """Выбрать узел по полезности. Возвращает node лучшего кандидата (близкие — жребием)."""
     pressured = _needs.pressure(needs, traits)
-    scored = sorted(((_places.score(c.kind, pressured, traits, phase), c) for c in candidates
+    scored = sorted(((_places.score(c.kind, pressured, traits, phase,
+                                    window_kind=c.window_kind), c) for c in candidates
                      if c.node is not None), key=lambda x: x[0], reverse=True)
     if not scored:
         return None

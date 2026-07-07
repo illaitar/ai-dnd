@@ -3,6 +3,15 @@
 Граф (aidnd.citygraph) — скелет; этот пакет — СЛОЙ НАСЫЩЕНИЯ (фактшит-характеристики через LLM),
 отдельный от графа и от скрипта. Результат складывается в БД (WorldStore) под world_id для дешёвого
 переиспользования. Хук генерации изображений — imagegen (на будущее).
+
+Key functions
+-------------
+enrich_city() : Enrich all locations in city graph with LLM-generated details.
+store_world() : Persist enriched world data to database under world_id.
+Enrichment : Result model holding enriched building/location details.
+Enricher : Base class for location enrichment strategies (LLM or stub).
+WorldStore : Database interface for persisting and retrieving world data.
+ImageGen : Interface for generating and managing entity portraits/images.
 """
 
 from __future__ import annotations

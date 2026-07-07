@@ -1,5 +1,12 @@
 """Подсчёт прогресса насыщения. Единица плана — БАТЧ: число зданий, делённое на максимум
-одновременных промптов. Прогресс = сделано/всего зданий + текущий/всего батчей."""
+одновременных промптов. Прогресс = сделано/всего зданий + текущий/всего батчей.
+
+Key functions
+-------------
+Progress(total, max_concurrent, on_update, label) -> instance : Progress tracker for worldgen
+  batches; computes done/total and current batch index out of batch count.
+tick(n) -> dict : Mark n buildings completed, trigger on_update callback, return snapshot dict.
+snapshot() -> dict : Return current state (phase, done/total, batch/batches_total, percentage)."""
 
 from __future__ import annotations
 

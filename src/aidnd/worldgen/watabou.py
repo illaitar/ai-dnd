@@ -16,6 +16,14 @@
   только внутри комнат; колоннады в длинных залах.
 Выход — нейтральный формат (rooms/edges/water/columns), драматургию (цель/ключи/секретные
 крылья/backdoor) поверх наводит Planner в dungeongen.
+
+Key functions
+-------------
+Room(...) : Rectangular dungeon room/corridor with axis-aligned door and parent links.
+Layout(seed, rooms_target, ...) : Generates dungeon via seeded accretion and growth.
+Layout.build(origin) -> bool : Orchestrates accretion, grow, loops, and shaping.
+Layout.export() -> dict : Exports neutral format (rooms, edges, water, columns).
+layout(seed, ..., origin) -> dict | None : Public API; generates dungeon or None.
 """
 
 from __future__ import annotations
@@ -219,7 +227,7 @@ class Layout:
                    fwd_task(rng.random(), child_size())]
             out[0]["group"] = out[1]["group"] = None
         # else: лист (без детей)
-        for i, k in enumerate(out):                   # общая группа для близнецов с 1 seed
+        for _i, k in enumerate(out):                   # общая группа для близнецов с 1 seed
             if k.get("group", "x") is None:
                 k["group"] = ("twin", k["seed"])
         return out
@@ -358,7 +366,7 @@ class Layout:
         for dr in self.doors:
             deg[dr["a"]] = deg.get(dr["a"], 0) + 1
             deg[dr["b"]] = deg.get(dr["b"], 0) + 1
-        for g, ids in self.groups.items():
+        for g, _ids in self.groups.items():
             rs = [r for r in self.rooms if r.group == g]
             if not rs:
                 continue

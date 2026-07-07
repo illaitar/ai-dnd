@@ -10,6 +10,18 @@
 
 Рантайм — 0 LLM, суточный шаг (economy_step в _world_events). LOD: цепочки — именованные
 производители (реальные кошельки); безымянная масса — покупатели/дрейф в общем пуле M.
+
+Key functions
+-------------
+ensure() -> None : Idempotent init of coin seed and supply chains on world entry.
+instantiate() -> list : Assemble named chains from real producers and venues.
+economy_step(day) -> list : Daily simulation: production, sales, price updates, wealth.
+economy_catchup(cap) -> list : Lazy catch-up for skipped days (time jumps/sleeps).
+venue_buyouts() -> list : Daily: aspirants buy out venues and revive broken chains.
+market_here(bid) -> list : Get live market state (goods, prices, stocks) at venue.
+player_buy(bid, key, qty) -> dict : Player purchase: inflates prices, creates wealth gap.
+player_sell(bid, key, qty) -> dict : Player sale: deflates prices, draws from NPC purses.
+chains_view() -> list : Diagnostic view: all chains with live prices, stocks, producers.
 """
 
 from __future__ import annotations

@@ -1,6 +1,10 @@
 """CLI владельца: сгенерировать коды разблокировки безлимита.
 
   python -m aidnd.server.gencode [N]     # N кодов (по умолчанию 1), печатает их по одному
+
+Key functions
+-------------
+_main(n: int) -> None : Generate N unlimited-unlock codes; prints each to stdout.
 """
 
 from __future__ import annotations

@@ -7,6 +7,13 @@
 Мирные и хищные цели — один механизм: отличается лишь kind вехи (need/affiliate/trade vs acquire/harm)
 и цель. Острая нужда/угроза по-прежнему ПЕРЕБИВАЮТ агенду (реактивный слой выигрывает арбитраж).
 LLM-планировщик — в llm_agent.plan_agenda; здесь модель данных + продвижение вех + офлайн-заглушка.
+
+Key functions
+-------------
+Milestone : dataclass step in a long-term agenda with description, kind, and completion.
+Agenda : dataclass for a long-term goal with milestones, cursor, and status tracking.
+Agenda.current() -> Milestone | None : get the current active milestone.
+Agenda.view() -> dict : return a dict representation of the agenda for display.
 """
 
 from __future__ import annotations

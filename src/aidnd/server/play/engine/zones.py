@@ -3,6 +3,13 @@
 
 Скоринг и выбор — чистые функции (тестируются без сервера и LLM). building_zones —
 резолв обстановки здания: мир → пул по имени → пул по типу (мост до материализации шага 2).
+
+Key functions
+--------------
+building_zones(bid) -> tuple : Resolve zones by name or type from pool.
+zone_score(state, zone, load) -> float : Score zone fit by needs and capacity.
+choose_zone(state, zones, load, rng, ...) -> str : Best zone with hysteresis.
+assign_zones(states, zones, seed, ...) -> dict : Deterministic placement.
 """
 
 from __future__ import annotations

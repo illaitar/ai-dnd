@@ -3,6 +3,14 @@ npc/combat/rules) снесён — интерфейс игрока строит�
 
 Здесь: авторизация, лимиты, дебаг-стенды (/citydebug, /minddebug, /npcdebug) и роутеры игрового
 контура (server/play/*): сцена, действие, бой, магия, торговля, подземелья, экономика.
+
+Key functions
+-------------
+app : FastAPI instance; router and middleware hub for the game engine.
+index() -> HTMLResponse : Serve landing page to new players.
+play_page(request) -> HTMLResponse : Serve game page; redirect if not authenticated.
+login_page() -> HTMLResponse : Serve login page for email-based authentication.
+run(host, port) -> None : Start the uvicorn web server on configured host/port.
 """
 
 from __future__ import annotations

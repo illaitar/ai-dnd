@@ -8,6 +8,14 @@ HP), твои нужды и эмоции (с адресатом), отношен
 
 manager — aidnd.inference.ModelManager. Нет модели → LLMUnavailable, не разобрали ответ (после
 повтора) → LLMBadOutput: фоллбэков нет, ошибка честно летит наверх.
+
+Key functions
+-------------
+build_prompt(state, world, percept, ctx, prefs=None) -> list : Build LLM prompt.
+decide_hybrid(state, world, percept, manager, ctx) -> dict : Hybrid: score goals + LLM choice.
+decide_llm(state, world, percept, manager, ctx) -> dict : Pure LLM decision.
+plan_agenda(state, world, ctx, manager) -> Agenda|None : Create long-term agenda.
+apply_actions(actions, state, world, clock) -> list : Execute tool sequence.
 """
 
 from __future__ import annotations

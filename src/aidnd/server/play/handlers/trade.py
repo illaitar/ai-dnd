@@ -1,4 +1,13 @@
-"""Домен ТОРГ (/offer /sell /wares /buy /askkey) — распил world.py. Цена глазом NPC, торг, аренда ключа."""
+"""Домен ТОРГ (/offer /sell /wares /buy /askkey) — распил world.py. Цена глазом NPC, торг, аренда ключа.
+
+Key functions
+-------------
+askkey(request) -> dict : Request an NPC's key (gated by affinity/trust).
+offer(request) -> dict : Get NPC's item price estimate (asymmetric knowledge).
+sell(request) -> dict : Sell item to merchant and receive coins.
+wares(npc) -> dict : List merchant's wares with prices from their viewpoint.
+buy(request) -> dict : Purchase item from merchant if player has coins.
+"""
 
 from __future__ import annotations
 

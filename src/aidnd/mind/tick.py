@@ -1,6 +1,11 @@
 """Ход мира: один тик. Пока — рост нужд + распад эмоций к базе (декол. дин-ка эмоций).
 Решения/действия NPC дёргаются вручную (дебаг) или будущим арбитром. Апрейзал — фикс. функция
 измерения→эмоции (по обсуждению): сюда подаём вектор измерений, получаем дельты каналов.
+
+Key functions
+-------------
+advance(state, scene, ticks, stim) -> dict : Advances NPC state by ticks, updating needs, emotions, and FSM.
+appraise(state, dims, source) -> dict : Calculates emotion deltas from appraisal dimensions and updates emotion state.
 """
 
 from __future__ import annotations

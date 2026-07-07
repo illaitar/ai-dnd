@@ -2,6 +2,10 @@
 
 Несущая балка: иерархия ≠ важность. Валидатор ОБЯЗУЕТ разрыв осей, чеховские ружья, арки.
 Игрок — регрессор: библия несёт «прошлый_цикл» (пролог книги) и «дельта» (где память врёт).
+
+Key functions
+-------------
+validate_bible(b: dict) -> list : Validate plot structure; return list of errors or empty.
 """
 
 from __future__ import annotations

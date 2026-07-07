@@ -4,6 +4,15 @@
 
 Крафтит и NPC-мастер (Capability из NpcState), и игрок (pc-Capability). LLM тут НЕ нужен — механика
 табличная; флейвор-имя навешивает item_smith на слое игры (по желанию).
+
+Key functions
+-------------
+materials_graph() -> dict : Load/cache materials dependency graph.
+craft_path(have, want, graph) -> list | None : Find crafting steps to transform materials.
+Recipe : Dataclass defining a crafting recipe with DC, duration, station, mod target.
+mastery(cap, station, reputation, station_tier) -> int : Calculate crafter's skill modifier.
+craft(cap, recipe, *, seed, inputs, maker, reputation, station_tier) -> dict : Craft item with quality/mods/flaws based on roll.
+repair(item, cap, *, seed, station) -> dict : Repair item durability, may degrade max durability if failed.
 """
 
 from __future__ import annotations

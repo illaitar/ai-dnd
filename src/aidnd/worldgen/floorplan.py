@@ -14,6 +14,15 @@
   предпочтение спота · privacy↔дистанция-от-прохода · разрежённость · clearance.
 - ГАРАНТИИ: главный проход и клетка перед каждой дверью зарезервированы; финальный
   reachable() (BFS). Решается ОФЛАЙН (пул/ленивая материализация), рантайм только рисует.
+
+Key functions
+-------------
+clamp_layout(d) -> dict : Validate and clamp layout parameters to allowed enums.
+canonical_footprint(size, seed_key) -> dict : Generate deterministic building shape.
+plan_location(data, seed_key) -> dict : Assemble location floor plan from zone data.
+reachable(plan) -> bool : Verify all critical doors and stairs are accessible (BFS).
+canonical_mask_from(fl) -> set : Extract interior cell mask from saved floor layout.
+plan_svg(plan) -> str : Render location plan as SVG visualization.
 """
 
 from __future__ import annotations
@@ -333,7 +342,6 @@ def plan_location(data: dict, seed_key: str = "") -> dict:
 def reachable(plan: dict) -> bool:
     """BFS от входа по клеткам футпринта: все двери пристроек и подход к лестнице достижимы."""
     fl = plan["floors"][0]
-    hall = fl.get("hall") or {"x": 0, "w": fl["w"], "h": fl["h"]}
     mask = canonical_mask_from(fl)
     occ = {(r["x"] + i, r["y"] + j) for r in fl["zones"]
            for i in range(r["w"]) for j in range(r["h"])}

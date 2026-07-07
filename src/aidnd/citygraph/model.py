@@ -5,6 +5,15 @@
 Рёбра типизированы: road (дорога↔дорога), door (нутро↔точка дороги — это вход/выход),
 internal (нутро↔под-здание, напр. лестница в подвал).
 Дома — второй слой: каждый дом привязан к ближайшей точке дороги (двери) и к одному перекрёстку.
+
+Key functions
+-------------
+NodeKind : StrEnum of node types (CROSSROAD, POINT, BRIDGE, GATE, INTERIOR).
+Node : graph node with position and kind; immutable.
+Edge : connection between two nodes; may represent road, door, or internal passage.
+House : anchored to nearest road point and assigned to one crossroad for zoning.
+KeyBuilding : landmark building with name, position, and interior entrance node.
+Route : result of pathfinding (found, steps, crossroads, signs, landmarks, bearing).
 """
 
 from __future__ import annotations

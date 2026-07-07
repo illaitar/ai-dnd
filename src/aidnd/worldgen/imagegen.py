@@ -4,6 +4,15 @@
 
 Ключ: env FAL_KEY или .secrets/fal.key. Картинки тяжёлые — падают файлами в data/portraits/<id>/,
 в гит НЕ идут (rsync на прод). Промпт зданий (build_prompt) оставлен как был.
+
+Key functions
+-------------
+portrait_prompt(persona, expr) -> str : Generate Flux prompt for NPC portrait with
+  emotion and unified styling.
+ImageGen : Base class for image generation (stub/no-op).
+FluxImageGen : fal.ai Flux schnell backend; generate() + portraits() for 4 emotions.
+get_imagegen() -> ImageGen : Factory; returns FluxImageGen if available, else ImageGen.
+build_prompt(data, sign) -> str : Generate Flux prompt for building from sheet data.
 """
 
 from __future__ import annotations

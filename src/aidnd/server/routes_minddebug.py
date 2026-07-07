@@ -4,6 +4,13 @@
 
 Всё считает механическое ядро aidnd.mind (score/propose_goals); LLM — только чтобы разобрать
 свободный текст ситуации в структурированную сцену.
+
+Key functions
+-------------
+minddebug_page() -> HTMLResponse : Serve interactive UI for manual NPC mind exploration.
+minddebug_schema() -> dict : Return schema of traits, needs, emotions, archetypes.
+minddebug_decide() -> dict : Compute complete decision graph (perception → goals → choices).
+minddebug_scene_from_text() -> dict : Parse free-text scene into structured entities/environment.
 """
 
 from __future__ import annotations

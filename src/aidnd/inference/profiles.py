@@ -1,7 +1,13 @@
 """Профили запуска: role → (backend, model). Выбор — config.LLM_PROFILE (env AIDND_PROFILE).
 
 «local» генерится из ModelManager.ROLE_MODELS (текущее поведение, тюненое в Ollama). Здесь —
-облачные/гибридные варианты. «default» применяется к ролям без явного маппинга."""
+облачные/гибридные варианты. «default» применяется к ролям без явного маппинга.
+
+Key functions
+-------------
+routing_for(profile_name, role_models) -> dict : Select LLM backend routing for a profile.
+make_backends(routing, ollama_client=None) -> dict : Instantiate backend client objects for routing.
+"""
 
 from __future__ import annotations
 

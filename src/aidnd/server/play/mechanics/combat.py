@@ -1,6 +1,17 @@
 """Игровой контур — БОЙ И ГИЛЬДИЯ: логова, ранги/жетон, дуэли, авторезолв.
 
 Слой mechanics/ (см. docs/loop.md).
+
+Key functions
+-------------
+_lairs() -> list : Generate lairs around city with CR/env/monster data.
+GUILD_RANKS : Tuple of guild rank definitions (name/cr_max/advancement).
+_guild_board() -> list : Return uncompleted contracts from guild board.
+_guild_status() -> dict : Return player guild rank/affiliation/progress.
+_pc_combatant() -> Combatant : Build player combatant for combat engine.
+_combat_wrapup(enc, cb) -> dict : Resolve combat end (loot/hp/consequences).
+combat_state() -> dict : API endpoint — return active combat state.
+combat_act(request) -> dict : API endpoint — process player combat action.
 """
 
 from __future__ import annotations

@@ -7,6 +7,12 @@
 Роль Б — сорванный круг: исход из ОГРАНИЧЕННОГО меню (мир не сломать).
 
 LLMInscriber — единственный рантайм-путь (роли spell_scribe/wild_magic); StubInscriber — ТОЛЬКО тесты.
+
+Key functions
+-------------
+clamp_law(d: dict, comp) -> dict : clamps spell law to power budget; validates all fields.
+Inscriber : base class for spell inscription (role A) and wild magic outcome (role B).
+LLMInscriber : LLM-powered inscriber; spell_scribe role writes laws, wild_magic role handles chaos.
 """
 
 from __future__ import annotations

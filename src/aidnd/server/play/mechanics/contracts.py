@@ -1,6 +1,16 @@
 """Игровой контур — КОНТРАКТЫ: квесты из агенд (шаги-предикаты) + доска объявлений.
 
 Слой mechanics/ (см. docs/loop.md).
+
+Key functions
+-------------
+_contract_offer(npc: str) -> dict | None : Generate personal quest offer for NPC.
+_make_contract(npc: str, status: str) -> dict | None : Core contract generation from agendas.
+_contract_on_give(npc: str, it: dict) -> str | None : Complete quest step when item given.
+_contract_on_move(loc: int) -> str | None : Complete quest step when reaching location.
+_contract_on_talk(npc: str) -> str | None : Complete quest step when talking to NPC.
+_board_ads() -> list : Return active board advertisements.
+_board_publish() -> list : Publish new contract to board.
 """
 
 from __future__ import annotations

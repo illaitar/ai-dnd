@@ -2,6 +2,12 @@
 (логгеры aidnd/uvicorn/…) + ПОЛНЫЕ трейсбеки необработанных исключений (через middleware в app).
 Каждая запись помечена id мира. Скачивается/чистится через /api/play/debuglog. Шумный сторонний
 DEBUG (httpx/asyncio/…) приглушён до INFO.
+
+Key functions
+-------------
+setup(wid_getter=None) -> str : Initialize file logging with world ID tracking.
+read_log(tail_bytes: int | None = None) -> str : Read session debug log, optionally tail N bytes.
+clear_log() -> None : Clear the debug log file.
 """
 
 from __future__ import annotations

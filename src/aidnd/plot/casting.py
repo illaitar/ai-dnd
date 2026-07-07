@@ -1,6 +1,12 @@
 """Кастинг: нанизать актёров библии на СУЩЕСТВУЮЩИХ placed NPC (решение С3: ~80%).
 Матч по роли/персоне: архетип → предпочтительные городские роли; жадный скоринг.
-Не нашли — актёр остаётся NEW (значимого NPC заведёт след. срез)."""
+Не нашли — актёр остаётся NEW (значимого NPC заведёт след. срез).
+
+Key functions
+-------------
+match_cast(cast: list, people: dict) -> dict : Greedily match cast members to
+  NPCs by role; returns {cast_id: pid|None}.
+"""
 
 from __future__ import annotations
 

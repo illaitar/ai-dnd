@@ -1,5 +1,13 @@
 """Домен МАГИЯ (хендлеры /cast /glyphs /learn /teachers /grimoire) — распил world.py (docs/loop.md).
 Круг-рисунок → закон от LLM (кламп по бюджету), каст без броска, гримуар-на-мир, обучение глифам.
+
+Key functions
+-------------
+cast(request) -> dict : Execute a drawn spell circle—validate glyphs, cost, and handle backlash.
+glyphs_list() -> dict : List all available glyphs and mark which ones the player knows.
+learn_glyph(request) -> dict : Learn a glyph from a teacher—requires affinity and coins.
+teachers_here() -> dict : List nearby NPCs who teach magic for UI highlighting.
+grimoire_list() -> dict : List spells inscribed in the grimoire with composition and cast count.
 """
 
 from __future__ import annotations

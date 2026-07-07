@@ -1,5 +1,14 @@
 """Auth сервиса: argon2-пароли, непрозрачные отзывные токены сессий, зависимость current_user,
-регистрация/вход (email+пароль) и приём Google-аккаунта (id_token). Токены живут в auth_sessions."""
+регистрация/вход (email+пароль) и приём Google-аккаунта (id_token). Токены живут в auth_sessions.
+
+Key functions
+-------------
+register(db, email, password) -> tuple[User, str] : Create new user account & issue token.
+login(db, email, password) -> tuple[User, str] : Authenticate with email/password & issue token.
+login_google(db, id_token) -> tuple[User, str] : Authenticate via Google OAuth & issue token.
+issue_token(db, user) -> str : Generate opaque revocable session token.
+current_user(db, authorization, aidnd_session) -> User : FastAPI dependency for auth check.
+revoke(db, token) -> None : Revoke a session token."""
 
 from __future__ import annotations
 

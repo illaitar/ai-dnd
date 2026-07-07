@@ -5,6 +5,14 @@ amount). Ценность СУБЪЕКТИВНА: worth(предмет, аген
 товар) и взятку (плата — за расположение). Игрок — такой же агент: его «согласен» приходит от игрока.
 
 Никакого «продать» в коде нет — сделка ВЫПАДАЕТ из ценностного коридора между двумя worth.
+
+Key functions
+-------------
+money_demand(st) -> float : Agent's demand for money based on wealth/greed/ambition traits.
+money_of(st, world) -> float : Total coins an agent currently carries.
+worth(item, st, world) -> float : Subjective value of owning an item (scales by possession & need).
+propose_sale(seller_st, buyer_st, world) -> tuple|None : Find mutually beneficial trade within price corridor.
+settle_sale(deal, seller_st, buyer_st, world) -> dict : Execute trade (transfer item & coins).
 """
 
 from __future__ import annotations

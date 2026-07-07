@@ -1,4 +1,9 @@
-"""HTTP-эндпоинты лимитов: статус использования и разблокировка кодом."""
+"""HTTP-эндпоинты лимитов: статус использования и разблокировка кодом.
+
+Key functions
+-------------
+my_usage(user: CurrentUser) -> dict : Return current user's usage snapshot.
+redeem(body: Code, user: CurrentUser, db: DbSession) -> dict : Redeem unlock code, return updated usage."""
 
 from __future__ import annotations
 

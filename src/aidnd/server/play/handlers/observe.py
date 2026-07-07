@@ -1,4 +1,9 @@
-"""Домен ОСМОТР (/look) — распил world.py. Восприятие снимает туман; affordances из society-каталога."""
+"""Домен ОСМОТР (/look) — распил world.py. Восприятие снимает туман; affordances из society-каталога.
+
+Key functions
+-------------
+look(request: Request) -> dict : Perception roll (d20+Wis) against DC to reveal NPCs and containers.
+"""
 
 from __future__ import annotations
 

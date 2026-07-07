@@ -4,6 +4,16 @@
     from aidnd.items import ItemCtx, LLMSmith, StubSmith, Capability, inspect, view, normalize
 
 Крафт/мастерство/прочность (craft.py, durability.py) — следующий срез.
+
+Key functions
+-------------
+ItemCtx : item with surface/hidden layers and inspection gating.
+LLMSmith : LLM-powered smith for emergent item creation.
+inspect(item, actor, context) -> Result : inspect items with gating rules.
+view(item) -> Dict : expose surface (public) or hidden (private) item data.
+Capability : enum of item capabilities and properties.
+craft(recipe, materials) -> ItemCtx : forge item from recipe with durability.
+normalize(item) -> Dict : canonical item representation.
 """
 
 from __future__ import annotations

@@ -3,6 +3,13 @@
 NpcConfig — редактируемые настройки (характер/характеристики/нужды/эмоции/память/связи).
 NpcState — рантайм (config + позиция на графе + текущие нужды/эмоции/режим + память).
 Scene — лёгкий мир дебага: граф города + часы (тик) + размещённые NPC + предметы.
+
+Key functions
+--------------
+NpcConfig : editable NPC config (traits, abilities, relationships).
+Plan : routine plan with steps and execution cursor tracking.
+NpcState : runtime NPC state (emotions, needs, relationships, memory).
+Scene : lightweight debug world (city graph, NPCs, items, clock).
 """
 
 from __future__ import annotations

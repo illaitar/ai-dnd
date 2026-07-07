@@ -2,7 +2,16 @@
 
 На юзера: FREE_ENRICH генераций мира и FREE_REQUESTS игровых запросов. Валидный код,
 введённый в настройках, ставит user.unlimited=True. Коды генерит владелец (server/gencode).
-consume_* перечитывают юзера в текущей сессии БД (кэш на WS-коннекте мог устареть)."""
+consume_* перечитывают юзера в текущей сессии БД (кэш на WS-коннекте мог устареть).
+
+Key functions
+   -----------
+   snapshot(user: User) -> dict : Returns user quota state for UI.
+   consume_enrich(db: AsyncSession, user_id: int) -> tuple[bool, User] : Consume world-generation quota; returns (ok, updated user).
+   consume_request(db: AsyncSession, user_id: int) -> tuple[bool, User] : Consume game-request quota; returns (ok, updated user).
+   redeem(db: AsyncSession, user_id: int, code: str) -> tuple[bool, User] : Redeem unlock code for unlimited access.
+   generate_codes(db: AsyncSession, n: int = 1) -> list[str] : Generate new unlock codes (admin only).
+"""
 
 from __future__ import annotations
 

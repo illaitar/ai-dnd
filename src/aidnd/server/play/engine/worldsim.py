@@ -3,6 +3,20 @@
 
 routine_step() — дешёвый пересчёт спотов ВСЕХ жителей по нуждам (замена хардкода _routine_spot).
 Вызывается на смене фазы суток из тика мира (см. engine.world._world_tick).
+
+Key functions
+-------------
+routine_step(people, crof) -> None : Recalculate where each NPC is based on
+  needs/traits/time; mutates placement and needs state.
+predict(pid, phase=None) -> dict : Forecast NPC direction and purpose (node,
+  kind, route) in a phase; deterministic query with no stored state.
+forecast(pid) -> dict : Daily schedule as {phase: activity_kind} for UI
+  display; shows how NPC spends each day phase.
+crosses(pid, node, phase=None) -> bool : Check if NPC route passes through
+  node in a phase; used for ambush planning.
+set_commit(pid, kind, node=None, until_gt=None) -> None : Override routine
+  with commitment (follow/shift/errand); can expire.
+clear_commit(pid) -> None : Remove commitment override, freeing routine.
 """
 
 from __future__ import annotations
@@ -181,7 +195,7 @@ def routine_step(people: dict, crof: dict) -> None:
     один индекс зданий + O(люди×места) утилити. Мутирует crof (спот) и нужды в people[*].state."""
     phase = _phase()
     keynode, kps, place_idx, work_kinds = _place_context(people)
-    day, gt = _gt() // 1440, _gt()
+    gt = _gt()
     node2kind = {}  # где сейчас стоит NPC → тип места (гасит нужды)
     for kind, nodes in place_idx.items():
         for n in nodes:

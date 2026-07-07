@@ -8,6 +8,12 @@
 Модуляция общая (по КЛАССУ действия/цели, не по ситуации): нетерпёж (arousal) дисконтирует
 ожидание/подход и тянет к немедленному (и рушит «держать цену» в торге → голодный соглашается);
 пессимизм (valence↓) добавляет риск-аверсию к атаке. Argmax остаётся у ядра — меняется РАНЖИРОВАНИЕ.
+
+Key functions
+--------------
+think(state, world, percept=None, modulate=True) -> dict : Execute full decision cycle.
+modulate_ranked(ranked, m) -> list : Weight actions by emotional modulators.
+node(nid, label, active, content) -> dict : Build trace node for debugging.
 """
 
 from __future__ import annotations

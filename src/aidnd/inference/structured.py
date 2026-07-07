@@ -1,9 +1,16 @@
 """Надёжный structured output (main §6.3).
 
-Все структурные выходы агентов идут через constrained decoding по JSON Schema. На
+Все структурные выходы агентов идят через constrained decoding по JSON Schema. На
 сервере это XGrammar в vLLM (guided_json). Для Ollama-фоллбэка извлекаем первый
 JSON-объект из текста или из нативных tool_calls и приводим к схеме. Если ничего
 валидного — возвращаем None, и вызывающий код берёт детерминированный фоллбэк.
+
+Key functions
+--------------
+extract(response: dict, tool_name: str | None) -> dict | None : Extract structured result from LLM response.
+coerce(obj: dict | None, required: list[str]) -> dict | None : Validate required schema fields present.
+conform_to_schema(obj: dict | None, params: dict) -> dict | None : Normalize model output to match schema.
+sanitize_for_ollama(schema) : Prepare JSON Schema for Ollama structured output grammar.
 """
 
 from __future__ import annotations

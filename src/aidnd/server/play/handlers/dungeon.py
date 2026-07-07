@@ -7,6 +7,17 @@ _S["dungeon"]: позиция, туман (seen), зачищенные/обыс�
 машины-виньетки будят стражей; ключи открывают замки с lock_flavor брифа; блуждающие —
 давление времени (1-к-6 каждые 2 перехода). Бой комнаты — существующий Encounter, арена
 из ФОРМЫ комнаты. Босс — контур логова (гильдия/cleared/трофеи) без изменений.
+
+Key functions
+-------------
+build_dungeon(l) -> dict : Generate dungeon structure with rooms/traps/loot seeded by lair.
+incident_delve(inc) -> dict : Enter urban incident as procedural dungeon; populate rooms with townspeople.
+delve_enter(l) -> dict : Enter lair dungeon; initialize player at entrance.
+dungeon_payload(narr=None) -> dict : Create game state response with dungeon map, exits, room info.
+dungeon_move(request) : Move player to adjacent room; trigger content (monsters/traps/wanderers).
+dungeon_loot(request) : Search room for treasure, keys, secret doors; perception check.
+dungeon_exit(request) : Ascend from dungeon; clear state.
+dungeon_state(request) : Fetch current dungeon state.
 """
 
 from __future__ import annotations

@@ -1,6 +1,17 @@
 """Игровой контур — ЯДРО: сессии-миры, состояние, БД, время, игрок-агент, общие хелперы.
 
 Слой mechanics/ (см. docs/loop.md).
+
+Key functions
+-------------
+_play_session(request: Request) : FastAPI dependency for all /api/play/* endpoints.
+_gt() -> int : Get current game time in minutes from world session.
+_pc() -> NpcState : Get or load player state, with memory and relationships.
+_store() -> WorldStore : Access runtime world database (data/live.db).
+_pool() -> WorldStore : Access content pool database (data/worlds.db).
+_mana() -> float : Get player's current mana with lazy Int/Wis-based regeneration.
+_pc_save() -> None : Persist player state (hp, mana, memory, relationships) to DB.
+_model() : Get LLM model manager instance with usage tracking.
 """
 
 from __future__ import annotations

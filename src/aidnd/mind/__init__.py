@@ -1,5 +1,15 @@
 """Ядро разума NPC (новое, отдельно от старого aidnd/npc): состояние, память+SOTA-ретрива,
 инструменты (READ/WRITE), ход мира. Граф города и LLM — внешние зависимости (citygraph, inference).
+
+Key functions
+-------------
+NpcState : NPC internal state (mind, needs, goals, memory, body).
+decide(state, context) -> Action : Main decision engine; scores actions via utility.
+tick(world, state) -> effects : Simulation step; perception, time, NPC updates.
+Memory / MemoryStore : Semantic memory; stores observations, retrieves by similarity.
+Plan : Action plan; represents current NPC task and execution context.
+advance_agendas(npc_state) -> None : Updates long-term agendas (wealth, revenge, etc.).
+think(state, prompt) -> str : LLM reasoning; narrates, plans, makes decisions.
 """
 
 from __future__ import annotations

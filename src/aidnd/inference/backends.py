@@ -3,7 +3,17 @@
 Агенты зовут ModelManager.call(role, …); тот по активному профилю выбирает (backend, model)
 и дёргает backend.chat(…). Добавить провайдера = новый класс здесь + строчка в profiles.py.
 Каждый бэкенд САМ переводит провайдер-агностичную JSON-схему в своё (Ollama format /
-OpenAI response_format)."""
+OpenAI response_format).
+
+Key functions
+-------------
+OllamaBackend : Local Ollama backend with tuned adapters and strict JSON grammar.
+OllamaBackend.available() -> bool : Check if Ollama is reachable.
+OllamaBackend.chat(...) -> dict : Call Ollama with messages, schema, and streaming.
+OpenAICompatBackend : OpenAI-compatible backend (DeepSeek, vLLM, llama.cpp).
+OpenAICompatBackend.available() -> bool : Check if provider is available (key + httpx).
+OpenAICompatBackend.chat(...) -> dict : Call OpenAI-compatible API with json_object format.
+"""
 
 from __future__ import annotations
 

@@ -3,6 +3,13 @@ decide скорит каждую пару (действие, цель) обще�
 
 Примитивов мало и они общие: move/attack/take/give/say(act)/use/wait. Никакого «follow», «flee»,
 «ambush» — это всё ВЫИГРАВШИЙ примитив под конкретной целью.
+
+Key functions
+-------------
+Action : Primitive action datatype: move/attack/take/give/say/use/wait.
+enumerate_actions(state, world, percept) -> list : Generate feasible actions.
+score(state, world, percept) -> list : Score and rank action-goal pairs.
+decide(state, world, percept, temp, rng) -> tuple : Select best action.
 """
 
 from __future__ import annotations

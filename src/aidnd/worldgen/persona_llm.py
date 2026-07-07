@@ -5,6 +5,15 @@
 подсказки в промпте, но НИКОГДА не переписывает числа — персона это только флейвор поверх.
 
 LLMPersona — единственный рантайм-путь (роль character_writer); StubPersona — ТОЛЬКО тесты.
+
+Key functions
+-------------
+PersonaCtx : Context for NPC persona generation (id, name, role, sex, traits, charisma, appearance).
+trait_hints(traits, charisma, appearance) -> str : Convert character traits to Russian adjective hints.
+normalize(d, ctx) -> dict : Validate and normalize persona data (look, gear, carry, secret, etc.).
+PersonaEnricher : Abstract base class; subclasses implement describe(ctx) -> dict | None.
+LLMPersona(manager) : Runtime enricher; generates JSON personas via LLM character_writer role.
+StubPersona : Test-only enricher; returns deterministic persona without LLM call.
 """
 
 from __future__ import annotations

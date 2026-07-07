@@ -4,6 +4,14 @@
 
 Обязательство (promise) — дело со статусом: active → done|broken. Мир напоминает о слове
 в промпте и ведёт на встречу рутиной (worldsim: кандидат «appointment» в срок).
+
+Key functions
+-------------
+record(...) -> int : Append deed event to the world journal.
+town_talk(names, limit) -> list[str] : Extract fresh PUBLIC deeds for gossip.
+promise_make(...) -> int : Create a promise deed with active status.
+promises_active(actor) -> list : Get active promises for NPC or globally.
+promise_resolve(d, done) -> None : Mark promise as done or broken.
 """
 
 from __future__ import annotations

@@ -4,6 +4,14 @@
 
 Чистая логика над lv-словарём (тестируется без LLM/сервера). Разговор живёт в зоне:
 ушёл из зоны — вышел из беседы; тишина N тиков — беседа распалась.
+
+Key functions
+-------------
+conv_of(lv, pid) -> dict | None : Find conversation containing a participant.
+conv_note_say(lv, frm, to, text, zone) -> dict : Record speech act; merge and set debt.
+conv_debt_to(lv, pid) -> dict | None : Check if participant has unanswered question.
+conv_tick(lv, place_of) : Age conversations; remove stale or empty ones.
+conv_block(lv, pid, names) -> str | None : Build current conversation prompt block.
 """
 
 from __future__ import annotations

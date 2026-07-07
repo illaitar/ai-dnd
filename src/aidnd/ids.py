@@ -3,6 +3,15 @@
 Единое правило неймспейсинга: <тип>:<имя>. id уникален и стабилен на всё время
 жизни мира — сущность рождается с id и сохраняет его навсегда (нужно для event
 log, KG и провенанса).
+
+Key functions
+-------------
+slug(text: str) -> str : normalize arbitrary strings to stable slugs for id assembly.
+make(prefix: str, name: str) -> str : build id as "prefix:name", validating prefixes.
+kind_of(eid: str) -> str : extract entity type prefix from id.
+name_of(eid: str) -> str : extract name portion from id.
+is_pc(eid: str) -> bool : determine if id belongs to a player character.
+is_npc(eid: str) -> bool : determine if id belongs to an NPC.
 """
 
 from __future__ import annotations

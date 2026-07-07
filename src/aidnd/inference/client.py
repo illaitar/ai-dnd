@@ -3,6 +3,23 @@
 ПРАВИЛО ПРОЕКТА: офлайн-фоллбэков НЕТ. Нет модели / сеть легла → LLMUnavailable
 (после ретраев), и ошибка честно доходит до игрока. Заглушки (Stub*) допустимы
 ТОЛЬКО в тестах — рантайм их никогда не строит.
+
+Key functions
+-------------
+OllamaClient : HTTP client to Ollama/OpenAI-compatible backends with
+  streaming, tools, and structured output (fmt).
+ModelManager : Route LLM calls by role (intent/narrator/etc) to
+  backends; enforces no offline fallbacks (LLMUnavailable on failure).
+OllamaClient.chat_stream(..., on_token, think, tools, fmt) -> dict :
+  Stream model response, calling on_token() per token piece.
+OllamaClient.chat(...) -> dict : Non-streaming wrapper that collects
+  full response (calls chat_stream with no-op callback).
+ModelManager.call(role, messages, schema, ...) -> dict : Unified
+  entry point — routes by role, retries 3x, raises LLMUnavailable.
+ModelManager.available() -> bool : Health check for active backends;
+  runtime never branches on this (call() raises if unavailable).
+LLMUnavailable : Exception raised after retries; caught at server
+  boundary and returned to player as honest error (no fallback).
 """
 
 from __future__ import annotations

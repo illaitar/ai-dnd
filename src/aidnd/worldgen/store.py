@@ -1,6 +1,15 @@
 """SQLite-БД насыщенных миров: world_id + здания (фактшит). Дешёвое переиспользование: load, без LLM.
 
 Файл по умолчанию <repo>/data/worlds.db (override через AIDND_WORLDS_DB). Коммитится — мир едет на прод.
+
+Key functions
+-------------
+WorldStore(path) : SQLite database client for world state — config, NPCs, items, deeds, contracts.
+user_world_create(user_id) -> tuple : Allocate new user to a fresh world (id, seed).
+destroy_world(world_id) : Permadeath: erase world runtime and release user.
+deed_add(world_id, gt, actor, verb, ...) -> int : Append event to world's gossip/witness log.
+place_person(world_id, npc_id, node, home, work) : Bind NPC to world location + role.
+inventory(world_id, holder) -> list : Fetch player's inventory (items + known properties).
 """
 
 from __future__ import annotations

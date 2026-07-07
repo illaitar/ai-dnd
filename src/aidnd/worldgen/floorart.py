@@ -4,6 +4,10 @@
 Чистый SVG (feTurbulence для бумаги и пятен, никакого canvas). Дрожь штриха — сидированная
 (один и тот же дом всегда нарисован одинаково). Геометрию даёт floorplan.plan_location;
 здесь — только красота поверх готовых координат.
+
+Key functions
+-------------
+paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = None) -> str : Render location plan as parchment map with glyphs and legend.
 """
 
 from __future__ import annotations
@@ -212,7 +216,7 @@ def _g_storage(out, r, rng):
 
 
 def _g_desk(out, r, rng):
-    x, y, w, h = r["px"], r["py"], r["pw"], r["ph"]
+    x, y, w = r["px"], r["py"], r["pw"]
     _wrect(out, x + 5, y + 6, w * 0.5, 12, rng, width=1.1)
     _wcircle(out, x + 5 + w * 0.25, y + 26, 3.4, rng, width=0.9)
     px, py = x + w * 0.68, y + 8                                        # бумага

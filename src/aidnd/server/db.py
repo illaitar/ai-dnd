@@ -1,7 +1,17 @@
 """Асинхронный слой БД сервиса (Postgres): движок, фабрика сессий, Base, init_db.
 
 Пользователи / сессии-токены / игры. URL — config.DATABASE_URL (env AIDND_DATABASE_URL).
-SQLAlchemy 2.0 async + asyncpg. Схема создаётся через create_all (Alembic — позже)."""
+SQLAlchemy 2.0 async + asyncpg. Схема создаётся через create_all (Alembic — позже).
+
+Key functions
+-------------
+Base : SQLAlchemy ORM declarative base for all model classes.
+engine : AsyncIO PostgreSQL engine (create_async_engine) with NullPool.
+SessionLocal : Async session factory bound to the engine.
+init_db() -> None : Create all tables from models.metadata (idempotent).
+get_session() -> AsyncIterator[AsyncSession] : FastAPI dependency yielding a DB session per request.
+DbSession : Type alias (Annotated) for session dependency injection in route handlers.
+"""
 
 from __future__ import annotations
 

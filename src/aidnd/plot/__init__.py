@@ -1,5 +1,14 @@
 """Основной сюжет: библия (тема/правда/каст 30+ с иерархией≠важностью), архитектор, кастинг.
-Игрок — регрессор. См. docs/PLOT.md."""
+Игрок — регрессор. См. docs/PLOT.md.
+
+Key functions
+-------------
+StubArchitect : Deterministic plot architecture; cult sacrifice template for seeding.
+validate_bible(b) -> list : Validates plot bible structure; returns violations.
+match_cast(cast, people) -> dict : Greedily matches archetypal roles to NPCs.
+ARCHETYPES : Tuple of 13+ archetypal character roles with hierarchy.
+CATEGORIES : Tuple of plot categories (enemy, ally, neutral) for NPC classification.
+"""
 
 from __future__ import annotations
 

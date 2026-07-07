@@ -1,6 +1,17 @@
 """Пошаговый боевой движок (5e-lite): инициатива d20+dex, ход = движение (клетки, BFS) + одно
 действие (attack / dodge / flee / end). Атака d20+to_hit против AC (dodge = помеха), урон кости+бонус,
 резист/иммун по типу. Мораль: слабые бегут. Детерминирован сидом. Лог сухой, как у мастера за столом.
+
+Key functions
+-------------
+roll_dice(spec, rng) -> int : Parse dice notation and roll the result.
+Encounter(party, foes, seed, ...) : Orchestrate combat: init, turns, actions, log.
+act_move(c, tx, ty) -> str | None : Move combatant via pathfinding; None if success.
+act_attack(c, target_id) -> str | None : Attack with d20 roll, damage, crits.
+act_dodge(c) -> str | None : Defensive stance (disadvantage to attackers).
+act_flee(c) -> str | None : Flee combat if at map edge.
+status() -> str : Return battle state: "active" / "won" / "lost" / "draw".
+ai_turn(c) -> None : Enemy AI: morale check, approach/kite, attack or flee.
 """
 
 from __future__ import annotations

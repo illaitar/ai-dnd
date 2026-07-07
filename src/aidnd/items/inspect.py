@@ -1,6 +1,11 @@
 """Осмотр: резолвим гейт каждого скрытого свойства о Capability наблюдателя. Разный `via` вскрывает
 разное; expert делегирует чужой способности (NPC-знаток). view() — что наблюдатель ЗНАЕТ о предмете
 (surface + вскрытое), с истинной ценой только после вскрытия true_worth/forgery.
+
+Key functions
+-------------
+inspect(item, cap, via, **opts) -> dict : Reveal hidden properties by inspection method.
+view(item, known) -> dict : Query known item facts (surface + revealed).
 """
 
 from __future__ import annotations

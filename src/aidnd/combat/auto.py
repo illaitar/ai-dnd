@@ -1,5 +1,9 @@
 """Авторезолв боя целиком (обе стороны на ИИ): NPC-партии зачищают подземелья ОФСКРИН тем же
 движком, что и игрок, — один набор правил на весь мир.
+
+Key functions
+-------------
+resolve(party, foes, seed, obstacles, waves) -> dict : Complete auto-combat simulation for NPC parties.
 """
 
 from __future__ import annotations

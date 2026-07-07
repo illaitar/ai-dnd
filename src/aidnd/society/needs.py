@@ -4,6 +4,14 @@
 паттерны-жизни агентных соцсимуляций (Maslow-иерархия нужд, эволюционирующих во времени):
 каждая нужда = число 0..1 («насколько ХОЧУ»), само растёт со временем, гасится в местах, которые
 её «рекламируют» (см. places.py). Черта характера усиливает свою нужду (жадный острее хочет денег).
+
+Key functions
+   -----------
+   Need(...) -> Need : Core dataclass representing one NPC need with growth rate and trait boosting.
+   fresh() -> dict : Initialize need levels (0..1) for a new NPC; returns base values.
+   pressure(needs, traits) -> dict : Compute effective need pressure with trait boosting.
+   advance(needs, minutes, sated) -> dict : Evolve needs over time; sated places reduce them.
+   NEEDS : list[Need] : Catalog of 7 game needs with growth rates and trait associations.
 """
 
 from __future__ import annotations

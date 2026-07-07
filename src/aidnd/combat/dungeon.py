@@ -4,6 +4,11 @@
 движка: не террейн-коды, а множество непроходимых клеток obstacles. Каверны (лесные/болотные/
 пещерные логова) — клеточный автомат; руины/городские — редкие столбы-опоры. Детерминировано по
 (seed, env). Волны: CR-бюджет режется на 2-3 накатывающие группы (то же pick_encounter по среде).
+
+Key functions
+-------------
+obstacles(w, h, env, seed) -> set : Generate dungeon obstacles; ensures playable layout.
+waves(cr_budget, env, seed, n=2, max_units=4) -> list : Split CR budget into n enemy waves.
 """
 
 from __future__ import annotations

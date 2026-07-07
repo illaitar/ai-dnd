@@ -5,6 +5,12 @@
 глаголов в прозе больше нет. Контекст-сборщик отдаёт арбитру МАКСИМУМ фактов сцены (люди,
 ёмкости, сумка, зоны, предметы рядом, места города, время) — арбитр сам парсит намерение
 и цели; исполнители (примитив×манера×гейты) живут в handlers/freeform._attempt.
+
+Key functions
+-------------
+resolve(text: str, sc: dict) -> dict | None : Parse player input to verb-target-manner plan via LLM arbiter.
+assemble_context(sc: dict) -> str : Gather scene facts (NPCs, items, zones) for arbiter.
+normalize_plan(out: dict, cap: int = 3) -> dict : Validate and clean arbiter response into executable plan.
 """
 
 from __future__ import annotations

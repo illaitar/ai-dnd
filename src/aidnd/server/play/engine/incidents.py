@@ -11,6 +11,15 @@
 - missing = житель похищен (flag captive — исчезает из сцен города честно), спасение
   возвращает; stash = схрон краденого ИЗ deed-журнала (возврат жертвам — реальные кошельки).
 Сам данж — маленький dungeongen (городской масштаб) с брифом пула. LLM в рантайме нет.
+
+Key functions
+-------------
+incidents_active() -> list : Returns all active incidents in the world.
+incident_spawn() -> list : Morning: spawn one incident from city life (max 2 active).
+gang_morning() -> list : Daily escalation: active gangs steal coins & record deeds.
+incident_jobs() -> list : Format incidents as guild board quests with CR & reward.
+incident_resolve(inc_id, fell_members) -> list : Complete incident: reward patron,
+                                                   free captive, return loot to victims.
 """
 
 from __future__ import annotations
@@ -215,7 +224,7 @@ def incident_resolve(inc_id: str, fell_members: list) -> list:
         _store().flag_del(_wid(), f"captive|{inc['captive']}")
         nm = inc.get("captive_name", "спасённый")
         narr.append(f"{nm} на свободе — сам доберётся до родни, а те не забудут.")
-        for pid, p in people.items():
+        for _pid, p in people.items():
             if _fam(p.name) == _fam(nm):
                 rel = p.state.rel("pc")
                 rel["affinity"] = min(1.0, rel["affinity"] + 0.35)

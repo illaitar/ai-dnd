@@ -6,6 +6,11 @@ deed «предлагал кровь» (пища дознавателям). DC �
 отношений и АДЕКВАТНОСТИ ставки против цены дела; формулы в PB (принцип 4).
 Исполнение заказов крови — утренний шаг _deal_jobs: авторезолв ТЕМ ЖЕ движком, что
 NPC-зачистки; исход настоящий (flag dead, deed murder, выплата эскроу / возврат задатка).
+
+Key functions
+-------------
+deal_attempt(...) -> dict | None : Deal chain gate—validate stakes, roll
+  persuasion vs. NPC DC (honesty/malice), create contract on success.
 """
 
 from __future__ import annotations

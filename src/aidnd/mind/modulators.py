@@ -7,6 +7,11 @@ dominance/resolution/selection_threshold/securing). Это МЕХАНИЗМ СИ
 
 НЕЙТРАЛЬНО при базовом состоянии (нужды≈0.2, эмоции 0, черты 0.5 → arousal≈valence≈…≈0.5), поэтому
 подключение к скору (brain.modulate) не сдвигает поведение в норме — только под давлением.
+
+Key functions
+-------------
+urges(state) -> dict : Calculate urge intensity, urgency, and priority for each need.
+modulators(state) -> dict : Compute 6 global behavioral modulators from state and traits.
 """
 
 from __future__ import annotations

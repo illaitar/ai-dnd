@@ -5,6 +5,12 @@
 Здесь НЕТ скриптов поведения — только «что ценно сейчас». Как добиваться — решит utility над
 общими примитивами. Формирование НОВОЙ ситуативной цели — место для LLM (помечено), но базовый
 набор выводится механически, чтобы стенд был детерминирован и проверяем.
+
+Key functions
+--------------
+Goal : desired outcome with kind, target, value, and metadata.
+standing_needs(state) -> list : generate standing goals from NPC needs.
+propose_goals(state, world, percept) -> list : compile all goal candidates for tick.
 """
 
 from __future__ import annotations

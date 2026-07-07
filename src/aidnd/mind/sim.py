@@ -4,6 +4,13 @@
 Где был бы LLM (в продовом контуре): apprise неоднозначных событий (Tier-2), формирование НОВОЙ
 ситуативной цели в propose_goals, рендер речевого акта say(...) в текст, rerank в recall. Здесь
 всё механически — чтобы сценарии были детерминированы и проверяемы.
+
+Key functions
+-------------
+Percept : dataclass holding NPC's perception data (location, entities, exits).
+perceive(state, world, radius: int = 1) -> Percept : capture sensory input.
+apply(action, state, world) -> dict : apply action to world and return event.
+tick(state, world, temp: float = 0.0, rng) -> dict : one cycle: perceive → decide → apply.
 """
 
 from __future__ import annotations

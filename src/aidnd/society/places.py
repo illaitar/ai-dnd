@@ -6,6 +6,14 @@
 `detect` связывает КАТАЛОГ с реальными зданиями мира: по типу/услугам фактшита определяем, какие
 place-kind воплощает здание (и значит — какие нужды оно закрывает). Один источник истины и для
 рутины (куда идти), и для сцены (что закрыть, стоя тут).
+
+Key functions
+-------------
+PlaceKind : dataclass for place type with need rates, time window, and trait affinity weights.
+kinds_of(building: dict) -> list[str] : detect which place-kinds a building implements.
+advertises(building: dict) -> dict : aggregate need satiation this building offers.
+affinity(kind: str, traits: dict) -> float : compute NPC attraction to place type.
+score(kind: str, pressured: dict, traits: dict, phase: str, ...) -> float : compute visit utility.
 """
 
 from __future__ import annotations

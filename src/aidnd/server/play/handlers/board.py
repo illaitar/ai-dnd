@@ -1,4 +1,14 @@
-"""Домен ДОСКА/ГИЛЬДИЯ/ВЫЛАЗКА (/board /guild_redeem /board_take /delve /surrender /watch_flee) — распил world.py."""
+"""Домен ДОСКА/ГИЛЬДИЯ/ВЫЛАЗКА (/board /guild_redeem /board_take /delve /surrender /watch_flee) — распил world.py.
+
+Key functions
+-------------
+board() -> dict : Returns guild board, lairs, job listings, and player status.
+guild_redeem(request) -> dict : Pays guild fine to redeem a guild mark.
+board_take(request) -> dict : Takes job from guild board; creates active contract.
+delve(request) -> dict : Enters lair/dungeon and initiates combat encounter.
+surrender(request) -> dict : Surrenders to watch; pays fine or serves jail time.
+watch_flee(request) -> dict : Attempts Dex check to flee from guard pursuit.
+"""
 
 from __future__ import annotations
 

@@ -1,6 +1,12 @@
 """Модель предмета: фактшит в ДВА слоя знания — surface (видно, может врать) + hidden[] (истина под
 гейтами осмотра). Модификаторы системно-нейтральны (соц-ось mind/функции/цена/улики работают сейчас,
 боевые спят до боёвки). Предмет — dict-фактшит (как здания/персоны), логика — функции рядом.
+
+Key functions
+--------------
+Capability : holds inspector/crafter profile with abilities, competencies, tools.
+normalize(d: dict) -> dict : validate and normalize raw item data into factsheet.
+rarity_price(worth: float, rarity: str) -> int : apply rarity multiplier to worth.
 """
 
 from __future__ import annotations

@@ -13,6 +13,16 @@
   cost/moral        — наказание (×lawful) + внутренний моральный тормоз (×honesty)
 Терпение γ и риск-толерантность выводятся из черт. Все коэффициенты — в BAL (это и есть то,
 что калибруется к спеке-бенчу, а не 50 скриптов).
+
+Key functions
+-------------
+utility(a, g, state, world, percept) -> float : Main dispatcher for action utility by goal type.
+T(state, name: str) -> float : Gets trait value from NPC config.
+proximity(d: int) -> float : Proximity factor (1.0/(1.0+d)) for distance decay.
+gamma(state) -> float : Opportunity discount factor derived from irritability.
+pwin(att, deff) -> float : Combat win probability clamped to [0.02, 0.98].
+hostility(state, me, b) -> float : Threat level [0..1] of entity to self.
+witnesses(percept, state, target_id: str) -> int : Count third-party observers.
 """
 
 from __future__ import annotations

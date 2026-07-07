@@ -1,5 +1,10 @@
 """Параметры генерации города. Передаются снаружи (дебаг-экран/игра), детали генератора
-скрыты за этим простым контрактом."""
+скрыты за этим простым контрактом.
+
+Key functions
+-------------
+CityParams : dataclass for city generation parameters (seed, size, key_buildings, flags).
+normalized(self) -> CityParams : validate and clamp parameters to safe ranges."""
 
 from __future__ import annotations
 

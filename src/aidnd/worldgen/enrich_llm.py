@@ -5,6 +5,13 @@
 людей не выдумываем (NPC отдельным пассом), роли — в occupants_kind.
 
 LLMEnricher — единственный рантайм-путь; StubEnricher — ТОЛЬКО тесты.
+
+Key functions
+-------------
+BuildingCtx : Context dataclass for building hints and landmarks.
+Enricher.describe_building(ctx: BuildingCtx) -> dict : Abstract interface for enrichers.
+StubEnricher.describe_building(ctx: BuildingCtx) -> dict : Test enricher with deterministic output.
+LLMEnricher(manager) : Real enricher; calls location_writer LLM role.
 """
 
 from __future__ import annotations

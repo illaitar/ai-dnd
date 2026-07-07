@@ -6,6 +6,14 @@
 
 Место-агностично: candidates строит адаптер (server/play/worldsim), зная здания мира. Здесь —
 чистая логика выбора. Ни сервера, ни БД.
+
+Key functions
+-------------
+Candidate : dataclass for available NPC location (kind, node, window_kind).
+step(...) -> (node, kind) : advance NPC needs and choose next destination.
+choose_c(...) -> Candidate : select best candidate by utility, break ties with seeding.
+choose(...) -> int : return node of best candidate (backward-compatible wrapper).
+explain(...) -> list : diagnostic scoring of candidates for /minddebug.
 """
 
 from __future__ import annotations

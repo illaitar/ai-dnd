@@ -3,7 +3,14 @@
 - users: аккаунт. pw_hash (argon2) и/или google_sub — поддержаны оба способа входа
   (email+пароль и Google OAuth); хотя бы один заполнен.
 - auth_sessions: непрозрачные отзывные токены сессий (не stateless-JWT).
-- games: сохранённые игры пользователя (снапшот мира), привязка к user_id."""
+- games: сохранённые игры пользователя (снапшот мира), привязка к user_id.
+
+Key functions
+-------------
+User : user account with optional password hash (Argon2) and/or Google OAuth.
+AuthSession : opaque revocable session token linked to a user.
+Game : saved game world snapshot with seed, title, and snapshot data.
+UnlockCode : unlock code for unlimited features; redeemable by users."""
 
 from __future__ import annotations
 

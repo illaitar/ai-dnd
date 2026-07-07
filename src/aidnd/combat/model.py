@@ -1,6 +1,14 @@
 """Боевая модель (5e-lite, дух Baldur's Gate — упрощённо): единый Combatant из ЛЮБОГО источника —
 монстр бестиария (данные SRD), NPC пула (его mech), игрок (pc + оружие из сумки). Никакого
 хардкода видов: всё из данных.
+
+Key functions
+-------------
+Combatant : unified combat model (HP/AC/damage for any combatant type).
+from_monster(row, cid) -> Combatant : create combatant from SRD data.
+from_npc(pid, name, mech, ...) -> Combatant : create NPC combatant.
+from_pc(abilities, hp, max_hp, ...) -> Combatant : create PC combatant.
+bestiary() -> list : load cached SRD monster database.
 """
 
 from __future__ import annotations

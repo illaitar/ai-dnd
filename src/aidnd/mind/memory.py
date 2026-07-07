@@ -4,6 +4,14 @@
 выбирает top-k самых релевантных ВОПРОСУ. Обращение освежает last_access (доступ укрепляет память).
 Реранкер подключаем (LLMReranker) или None — тогда shortlist по механическому скору как есть
 (это ранжирование, не контент: единственное санкционированное «без LLM» место).
+
+Key functions
+-------------
+Memory : NPC memory record with text, importance, recency tracking.
+relevance_lexical(query, m) -> float : Lexical token overlap scoring.
+Reranker : Base reranking interface for memory retrieval strategies.
+LLMReranker(manager) : LLM-driven top-k selection by relevance via cognition.
+MemoryStore : Memory bank with scored recall (recency·importance·relevance).
 """
 
 from __future__ import annotations

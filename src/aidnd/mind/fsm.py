@@ -5,6 +5,13 @@
 следующий шаг плана). hold(routine)=важность плана → важная рутина устойчива к мелочам, пустяковая рвётся.
 
 Решения внутри режима (выбор инструмента) — отдельный слой; здесь только КАКОЙ режим.
+
+Key functions
+-------------
+dominant_need(state: NpcState) -> tuple : Find most pressing need weighted by traits.
+urgency(state: NpcState, stim: dict | None = None) -> dict : Compute bids per mode.
+hold(state: NpcState) -> float : Stickiness of current mode against interruption.
+step(state: NpcState, scene, stim: dict | None = None) -> dict : Execute FSM step, return trace.
 """
 
 from __future__ import annotations

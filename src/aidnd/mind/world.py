@@ -3,6 +3,16 @@
 Это ЧИСТЫЙ стенд для проверки эмерджентных сценариев — без citygraph/LLM. Тот же контур
 value/act позже подключится к настоящему городу (citygraph.City как подложка мест). Здесь
 ничего «про сценарий» не зашито: только тела с наблюдаемыми атрибутами и граф мест.
+
+Key functions
+-------------
+Item(name, value, ...) -> Item : defines an inventory item with satisfaction effect.
+Body(id, place, ...) -> Body : defines a physical agent with stats and inventory.
+World() -> World : container for the place graph and agents in simulation.
+World.link(a, b) -> None : connect two places bidirectionally in the graph.
+World.add(body) -> Body : register an agent body into the simulation.
+World.present_at(place) -> list : return all agents currently at a location.
+World.dist(a, b) -> int : compute shortest path distance between locations.
 """
 
 from __future__ import annotations

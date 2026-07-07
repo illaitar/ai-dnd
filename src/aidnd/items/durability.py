@@ -1,5 +1,11 @@
 """Прочность: состояние, износ от использования, деградация mods, поломка. Живёт БЕЗ боёвки —
 инструменты/отмычки/ключи тупятся и ломаются, у зелий срок годности. Брак (weak_at) ломает раньше.
+
+Key functions
+-------------
+condition(item: dict) -> dict | None : Calculate item condition ratio and label.
+active_mods(item: dict) -> list : Get visible mods accounting for wear/breakage.
+use(item: dict, amount: int = 1) -> dict : Apply wear, return break/wear event info.
 """
 
 from __future__ import annotations

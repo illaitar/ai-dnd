@@ -1,4 +1,16 @@
-"""Домен ПРОЧЕЕ (/hero /debuglog) — распил world.py. Имя героя, скачиваемый лог сессии."""
+"""Домен ПРОЧЕЕ (/hero /debuglog) — распил world.py. Имя героя, скачиваемый лог сессии.
+
+Key functions
+-------------
+set_hero(request) -> dict : Set hero name for new world.
+debug_log(download, tail) -> Response : Retrieve session debug log (full or tail).
+debug_log_clear() -> dict : Clear session debug log.
+npc_schedule(npc) -> dict : Get NPC daily schedule from forecast; requires familiarity.
+economy_board() -> dict : Show all economy chains and city money supply.
+market_board() -> dict : Show goods at current venue; empty if not in shop.
+market_buy(request) -> dict : Purchase goods; update supply/price and player coins.
+market_sell(request) -> dict : Sell from inventory; update supply/price and coins.
+"""
 
 from __future__ import annotations
 

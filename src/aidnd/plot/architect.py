@@ -1,5 +1,10 @@
 """Архитектор сюжета: сид + профиль города → библия. StubArchitect — детерминированный шаблон
 «культ жертв» (офлайн/фоллбэк, ВАЛИДЕН по правилам). LLM-архитектор (роль plot_architect) — С-1б.
+
+Key functions
+-------------
+StubArchitect.build(seed, city, rng=None) -> dict : Generates a deterministic plot bible from
+    city profile and seed; template scenario with cast, theme, conflict, secrets, and hooks.
 """
 
 from __future__ import annotations

@@ -5,6 +5,10 @@
 
 Старый терминальный игровой цикл (bootstrap/runtime/rules) снесён — интерфейс игрока
 строится заново на mind+citygraph+worldgen (население — worldgen.population).
+
+Key functions
+-------------
+main() -> None : CLI dispatcher; routes 'serve'/'web' to web server, errors on unknown commands.
 """
 
 from __future__ import annotations

@@ -1,4 +1,16 @@
-"""Домен ПОХОД (/map /move /enter /exit /room /sign_ack /live) — распил world.py. Позвоночник: граф-путь, прерывания."""
+"""Домен ПОХОД (/map /move /enter /exit /room /sign_ack /live) — распил world.py. Позвоночник: граф-путь, прерывания.
+
+Key functions
+-------------
+game_map() -> dict : Returns map SVG, geometry, and player location for UI rendering.
+move(request) -> dict : Handle player movement; check path interrupts (signs/events).
+enter(request) -> dict : Enter a building; blocks map, starts interior scene.
+go_room(request) -> dict : Navigate rooms; gate checks (staff/lock/stealth).
+exit_building(request) -> dict : Exit building; return to street view.
+live(request) -> dict : Wait action; pass turn to world (NPC tick, time advance).
+play_plan() -> dict : Get paper floor plan with NPC positions and zone fog.
+play_zone(request) -> dict : Move player to zone within building.
+"""
 
 from __future__ import annotations
 

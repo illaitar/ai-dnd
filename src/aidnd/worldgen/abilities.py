@@ -3,6 +3,11 @@
 База — «простолюдинский» разброс 8..15 (3d6-стиль со сглаживанием), поверх — смещения роли
 (кузнецу — сила, знахарке — мудрость). Один и тот же (pid, seed) → те же цифры: банк можно
 мигрировать/перегенерировать без дрейфа. Персон/портретов не касается.
+
+Key functions
+-------------
+roll_abilities(role: str, rng: Random) -> dict : Generate role-biased ability
+  scores (6..17) with 4d6 distribution.
 """
 
 from __future__ import annotations

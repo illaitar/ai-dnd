@@ -1,7 +1,15 @@
 """HTTP-эндпоинты auth: /auth/register, /auth/login, /auth/google, /auth/logout, /auth/me.
 
 Email+пароль (argon2) и Google (id_token от клиентской кнопки Sign-In) — оба способа
-возвращают непрозрачный токен сессии. Защищённые ручки требуют Bearer-токен (current_user)."""
+возвращают непрозрачный токен сессии. Защищённые ручки требуют Bearer-токен (current_user).
+
+Key functions
+-------------
+register(body, response, db) -> dict : Create new user account with email+password.
+login(body, response, db) -> dict : Authenticate user with email+password credentials.
+google(body, response, db) -> dict : Authenticate user via Google id_token.
+logout(response, db, authorization, aidnd_session) -> dict : Revoke current session token.
+me(user) -> dict : Return authenticated user profile."""
 
 from __future__ import annotations
 

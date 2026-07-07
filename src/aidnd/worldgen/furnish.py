@@ -7,6 +7,16 @@ fixed|loose. Никаких стопок: шесть кружек = шесть �
 Слой ПУЛА: furnish_building пишет data["zones"] (building_pool, офлайн-скрипт scripts/furnish.py).
 Мир при создании материализует объекты в items/live.db (holder="zone:<bid>/<zid>") без LLM.
 LLMFurnisher — единственный рантайм-путь (роль furnisher); заглушек нет (принцип 1).
+
+Key functions
+-------------
+zone_catalog() -> dict : Load zone templates from content/zones.json.
+zones_for(btype, data, kind) -> list[dict] : Generate zone instances for a building.
+LLMFurnisher : Runtime furnisher; invokes LLM to populate zones with items.
+furnish_zone(zone, data, btype) -> list[dict] : Populate single zone with items via LLM.
+furnish_group(members, data, btype) -> list[list[dict]] : Batch-furnish grouped zone instances.
+furnish_building(data, btype, manager, kind) -> dict : Complete building furnishing.
+layout_params(data, btype, manager) -> dict : Generate layout presets.
 """
 
 from __future__ import annotations

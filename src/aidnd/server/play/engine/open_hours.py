@@ -4,6 +4,12 @@
 > 24 = за полночь (таверна до 01:00, игорный дом до 04:00). Гейтит доступ ИГРОКА к услугам/
 торговле (B2): ночью лавка заперта, рынок работает днём, таверна — вечер-ночь. Тот же канон
 питает нарратив («лавка закрыта до утра») и рыночную витрину (open/закрыто-до).
+
+Key functions
+-------------
+hours_for(info: str) -> tuple[int, int] | None : Query venue hours by name.
+is_open(info: str, gt: int) -> bool : Check if venue is open at game time.
+opens_at(info: str) -> int | None : Get opening hour for narrative text.
 """
 
 from __future__ import annotations

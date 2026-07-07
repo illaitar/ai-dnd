@@ -6,6 +6,15 @@
 логово вождя, склад…) с уликой-ссылкой на бит истории — валидатор бьёт висячие ссылки
 (Qud-метод: история рационализируется задним числом и оставляет СЛЕДЫ по комнатам).
 Рантайм детерминирован: generate() раздаёт виньетки комнатам по архетипу и сиду.
+
+Key functions
+-------------
+forge_dungeon_brief(env, folk_hint, mgr) -> dict : Generate offline dungeon brief
+  and room descriptions via LLM architect and decorator.
+room_arch(r) -> str : Determine room archetype from structural facts (entrance,
+  hall, cave, chief, store, post, danger, treasure, secret).
+apply_brief(d, brief, rng) -> None : Assign brief room descriptions to dungeon
+  rooms by archetype, deterministically seeded.
 """
 
 from __future__ import annotations

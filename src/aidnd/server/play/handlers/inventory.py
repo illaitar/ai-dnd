@@ -1,4 +1,15 @@
-"""Домен ПРЕДМЕТЫ (/loot /inspect /inventory /commission /repair /use /give) — распил world.py."""
+"""Домен ПРЕДМЕТЫ (/loot /inspect /inventory /commission /repair /use /give) — распил world.py.
+
+Key functions
+-------------
+loot(request) -> dict : Retrieve items from a container inside buildings.
+inspect_item(request) -> dict : Inspect item properties and reveal hidden facts.
+inventory() -> dict : Get player inventory with known item properties.
+commission(request) -> dict : Commission item crafting from NPC artisans.
+repair_item(request) -> dict : Repair durability damage on items.
+use_item(request) -> dict : Apply consumable effects or test durability.
+give_item(request) -> dict : Gift or trade items to NPCs via unified resolver.
+"""
 
 from __future__ import annotations
 

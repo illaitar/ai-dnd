@@ -1,6 +1,14 @@
 """Слой насыщения локаций — ОТДЕЛЬНЫЙ от графа. Один вызов на здание → фактшит характеристик
 (суб-помещения инлайн). Граф не мутирует. Результат можно сложить в БД миров (store) для дешёвого
 переиспользования.
+
+Key functions
+-------------
+Building : dataclass for an enriched building with id, node, is_key, sign, and data.
+Enrichment : container for enriched buildings, progress snapshot, and enrichment scope.
+building_ctx(city, bid, is_key, idx, region=None) -> BuildingCtx : prepare enricher context.
+enrich_city(city, scope, enricher, ...) -> Enrichment : enrich buildings, optionally save to DB.
+store_world(store, world_id, city, enr) -> None : persist enriched world to database.
 """
 
 from __future__ import annotations

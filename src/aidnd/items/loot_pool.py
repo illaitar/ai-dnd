@@ -1,6 +1,11 @@
 """Сид-набор пула предметов мира (ДАННЫЕ, без LLM): базовый товар/находки городка с осью
 редкости. Мир при создании копирует это в item_pool; лут/награды тянут по весу, пропуская
 уже выпавшие уникальные. Новые предметы (крафт/трофеи) добавляются в пул мира в рантайме.
+
+Key functions
+-------------
+seed_templates() -> list : Build item pool templates with weights for world init.
+draw(pool, taken_uniques, seed, tier) -> dict | None : Draw weighted loot, respecting tier and skipping taken uniques.
 """
 
 from __future__ import annotations

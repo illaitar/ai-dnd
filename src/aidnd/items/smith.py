@@ -2,6 +2,13 @@
 Табличный скелет качества/цены/DC + LLM-флейвор и ПРИРОДА скрытого («выглядит как X, на деле Y»).
 
 LLMSmith — единственный рантайм-путь (роль item_smith); StubSmith — ТОЛЬКО тесты.
+
+Key functions
+-------------
+ItemCtx : dataclass holding item context (kind/source/quality/region).
+Smith : abstract base; all smiths implement forge(ctx: ItemCtx) -> dict.
+StubSmith : test-only smith yielding items with hidden gated properties.
+LLMSmith(manager) -> forge(ctx: ItemCtx) -> dict : production impl via LLM.
 """
 
 from __future__ import annotations

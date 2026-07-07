@@ -2,6 +2,17 @@
 панель мыслей справа (ручной запуск инструментов/апрейзала). Доступ только владельцу.
 
 Состояние сцены процессное (один владелец) — это дебаг-стенд, не прод-механика.
+
+Key functions
+-------------
+npcdebug_page(_: Owner) -> HTMLResponse : serve the debug UI page.
+npcdebug_new(_: Owner, request: Request) -> dict : create a new debug scene with a test NPC.
+npcdebug_config(_: Owner, request: Request) : update NPC traits, abilities, needs, emotion.
+npcdebug_place(_: Owner, request: Request) : place the NPC at a graph node.
+npcdebug_tick(_: Owner, request: Request) : advance NPC by ticks with optional stimulus.
+npcdebug_tool(_: Owner, request: Request) : run a mind tool on the NPC with optional reranking.
+npcdebug_memory(_: Owner, request: Request) : add a memory entry to NPC's memory bank.
+npcdebug_appraise(_: Owner, request: Request) : evaluate NPC on given dimensions.
 """
 
 from __future__ import annotations

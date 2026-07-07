@@ -1,6 +1,16 @@
 """Игровой контур — ПРЕДМЕТЫ: инвентарь, ковка, пул, редкость, крафт по графу материалов.
 
 Слой mechanics/ (см. docs/loop.md).
+
+Key functions
+-------------
+_pool_draw(seed, tier, holder) -> dict | None : Draw item from loot pool, forge, mark unique.
+_do_craft(detail, out) -> dict : Perform crafting along materials graph with skill checks.
+_materialize_zones(bid) -> None : Lazily manifest building zone objects as real items.
+_put_item(seed, name, kind, ...) -> str : Mechanically forge and place item idempotently.
+_materialize_npc(pid, layer) -> None : Manifest NPC inventory from persona (visible/pockets).
+_forge(seed, kind, name_hint, source, band) -> dict : Lazy item forging via LLM with cache.
+_zone_stock(bid, zid) -> list[tuple] : Get current items in zone after theft/pickup.
 """
 
 from __future__ import annotations

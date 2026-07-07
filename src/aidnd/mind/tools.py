@@ -2,6 +2,15 @@
   READ (query) — читают состояние, без эффекта, «бесплатны»: perceive, recall, assess, locate.
   WRITE (act)  — меняют мир, тратят ход: move (далее say/give/take/use/attack/emote/wait).
 Каждый инструмент работает над (state: NpcState, scene: Scene, **params). Реестр TOOLS + run_tool.
+
+Key functions
+-------------
+perceive(state, scene) -> dict : Returns current scene state (location, NPCs present, exits, items).
+recall(state, scene, query, k, reranker) -> dict : Retrieves top-k memories matching a query.
+assess(state, scene, entity) -> dict : Returns relationship and facts about a specific entity.
+locate(state, scene, target) -> dict : Provides spatial path/bearing/landmarks to target location.
+move(state, scene, target) -> dict : Moves NPC one step toward target, returns route progress.
+run_tool(name, state, scene, params, reranker) -> dict : Main dispatcher for all NPC tools.
 """
 
 from __future__ import annotations

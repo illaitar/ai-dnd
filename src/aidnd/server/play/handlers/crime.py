@@ -1,4 +1,10 @@
-"""Домен КРАЖА (/steal) — распил world.py. Ловкость vs внимание жертвы; свидетели → розыск."""
+"""Домен КРАЖА (/steal) — распил world.py. Ловкость vs внимание жертвы; свидетели → розыск.
+
+Key functions
+-------------
+steal(request: Request) -> dict : Pickpocket attempt against NPC; success steals coin/item,
+    failure adds witnesses and wanted level.
+"""
 
 from __future__ import annotations
 

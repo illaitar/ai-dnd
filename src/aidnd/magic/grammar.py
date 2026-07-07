@@ -5,6 +5,16 @@
 
 Рисунок: [{id, size 0..1, angle 0..360 (0 = верх, по часовой), ring 0|1}]. Голая строка "огонь"
 принимается как {id, size .5, angle авто, ring 0} — обратная совместимость со старым вводом.
+
+Key functions
+-------------
+load() -> dict : loads glyph/element data dictionary for grammar.
+normalize(comp) -> list : normalizes input to [{id, size, angle, ring}].
+circle_hash(comp) -> str : canonical 12-char hash of circle drawing.
+power_budget(comp) -> float : sums (weight × size × ring_mult) budget.
+classify(comp) -> dict : validates circle (empty/clean/wild status).
+describe(comp) -> str : human-readable circle description for prompts.
+base_law(comp) -> dict : derives deterministic game mechanics skeleton.
 """
 
 from __future__ import annotations

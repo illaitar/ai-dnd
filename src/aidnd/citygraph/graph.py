@@ -7,6 +7,16 @@
 Передвижение — A* по графу: `route(a, b)` отдаёт реберные переходы, цепочку ключевых точек и
 вывески (линки на ключевые здания по пути). Это и есть API, которым пользуются все снаружи;
 детали Вороного/SVG сюда не протекают.
+
+Key functions
+-------------
+City(params, raw: dict) : Main class — builds graph from raw geometry; manages routing.
+route(a, b) -> Route : A* pathfinding; returns steps, crossroads, signs along path.
+assign_key_buildings(n, names) -> list[KeyBuilding] : Distribute n key buildings evenly.
+add_subspace(building, name: str) -> int | None : Add subspace (basement etc) to building.
+exits(node: int) -> list[Move] : Legal transitions from node (road/enter/exit/internal).
+nodes() -> list[Node] : Get all nodes: crossroads, street points, building interiors.
+edges() -> list[Edge] : Get all edges with distances, bridge flags, and movement kinds.
 """
 
 from __future__ import annotations

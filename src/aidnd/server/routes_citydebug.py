@@ -3,6 +3,18 @@
 Внешний код видит лишь aidnd.citygraph (City/CityParams) — детали генерации сюда не текут.
 Города детерминированы по параметрам, поэтому держим маленький процессный кэш, чтобы
 запрос маршрута не пересобирал город заново.
+
+Key functions
+-------------
+citydebug_page() -> HTMLResponse : Serve the city debug visualization page.
+citydebug_generate() -> dict : Generate city debug data with configurable parameters.
+citydebug_route() -> dict : Compute pathfinding route between two city nodes.
+citydebug_location() -> dict : Get location card with exits, landmarks, and nearby
+    buildings.
+citydebug_building() -> dict : Get building details, enrichment data, and graph facts.
+citydebug_citysvg() -> dict : Render city as SVG (same visual as in-game map).
+citydebug_pool() -> dict : Browse building pool from worlds.db (zone furnishing).
+citydebug_dungeonart() -> dict : Generate dungeon by seed/environment and return SVG.
 """
 
 from __future__ import annotations

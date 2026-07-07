@@ -1,5 +1,10 @@
 """Сборка энкаунтеров из ДАННЫХ бестиария: бюджет CR + среда → набор монстров. Никакого
 хардкода видов — что водится в такой среде, то и выйдет.
+
+Key functions
+-------------
+pick_encounter(cr_budget: float, env: str, seed: str, max_units: int = 5) -> list : Greedy encounter builder selecting monsters by CR budget and environment.
+lair_name(units: list, rng: Random) -> str : Generates lair name from inhabitants.
 """
 
 from __future__ import annotations

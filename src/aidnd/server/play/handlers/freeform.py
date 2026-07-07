@@ -1,4 +1,10 @@
-"""Домен СВОБОДНЫЙ ВВОД (/act) — распил world.py. Арбитр: намерение→возможность/сложность→исход (LLM)."""
+"""Домен СВОБОДНЫЙ ВВОД (/act) — распил world.py. Арбитр: намерение→возможность/сложность→исход (LLM).
+
+Key functions
+-------------
+_attempt(intent: dict, sc: dict) -> dict : Core resolver for any player action—gates, rolls, transfers, memory.
+_run_plan(steps: list, sc: dict, text: str) -> dict : Chain executor; halts on fail, dialog, combat, or salient event.
+act(request: Request) -> dict : POST /api/play/act endpoint; parse free-form text to intent and execute."""
 
 from __future__ import annotations
 

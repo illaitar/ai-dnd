@@ -3,6 +3,17 @@
 разыгрывает дикую магию (слой inscribe, добавится позже). См. docs/MAGIC.md.
 
     from aidnd.magic import load, classify, build_spec, known_ids
+
+Key functions
+-------------
+load(data: dict) -> dict : Parse and normalize raw circle data structure.
+classify(circle: dict) -> str : Classify circle type from glyphs and rules.
+normalize(circle: dict) -> dict : Normalize circle representation for storage.
+describe(circle: dict) -> str : Generate human-readable circle description.
+power_budget(circle: dict) -> int : Calculate remaining power budget for circle.
+base_law(circle: dict) -> dict : Extract base law from circle glyph rules.
+circle_hash(circle: dict) -> str : Compute deterministic content hash of circle.
+Inscriber : Base class for circle inscription and wild magic effects.
 """
 
 from __future__ import annotations

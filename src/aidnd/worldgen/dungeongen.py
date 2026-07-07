@@ -10,6 +10,15 @@
 Фильтр качества — метрики Жаке (цикломатика ≥ 2, тупики только с наградой), не прошёл —
 следующий под-сид. Детерминизм: всё от seed, ~десятки мс. LLM здесь НЕТ — вкус (история,
 палитра, наполнение) придёт брифом в этапе B.
+
+Key functions
+-------------
+generate(seed, env, cr, brief, small) -> dict : Generate a fully realized dungeon
+    with skeleton, contents (monsters/traps), and optional lore—deterministic from seed.
+stock(d, cr) -> None : Fill dungeon skeleton with monsters, traps, treasures
+    using B/X quotas and encounter scaling by challenge rating.
+dungeon_svg(d, title, game, floor) -> str : Render dungeon as parchment-style SVG
+    with game fog-of-war and per-floor layers.
 """
 
 from __future__ import annotations
@@ -777,7 +786,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
             return (x, y), (x, y + S)
         return (x + S, y), (x + S, y + S)
 
-    for (t, dxy, nrm) in ext_edges:
+    for (t, dxy, _nrm) in ext_edges:
         (x1, y1), (x2, y2) = _edge_px(t, dxy)
         out.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{INK}" '
                    f'stroke-width="3" stroke-linecap="square"/>')

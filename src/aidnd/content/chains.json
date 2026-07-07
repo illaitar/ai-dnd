@@ -1,0 +1,15 @@
+{
+  "_": "Именованные supply-chain города (docs/citysim.md §B): сырьё → производитель(роль) → товар → продажа(place-kind). ~N цепочек инстанцируются из реальных venue+производителей при создании мира; игрок видит и рвёт (убил мельника → хлеб дорожает). output/demand — единиц в день; base — базовая цена. Больше цепочек = живее экономика (пожелание автора).",
+  "chains": [
+    {"key": "хлеб",     "raw": "зерно",  "role": "мельник",    "good": "каравай хлеба",     "sell": "market", "base": 2, "output": 9,  "demand": 12},
+    {"key": "эль",      "raw": "зерно",  "role": "трактирщик", "good": "жбан эля",          "sell": "tavern", "base": 1, "output": 14, "demand": 16},
+    {"key": "кожа",     "raw": "шкуры",  "role": "дубильщик",  "good": "выделанная кожа",   "sell": "market", "base": 3, "output": 6,  "demand": 6},
+    {"key": "обувь",    "raw": "кожа",   "role": "сапожник",   "good": "пара сапог",        "sell": "market", "base": 7, "output": 3,  "demand": 4},
+    {"key": "утварь",   "raw": "руда",   "role": "кузнец",     "good": "железная утварь",   "sell": "market", "base": 5, "output": 3,  "demand": 3},
+    {"key": "снадобье", "raw": "травы",  "role": "знахарка",   "good": "склянка снадобья",  "sell": "market", "base": 4, "output": 2,  "demand": 3},
+    {"key": "снедь",    "raw": "припас", "role": "лавочник",   "good": "снедь с лотка",     "sell": "market", "base": 2, "output": 8,  "demand": 10},
+    {"key": "оружие",   "raw": "металл", "role": "оружейник",  "good": "клинок",            "sell": "market", "base": 12,"output": 1,  "demand": 1},
+    {"key": "снятьё",   "raw": "-",      "role": "трактирщик", "good": "ночлег",            "sell": "tavern", "base": 3, "output": 6,  "demand": 5},
+    {"key": "обереги",  "raw": "-",      "role": "жрец",       "good": "освящённый оберег", "sell": "temple", "base": 3, "output": 2,  "demand": 2}
+  ]
+}

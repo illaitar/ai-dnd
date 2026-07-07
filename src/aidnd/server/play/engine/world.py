@@ -113,6 +113,14 @@ def _world_events() -> None:
             _merchant_restock(f"caravan|{_gt() // 1440}")
     except Exception:  # noqa: BLE001
         pass
+    try:  # ЭКОНОМИКА: суточный оборот именованных цепочек (сохранение монеты M)
+        from aidnd.server.play.engine.economy import economy_step
+
+        en = economy_step()
+        if en:
+            _S["econ_news"] = (_S.get("econ_news") or [])[-2:] + en
+    except Exception:  # noqa: BLE001 — экономика не роняет мир
+        pass
 
 
 def _apply_routine() -> None:

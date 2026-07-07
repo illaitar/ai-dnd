@@ -64,6 +64,15 @@ def npc_schedule(npc: str = ""):
             "now": RU.get(predict(npc)["kind"], "?")}
 
 
+@router.get("/api/play/economy")
+def economy_board():
+    """Приборка экономики (стенд/наблюдаемость): именованные цепочки — товар/цена/запас/
+    производители/дефицит + монета города M."""
+    _play()
+    from aidnd.server.play.engine.economy import chains_view, money_supply
+    return {"money": money_supply(), "chains": chains_view()}
+
+
 @router.get("/api/play/deeds")
 def deeds_list(limit: int = 12):
     """Хроника мира: последние ДЕЛА (журнал deeds) — сырьё для UI-хроники и дебага."""

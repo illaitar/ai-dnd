@@ -1,31 +1,32 @@
 """Мост к процедурному генератору (диаграмма Вороного и пр.) → чистый граф города.
 
-Сам генератор (server/web/citygen.py) загружается приватно и НАРУЖУ не виден: внешний код
-работает только с City/CityParams. Здесь мы лишь вытаскиваем нейтральную геометрию
-(улицы, дома, мосты, река, стена, ворота) и отдаём её графу.
+Сам генератор (`citygraph/render.py`, порт citygen.js) наружу не виден: внешний код работает
+только с City/CityParams. Здесь мы лишь вытаскиваем нейтральную геометрию (улицы, дома, мосты,
+река, стена, ворота) и отдаём её графу.
+
+Key functions
+-------------
+generate(params) -> City : run the Voronoi generator and wrap the raw geometry into a movement
+    graph. The single public entry for "make me a city".
+visual(params, ...) -> dict : the RICH SVG the /citydebug stand and the game map both render
+    (full houses/river/walls); returns inner-SVG + canvas W×H so the interactive player layer
+    overlays without coordinate shifts.
+_citygen() : return the self-contained `render` module (build_city / render_svg). Kept as a thin
+    accessor so call sites (routes_citydebug, this file) stay unchanged after the move out of
+    server/web; it now backs a normal package import instead of the old importlib-by-path hack.
+_extract / _gate_points : raw generator dict → neutral geometry contract, honouring river/walls.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import os
-
+from . import render as _render_mod
 from .graph import City
 from .params import CityParams
 
-_CITYGEN = None
-
 
 def _citygen():
-    """Ленивая приватная загрузка self-contained генератора (без серверных зависимостей)."""
-    global _CITYGEN
-    if _CITYGEN is None:
-        path = os.path.join(os.path.dirname(__file__), "..", "server", "web", "citygen.py")
-        spec = importlib.util.spec_from_file_location("aidnd_citygen_core", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)          # сперва полностью загрузить…
-        _CITYGEN = mod                        # …потом опубликовать (иначе гонка пустого модуля)
-    return _CITYGEN
+    """Self-contained генератор (build_city / render_svg) — теперь обычный модуль пакета."""
+    return _render_mod
 
 
 def _gate_points(gate_edges, wall_poly) -> list:

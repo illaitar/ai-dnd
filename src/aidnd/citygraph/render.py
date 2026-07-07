@@ -1,12 +1,27 @@
-"""Порт citygen.js (Watabou-стиль город) 1:1 на Python.
+"""Порт citygen.js (Watabou-стиль город) 1:1 на Python — self-contained (только math/sys).
+
+Was `server/web/citygen.py`; moved into the citygraph package (docs/structure.md шаг 5b) so the
+sole owner of "city visuals" is `citygraph/`, and `generate.py` imports it as a normal sibling
+instead of the old importlib-by-path hack.
 
 Генерация: mulberry32 → точки (спираль) → 2× Ллойд → Вороной (клип в рамку) →
 городские клетки → площадь → граф улиц → кварталы (shrink) → рекурсивное subdivide →
 дома → стены по граничным рёбрам + ворота + башни → рынок → лендмарки → река (безье) →
 номерные бейджи + легенда. Рендер — в SVG (canvas-эквивалент без зависимостей).
 
-CLI:  python citygen.py [seed] [W] [H] > city.svg
-API:  build_city(seed,W,H,buildings) -> dict;  render_svg(model) -> str
+Key functions
+-------------
+build_city(seed, W, H, ...) -> dict : THE generator — deterministic Voronoi city model (streets
+    graph, houses, walls/gates, river/bridges, market, landmarks). 1:1 port of citygen.js.
+render_svg(model, ...) -> str : paint a city model to standalone SVG; flags chrome/marks/
+    interactive (interactive = clickable house polygons carrying data-id for the game map).
+render_page / __main__ : tiny HTML/CLI wrappers for standalone previewing.
+voronoi_cells / subdivide / make_river / mulberry32 : the geometry + RNG primitives build_city
+    composes (all already ≤50 lines).
+
+FOLLOW-UP (house rule ≤50 lines): `build_city` (~398L) and `render_svg` (~231L) are the two
+functions still over the limit — a verbatim move preserved them; decompose in a dedicated pass
+verified against the /citydebug render (no unit test covers the SVG output).
 """
 from __future__ import annotations
 
@@ -709,7 +724,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
     for i in range(len(dnames) - 1, 0, -1):
         j = int(rng_d() * (i + 1)); dnames[i], dnames[j] = dnames[j], dnames[i]
     dist_labels = []
-    for k, gc in sorted(groups.items(), key=lambda kv: -sum(area(c['poly']) for c in kv[1])):
+    for _k, gc in sorted(groups.items(), key=lambda kv: -sum(area(c['poly']) for c in kv[1])):
         tot = sum(area(c['poly']) for c in gc)
         if tot < 4500:                                    # мелкий район — без надписи
             continue
@@ -802,7 +817,7 @@ def _poly_d(p, close=True):
     return d + ("Z" if close else "")
 
 def render_svg(m, chrome=True, interactive=False, marks=True):
-    W, H, CX, CY = m['W'], m['H'], m['CX'], m['CY']
+    W, H, CY = m['W'], m['H'], m['CY']
     seed = m['seed']
     rngf = mulberry32(seed ^ 0x9E3779B9)   # отдельный поток для лесных кочек (детерминирован)
     e = []
@@ -843,7 +858,7 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
                  f'x2="{f["hridge"][1][0]:.1f}" y2="{f["hridge"][1][1]:.1f}" stroke="rgba(0,0,0,.25)" stroke-width="0.8"/>')
     # дороги снаружи в город (casing + центр) — рисуем до земли города, чтобы внутренний конец ушёл под кварталы
     for road in m.get('roads_out', []):
-        dd = "M%.1f %.1f L%.1f %.1f L%.1f %.1f" % (road[0][0], road[0][1], road[1][0], road[1][1], road[2][0], road[2][1])
+        dd = f"M{road[0][0]:.1f} {road[0][1]:.1f} L{road[1][0]:.1f} {road[1][1]:.1f} L{road[2][0]:.1f} {road[2][1]:.1f}"
         e.append(f'<path d="{dd}" fill="none" stroke="#8c7038" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>')
         e.append(f'<path d="{dd}" fill="none" stroke="#cdb585" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>')
     # земля города
@@ -907,7 +922,7 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
     # река: вода в каналах между берегами (над землёй, под стенами). Набережной-заплатки нет —
     # прибрежная полоса просто не застраивается. КЛИП по холсту: за краем карты реки нет.
     rp, rw = m['river_pts'], m['river_w']
-    rd = "M%.1f %.1f " % (rp[0][0], rp[0][1]) + " ".join("L%.1f %.1f" % (q[0], q[1]) for q in rp[1:])
+    rd = f"M{rp[0][0]:.1f} {rp[0][1]:.1f} " + " ".join(f"L{q[0]:.1f} {q[1]:.1f}" for q in rp[1:])
     e.append(f'<clipPath id="mapclip"><rect x="0" y="0" width="{W}" height="{H}"/></clipPath>')
     e.append('<g clip-path="url(#mapclip)">')
     e.append(f'<path d="{rd}" fill="none" stroke="#cdb98f" stroke-width="{rw:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')   # песчаный берег у воды

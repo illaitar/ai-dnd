@@ -20,7 +20,6 @@ from aidnd.mind import World as MWorld
 from aidnd.mind import perceive as mind_perceive
 from aidnd.mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
 from aidnd.mind.tick import _decay_emotion, _decay_needs
-from aidnd.play.population import Townsperson
 from aidnd.server.play.engine.core import (
     _COLORS,
     _PHASE_RU,
@@ -85,6 +84,7 @@ from aidnd.server.play.mechanics.items import (
     _pc_coins,
     _seed_item_pool,
 )
+from aidnd.worldgen.population import Townsperson
 
 
 def _world_events() -> None:
@@ -955,7 +955,7 @@ def _world_lookup(query: str, from_node: int | None = None) -> str:
                     )
                     continue
             outs.append(nm)
-    for pid, p in sorted(people.items()):
+    for _pid, p in sorted(people.items()):
         first = p.name.split()[0].lower()
         if p.role in q or first in q or p.name.lower() in q:
             place = _binfo(p.work)["name"] if p.work else None

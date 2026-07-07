@@ -17,9 +17,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-from aidnd.play.population import _FEMALE, _MALE, _traits  # noqa: E402
 from aidnd.worldgen import WorldStore  # noqa: E402
 from aidnd.worldgen.abilities import roll_abilities  # noqa: E402
+from aidnd.worldgen.population import _FEMALE, _MALE, _traits  # noqa: E402
 
 # «дитя» вдвое чаще старика — фронтир молод
 _KINDS = ["дитя", "дитя", "старик"]

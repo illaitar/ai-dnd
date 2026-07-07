@@ -1,8 +1,8 @@
 """FastAPI-оболочка НОВОГО контура. Старый игровой движок (runtime/orchestrator/content/gen/world/
-npc/combat/rules) снесён — интерфейс игрока строится заново на mind+citygraph+worldgen (aidnd.play).
+npc/combat/rules) снесён — интерфейс игрока строится на mind+citygraph+worldgen.
 
-Пока здесь: авторизация, лимиты, дебаг-страницы города (/citydebug), разума (/minddebug, /npcdebug).
-Игровой контур (WS/сессия/веб-UI) добавим следующими кирпичами.
+Здесь: авторизация, лимиты, дебаг-стенды (/citydebug, /minddebug, /npcdebug) и роутеры игрового
+контура (server/play/*): сцена, действие, бой, магия, торговля, подземелья, экономика.
 """
 
 from __future__ import annotations

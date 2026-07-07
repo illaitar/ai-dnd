@@ -40,9 +40,9 @@ def _setenv() -> None:
 _setenv()
 
 from aidnd.inference import ModelManager  # noqa: E402
-from aidnd.play.population import person_core  # noqa: E402
 from aidnd.worldgen import LLMPersona, PersonaCtx, WorldStore, get_imagegen  # noqa: E402
 from aidnd.worldgen.abilities import roll_abilities  # noqa: E402
+from aidnd.worldgen.population import person_core  # noqa: E402
 
 PORTRAITS_DIR = os.path.join(ROOT, "data", "portraits")
 

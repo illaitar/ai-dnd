@@ -1,6 +1,22 @@
-"""Население городка на новом стеке: обобщённые фэнтези-жители (имена/роли/черты), у каждого —
-мозг (mind.NpcState), размещённые на карте citygraph (ключевые здания = места работы, дома = жильё).
-Никакого Фэндалина: роли и имена — родовые для фронтира. Детерминировано по seed.
+"""Population projection: turn a bare frontier role into a placed, mind-bearing townsperson.
+
+This module lives in `worldgen/` because population is *generated* content assembled from the
+pool (personas, homes, workplaces) — the runtime scene layer only reads `Townsperson`.
+It was previously `aidnd/play/population.py` (the vestigial "twin" package); moved here per
+docs/structure.md so every domain owns one folder.
+
+Key functions
+-------------
+Townsperson (dataclass) : runtime projection of one NPC — identity + placement (home node /
+    workplace id) + visible stats + attached `mind.NpcState` + optional pool persona/portraits.
+    `.view()` renders the safe public dict.
+person_core(role, rng) -> dict : mechanical core of ONE pool NPC WITHOUT placement (name, sex,
+    11 traits, charisma, wealth). Shared by the offline pool forge (`scripts/peoplegen.py`) so
+    the bank and `populate()` produce mechanically-consistent people.
+populate(city, ...) -> dict : seed a whole town — key-building workers + commoners by house +
+    a couple of deviants (thief / thug). Deterministic by seed. Used by offline demos.
+_traits / _name / _person : deterministic helpers (role trait profile, sex-consistent name,
+    fully-placed person). `_traits`, `_MALE`, `_FEMALE` are re-used by `scripts/depgen.py`.
 """
 
 from __future__ import annotations
@@ -8,7 +24,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-from ..mind import TRAITS, NpcConfig, NpcState
+from aidnd.mind import TRAITS, NpcConfig, NpcState
 
 _MALE = ["Бран", "Горм", "Освин", "Тэд", "Ральф", "Кедрик", "Дунн", "Обер", "Хальд", "Ветл",
          "Сим", "Рэн", "Тол", "Ланн", "Ход", "Мерек"]

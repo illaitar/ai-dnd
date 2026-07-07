@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from aidnd.citygraph import CityParams, generate  # noqa: E402
 from aidnd.mind import Body, World, perceive, think  # noqa: E402
-from aidnd.play import populate  # noqa: E402
+from aidnd.worldgen.population import populate  # noqa: E402
 
 
 def run(seed=1):

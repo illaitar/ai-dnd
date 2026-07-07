@@ -4,7 +4,7 @@
          python -m aidnd serve      (то же)
 
 Старый терминальный игровой цикл (bootstrap/runtime/rules) снесён — интерфейс игрока
-строится заново на mind+citygraph+worldgen (aidnd.play).
+строится заново на mind+citygraph+worldgen (население — worldgen.population).
 """
 
 from __future__ import annotations

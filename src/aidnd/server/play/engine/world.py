@@ -113,14 +113,6 @@ def _world_events() -> None:
             _merchant_restock(f"caravan|{_gt() // 1440}")
     except Exception:  # noqa: BLE001
         pass
-    try:  # ЭКОНОМИКА: суточный оборот именованных цепочек (сохранение монеты M)
-        from aidnd.server.play.engine.economy import economy_step
-
-        en = economy_step()
-        if en:
-            _S["econ_news"] = (_S.get("econ_news") or [])[-2:] + en
-    except Exception:  # noqa: BLE001 — экономика не роняет мир
-        pass
 
 
 def _apply_routine() -> None:
@@ -135,6 +127,13 @@ def _apply_routine() -> None:
     if mkey[0] == "morning" and _S.get("events_key") != mkey:
         _S["events_key"] = mkey
         _world_events()
+    try:  # E1: экономика — ленивый catch-up по КАЖДОМУ пропущенному дню (не только «утром»)
+        from aidnd.server.play.engine.economy import economy_catchup
+        en = economy_catchup()
+        if en:
+            _S["econ_news"] = (_S.get("econ_news") or [])[-2:] + en
+    except Exception:  # noqa: BLE001 — экономика не роняет мир
+        pass
     routine_step(_S["people"], _S["crof"])
 
 

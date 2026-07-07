@@ -1189,10 +1189,12 @@ function renderMarket(d){
   $('mktcoins').textContent='· '+(d.coins|0)+' зм';
   const g=d.goods||[];
   if(!g.length){$('mktbody').innerHTML='<div style="color:var(--faint);font:italic 13px var(--serif);padding:6px 2px">здесь ничем не торгуют</div>';return;}
-  $('mktbody').innerHTML=g.map(x=>{
+  const shut=d.open===false;
+  const banner=shut?`<div style="color:#c98a3a;font:italic 12.5px var(--serif);padding:4px 2px 8px;border-bottom:1px solid var(--line)">🔒 закрыто${d.opens_at!=null?(' — откроется в '+d.opens_at+':00'):''}</div>`:'';
+  $('mktbody').innerHTML=banner+g.map(x=>{
     const out=x.broken?' <span style="color:#a55;font-size:11px">— нет производителя</span>':'';
-    const canB=!x.broken&&x.stock>0&&(d.coins|0)>=x.price;
-    const canS=x.have>0;
+    const canB=!shut&&!x.broken&&x.stock>0&&(d.coins|0)>=x.price;
+    const canS=!shut&&x.have>0;
     const bs='font:12px var(--sans);padding:4px 11px;border-radius:6px;background:transparent;border:1px solid var(--gold-dim);color:var(--gold);cursor:pointer';
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--line)">
       <div style="flex:1"><div style="font:500 14px var(--serif);color:var(--ink)">${esc(x.good)}${out}</div>

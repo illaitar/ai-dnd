@@ -101,13 +101,15 @@ def ensure() -> None:
         instantiate()
 
 
-def economy_step() -> list:
+def economy_step(day: int | None = None) -> list:
     """Суточный шаг (в _world_events): производство → продажа (СОХРАНЕНИЕ монеты, только
-    перевод) → цены (спрос/запас, кламп) → wealth-нужда от кошелька. Возвращает новости."""
+    перевод) → цены (спрос/запас, кламп) → wealth-нужда от кошелька. Возвращает новости.
+    `day` — конкретные сутки для сида (ленивый catch-up гоняет пропущенные дни по-разному)."""
     ensure()
     people = _people()
     dead = _dead()
-    day = _gt() // 1440
+    if day is None:
+        day = _gt() // 1440
     rng = random.Random(f"econ|{_wid()}|{day}")
     chains = _chains()
     news = []
@@ -144,6 +146,24 @@ def economy_step() -> list:
     _store().flag_set(_wid(), "econ_chains", json.dumps(chains, ensure_ascii=False))
     news += venue_buyouts()                           # B3: аспиранты выкупают ремесло
     _wealth_from_purse()
+    return news
+
+
+def economy_catchup(cap: int = 7) -> list:
+    """E1 (ленивый catch-up): прогнать суточный оборот за КАЖДЫЙ пропущенный день (прыжок во
+    времени/сон/дорога), не привязываясь к фазе «утро». Идемпотентно через flag econ_day; кап
+    cap дней (LOD — глубокие пропуски не молотим впустую). Возвращает новости ПОСЛЕДНЕГО дня."""
+    from aidnd.server.play.engine.core import _GT0, _S
+    ensure()
+    today = _gt() // 1440
+    last = _store().flag_get(_wid(), "econ_day")
+    last = int(last) if last is not None else _GT0 // 1440  # базлайн — день СТАРТА мира
+    if today <= last:
+        return _S.get("econ_news") or []
+    news: list = []
+    for d in range(max(last + 1, today - cap + 1), today + 1):  # максимум cap дней
+        news = economy_step(day=d)
+    _store().flag_set(_wid(), "econ_day", str(today))
     return news
 
 

@@ -73,17 +73,32 @@ def economy_board():
     return {"money": money_supply(), "chains": chains_view()}
 
 
+def _closed_note(bid):
+    """Если venue закрыт по часам — вернуть {error: «закрыто до N»}, иначе None (открыто/жильё)."""
+    from aidnd.server.play.engine.core import _binfo, _gt
+    from aidnd.server.play.engine.open_hours import is_open, opens_at
+    if not bid:
+        return None
+    info = _binfo(bid)["kind"] + " " + _binfo(bid)["name"]
+    if is_open(info, _gt()):
+        return None
+    oa = opens_at(info)
+    return {"error": f"закрыто{f' — откроется в {oa}:00' if oa is not None else ''}"}
+
+
 @router.get("/api/play/market")
 def market_board():
     """Товарный прилавок ЗДЕСЬ (B2): цепочки, чей venue = здание игрока, — товар/цена/запас/
     сколько у игрока в котомке. Пусто, если игрок не внутри торгового venue."""
     _play()
-    from aidnd.server.play.engine.core import _S, _store, _wid
+    from aidnd.server.play.engine.core import _S, _binfo, _gt, _store, _wid
     from aidnd.server.play.engine.economy import ensure, market_here
+    from aidnd.server.play.engine.open_hours import is_open, opens_at
     ensure()
     bid = _S.get("inside")
+    info = (_binfo(bid)["kind"] + " " + _binfo(bid)["name"]) if bid else ""
     return {"goods": market_here(bid), "coins": _store().purse_get(_wid(), "pc"),
-            "inside": bool(bid)}
+            "inside": bool(bid), "open": is_open(info, _gt()), "opens_at": opens_at(info)}
 
 
 @router.post("/api/play/market/buy")
@@ -93,7 +108,8 @@ async def market_buy(request: Request):
     from aidnd.server.play.engine.core import _S, _gt, _gt_add
     from aidnd.server.play.engine.economy import player_buy
     b = await request.json()
-    r = player_buy(_S.get("inside"), b.get("key"), int(b.get("qty", 1)))
+    closed = _closed_note(_S.get("inside"))
+    r = closed or player_buy(_S.get("inside"), b.get("key"), int(b.get("qty", 1)))
     if "error" not in r:
         _gt_add(5)
     return {**r, "gt": _gt()}
@@ -106,7 +122,8 @@ async def market_sell(request: Request):
     from aidnd.server.play.engine.core import _S, _gt, _gt_add
     from aidnd.server.play.engine.economy import player_sell
     b = await request.json()
-    r = player_sell(_S.get("inside"), b.get("key"), int(b.get("qty", 1)))
+    closed = _closed_note(_S.get("inside"))
+    r = closed or player_sell(_S.get("inside"), b.get("key"), int(b.get("qty", 1)))
     if "error" not in r:
         _gt_add(5)
     return {**r, "gt": _gt()}

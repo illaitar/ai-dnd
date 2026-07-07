@@ -1,5 +1,16 @@
 """Домен ДИАЛОГ (хендлеры /talk /say) — распил world.py (docs/loop.md). Знакомство, реплики; тон
-слов игрока → отношения/доверие/страх/эмоции. Голос NPC — сервис world._voice."""
+слов игрока → отношения/доверие/страх/эмоции. Голос NPC — сервис world._voice.
+
+Key functions
+-------------
+talk(request)  [POST /api/play/talk] : the player walks up to an NPC — first contact reveals the
+    name, marks the NPC as busy in this conversation, seeds a 'social' need bump, writes the
+    introduction into both memories, materializes the NPC's visible gear, and returns the portrait
+    + relationship + topic snapshot. Advances the world by PB['talk_min'].
+say(request)   [POST /api/play/say] : one spoken line to the current NPC — tone of the player's
+    words shifts affinity/trust/fear/emotion; the NPC answers in its own voice (world._voice) and
+    both sides remember it. Contract offers/acceptance ride on the same line (mechanics.contracts).
+"""
 
 from __future__ import annotations
 
@@ -8,8 +19,6 @@ import os
 from fastapi import Request
 
 from aidnd.inference import LLMBadOutput, LLMUnavailable
-from aidnd.mind import Body, think
-from aidnd.mind import World as MWorld
 from aidnd.server.play.engine.core import (
     _PORT_DIR,
     _S,
@@ -31,15 +40,6 @@ from aidnd.server.play.engine.core import (
 from aidnd.server.play.engine.world import _play, _voice, _world_tick
 from aidnd.server.play.mechanics.contracts import _contract_offer, _contract_on_talk
 from aidnd.server.play.mechanics.items import _CRAFT, _materialize_npc, _pc_coins
-
-
-def _mind_scene(npc_id, people) -> MWorld:
-    p = people[npc_id]
-    w = MWorld()
-    w.link("зал", "улица")
-    w.add(Body(id=npc_id, place="зал", charisma=p.charisma, appearance=p.appearance))
-    w.add(Body(id=PLAYER, place="зал", charisma=0.4, appearance=0.3))
-    return w
 
 
 @router.post("/api/play/talk")
@@ -64,7 +64,6 @@ async def talk(request: Request):
     _gt_add(PB["talk_min"])
     st = p.state
     st.needs["social"] = max(st.needs.get("social", 0.0), 0.4)
-    think(st, _mind_scene(npc, people), None)
     if first:  # знакомство ложится в память ОБОИМ
         st.memory.add("незнакомец (игрок) подошёл и заговорил со мной", _mt(), 0.4, about=[PLAYER])
         _pc_remember(f"я познакомился с {p.name} ({p.role})", 0.45, about=[npc])

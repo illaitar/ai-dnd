@@ -37,7 +37,8 @@ from aidnd.server.play.engine.core import (
     _topics_for,
     router,
 )
-from aidnd.server.play.engine.world import _play, _voice, _world_tick
+from aidnd.server.play.engine.resolve import _voice
+from aidnd.server.play.engine.world import _play, _world_tick
 from aidnd.server.play.mechanics.contracts import _contract_offer, _contract_on_talk
 from aidnd.server.play.mechanics.items import _CRAFT, _materialize_npc, _pc_coins
 

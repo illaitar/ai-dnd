@@ -29,7 +29,8 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.engine.world import _play, _voice
+from aidnd.server.play.engine.resolve import _voice
+from aidnd.server.play.engine.world import _play
 from aidnd.server.play.mechanics.items import _item_card, _materialize_npc, _pc_coins
 
 

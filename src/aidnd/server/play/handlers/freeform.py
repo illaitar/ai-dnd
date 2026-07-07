@@ -36,12 +36,11 @@ from aidnd.server.play.engine.core import (
     _witness_crime,
     router,
 )
-from aidnd.server.play.engine.resolve import resolve
+from aidnd.server.play.engine.resolve import _dm_snapshot, _voice, resolve
 from aidnd.server.play.engine.world import (
     _apply_routine,
     _play,
     _scene_dict,
-    _voice,
     _world_tick,
 )
 from aidnd.server.play.mechanics.combat import _combatant_from_npc, _pc_combatant
@@ -371,8 +370,6 @@ def _attempt(intent: dict, sc: dict) -> dict:
     mgr = _model()  # не-действие: отклик мастера ПО ФАКТАМ живой сцены (снимок, не выдумка)
     text = str(intent.get("_text") or detail or "")
     if text:
-        from aidnd.server.play.engine.world import _dm_snapshot
-
         resp = mgr.call(
             "narrator",
             [

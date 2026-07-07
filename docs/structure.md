@@ -39,9 +39,11 @@ scripts/            furnish.py (обстановка пула зонами) · p
 2. **`_S` — нетипизированный dict-блоб** в contextvar, трогается из 50+ функций; выходы LLM —
    сырые dict без схем.
 3. **mechanics → core напрямую** (`_S`, `PB`, `_store`) — механики приварены к сессии.
-4. ✔ ЧАСТИЧНО (2026-07-06): `engine/resolve.py` есть — арбитр `resolve(text)` + контекст-
-   сборщик, промпт из реестра PRIMITIVES (`_INTENT_SYS` умер). Осталось: переезд
-   consequence/voice/world_lookup из world.py и `engine/loop.py`.
+4. ✔ ЧАСТИЧНО: `engine/resolve.py` — арбитр `resolve(text)` + контекст-сборщик, промпт из
+   реестра PRIMITIVES (`_INTENT_SYS` умер, 2026-07-06). Сервисы `_voice`/`_world_lookup`/
+   `_dm_snapshot` ПЕРЕЕХАЛИ из world.py в resolve.py (2026-07-08, world.py 1835→1632; функции
+   AST-идентичны, world→resolve без цикла — resolve тянет world лениво). Осталось: consequence-
+   слой и `engine/loop.py`.
 5. ✔ (2026-07-07) **Близнецы снесены**: `aidnd/play` → `worldgen/population.py`;
    `server/web/citygen.py` → `citygraph/render.py` (обычный импорт сиблинга вместо importlib).
    Остался долг ≤50-строк: `render.build_city` (~398) и `render.render_svg` (~231) — декомпозиция

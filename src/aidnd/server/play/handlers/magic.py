@@ -54,7 +54,8 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.engine.world import _look_key, _play, _voice
+from aidnd.server.play.engine.resolve import _voice
+from aidnd.server.play.engine.world import _look_key, _play
 
 
 def _spell_hit(t, dmg: dict, out: dict, tag: str) -> None:

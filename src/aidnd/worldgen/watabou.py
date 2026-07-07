@@ -88,8 +88,8 @@ class Layout:
 
     # ── аккреция: очередь близнецов + ДОБОР случайной комнатой (как у автора:
     # «until end condition we pick one of the rooms and add children») ─────────
-    def build(self) -> bool:
-        q = [{"seed": self.rng.random(), "parent": None, "door": (0, 0),
+    def build(self, origin=(0, 0)) -> bool:
+        q = [{"seed": self.rng.random(), "parent": None, "door": tuple(origin),
               "axis": (0, 1), "size": 0, "mirror": False, "group": 0}]
         gid = 1
         guard = 0
@@ -424,7 +424,8 @@ class Layout:
 
 def layout(seed: str, rooms_target: int = 18, order_p: float = 0.75,
            corridor_p: float = 0.3, string: bool = False, hall_p: float = 0.15,
-           rotunda_p: float = 0.45, water_p: float = 0.45) -> dict | None:
+           rotunda_p: float = 0.45, water_p: float = 0.45,
+           origin=(0, 0)) -> dict | None:
     lay = Layout(seed, rooms_target, order_p, corridor_p, string, hall_p,
                  rotunda_p, water_p)
-    return lay.export() if lay.build() else None
+    return lay.export() if lay.build(origin) else None

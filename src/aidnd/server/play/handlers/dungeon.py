@@ -120,15 +120,25 @@ def _exits(st: dict) -> list:
     d, cur = st["d"], st["room"]
     out = []
     for eid, e in enumerate(d["edges"]):
-        if e["kind"] == "window" or cur not in (e["a"], e["b"]):
+        if e["kind"] in ("window", "portcullis") or cur not in (e["a"], e["b"]):
             continue
         if e["kind"] == "secret" and eid not in st["found"]:
             continue                                  # секретка невидима, пока не найдена
+        if e.get("one_way") and cur == e["b"]:
+            continue                                  # вверх по жёлобу не выбраться
         other = e["b"] if e["a"] == cur else e["a"]
         ro = d["rooms"][other]
         locked = bool(e["kind"] == "locked" and e["lock"] not in st["keys"])
         known = other in st["seen"]
         hint = "" if known else _HINTS.get((ro.get("content") or {}).get("kind", ""), "")
+        if e["kind"] == "stairs":
+            down = ro.get("floor", 0) > d["rooms"][cur].get("floor", 0)
+            hint = ("лестница уводит вниз, в темноту" if down
+                    else "лестница ведёт наверх, к свету")
+        elif e["kind"] == "chute":
+            hint = "зев жёлоба: вниз — легко, обратно — никак"
+        elif e["kind"] == "collapse":
+            hint = "пролом в перекрытии — можно слезть по обломкам"
         if not known and (ro.get("content") or {}).get("boss"):
             hint = "оттуда веет силой — логово хозяина"
         out.append({"room": other, "eid": eid, "kind": e["kind"], "locked": locked,
@@ -144,7 +154,9 @@ def dungeon_payload(narr: list | None = None) -> dict:
     svg = dungeon_svg(d, game={"seen": st["seen"], "cur": st["room"], "next": nxt,
                                "cleared": st["cleared"]})
     return {"dungeon": {"name": d.get("name"), "svg": svg, "room": st["room"],
-                        "room_name": cur.get("name"), "exits": _exits(st),
+                        "room_name": cur.get("name"),
+                        "floor": cur.get("floor", 0) + 1, "floors": d.get("floors", 1),
+                        "exits": _exits(st),
                         "cleared": d["metrics"]["rooms"] and st["lair"]["id"] in
                         {k.split("|", 1)[1] for k in _store().flags_prefix(_wid(), "cleared|")}},
             "narr": narr or [], "gt": _gt(), "hp": _pc_hp()}

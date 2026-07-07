@@ -212,9 +212,11 @@ def citydebug_dungeonart(_: Owner, seed: str, env: str = "Ruin") -> dict:
     brief = (_random.Random(f"pickbrief|{seed}").choice(briefs)) if briefs else None
     d = generate(seed, env=env, cr=1.5, brief=brief)
     return {"seed": seed, "metrics": d["metrics"], "name": d.get("name"),
+            "floors": d.get("floors", 1), "dtype": d.get("dtype_name"),
             "locks": sum(1 for e in d["edges"] if e["kind"] == "locked"),
             "secrets": sum(1 for e in d["edges"] if e["kind"] == "secret"),
-            "svg": dungeon_svg(d, f"Подземелье «{seed}»")}
+            "svg": "".join(dungeon_svg(d, f"Подземелье «{seed}»", floor=f)
+                           for f in range(d.get("floors", 1)))}
 
 
 @router.get("/api/citydebug/planart")

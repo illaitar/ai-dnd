@@ -45,34 +45,111 @@ def _pick(rng: random.Random, rows: list) -> dict:
 
 
 def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
-    """Watabou-укладка → Planner: вход/цель (дальняя по взвешенному пути), секретные
-    КРЫЛЬЯ, замки с ключами-до-двери, ступени, осмысленные тупики. Гарантии — ниже."""
+    """Watabou-укладка ПО ЭТАЖАМ (корень этажа N+1 = клетка лестницы этажа N — честное
+    XY-совмещение) → единый граф комнат (floor — поле комнаты, межэтажные связи — рёбра
+    stairs/chute/collapse; chute односторонний) → Planner: цель на НИЖНЕМ этаже,
+    секретные крылья, замки, ступени. Гарантии: solvable туда И ОБРАТНО."""
     from .watabou import layout
 
     rng = random.Random(f"dgen|{seed}")
     types = [t for t in _dtypes() if env in t["envs"]] or _dtypes()
     dt = rng.choices(types, weights=[t["w"] for t in types])[0]
-    lay = layout(seed, rooms_target=(10 if small else rng.randint(16, 26)),
-                 order_p=dt["order_p"], corridor_p=dt["corridor_p"],
-                 string=(rng.random() < dt.get("string_p", 0)),
-                 hall_p=dt["hall_p"], rotunda_p=dt["rotunda_p"], water_p=dt["water_p"])
-    if lay is None:
-        return None
-    rooms, edges = lay["rooms"], lay["edges"]
-    # нормировка координат к нулю
+    n_floors = 1 if small else rng.randint(*dt.get("floors", [1, 1]))
+    per_floor = (10 if small else
+                 rng.randint(12, 17) if n_floors > 1 else rng.randint(16, 26))
+
+    floors, stairs_pts = [], []
+    origin = (0, 0)
+    for fi in range(n_floors):
+        lay = layout(f"{seed}|f{fi}", rooms_target=per_floor,
+                     order_p=dt["order_p"], corridor_p=dt["corridor_p"],
+                     string=(fi == 0 and rng.random() < dt.get("string_p", 0)),
+                     hall_p=dt["hall_p"], rotunda_p=dt["rotunda_p"],
+                     water_p=dt["water_p"], origin=origin)
+        if lay is None:
+            return None
+        floors.append(lay)
+        if fi < n_floors - 1:                         # лестница вниз — в дальней комнате
+            adjf: dict = {}
+            for e in lay["edges"]:
+                adjf.setdefault(e["a"], []).append(e["b"])
+                adjf.setdefault(e["b"], []).append(e["a"])
+            distf = {0: 0}
+            qf = [0]
+            while qf:
+                cur = qf.pop(0)
+                for nb in adjf.get(cur, []):
+                    if nb not in distf:
+                        distf[nb] = distf[cur] + 1
+                        qf.append(nb)
+            cand = [r for r in lay["rooms"] if r["size"] < 2]
+            sr = max(cand, key=lambda r: distf.get(r["id"], 0))
+            ts = sr["tiles"]
+            cx = sorted(t[0] for t in ts)[len(ts) // 2]
+            cy = sorted(t[1] for t in ts)[len(ts) // 2]
+            stairs_pts.append((sr["id"], (cx, cy)))
+            origin = (cx, cy)                         # корень следующего этажа — здесь
+
+    # ── склейка этажей в единый граф ──
+    rooms: list = []
+    edges: list = []
+    offs = []
+    for fi, lay in enumerate(floors):
+        off = len(rooms)
+        offs.append(off)
+        for r in lay["rooms"]:
+            r2 = dict(r)
+            r2["id"] = r["id"] + off
+            r2["parent"] = (r["parent"] + off) if r.get("parent") is not None else None
+            r2["floor"] = fi
+            r2["tags"] = r.get("tags") or []
+            rooms.append(r2)
+        for e in lay["edges"]:
+            edges.append({**e, "a": e["a"] + off, "b": e["b"] + off})
+    for fi, (srid, cell) in enumerate(stairs_pts):    # лестницы: XY совпадает на этажах
+        edges.append({"a": srid + offs[fi], "b": 0 + offs[fi + 1], "kind": "stairs",
+                      "lock": None, "door": [cell[0], cell[1], cell[0], cell[1]],
+                      "path": []})
+    # вторая разнотипная связь (Jaquays): пересечение этажей по XY → жёлоб/шахта/пролом
+    for fi in range(n_floors - 1):
+        conns = dt.get("connectors") or []
+        if not conns or rng.random() < 0.25:
+            continue
+        up = {tuple(t): r["id"] + offs[fi]
+              for r in floors[fi]["rooms"] if r["size"] < 2 for t in r["tiles"]}
+        stair_cell = stairs_pts[fi][1]
+        best = None
+        for r in floors[fi + 1]["rooms"]:
+            if r["size"] >= 2:
+                continue
+            for t in r["tiles"]:
+                tt = tuple(t)
+                if tt in up and abs(tt[0] - stair_cell[0]) + abs(tt[1] - stair_cell[1]) > 6:
+                    best = (up[tt], r["id"] + offs[fi + 1], tt)
+                    break
+            if best:
+                break
+        if best:
+            kind = rng.choice(conns)
+            edges.append({"a": best[0], "b": best[1], "kind": kind, "lock": None,
+                          "door": [best[2][0], best[2][1], best[2][0], best[2][1]],
+                          "path": [], "one_way": kind == "chute"})
+
+    # нормировка ОДНИМ сдвигом (XY этажей физически совмещены)
     all_t = [t for r in rooms for t in r["tiles"]]
     mx = min(t[0] for t in all_t) - 1
     my = min(t[1] for t in all_t) - 1
     for r in rooms:
         r["tiles"] = [[x - mx, y - my] for x, y in r["tiles"]]
-        r["tags"] = r.get("tags") or []
     for e in edges:
         e["door"] = [e["door"][0] - mx, e["door"][1] - my,
                      e["door"][2] - mx, e["door"][3] - my]
-    lay["water"] = [[x - mx, y - my] for x, y in lay["water"]]
-    lay["columns"] = [[x - mx, y - my] for x, y in lay["columns"]]
+    water, columns = [], []
+    for lay in floors:
+        water += [[x - mx, y - my] for x, y in lay["water"]]
+        columns += [[x - mx, y - my] for x, y in lay["columns"]]
 
-    # виды комнат
+    # ── виды, цель (на нижнем этаже), драматургия ──
     for r in rooms:
         r["kind"] = ("corridor" if r["size"] >= 2 else
                      "hall" if r["size"] == 1 else "room")
@@ -80,9 +157,8 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
     adj: dict = {}
     for e in edges:
         adj.setdefault(e["a"], []).append((e["b"], e))
-        adj.setdefault(e["b"], []).append((e["a"], e))
-
-    # цель = дальняя по ВЗВЕШЕННОМУ пути (через залы дороже — Watabou Planner)
+        if not e.get("one_way"):
+            adj.setdefault(e["b"], []).append((e["a"], e))
     cost = {0: 0}
     todo = [(0, 0)]
     while todo:
@@ -93,11 +169,12 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
             if nb not in cost or c + w_ < cost[nb]:
                 cost[nb] = c + w_
                 todo.append((c + w_, nb))
-    goal = max((r["id"] for r in rooms if r["size"] <= 1 and r["id"] != 0),
-               key=lambda i: cost.get(i, -1), default=len(rooms) - 1)
+    last_floor = max(r["floor"] for r in rooms)
+    goal_pool = [r["id"] for r in rooms
+                 if r["size"] <= 1 and r["id"] != 0 and r["floor"] == last_floor]
+    goal = max(goal_pool or [len(rooms) - 1], key=lambda i: cost.get(i, -1))
     rooms[goal]["kind"] = "goal"
 
-    # критпуть (BFS-предки) — секретки/замки его уважают
     prev = {0: None}
     q = [0]
     qi = 0
@@ -114,7 +191,6 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
         crit.add(cur)
         cur = prev.get(cur)
 
-    # СЕКРЕТНЫЕ КРЫЛЬЯ: поддерево аккреции вне критпути прячется за секретной дверью
     kids: dict = {}
     for r in rooms:
         if r.get("parent") is not None:
@@ -134,7 +210,7 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
              and 1 <= len(subtree(r["id"])) <= 4
              and all(x not in crit for x in subtree(r["id"]))]
     rng.shuffle(wings)
-    for wroot in wings[:rng.randint(1, 2)]:
+    for wroot in wings[:dt.get("secret_wings", 1)]:
         e = next((e for e in edges
                   if frozenset((e["a"], e["b"])) ==
                   frozenset((wroot, rooms[wroot]["parent"]))), None)
@@ -145,29 +221,26 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
         for x in wing:
             if "secret_wing" not in rooms[x]["tags"]:
                 rooms[x]["tags"].append("secret_wing")
-        leaf = wing[-1]
-        if "treasure" not in rooms[leaf]["tags"]:
-            rooms[leaf]["tags"].append("treasure")
+        if "treasure" not in rooms[wing[-1]]["tags"]:
+            rooms[wing[-1]]["tags"].append("treasure")
 
-    # ЗАМКИ: дверь второй половины критпути; ключ — в комнате, достижимой БЕЗ неё
     keys: list = []
     lock_n = 0
-    path = [x for x in [goal] if False]
     seq, cur = [], goal
     while cur is not None:
         seq.append(cur)
         cur = prev.get(cur)
-    seq = seq[::-1]                                   # вход → цель
+    seq = seq[::-1]
     lockable = [e for e in edges if e["kind"] == "door"
                 and frozenset((e["a"], e["b"])) in
                 {frozenset((seq[i], seq[i + 1])) for i in range(len(seq) // 2,
                                                                 len(seq) - 1)}]
     rng.shuffle(lockable)
     chosen = lockable[:rng.randint(0, 1) + (1 if not small else 0)]
-    for e in chosen:                                  # сперва запереть ВСЕ двери…
+    for e in chosen:
         lock_n += 1
         e["kind"], e["lock"] = "locked", f"k{lock_n}"
-    for e in list(chosen):                            # …потом ключи ВНЕ любого замка
+    for e in list(chosen):
         reach = _reachable_without(rooms, edges, None)
         spots = [x for x in reach if x != 0 and rooms[x]["kind"] not in ("goal",)]
         if not spots:
@@ -175,13 +248,13 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
             continue
         keys.append({"id": e["lock"], "room": rng.choice(spots)})
 
-    # ante-room: подводка перед кульминацией (buildApproach) — страж/предвестие
     before_goal = prev.get(goal)
     if before_goal is not None and rooms[before_goal]["kind"] in ("room", "hall"):
         rooms[before_goal]["tags"].append("approach")
-    if lay.get("backdoor") is not None and lay["backdoor"] != goal:
-        rooms[lay["backdoor"]]["tags"].append("backdoor")
-    # ступени-перепады (шанс из профиля типа) + осмысленные тупики
+    for fi, lay in enumerate(floors):
+        if lay.get("backdoor") is not None and fi == 0 \
+                and lay["backdoor"] + offs[fi] != goal:
+            rooms[lay["backdoor"] + offs[fi]]["tags"].append("backdoor")
     for e in edges:
         if e["kind"] == "door" and rng.random() < dt["steps_p"]:
             e["kind"] = "steps"
@@ -193,8 +266,7 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
         if deg.get(r["id"], 0) == 1 and r["kind"] in ("room", "hall") \
                 and r["id"] != goal and "treasure" not in r["tags"]:
             r["tags"].append("treasure")
-
-    for r in rooms:                                   # реквизит по словарю типа
+    for r in rooms:
         if r["kind"] in ("corridor", "entrance"):
             continue
         props = []
@@ -211,16 +283,48 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
         return None
     if not _solvable(rooms, edges, keys, 0, goal, use_secret=True):
         return None
+    if not _solvable_back(rooms, edges, goal):        # односторонние жёлобы не запирают
+        return None
     met = _metrics(rooms, edges)
     if met["cyclomatic"] < 1 or met["bad_deadends"]:
         return None
     tw = max(t[0] for r in rooms for t in r["tiles"]) + 2
     th = max(t[1] for r in rooms for t in r["tiles"]) + 2
     return {"seed": seed, "env": env, "dtype": dt["key"], "dtype_name": dt["name"],
-            "rooms": rooms, "edges": edges, "keys": keys,
+            "floors": n_floors, "rooms": rooms, "edges": edges, "keys": keys,
             "entrance": 0, "goal": goal, "metrics": met,
-            "water": lay["water"], "columns": lay["columns"],
-            "tile_w": tw, "tile_h": th}
+            "water": water, "columns": columns, "tile_w": tw, "tile_h": th}
+
+
+def _solvable_back(rooms, edges, goal) -> bool:
+    """С цели можно ВЕРНУТЬСЯ ко входу (жёлобы односторонние — лестницы выводят)."""
+    adj: dict = {}
+    for e in edges:
+        if e["kind"] in ("window", "portcullis"):
+            continue
+        adj.setdefault(e["a"], []).append(e["b"])
+        if not e.get("one_way"):
+            adj.setdefault(e["b"], []).append(e["a"])
+        else:
+            adj.setdefault(e["b"], [])                # вверх по жёлобу нельзя
+    # обратный обход: из goal по рёбрам, где переход b→a разрешён
+    radj: dict = {}
+    for e in edges:
+        if e["kind"] in ("window", "portcullis"):
+            continue
+        radj.setdefault(e["b"], []).append(e["a"])
+        if not e.get("one_way"):
+            radj.setdefault(e["a"], []).append(e["b"])
+    seen, q = {goal}, [goal]
+    while q:
+        cur = q.pop()
+        if cur == 0:
+            return True
+        for nb in radj.get(cur, []):
+            if nb not in seen:
+                seen.add(nb)
+                q.append(nb)
+    return False
 
 
 _DT: list | None = None
@@ -287,7 +391,8 @@ def _solvable(rooms, edges, keys, ent, goal, use_secret: bool) -> bool:
                 (e["kind"] == "secret" and not use_secret):
             continue
         adj.setdefault(e["a"], []).append((e["b"], e["lock"]))
-        adj.setdefault(e["b"], []).append((e["a"], e["lock"]))
+        if not e.get("one_way"):
+            adj.setdefault(e["b"], []).append((e["a"], e["lock"]))
     start = (ent, frozenset(key_at.get(ent, set())))
     seen, todo = {start}, [start]
     while todo:
@@ -399,7 +504,8 @@ def stock(d: dict, cr: float = 1.0) -> None:
             kind = "treasure"                         # тупик-награда осмыслен по построению
         c: dict = {"kind": kind}
         if kind == "monster":
-            units = pick_encounter(cr * rng.uniform(0.25, 0.5), env,
+            fmul = 1 + 0.25 * r.get("floor", 0)       # глубже — злее (ярусы напряжения)
+            units = pick_encounter(cr * rng.uniform(0.25, 0.5) * fmul, env,
                                    seed=f"mob|{d['seed']}|{r['id']}")
             c["units"] = _unit_names(units)
             if not post_done and deg.get(r["id"], 0) >= 2:
@@ -510,14 +616,19 @@ def _glyph(out, kind, cx, cy, S, rng, ink):
                    f'stroke-width="1.1"/>')
 
 
-def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
-    """Watabou-одностраничник на пергаменте: плотный комплекс, сетка пола, ТОЛСТЫЕ стены
-    (и между смежными комнатами), двери-коробки в общих стенах, хэтч по силуэту.
-    game: туман (seen), призраки-«?» у дверей, маркер игрока, зум по исследованному."""
+def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
+                floor: int | None = None) -> str:
+    """Watabou-одностраничник на пергаменте: плотный комплекс, сетка пола, ТОЛСТЫЕ стены,
+    двери-коробки, хэтч по силуэту. ЭТАЖ = представление (лист-на-этаж): рисуются комнаты
+    одного яруса, межэтажные связи — знаками (веер лестницы / зев жёлоба / пролом).
+    game: туман (seen), призраки у дверей (межэтажные — стрелкой), маркер, зум."""
     from .floorart import INK, _defs
 
     rng = random.Random(f"dart|{d['seed']}")
-    seen = set(game["seen"]) if game else {r["id"] for r in d["rooms"]}
+    if floor is None:
+        floor = (d["rooms"][game["cur"]].get("floor", 0) if game else 0)
+    fl_rooms = {r["id"] for r in d["rooms"] if r.get("floor", 0) == floor}
+    seen = (set(game["seen"]) if game else set(fl_rooms)) & fl_rooms
     found = set(game.get("found") or ()) if game else None
 
     def _vis_edge(eid, e) -> bool:
@@ -542,7 +653,20 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
     door_marks: list = []                             # (cellA, cellB, kind)
     ghost_at: dict = {}                               # rid → якорь призрака
     corr_cells: set = set()
+    interfloor: list = []                             # (cell, kind, направление, other_rid)
     for eid, e in enumerate(d["edges"]):
+        if e["kind"] in ("stairs", "chute", "collapse"):
+            fa = d["rooms"][e["a"]].get("floor", 0)
+            fb = d["rooms"][e["b"]].get("floor", 0)
+            here_rid = e["a"] if fa == floor else (e["b"] if fb == floor else None)
+            if here_rid is None or (game and here_rid not in seen):
+                continue
+            other = e["b"] if here_rid == e["a"] else e["a"]
+            down = d["rooms"][other].get("floor", 0) > floor
+            if e.get("one_way") and here_rid == e["b"]:
+                other = None                          # снизу жёлоб — только знак, не ход
+            interfloor.append(((e["door"][0], e["door"][1]), e["kind"], down, other))
+            continue
         if e["kind"] == "window" or not _vis_edge(eid, e):
             continue
         both = e["a"] in seen and e["b"] in seen
@@ -577,15 +701,18 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
                 ghost_at[unseen] = cut[-1] if e["a"] in seen else cut[0]
             if both and ends and e["kind"] in ("locked", "secret"):
                 door_marks.append((*ends[-1], e["kind"]))
-    floor = set(owner)
+    floor_cells = set(owner)
+    floor_tiles_all = {tuple(t) for r in d["rooms"]
+                       if r.get("floor", 0) == (floor if isinstance(floor, int) else 0)
+                       for t in r["tiles"]}
 
     S = 15
     pad = 34
-    if floor:
+    if floor_cells:
         gx = [g[0] for g in ghost_at.values()]
         gy = [g[1] for g in ghost_at.values()]
-        xs = [t[0] for t in floor] + [x - 2 for x in gx] + [x + 2 for x in gx]
-        ys = [t[1] for t in floor] + [y - 2 for y in gy] + [y + 2 for y in gy]
+        xs = [t[0] for t in floor_cells] + [x - 2 for x in gx] + [x + 2 for x in gx]
+        ys = [t[1] for t in floor_cells] + [y - 2 for y in gy] + [y + 2 for y in gy]
         bx0, by0, bx1, by1 = min(xs), min(ys), max(xs) + 1, max(ys) + 1
     else:
         bx0, by0, bx1, by1 = 0, 0, d["tile_w"], d["tile_h"]
@@ -602,19 +729,19 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
            f'<rect width="{W}" height="{H}" fill="none" filter="url(#grain)"/>']
 
     # drop shadow: смещённый силуэт — «карта лежит на бумаге» (Watabou)
-    for t in sorted(floor):
+    for t in sorted(floor_cells):
         x, y = px(t)
         out.append(f'<rect x="{x + S * 0.22:.1f}" y="{y + S * 0.3:.1f}" width="{S}" '
                    f'height="{S}" fill="#c9bfa2" opacity="0.55"/>')
     # пол: сетка клеток (коридоры чуть темнее)
-    for t in sorted(floor):
+    for t in sorted(floor_cells):
         x, y = px(t)
         fill = "#e4d9ba" if t in corr_cells else "#f3ecd8"
         out.append(f'<rect x="{x}" y="{y}" width="{S}" height="{S}" fill="{fill}" '
                    f'stroke="{INK}" stroke-width="0.3" opacity="0.95"/>')
 
     # вода (шум+порог, только в комнатах) и колонны
-    wat = {tuple(t) for t in (d.get("water") or [])} & floor
+    wat = {tuple(t) for t in (d.get("water") or [])} & floor_cells
     for t in sorted(wat):
         x, y = px(t)
         out.append(f'<rect x="{x}" y="{y}" width="{S}" height="{S}" fill="#d6dbd2"/>')
@@ -623,7 +750,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
                    f't {S / 2 - 4:.0f} 0" fill="none" stroke="{INK}" stroke-width="0.8" '
                    f'opacity="0.6"/>')
     for t in (d.get("columns") or []):
-        if tuple(t) not in floor:
+        if tuple(t) not in floor_cells:
             continue
         x, y = px(t)
         out.append(f'<circle cx="{x + S / 2}" cy="{y + S / 2}" r="{S * 0.2:.1f}" '
@@ -631,10 +758,10 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
 
     # ── стены: наружные (с хэтчем) и межкомнатные ──
     ext_edges, int_edges = [], []
-    for t in floor:
+    for t in floor_cells:
         for dx, dy, nx, ny in ((0, -1, 0, -1), (0, 1, 0, 1), (-1, 0, -1, 0), (1, 0, 1, 0)):
             nb = (t[0] + dx, t[1] + dy)
-            if nb not in floor:
+            if nb not in floor_cells:
                 ext_edges.append((t, (dx, dy), (nx, ny)))
             elif owner[nb] != owner[t] and frozenset((t, nb)) not in openings:
                 if (dx, dy) in ((1, 0), (0, 1)):      # каждую внутреннюю — один раз
@@ -697,7 +824,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
 
     # двери-коробки на общих стенах
     for (a_c, b_c, kind) in door_marks:
-        if a_c not in floor and b_c not in floor:
+        if a_c not in floor_cells and b_c not in floor_cells:
             continue
         ax, ay = px(a_c)
         bx2, by2 = px(b_c)
@@ -736,9 +863,41 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
                        f'width="{tw_:.1f}" height="{th_:.1f}" fill="none" stroke="{INK}" '
                        f'stroke-width="1" stroke-dasharray="1.5 1.8"/>')
 
+    # межэтажные знаки: веер лестницы / зев жёлоба / пролом (+клик-переход в game)
+    for (cell, kind, down, other) in interfloor:
+        if cell not in floor_tiles_all:
+            continue
+        x, y = px(cell)
+        cxp, cyp = x + S / 2, y + S / 2
+        g_open = ""
+        g_close = ""
+        if game and other is not None and other in (game.get("next") or ()):
+            g_open = (f'<g data-room="{other}" class="droom" style="cursor:pointer">')
+            g_close = "</g>"
+        out.append(g_open)
+        if kind == "stairs":
+            for i4 in range(4):
+                ww = S * (0.85 - i4 * 0.18)
+                out.append(f'<line x1="{cxp - ww / 2:.1f}" y1="{y + 2.5 + i4 * 3.2:.1f}" '
+                           f'x2="{cxp + ww / 2:.1f}" y2="{y + 2.5 + i4 * 3.2:.1f}" '
+                           f'stroke="{INK}" stroke-width="1.3"/>')
+        elif kind == "chute":
+            out.append(f'<circle cx="{cxp}" cy="{cyp}" r="{S * 0.36:.1f}" fill="{INK}" '
+                       f'opacity="0.85"/><circle cx="{cxp}" cy="{cyp}" r="{S * 0.36:.1f}" '
+                       f'fill="none" stroke="{INK}" stroke-width="1.2"/>')
+        else:                                         # пролом: россыпь обломков
+            for _ in range(6):
+                bx3 = cxp + rng.uniform(-S * 0.35, S * 0.35)
+                by3 = cyp + rng.uniform(-S * 0.35, S * 0.35)
+                out.append(f'<circle cx="{bx3:.1f}" cy="{by3:.1f}" '
+                           f'r="{rng.uniform(0.8, 1.6):.1f}" fill="{INK}"/>')
+        out.append(f'<text x="{cxp + S * 0.55:.1f}" y="{cyp + 4:.1f}" font-size="11" '
+                   f'fill="{INK}">{"↓" if down else "↑"}</text>')
+        out.append(g_close)
+
     # нумерация по ЧАСОВОЙ вокруг центра карты (Watabou), коридоры не нумеруются
-    ctr_x = sum(t[0] for t in floor) / max(1, len(floor))
-    ctr_y = sum(t[1] for t in floor) / max(1, len(floor))
+    ctr_x = sum(t[0] for t in floor_cells) / max(1, len(floor_cells))
+    ctr_y = sum(t[1] for t in floor_cells) / max(1, len(floor_cells))
     numbered = [r for r in d["rooms"] if r.get("size", 0) < 2 and r["id"] in seen]
     numbered.sort(key=lambda r: math.atan2(
         sum(t[0] for t in r["tiles"]) / len(r["tiles"]) - ctr_x,
@@ -839,6 +998,8 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None) -> str:
 
     m = d["metrics"]
     label = d.get("name") or title or "Подземелье"
+    if d.get("floors", 1) > 1:
+        label += f" · ярус {floor + 1}/{d['floors']}"
     hist = (d.get("history") or {}).get("now", "")
     out.append(f'<text x="{pad}" y="{H - 8}" font-size="13" font-style="italic" '
                f'fill="{INK}" opacity="0.85">{label} · комнат {m["rooms"]} · '

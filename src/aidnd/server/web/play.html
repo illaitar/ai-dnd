@@ -1102,7 +1102,7 @@ function dngHints(dg){
 function renderDungeon(){
   const box=$('planbox');
   if(!DNG){$('mapbox').classList.remove('hasplan','inside');box.innerHTML='';renderWays();return;}
-  box.innerHTML=`<div style="color:#d9c9a0;font:italic 12px Georgia;margin:2px 6px">${esc(DNG.name||'Подземелье')}${DNG.room_name?' — '+esc(DNG.room_name):''}</div>`+DNG.svg;
+  box.innerHTML=`<div style="color:#d9c9a0;font:italic 12px Georgia;margin:2px 6px">${esc(DNG.name||'Подземелье')}${DNG.floors>1?' · ярус '+DNG.floor+'/'+DNG.floors:''}${DNG.room_name?' — '+esc(DNG.room_name):''}</div>`+DNG.svg;
   $('mapbox').classList.add('hasplan','inside');
   box.querySelectorAll('[data-room].droom').forEach(el=>el.onclick=()=>dmove(+el.dataset.room));
   renderWays();

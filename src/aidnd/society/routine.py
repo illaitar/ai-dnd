@@ -25,27 +25,38 @@ class Candidate:
     window_kind: str | None = None
 
 
-def step(state, candidates: list, phase: str, minutes: float, here_kind: str | None, rng) -> int:
-    """Продвинуть нужды NPC и вернуть узел, куда он направляется.
+def step(state, candidates: list, phase: str, minutes: float, here_kind: str | None, rng,
+         stay: int | None = None):
+    """Продвинуть нужды NPC и вернуть (узел, вид-занятия), куда он направляется.
     state — NpcState (нужды в .needs, черты в .config.traits); here_kind — тип места, где он
-    стоял (гасил нужды); candidates — куда он МОЖЕТ пойти; minutes — сколько прошло."""
+    стоял (гасил нужды); candidates — куда он МОЖЕТ пойти; stay — узел, где стоял (инерция)."""
     traits = state.config.traits
     sated = _places.PLACE[here_kind].sates if here_kind in _places.PLACE else {}
     _needs.advance(state.needs, minutes, sated)
-    return choose(state.needs, traits, candidates, phase, rng)
+    c = choose_c(state.needs, traits, candidates, phase, rng, stay=stay)
+    return (c.node, c.kind) if c is not None else (None, None)
 
 
-def choose(needs: dict, traits: dict, candidates: list, phase: str, rng) -> int | None:
-    """Выбрать узел по полезности. Возвращает node лучшего кандидата (близкие — жребием)."""
+def choose_c(needs: dict, traits: dict, candidates: list, phase: str, rng, stay: int | None = None):
+    """Выбрать КАНДИДАТА по полезности (близкие — жребием). stay — узел, где стоял: лёгкая
+    инерция против дёрганья между равными местами (урок Sims)."""
     pressured = _needs.pressure(needs, traits)
     scored = sorted(((_places.score(c.kind, pressured, traits, phase,
-                                    window_kind=c.window_kind), c) for c in candidates
-                     if c.node is not None), key=lambda x: x[0], reverse=True)
+                                    window_kind=c.window_kind)
+                      * (1.12 if stay is not None and c.node == stay else 1.0), c)
+                     for c in candidates if c.node is not None),
+                    key=lambda x: x[0], reverse=True)
     if not scored:
         return None
     best = scored[0][0]
     close = [c for s, c in scored if s >= best * 0.85] or [scored[0][1]]
-    return rng.choice(close).node if len(close) > 1 else scored[0][1].node
+    return rng.choice(close) if len(close) > 1 else scored[0][1]
+
+
+def choose(needs: dict, traits: dict, candidates: list, phase: str, rng, stay: int | None = None):
+    """Узел лучшего кандидата (обратная совместимость)."""
+    c = choose_c(needs, traits, candidates, phase, rng, stay=stay)
+    return c.node if c is not None else None
 
 
 def explain(needs: dict, traits: dict, candidates: list, phase: str) -> list:

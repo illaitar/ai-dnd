@@ -64,6 +64,8 @@ def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
     if p.work:
         wk = (work_kinds or {}).get(p.work)          # окно ЗАВЕДЕНИЯ: таверна зовёт вечером
         out.append(society.Candidate("work", keynode.get(p.work, home), window_kind=wk))
+    elif home is not None and p.role != "горожанин":  # ремесленник трудится ДОМА (ист. норма)
+        out.append(society.Candidate("work", home))
     for kind in ("tavern", "temple", "market"):  # привязанные к зданиям места
         nodes = place_idx.get(kind)
         if nodes and _gate_ok(kind, p):
@@ -130,6 +132,7 @@ def routine_step(people: dict, crof: dict) -> None:
                     obj_p.state.rel(d["actor"])["trust"] = max(
                         -1.0, obj_p.state.rel(d["actor"]).get("trust", 0) - 0.25)
     n2b = _S.get("cr2b") or {}
+    kind_of: dict = _S.setdefault("crof_kind", {})    # pid → вид занятия (для GIF/наблюдаемости)
     load: dict = {}                                   # узел → сколько уже там (для ёмкости)
     last = _S.setdefault("needs_gt", {})
     order = sorted(people.items(), key=lambda kv: (kv[1].work is None, kv[0]))  # работники — первыми
@@ -144,9 +147,10 @@ def routine_step(people: dict, crof: dict) -> None:
                             load=load, n2b=n2b)
         if pid in appts:                              # уговор в силе: место встречи зовёт
             cands.append(society.Candidate("appointment", appts[pid]))
-        node = society.step(st, cands, phase, mins, here, rng)
+        node, akind = society.step(st, cands, phase, mins, here, rng, stay=crof.get(pid))
         if node is not None:
             crof[pid] = node
+            kind_of[pid] = akind
         if node is not None and n2b.get(node):        # встал в здание — занял место
             load[node] = load.get(node, 0) + 1
         last[pid] = gt

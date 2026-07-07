@@ -1344,10 +1344,10 @@ def _live_tick(people) -> tuple:
         imp += (st.config.traits.get("sociability", 0.5) - 0.5) * 0.5
         impulses[pid] = (round(imp, 2), why)
     ranked_imp = sorted(order, key=lambda p: -impulses[p][0])
-    actors = [p for p in ranked_imp if impulses[p][0] >= PB["impulse_llm"]][: PB["live_llm_cap"]]
-    if not actors and order:
-        actors = ranked_imp[:1]                       # зал не замирает совсем
-    background = [p for p in order if p not in actors]
+    # РЕШЕНИЕ автора (2026-07-07): ВСЕ присутствующие ходят через LLM, латентность пока
+    # неважна. Дирижёр остаётся ПОРЯДКОМ (импульс → волны анти-хора), не отбором/капом.
+    actors = ranked_imp
+    background: list = []
     ctx["convs"] = {pid: b for pid in actors
                     if (b := conv_block(lv, pid, lv["names"]))}
     if salient:

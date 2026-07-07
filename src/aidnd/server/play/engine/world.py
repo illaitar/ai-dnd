@@ -952,14 +952,17 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     rng = random.Random(f"live|{loc}")
     npc_map: dict = {}  # pid → {имя вещи: item_id} (кражи реальны)
     here_all = _here(loc, crof)
-    if len(here_all) > PB["live_llm_cap"]:  # LOD: LLM-прослойка — только ядро сцены
+    # LOD-КОЛЬЦО только на УЛИЦЕ (открытый узел без естественной ёмкости): не симулируем
+    # весь квартал. ВНУТРИ здания кэпа нет — сцена = все, кто реально там (ёмкость держит
+    # симуляция города, routine_step). Дирижёр всё равно даёт LLM-ход лишь салиентным.
+    if not bid and len(here_all) > PB["street_lod_cap"]:
         met = _met()
         core = [i for i in here_all if people[i].work] + [
             i for i in here_all if not people[i].work and i in met
         ]
         rest = [i for i in here_all if i not in core]
         rng.shuffle(rest)
-        here_all = (core + rest)[: PB["live_llm_cap"]]
+        here_all = (core + rest)[: PB["street_lod_cap"]]
     workers = {pid for pid in here_all if people[pid].work == bid}
     zonemap = assign_zones({pid: people[pid].state for pid in here_all}, zones,
                            f"zones|{_wid()}|{bid}|{_phase()}",

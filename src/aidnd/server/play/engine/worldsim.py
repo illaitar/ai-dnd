@@ -38,8 +38,23 @@ def _gate_ok(kind: str, p) -> bool:
     return True
 
 
+_BCAP: dict = {}
+_NOT_SOCIAL = {"private", "storage", "cell", "beds"}   # не «общий зал» — не считаем в толпу
+
+
+def _building_cap(bid) -> int:
+    """Ёмкость здания = Σ cap социальных зон (мест «где можно быть на людях»); кэш по bid."""
+    if bid not in _BCAP:
+        from aidnd.server.play.engine.zones import building_zones
+        _zd, zs = building_zones(bid)
+        cap = sum(int(z.get("cap", 0)) for z in zs if z.get("kind") not in _NOT_SOCIAL)
+        _BCAP[bid] = max(6, cap) if zs else 14        # разумный дефолт без зон
+    return _BCAP[bid]
+
+
 def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
-                work_kinds: dict | None = None) -> list:
+                work_kinds: dict | None = None, load: dict | None = None,
+                n2b: dict | None = None) -> list:
     """Доступные этому NPC места как список society.Candidate. Дом/работа персональны;
     трактир/храм/рынок — «свой» из города (сидированный выбор); улица/дозор/промысел — точка графа."""
     out = []
@@ -52,7 +67,12 @@ def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
     for kind in ("tavern", "temple", "market"):  # привязанные к зданиям места
         nodes = place_idx.get(kind)
         if nodes and _gate_ok(kind, p):
-            out.append(society.Candidate(kind, nodes[hash((p.state.config.id, kind)) % len(nodes)]))
+            node = nodes[hash((p.state.config.id, kind)) % len(nodes)]
+            if load is not None and n2b is not None:  # ёмкость: полное здание не зовёт
+                bid = n2b.get(node)
+                if bid and load.get(node, 0) >= _building_cap(bid):
+                    continue
+            out.append(society.Candidate(kind, node))
     for kind in ("street", "patrol", "prowl"):  # мобильные места — точка на графе
         if kps and _gate_ok(kind, p):
             out.append(
@@ -109,18 +129,24 @@ def routine_step(people: dict, crof: dict) -> None:
                                            about=[d["actor"]])
                     obj_p.state.rel(d["actor"])["trust"] = max(
                         -1.0, obj_p.state.rel(d["actor"]).get("trust", 0) - 0.25)
+    n2b = _S.get("cr2b") or {}
+    load: dict = {}                                   # узел → сколько уже там (для ёмкости)
     last = _S.setdefault("needs_gt", {})
-    for pid, p in people.items():
+    order = sorted(people.items(), key=lambda kv: (kv[1].work is None, kv[0]))  # работники — первыми
+    for pid, p in order:
         st = p.state
         mins = max(0, gt - last.get(pid, gt - 360))  # прошло с прошлого шага (старт: ~фаза)
         here = node2kind.get(crof.get(pid))  # где стоял → что гасил
         if here is None and crof.get(pid) == p.home:
             here = "home"
         rng = random.Random(f"rout|{pid}|{phase}|{gt // 30}")
-        cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds)
+        cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds,
+                            load=load, n2b=n2b)
         if pid in appts:                              # уговор в силе: место встречи зовёт
             cands.append(society.Candidate("appointment", appts[pid]))
         node = society.step(st, cands, phase, mins, here, rng)
         if node is not None:
             crof[pid] = node
+        if node is not None and n2b.get(node):        # встал в здание — занял место
+            load[node] = load.get(node, 0) + 1
         last[pid] = gt

@@ -21,10 +21,10 @@ src/aidnd/
   combat/      620   Combatant · Encounter · auto · encounters · dungeon
   magic/       390   grammar (бюджет/хэш/base_law) · inscribe (scribe_law/wild)
   plot/        260   bible · architect · casting (НЕ в рантайме)
-  play/        130   population (Townsperson)                        ← близнец-огрызок
+  (play/ снесён 2026-07-07 → worldgen/population.py: Townsperson/populate/person_core)
   content/           bestiary.json (322) · glyphs · материалы · zones.json (шаблоны зон локаций)
-  server/     8700   app · auth · db(postgres) · usage · debug-стенды (+plansdebug: галерея
-                     планов) · web/ (play.html, citygen.py-рендер 1055) ·
+  server/    10950   app · auth · db(postgres) · usage · debug-стенды (+plansdebug: галерея
+                     планов) · web/ (только play.html/ассеты — citygen.py уехал в citygraph/render.py) ·
                      play/: engine{core 802, world 1400, worldsim, zones (выбор зоны нуждами)} ·
                      mechanics{items, contracts, combat} · handlers{10 доменных: +план здания
                      /plan /zone в travel}
@@ -33,16 +33,19 @@ scripts/            furnish.py (обстановка пула зонами) · p
 
 ## Болячки (по данным ревизии 2026-07-04)
 
-1. **`engine/world.py` — 1307 строк**, функции по 200-400 строк (`_live_build`, `_live_tick`,
-   `_world_tick`) знают всё сразу: генерацию, рутину, LLM-планирование, бой.
+1. **`engine/world.py` — 1835 строк** (было 1307 на ревизии 2026-07-04 — вырос, не похудел),
+   функции по 200-485 строк (`_live_build` ~258, `_live_tick` ~485, `_world_tick`) знают всё
+   сразу: генерацию, рутину, LLM-планирование, бой. Главная цель распила Phase B.
 2. **`_S` — нетипизированный dict-блоб** в contextvar, трогается из 50+ функций; выходы LLM —
    сырые dict без схем.
 3. **mechanics → core напрямую** (`_S`, `PB`, `_store`) — механики приварены к сессии.
 4. ✔ ЧАСТИЧНО (2026-07-06): `engine/resolve.py` есть — арбитр `resolve(text)` + контекст-
    сборщик, промпт из реестра PRIMITIVES (`_INTENT_SYS` умер). Осталось: переезд
    consequence/voice/world_lookup из world.py и `engine/loop.py`.
-5. **Близнецы**: `aidnd/play` (130 строк) рядом с `server/play`; SVG-рендер города
-   (`citygen.py`, 1055 строк) живёт в `server/web/`.
+5. ✔ (2026-07-07) **Близнецы снесены**: `aidnd/play` → `worldgen/population.py`;
+   `server/web/citygen.py` → `citygraph/render.py` (обычный импорт сиблинга вместо importlib).
+   Остался долг ≤50-строк: `render.build_city` (~398) и `render.render_svg` (~231) — декомпозиция
+   отдельным проходом под визуальную проверку /citydebug.
 6. Нет deed-журнала: лента/сплетни/розыск/хроника — пять ad-hoc механизмов.
 
 ## Целевое дерево
@@ -81,8 +84,9 @@ src/aidnd/
    переводятся на параметры.
 4. ✔ (2026-07-06) **Единый `resolve()`** — арбитр+контекст в `engine/resolve.py`,
    промпт из реестра примитивов; исполнители пока в `freeform._attempt`.
-5. **Переезды**: `aidnd/play` → `worldgen/population.py`; `server/web/citygen.py` →
-   `citygraph/render.py`.
+5. ✔ (2026-07-07) **Переезды**: `aidnd/play` → `worldgen/population.py` (4 импортёра обновлены);
+   `server/web/citygen.py` → `citygraph/render.py`. Папка-на-домен восстановлена, `server/web/`
+   держит только ассеты.
 6. **`deeds.py`** — журнал дел + перевод сплетен/розыска/хроники/обращений на него
    ([entities.md](entities.md) «Дальше»).
 

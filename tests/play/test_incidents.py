@@ -48,7 +48,8 @@ def test_gang_members_are_citizens_and_steal(world, monkeypatch):
     assert inc["members"] and all(m in world for m in inc["members"])
     for m in inc["members"]:                           # шайка — из горожан с гнильцой
         assert world[m].state.config.traits.get("malice", 0) >= core.PB["incident_gang_malice"]
-    mark_purses = {pid: core._store().purse_get(core._wid(), pid) for pid in world}
+    victim = next(pid for pid in sorted(world) if pid not in inc["members"])
+    core._store().purse_add(core._wid(), victim, 10)   # у жертвы есть что красть (self-sufficient)
     core._S["gt"] = core._gt() + 1440                  # следующее утро
     news = inc_m.gang_morning()
     assert news and "обчистили" in news[0]

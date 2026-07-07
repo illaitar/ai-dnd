@@ -324,6 +324,58 @@ def _res_binfo(bid: str) -> dict | None:
     return random.Random(f"res|{_wid()}|{bid}").choice(_RES_POOL)["data"]
 
 
+# Категории профессий (роль→нужен venue vs производит дома). Данные в коде — маленькая
+# таблица; при росте вынести в content/professions.json.
+_VENUE_NEED = {"трактирщик", "лавочник", "оружейник", "жрец", "маг"}   # нет venue ⟹ подёнщик
+_HOME_PRODUCER = {"дубильщик", "сапожник", "мельник", "кузнец", "знахарка"}  # ремесло на дому
+_MOBILE_ROLE = {"стражник", "головорез", "бродяга", "бард", "горожанин"}
+_WORKCAP = {"таверн": 6, "трактир": 6, "гильд": 6, "игорн": 4, "лавк": 3, "оружейн": 2,
+            "кузн": 3, "храм": 3, "молельн": 3, "часовн": 3, "лечебн": 3, "мастерск": 3,
+            "башн": 2, "магич": 2}
+
+
+def _plan_jobs(city, homes: dict, roles: dict) -> dict:
+    """ДЕТЕРМИНИРОВАННО: кто на каком venue работает (гравитация — ближайшие по дому) + кого
+    реклассифицировать. Возвращает pid → (work_bid|None, role_override|None). Чистая функция
+    от (город, дома, роли) — один результат в обоих путях расселения (свежий/восстановление)."""
+    xy = {n.id: (n.x, n.y) for n in city.nodes()}
+
+    def dist(pid, node):
+        h = homes.get(pid)
+        if h not in xy or node not in xy:
+            return 1e9
+        (ax, ay), (bx, by) = xy[h], xy[node]
+        return (ax - bx) ** 2 + (ay - by) ** 2
+
+    out: dict = {}
+    assigned: set = set()
+    for bid, kb in sorted(city.key_buildings.items()):  # venue набирает БЛИЖАЙШИХ по роли
+        want = _role_for_building(bid)
+        info = (_binfo(bid)["kind"] + " " + _binfo(bid)["name"]).lower()
+        cap = next((c for w, c in _WORKCAP.items() if w in info), 3)
+        cand = sorted((pid for pid, r in roles.items()
+                       if r == want and pid not in assigned),
+                      key=lambda pid: dist(pid, kb.node))
+        for pid in cand[:cap]:
+            out[pid] = (bid, None)
+            assigned.add(pid)
+    for pid, r in roles.items():                        # остаток: дом-производитель / подёнщик
+        if pid in assigned:
+            continue
+        if r in _VENUE_NEED:                            # услуге без venue не быть — подёнщик
+            out[pid] = (None, "подёнщик")
+        # HOME_PRODUCER и MOBILE — без override (производят дома / мобильны), work=None
+    return out
+
+
+def _reclass_note(p, former: str) -> None:
+    """Нарративная нисходящая мобильность: метка «прежде был X» — не молчаливая смена ярлыка."""
+    if any("прежде был" in m.text for m in p.state.memory.items):
+        return
+    p.state.memory.add(f"прежде был {former}, да места не нашёл — перебиваюсь подёнщиной",
+                       _mt(), 0.5)
+
+
 def _fill_from_pool(city, keynode, kps):
     """Наполнить толпу из БАНКА (worldgen.people): ключевые здания по роли + горожане по домам +
     пара лихих. Привязки пишем в placements (персист) и восстанавливаем при повторном заходе.
@@ -343,13 +395,20 @@ def _fill_from_pool(city, keynode, kps):
         dead = {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "dead|")} | \
             {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "captive|")}  # пленники не гуляют
         by_id = {r["id"]: r for r in _pool().list_people(limit=100000)}  # 1 запрос, не N
+        homes = {pid: pl["home"] for pid, pl in placed.items() if pid not in dead}
+        roles = {pid: by_id[pid]["role"] for pid in homes if pid in by_id}
+        jobs = _plan_jobs(city, homes, roles)           # гравитация venue + реклассификация
         for pid, pl in placed.items():
-            if pid in dead:
+            if pid in dead or pid not in by_id:
                 continue  # мёртвые не возвращаются
-            row = by_id.get(pid)
-            if row:
-                people[pid] = _person_from_row(row, pl["home"], pl["work"])
-                spot[pid] = pl["node"]
+            work, override = jobs.get(pid, (None, None))
+            row = by_id[pid]
+            p = _person_from_row(row, pl["home"], work)
+            if override:
+                _reclass_note(p, p.role)
+                p.role = override
+            people[pid] = p
+            spot[pid] = pl["node"]
         if people:
             return people, spot
     rng = random.Random(f"settle|{_wid()}")
@@ -358,28 +417,22 @@ def _fill_from_pool(city, keynode, kps):
     houses = [h.node for h in city.houses.values()]
     rng.shuffle(houses)
     hi = iter(houses)
-    by_role = {}
+    home_of = {r["id"]: (next(hi, None) or rng.choice(houses)) for r in rows}  # дом каждому
+    roles = {r["id"]: r["role"] for r in rows}
+    jobs = _plan_jobs(city, home_of, roles)              # гравитация venue + реклассификация
+    n2b_kb = {kb.node: bid for bid, kb in city.key_buildings.items()}
     for r in rows:
-        by_role.setdefault(r["role"], []).append(r)
-    used = set()
-
-    def place(row, node, work, home):
-        people[row["id"]] = _person_from_row(row, home, work)
-        spot[row["id"]] = node
-        store.place_person(_wid(), row["id"], node, home, work)
-        used.add(row["id"])
-
-    for bid, kb in sorted(city.key_buildings.items()):  # работники — по роли из типа здания
-        want = _role_for_building(bid)
-        cand = [r for r in by_role.get(want, []) if r["id"] not in used] or [
-            r for r in rows if r["id"] not in used
-        ]
-        for row in cand[:2]:  # хозяин + подмастерье
-            place(row, kb.node, bid, home=next(hi, kb.node))
-    for row in rows:  # ВЕСЬ остальной пул — по домам города
-        if row["id"] not in used:
-            h = next(hi, None) or rng.choice(houses)
-            place(row, h, None, home=h)
+        pid = r["id"]
+        home = home_of[pid]
+        work, override = jobs.get(pid, (None, None))
+        node = (city.key_buildings[work].node if work else home)  # работник venue стоит там
+        p = _person_from_row(r, home, work)
+        if override:
+            _reclass_note(p, p.role)
+            p.role = override
+        people[pid] = p
+        spot[pid] = node
+        store.place_person(_wid(), pid, node, home, work)
     return people, spot
 
 

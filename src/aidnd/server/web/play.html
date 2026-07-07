@@ -371,6 +371,13 @@
     <div class="invgrid" id="invgrid"></div>
   </div>
 </div>
+<div id="mktwrap" class="overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+  <div class="magwin" style="width:min(520px,94vw)">
+    <h3>&#127974; Прилавок <span id="mktcoins" style="font:400 13px var(--serif);color:var(--dim);margin-left:6px"></span>
+      <span class="x" onclick="$('mktwrap').classList.add('hidden')">✕</span></h3>
+    <div id="mktbody" style="margin-top:6px"></div>
+  </div>
+</div>
 <div id="magicwrap" class="overlay hidden" onclick="if(event.target===this)closeMagic()">
   <div class="magwin">
     <h3>&#10022; Круг чар <span class="x" onclick="closeMagic()">✕</span></h3>
@@ -665,6 +672,7 @@ function renderWays(){
   if(SCENE.inside)b.push(`<button onclick="exitB()">&#8592; выйти наружу</button>`);
   else if(SCENE.enterable)b.push(`<button onclick="enterB()">войти: ${esc(SCENE.enterable.name)}</button>`);
   if((SCENE.looked|0)<1)b.push(`<button onclick="lookAround()">&#128065; осмотреться</button>`);
+  if(SCENE.inside)b.push(`<button onclick="openMarket()">&#127974; прилавок</button>`);
   if(SCENE.inside&&SCENE.room)b.push(`<button onclick="goRoom(null)">&#8598; в общий зал</button>`);
   (SCENE.inside?(SCENE.rooms||[]):[]).forEach(rm=>{if(rm.name!==SCENE.room){
     const lk=rm.access==='locked'?' &#128274;':(rm.access==='staff'?' (служебное)':'');
@@ -1170,6 +1178,37 @@ function openInv(){
   g.innerHTML=INV.map(it=>{const rc=RC[it.rarity||'common'];return `<div class="invcard" style="${rc?('border-color:'+rc):''}" onclick="$('invwrap').classList.add('hidden');inspectItem('${it.id}')">
     <div class="bn">${esc(it.name)}${rc?` <span style="color:${rc};font-size:10px">◆ ${RL[it.rarity]}</span>`:''}</div>
     <div class="bw">${esc(it.kind||'')}${it.qty>1?(' × '+it.qty):''}</div></div>`;}).join('');
+}
+async function openMarket(){
+  $('mktwrap').classList.remove('hidden');
+  $('mktbody').innerHTML='<div style="color:var(--faint);font:italic 13px var(--serif)">…</div>';
+  renderMarket(await api('/api/play/market'));
+}
+function renderMarket(d){
+  if(!d||!d.inside){$('mktwrap').classList.add('hidden');return;}
+  $('mktcoins').textContent='· '+(d.coins|0)+' зм';
+  const g=d.goods||[];
+  if(!g.length){$('mktbody').innerHTML='<div style="color:var(--faint);font:italic 13px var(--serif);padding:6px 2px">здесь ничем не торгуют</div>';return;}
+  $('mktbody').innerHTML=g.map(x=>{
+    const out=x.broken?' <span style="color:#a55;font-size:11px">— нет производителя</span>':'';
+    const canB=!x.broken&&x.stock>0&&(d.coins|0)>=x.price;
+    const canS=x.have>0;
+    const bs='font:12px var(--sans);padding:4px 11px;border-radius:6px;background:transparent;border:1px solid var(--gold-dim);color:var(--gold);cursor:pointer';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--line)">
+      <div style="flex:1"><div style="font:500 14px var(--serif);color:var(--ink)">${esc(x.good)}${out}</div>
+        <div style="font-size:11px;color:var(--dim)">${x.price} зм · в запасе ${x.stock}${x.have?(' · у тебя '+x.have):''}</div></div>
+      <button ${canB?'':'disabled'} style="${bs};opacity:${canB?1:.35}" onclick="marketTrade('buy','${esc(x.key)}')">купить</button>
+      <button ${canS?'':'disabled'} style="${bs};opacity:${canS?1:.35}" onclick="marketTrade('sell','${esc(x.key)}')">сбыть</button>
+    </div>`;}).join('');
+}
+async function marketTrade(act,key){
+  const r=await api('/api/play/market/'+act,{key:key,qty:1});
+  if(r.error){push('sys',esc(r.error));return;}
+  if(r.gt!=null){GT=r.gt;setClock();}
+  const verb=act==='buy'?('купил '+esc(r.good)+' за '+r.cost+' зм'):('сбыл '+esc(r.good)+' за '+r.paid+' зм'+(r.partial?' (скупщик небогат)':''));
+  push('sys',verb+' — цена теперь '+r.price+' зм');
+  if(r.coins!=null){$('coins').textContent=r.coins;}
+  renderMarket(await api('/api/play/market'));
 }
 function openCombat(cb,head){CB=cb;$('cbname').textContent=(head&&head.name)||'Бой';
   $('cbsub').textContent=(head&&head.sub)||'';

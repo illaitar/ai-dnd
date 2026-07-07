@@ -120,11 +120,12 @@ def economy_step() -> list:
                 news.append(f"{ch['key']}: производить некому — цена растёт ({int(ch['price'])} зм)")
             continue
         ch["stock"] += ch["output"] * len(alive)          # производство → товар (не монета!)
-        # ПОКУПКА: масса платит производителям — монета ПЕРЕМЕЩАЕТСЯ (сохранение M)
+        # ПОКУПКА: масса платит производителям — монета ПЕРЕМЕЩАЕТСЯ (сохранение M); спрос за
+        # шаг = demand. Что не покрыто запасом — неудовлетворённый спрос (дефицит).
         price = max(1, round(ch["price"]))
-        want = ch["demand"] * 3
+        want = ch["demand"]
         buyers = [pid for pid in rng.sample(sorted(people),
-                                            min(len(people), want * 2))
+                                            min(len(people), max(1, want * 2)))
                   if pid not in dead and pid not in ch["producers"]
                   and _store().purse_get(_wid(), pid) >= price]
         sold = 0
@@ -133,12 +134,13 @@ def economy_step() -> list:
             _store().purse_add(_wid(), pid, -price)       # покупатель платит…
             _store().purse_add(_wid(), seller, price)     # …производитель получает (сохранение)
             sold += 1
-        ch["stock"] -= sold
-        # ЦЕНА: не распродано → вниз (эластичность); распродали весь спрос → вверх
-        if sold < ch["demand"]:
-            ch["price"] = max(1.0, ch["price"] * 0.94)
-        elif ch["stock"] <= 0:
+        ch["stock"] = min(ch["stock"] - sold, ch["demand"] * 8)  # потолок склада (порча/место)
+        # ЦЕНА: спрос не покрыт запасом → ДЕФИЦИТ → вверх; залежался избыток → вниз
+        unmet = want - sold
+        if unmet > 0:
             ch["price"] = min(ch["base"] * 4, ch["price"] * 1.08)
+        elif ch["stock"] > ch["demand"]:
+            ch["price"] = max(1.0, ch["price"] * 0.94)
     _store().flag_set(_wid(), "econ_chains", json.dumps(chains, ensure_ascii=False))
     news += venue_buyouts()                           # B3: аспиранты выкупают ремесло
     _wealth_from_purse()
@@ -205,6 +207,99 @@ def venue_buyouts() -> list:
         _deeds.record(cand, "acquire", obj=bid, place=_binfo(bid)["name"], witnesses=[])
         news.append(f"{p.name} выкупил(а) место в «{_binfo(bid)['name']}» — снова {role}")
     return news
+
+
+# ── B2: товарный рынок для игрока (покупка/продажа chain-goods двигают запас/цену/M) ──
+def market_here(bid: str | None) -> list:
+    """Что продаётся в ЭТОМ venue: цепочки, чей узел-заведение == bid (живые цена/запас)."""
+    if not bid:
+        return []
+    dead = _dead()
+    people = _people()
+    out = []
+    for ch in _chains():
+        if ch.get("venue") != bid:
+            continue
+        alive = [p for p in ch["producers"] if p in people and p not in dead]
+        out.append({"key": ch["key"], "good": ch["good"], "price": max(1, round(ch["price"])),
+                    "stock": ch["stock"], "broken": not alive,
+                    "have": _larder_get(ch["key"])})
+    return out
+
+
+def _larder_get(key: str) -> int:
+    return int(_store().flag_get(_wid(), f"pc_larder|{key}") or 0)
+
+
+def _larder_add(key: str, d: int) -> int:
+    n = max(0, _larder_get(key) + d)
+    _store().flag_set(_wid(), f"pc_larder|{key}", str(n))
+    return n
+
+
+def player_buy(bid: str | None, key: str, qty: int = 1) -> dict:
+    """Игрок покупает товар цепочки по ЖИВОЙ цене: запас−, цена↑ (спрос), монета pc→
+    производителям (приток извне = ИНФЛЯЦИЯ, M+). Товар кладётся в котомку (pc_larder)."""
+    qty = max(1, int(qty))
+    chains = _chains()
+    ch = next((c for c in chains if c["key"] == key and c.get("venue") == bid), None)
+    if ch is None:
+        return {"error": "здесь этим не торгуют"}
+    people, dead = _people(), _dead()
+    alive = [p for p in ch["producers"] if p in people and p not in dead]
+    if not alive:
+        return {"error": f"{ch['good']}: производить некому — товара нет"}
+    if ch["stock"] < qty:
+        return {"error": f"в запасе только {ch['stock']} — столько не купить"}
+    price = max(1, round(ch["price"]))
+    cost = price * qty
+    if _store().purse_get(_wid(), "pc") < cost:
+        return {"error": f"не хватает монет (нужно {cost} зм)"}
+    _store().purse_add(_wid(), "pc", -cost)                # монета pc уходит в город (M+)
+    for i in range(qty):                                  # выручка — производителям (round-robin)
+        _store().purse_add(_wid(), alive[i % len(alive)], price)
+    ch["stock"] -= qty
+    ch["price"] = min(ch["base"] * 4, ch["price"] * (1.03 ** qty))  # раскупают → дорожает
+    _store().flag_set(_wid(), "econ_chains", json.dumps(chains, ensure_ascii=False))
+    _wealth_from_purse()
+    return {"good": ch["good"], "qty": qty, "cost": cost,
+            "price": max(1, round(ch["price"])), "stock": ch["stock"],
+            "have": _larder_add(key, qty), "coins": _store().purse_get(_wid(), "pc")}
+
+
+def player_sell(bid: str | None, key: str, qty: int = 1) -> dict:
+    """Игрок сбывает товар из котомки в цепочку: запас+, цена↓ (переизбыток), монета из
+    кошельков производителей→pc (отток = ДЕФЛЯЦИЯ, M−). Наценка-спред 0.7; неликвид → сколько
+    есть у производителей (клампится по их деньгам)."""
+    qty = max(1, int(qty))
+    chains = _chains()
+    ch = next((c for c in chains if c["key"] == key and c.get("venue") == bid), None)
+    if ch is None:
+        return {"error": "здесь это не примут"}
+    if _larder_get(key) < qty:
+        return {"error": "нечего продавать"}
+    people, dead = _people(), _dead()
+    alive = [p for p in ch["producers"] if p in people and p not in dead]
+    if not alive:
+        return {"error": "скупщика нет — цепочка встала"}
+    price = max(1, round(ch["price"]))
+    want = int(price * 0.7) * qty                         # спред: сбыт дешевле покупки
+    paid = 0                                              # тянем из кошельков скупщиков (неликвид)
+    i = 0
+    while paid < want and any(_store().purse_get(_wid(), s) > 0 for s in alive):
+        s = alive[i % len(alive)]
+        if _store().purse_get(_wid(), s) > 0:
+            _store().purse_add(_wid(), s, -1)
+            paid += 1
+        i += 1
+    _store().purse_add(_wid(), "pc", paid)                # монета уходит из города к игроку (M−)
+    ch["stock"] += qty
+    ch["price"] = max(1.0, ch["price"] * (0.97 ** qty))   # переизбыток → дешевеет
+    _store().flag_set(_wid(), "econ_chains", json.dumps(chains, ensure_ascii=False))
+    _wealth_from_purse()
+    return {"good": ch["good"], "qty": qty, "paid": paid, "partial": paid < want,
+            "price": max(1, round(ch["price"])), "stock": ch["stock"],
+            "have": _larder_add(key, -qty), "coins": _store().purse_get(_wid(), "pc")}
 
 
 def money_supply() -> int:

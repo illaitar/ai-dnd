@@ -73,6 +73,45 @@ def economy_board():
     return {"money": money_supply(), "chains": chains_view()}
 
 
+@router.get("/api/play/market")
+def market_board():
+    """Товарный прилавок ЗДЕСЬ (B2): цепочки, чей venue = здание игрока, — товар/цена/запас/
+    сколько у игрока в котомке. Пусто, если игрок не внутри торгового venue."""
+    _play()
+    from aidnd.server.play.engine.core import _S, _store, _wid
+    from aidnd.server.play.engine.economy import ensure, market_here
+    ensure()
+    bid = _S.get("inside")
+    return {"goods": market_here(bid), "coins": _store().purse_get(_wid(), "pc"),
+            "inside": bool(bid)}
+
+
+@router.post("/api/play/market/buy")
+async def market_buy(request: Request):
+    """Купить товар цепочки по живой цене: запас−, цена↑, монета pc→производителям (M+)."""
+    _play()
+    from aidnd.server.play.engine.core import _S, _gt, _gt_add
+    from aidnd.server.play.engine.economy import player_buy
+    b = await request.json()
+    r = player_buy(_S.get("inside"), b.get("key"), int(b.get("qty", 1)))
+    if "error" not in r:
+        _gt_add(5)
+    return {**r, "gt": _gt()}
+
+
+@router.post("/api/play/market/sell")
+async def market_sell(request: Request):
+    """Сбыть товар из котомки в цепочку: запас+, цена↓, монета производителей→pc (M−)."""
+    _play()
+    from aidnd.server.play.engine.core import _S, _gt, _gt_add
+    from aidnd.server.play.engine.economy import player_sell
+    b = await request.json()
+    r = player_sell(_S.get("inside"), b.get("key"), int(b.get("qty", 1)))
+    if "error" not in r:
+        _gt_add(5)
+    return {**r, "gt": _gt()}
+
+
 @router.get("/api/play/deeds")
 def deeds_list(limit: int = 12):
     """Хроника мира: последние ДЕЛА (журнал deeds) — сырьё для UI-хроники и дебага."""

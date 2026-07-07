@@ -93,3 +93,54 @@ def test_aspirant_buys_out_venue(world):
     assert buyer is not None, "venue не выкуплен — ремесло не восстановлено"
     assert any("выкупил" in n for n in news)
     assert core._store().deeds(core._wid(), verb="acquire")
+
+
+# ── B2: товарный рынок игрока (docs/citysim.md §B2) ──
+def _first_venue_chain():
+    """Первая цепочка с живым venue и производителями — площадка для B2-тестов."""
+    return next((c for c in ec._chains() if c.get("venue") and c["producers"]), None)
+
+
+def test_player_buy_drains_stock_raises_price(world):
+    ec.economy_step()                                    # накопить запас
+    ch = _first_venue_chain()
+    assert ch is not None, "нет цепочки с venue"
+    bid, key = ch["venue"], ch["key"]
+    core._store().purse_add(core._wid(), "pc", 1000)     # у игрока есть деньги
+    m0 = ec.money_supply()
+    p0, s0 = ec.market_here(bid)[0]["price"], ec.market_here(bid)[0]["stock"]
+    r = ec.player_buy(bid, key, min(3, s0))
+    assert "error" not in r, r
+    now = next(g for g in ec.market_here(bid) if g["key"] == key)
+    assert now["stock"] == s0 - r["qty"]                 # запас ушёл игроку
+    assert now["price"] >= p0                            # спрос → цена не ниже
+    assert now["have"] == r["qty"]                       # в котомке игрока
+    assert ec.money_supply() > m0                        # монета игрока влилась в город (инфляция)
+
+
+def test_player_sell_returns_coin_lowers_price(world):
+    ec.economy_step()
+    ch = _first_venue_chain()
+    bid, key = ch["venue"], ch["key"]
+    core._store().purse_add(core._wid(), "pc", 1000)
+    ec.player_buy(bid, key, 2)                            # сначала купить (наполнить котомку)
+    p_before = next(g for g in ec.market_here(bid) if g["key"] == key)["price"]
+    m_before = ec.money_supply()
+    r = ec.player_sell(bid, key, 2)
+    assert "error" not in r, r
+    now = next(g for g in ec.market_here(bid) if g["key"] == key)
+    assert now["have"] == 0                               # котомка опустела
+    assert now["price"] <= p_before                       # переизбыток → дешевеет
+    assert ec.money_supply() <= m_before                  # монета утекла к игроку (дефляция)
+
+
+def test_buy_rejects_over_stock_and_broke(world):
+    ch = _first_venue_chain()
+    bid, key = ch["venue"], ch["key"]
+    stock = next(g for g in ec.market_here(bid) if g["key"] == key)["stock"]
+    assert "error" in ec.player_buy(bid, key, stock + 999)   # больше запаса нельзя
+    core._store().purse_add(core._wid(), "pc",
+                            -core._store().purse_get(core._wid(), "pc"))  # обнулить кошелёк
+    if stock > 0:
+        assert "error" in ec.player_buy(bid, key, stock)      # без монет — нельзя
+    assert "error" in ec.player_buy(bid, "нет-такой", 1)      # чужой venue/ключ

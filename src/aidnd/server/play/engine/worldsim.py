@@ -40,6 +40,7 @@ def _gate_ok(kind: str, p) -> bool:
 
 _BCAP: dict = {}
 _NOT_SOCIAL = {"private", "storage", "cell", "beds"}   # не «общий зал» — не считаем в толпу
+_NONCRAFT = {"горожанин", "дитя", "старик"}            # без ремесла — дома НЕ производят (D2 иждивенцы)
 
 
 def _building_cap(bid) -> int:
@@ -64,7 +65,7 @@ def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
     if p.work:
         wk = (work_kinds or {}).get(p.work)          # окно ЗАВЕДЕНИЯ: таверна зовёт вечером
         out.append(society.Candidate("work", keynode.get(p.work, home), window_kind=wk))
-    elif home is not None and p.role != "горожанин":  # ремесленник трудится ДОМА (ист. норма)
+    elif home is not None and p.role not in _NONCRAFT:  # ремесленник трудится ДОМА (ист. норма)
         out.append(society.Candidate("work", home))
     for kind in ("tavern", "temple", "market"):  # привязанные к зданиям места
         nodes = place_idx.get(kind)

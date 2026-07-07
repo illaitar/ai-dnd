@@ -443,6 +443,18 @@ def _fill_from_pool(city, keynode, kps):
                 p.role = override
             people[pid] = p
             spot[pid] = pl["node"]
+        # D2 top-up: иждивенцы, добавленные в пул ПОСЛЕ расселения мира — доселить в дом главы
+        # семьи (не тревожа размещённых взрослых), одноразово; дальше живут через placements.
+        for pid, row in by_id.items():
+            if pid in placed or pid in dead or not (row.get("mech") or {}).get("dependent"):
+                continue
+            head = (row["mech"] or {}).get("head")
+            home = homes.get(head) or (placed.get(head) or {}).get("home")
+            if home is None:                              # глава мёртв/не размещён — пропустить
+                continue
+            people[pid] = _person_from_row(row, home, None)
+            spot[pid] = home
+            store.place_person(_wid(), pid, home, home, None)
         if people:
             return people, spot
     rng = random.Random(f"settle|{_wid()}")
@@ -451,11 +463,16 @@ def _fill_from_pool(city, keynode, kps):
     houses = sorted({h.node for h in city.houses.values()})  # дедуп по узлу — семья ⇒ свой дом
     rng.shuffle(houses)
     hi = iter(houses)
+    adults = [r for r in rows if not (r.get("mech") or {}).get("dependent")]
+    deps = [r for r in rows if (r.get("mech") or {}).get("dependent")]  # D2: дети/старики
     home_of = {}                                         # D1: семья живёт в ОДНОМ доме
-    for hh in _households(rows, rng):                    # разбить пул на семьи (по фамилии)
+    for hh in _households(adults, rng):                  # разбить взрослых на семьи (по фамилии)
         home = next(hi, None) or rng.choice(houses)
         for pid in hh:
             home_of[pid] = home
+    for r in deps:                                       # D2: иждивенец — в дом СВОЕГО главы семьи
+        head = (r.get("mech") or {}).get("head")
+        home_of[r["id"]] = home_of.get(head) or (next(hi, None) or rng.choice(houses))
     roles = {r["id"]: r["role"] for r in rows}
     jobs = _plan_jobs(city, home_of, roles)              # гравитация venue + реклассификация
     for r in rows:

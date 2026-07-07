@@ -408,76 +408,77 @@ def _reclass_note(p, former: str) -> None:
                        _mt(), 0.5)
 
 
-def _fill_from_pool(city, keynode, kps):
-    """Наполнить толпу из БАНКА (worldgen.people): ключевые здания по роли + горожане по домам +
-    пара лихих. Привязки пишем в placements (персист) и восстанавливаем при повторном заходе.
-    Пустой банк = сломанная поставка данных → жёсткая ошибка (мир без персон не строим)."""
-    store = _store()
-    if _pool().people_count() == 0:
-        raise RuntimeError("банк NPC (worlds.db:people) пуст — мир не построить; проверь поставку пулов")
+def _restore_placed(city, placed):
+    """Rebuild the SAME residents from stored placements (persisted across re-entry): drop the
+    dead/captive, re-plan jobs (venue gravity may have shifted), then top up any dependents forged
+    into the pool after this world was first settled. Returns (people, spot); may be empty."""
+    store, by_id = _store(), {r["id"]: r for r in _pool().list_people(limit=100000)}
+    dead = {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "dead|")} | \
+        {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "captive|")}  # captives don't roam
+    homes = {pid: pl["home"] for pid, pl in placed.items() if pid not in dead}
+    roles = {pid: by_id[pid]["role"] for pid in homes if pid in by_id}
+    jobs = _plan_jobs(city, homes, roles)               # venue gravity + reclassification
     people, spot = {}, {}
-    placed = {pl["npc_id"]: pl for pl in store.placements_for(_wid())}
-    if placed and not all(
-        pl["node"] in city._xy and pl["home"] in city._xy  # noqa: SLF001
-        for pl in placed.values()
-    ):
-        store.clear_placements(_wid())  # граф города изменился — узлы протухли
-        placed = {}  # пере-размещаем заново (память NPC цела)
-    if placed:  # уже наполнен — восстановить тех же людей
-        dead = {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "dead|")} | \
-            {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "captive|")}  # пленники не гуляют
-        by_id = {r["id"]: r for r in _pool().list_people(limit=100000)}  # 1 запрос, не N
-        homes = {pid: pl["home"] for pid, pl in placed.items() if pid not in dead}
-        roles = {pid: by_id[pid]["role"] for pid in homes if pid in by_id}
-        jobs = _plan_jobs(city, homes, roles)           # гравитация venue + реклассификация
-        for pid, pl in placed.items():
-            if pid in dead or pid not in by_id:
-                continue  # мёртвые не возвращаются
-            work, override = jobs.get(pid, (None, None))
-            row = by_id[pid]
-            p = _person_from_row(row, pl["home"], work)
-            if override:
-                _reclass_note(p, p.role)
-                p.role = override
-            people[pid] = p
-            spot[pid] = pl["node"]
-        # D2 top-up: иждивенцы, добавленные в пул ПОСЛЕ расселения мира — доселить в дом главы
-        # семьи (не тревожа размещённых взрослых), одноразово; дальше живут через placements.
-        for pid, row in by_id.items():
-            if pid in placed or pid in dead or not (row.get("mech") or {}).get("dependent"):
-                continue
-            head = (row["mech"] or {}).get("head")
-            home = homes.get(head) or (placed.get(head) or {}).get("home")
-            if home is None:                              # глава мёртв/не размещён — пропустить
-                continue
-            people[pid] = _person_from_row(row, home, None)
-            spot[pid] = home
-            store.place_person(_wid(), pid, home, home, None)
-        if people:
-            return people, spot
+    for pid, pl in placed.items():
+        if pid in dead or pid not in by_id:
+            continue  # the dead do not return
+        work, override = jobs.get(pid, (None, None))
+        p = _person_from_row(by_id[pid], pl["home"], work)
+        if override:
+            _reclass_note(p, p.role)
+            p.role = override
+        people[pid] = p
+        spot[pid] = pl["node"]
+    _topup_dependents(city, by_id, placed, dead, homes, people, spot)
+    return people, spot
+
+
+def _topup_dependents(city, by_id, placed, dead, homes, people, spot):
+    """D2 top-up: dependents added to the pool AFTER this world was settled — house each with its
+    family head once (without disturbing placed adults); thereafter they live via placements.
+    Mutates people/spot in place and persists the placement."""
+    store = _store()
+    for pid, row in by_id.items():
+        if pid in placed or pid in dead or not (row.get("mech") or {}).get("dependent"):
+            continue
+        head = (row["mech"] or {}).get("head")
+        home = homes.get(head) or (placed.get(head) or {}).get("home")
+        if home is None:                                # head dead/unplaced — skip
+            continue
+        people[pid] = _person_from_row(row, home, None)
+        spot[pid] = home
+        store.place_person(_wid(), pid, home, home, None)
+
+
+def _settle_fresh(city):
+    """First settlement of a world: shuffle the pool, group adults into families (one house each),
+    house each dependent with their family head, plan jobs by venue gravity, and place everyone.
+    Returns (people, spot) and writes placements so re-entry restores the same people."""
+    store = _store()
     rng = random.Random(f"settle|{_wid()}")
     rows = _pool().list_people(limit=100000)
     rng.shuffle(rows)
-    houses = sorted({h.node for h in city.houses.values()})  # дедуп по узлу — семья ⇒ свой дом
+    houses = sorted({h.node for h in city.houses.values()})  # dedup by node — one family, one house
     rng.shuffle(houses)
     hi = iter(houses)
     adults = [r for r in rows if not (r.get("mech") or {}).get("dependent")]
-    deps = [r for r in rows if (r.get("mech") or {}).get("dependent")]  # D2: дети/старики
-    home_of = {}                                         # D1: семья живёт в ОДНОМ доме
-    for hh in _households(adults, rng):                  # разбить взрослых на семьи (по фамилии)
+    deps = [r for r in rows if (r.get("mech") or {}).get("dependent")]  # D2: children/elders
+    home_of = {}                                         # D1: a family lives in ONE house
+    for hh in _households(adults, rng):                  # split adults into families (by surname)
         home = next(hi, None) or rng.choice(houses)
         for pid in hh:
             home_of[pid] = home
-    for r in deps:                                       # D2: иждивенец — в дом СВОЕГО главы семьи
+    for r in deps:                                       # D2: dependent → their family head's house
         head = (r.get("mech") or {}).get("head")
         home_of[r["id"]] = home_of.get(head) or (next(hi, None) or rng.choice(houses))
     roles = {r["id"]: r["role"] for r in rows}
-    jobs = _plan_jobs(city, home_of, roles)              # гравитация venue + реклассификация
+    jobs = _plan_jobs(city, home_of, roles)              # venue gravity + reclassification
+    people, spot = {}, {}
     for r in rows:
         pid = r["id"]
         home = home_of[pid]
         work, override = jobs.get(pid, (None, None))
-        node = (city.key_buildings[work].node if work else home)  # работник venue стоит там
+        node = (city.key_buildings[work].node if work else home)  # a venue worker stands there
         p = _person_from_row(r, home, work)
         if override:
             _reclass_note(p, p.role)
@@ -486,6 +487,27 @@ def _fill_from_pool(city, keynode, kps):
         spot[pid] = node
         store.place_person(_wid(), pid, node, home, work)
     return people, spot
+
+
+def _fill_from_pool(city, keynode, kps):
+    """Populate the crowd from the NPC BANK (worldgen.people): if the world was already settled,
+    restore stored placements (re-planning jobs, topping up new dependents); otherwise settle it
+    fresh. Empty bank = broken data supply → hard error (we never build a world without people)."""
+    if _pool().people_count() == 0:
+        raise RuntimeError("банк NPC (worlds.db:people) пуст — мир не построить; проверь поставку пулов")
+    store = _store()
+    placed = {pl["npc_id"]: pl for pl in store.placements_for(_wid())}
+    if placed and not all(
+        pl["node"] in city._xy and pl["home"] in city._xy  # noqa: SLF001
+        for pl in placed.values()
+    ):
+        store.clear_placements(_wid())  # city graph changed — stale nodes; re-place (memory kept)
+        placed = {}
+    if placed:
+        people, spot = _restore_placed(city, placed)
+        if people:
+            return people, spot
+    return _settle_fresh(city)
 
 
 def _play():
@@ -594,39 +616,100 @@ def _looked_level(loc, inside) -> int:
     return int((_S.setdefault("looked", {})).get(_look_key(loc, inside), 0))
 
 
+def _scene_locinfo(city, loc, bid, inside, plaza):
+    """Resolve the scene's display name + kind: inside a building, at its entrance, the town board
+    on the plaza, a crossroad, or plain street. Returns (name, kind)."""
+    if inside:
+        info = _binfo(inside)
+        return info["name"], info["kind"]
+    if bid:
+        return f"у входа: {_binfo(bid)['name']}", "снаружи"
+    if plaza is not None and loc == plaza:
+        return "Городская доска", "площадь · объявления горожан"
+    if city.node_kind(loc) == NodeKind.CROSSROAD:
+        return "Перекрёсток", "городская развилка"
+    return "Улица", "мостовая меж домов"
+
+
+def _scene_ambient(here, lvl):
+    """Ambient line for the scene: time-of-day, weather, crowd mood, and a one-line event that
+    depends on whether the player has looked around yet."""
+    return {
+        "time": _PHASE_RU[_phase()],
+        "weather": "дождь",
+        "mood": "оживлённо" if len(here) > 2 else "тихо",
+        "event": (
+            "Ты ещё не осмотрелся здесь."
+            if lvl == 0 and here
+            else "Народ занят своими делами."
+            if here
+            else "Пусто; лишь ветер гуляет меж домов."
+        ),
+    }
+
+
+def _scene_folk(vis_here, people):
+    """Visible people in the scene → cards (id, display name, role, initial, colour, portrait).
+    A stranger shows by descriptor until introduced."""
+    return [
+        {
+            "id": pid,
+            "name": _display(pid, people),  # stranger by descriptor, name after introduction
+            "role": (
+                people[pid].role if (pid in _met() or people[pid].work) else "кто-то из горожан"
+            ),
+            "init": _display(pid, people)[0].upper(),
+            "color": _COLORS[i % len(_COLORS)],
+            "portrait": _portrait_url(people[pid], _emo(people[pid].state)),
+        }
+        for i, pid in enumerate(vis_here)
+    ]
+
+
+def _scene_extras(d, bid, loc, inside, plaza, people, crof):
+    """Append conditional scene sections in place: guild board/rank (minting a newcomer's badge),
+    the citizens' notice board at the plaza post, and the watch when the player is highly wanted."""
+    if bid and bid == _guild_bid():  # in the guild — board, rank, newcomer intake
+        d.setdefault("narr", [])
+        if not _pc_badge() and not _store().flag_get(_wid(), "guild_mark|pc"):
+            _mint_badge(0)
+            d["narr"].append("Тебя приняли в гильдию. Вот жетон приключенца (Медь).")
+        d["guild_board"], d["guild_news"] = _guild_board(), (_S.get("guild_news") or [])
+        d["guild_status"] = _guild_status()
+    if plaza is not None and loc == plaza and not inside:  # at the post — citizens' notices
+        d["board_ads"] = _board_ads()
+        d["board_news"] = _S.get("board_news") or []
+    wc = _watch_check(people, crof, loc)  # the watch, at a high wanted level
+    if wc:
+        d["watch"] = wc
+
+
+def _scene_rooms(inside, lvl):
+    """Rooms of the building the player is in; hidden ones show only on a keen look (lvl 2)."""
+    if not inside:
+        return []
+    return [r for r in _building_rooms(inside) if not (r["access"] == "hidden" and lvl < 2)]
+
+
 def _scene_dict(city, people, crof, cr2b, loc):
+    """Assemble the full scene dict the client renders: place name/kind, fog level, rooms, the
+    location block, ambient, the visible folk, and any guild/board/watch extras."""
     role = _role_at(loc, people, crof, cr2b)
     bid = cr2b.get(loc)
     inside = _S.get("inside")
-    if inside and inside != bid:  # отошёл от здания — значит, вышел
+    if inside and inside != bid:  # stepped away from the building → left it
         inside = _S["inside"] = None
         _S["room"] = None
-    _mark_seen(bid)  # пришёл — узнал место
+    _mark_seen(bid)  # arrived — learned the place
     plaza = (_S.get("geom") or {}).get("plaza")
-    if inside:
-        info = _binfo(inside)
-        name, kind = info["name"], info["kind"]
-    elif bid:
-        info = _binfo(bid)
-        name, kind = f"у входа: {info['name']}", "снаружи"
-    elif plaza is not None and loc == plaza:
-        name, kind = "Городская доска", "площадь · объявления горожан"
-    elif city.node_kind(loc) == NodeKind.CROSSROAD:
-        name, kind = "Перекрёсток", "городская развилка"
-    else:
-        name, kind = "Улица", "мостовая меж домов"
+    name, kind = _scene_locinfo(city, loc, bid, inside, plaza)
     here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
     lvl = _looked_level(loc, inside)
     more = max(0, len(here) - PB["here_show_cap"])
     here = here[: PB["here_show_cap"]]
-    vis_here = here if lvl >= 1 else []  # туман: людей различаешь, лишь осмотревшись
+    vis_here = here if lvl >= 1 else []  # fog: you tell people apart only after looking around
     room = _S.get("room") if inside else None
-    rooms = []
-    if inside:
-        for r in _building_rooms(inside):  # скрытые видны лишь по зоркому осмотру (lvl 2)
-            if r["access"] == "hidden" and lvl < 2:
-                continue
-            rooms.append(r)
+    rooms = _scene_rooms(inside, lvl)
     if inside and room:
         name = f"{_binfo(inside)['name']} · {room}"
     d = {
@@ -650,45 +733,10 @@ def _scene_dict(city, people, crof, cr2b, loc):
         "dungeon": ({"name": (_S.get("dungeon") or {}).get("d", {}).get("name"),
                      "room": (_S.get("dungeon") or {}).get("room")}
                     if _S.get("dungeon") else None),
-        "ambient": {
-            "time": _PHASE_RU[_phase()],
-            "weather": "дождь",
-            "mood": "оживлённо" if len(here) > 2 else "тихо",
-            "event": (
-                "Ты ещё не осмотрелся здесь."
-                if lvl == 0 and here
-                else "Народ занят своими делами."
-                if here
-                else "Пусто; лишь ветер гуляет меж домов."
-            ),
-        },
-        "here": [
-            {
-                "id": pid,
-                "name": _display(pid, people),  # незнакомец — дескриптором, имя после знакомства
-                "role": (
-                    people[pid].role if (pid in _met() or people[pid].work) else "кто-то из горожан"
-                ),
-                "init": _display(pid, people)[0].upper(),
-                "color": _COLORS[i % len(_COLORS)],
-                "portrait": _portrait_url(people[pid], _emo(people[pid].state)),
-            }
-            for i, pid in enumerate(vis_here)
-        ],
+        "ambient": _scene_ambient(here, lvl),
+        "here": _scene_folk(vis_here, people),
     }
-    if bid and bid == _guild_bid():  # в гильдии — доска, ранг, приём новичка
-        d.setdefault("narr", [])
-        if not _pc_badge() and not _store().flag_get(_wid(), "guild_mark|pc"):
-            _mint_badge(0)
-            d["narr"].append("Тебя приняли в гильдию. Вот жетон приключенца (Медь).")
-        d["guild_board"], d["guild_news"] = _guild_board(), (_S.get("guild_news") or [])
-        d["guild_status"] = _guild_status()
-    if plaza is not None and loc == plaza and not inside:  # у столба — объявления горожан
-        d["board_ads"] = _board_ads()
-        d["board_news"] = _S.get("board_news") or []
-    wc = _watch_check(people, crof, loc)  # стража при высоком розыске
-    if wc:
-        d["watch"] = wc
+    _scene_extras(d, bid, loc, inside, plaza, people, crof)
     return d
 
 

@@ -376,6 +376,30 @@ def _plan_jobs(city, homes: dict, roles: dict) -> dict:
     return out
 
 
+def _surname(name: str) -> str:
+    """Фамилия = последний токен имени (иначе пусто) — та же логика, что предзнакомство-родня."""
+    parts = name.split()
+    return parts[-1] if len(parts) > 1 else ""
+
+
+def _households(rows: list, rng) -> list:
+    """D1: разбить пул на СЕМЬИ-домохозяйства — малые группы одной фамилии (couple/siblings),
+    каждая живёт в одном доме. Детерминир. (rng из settle|wid). Размер 1-5, пик 2-3."""
+    by_sur: dict = {}
+    for r in rows:
+        by_sur.setdefault(_surname(r["name"]) or r["id"], []).append(r["id"])
+    households = []
+    for sur in sorted(by_sur):
+        members = sorted(by_sur[sur])
+        rng.shuffle(members)
+        i = 0
+        while i < len(members):
+            size = rng.choices([1, 2, 3, 4, 5], weights=[2, 4, 4, 2, 1])[0]
+            households.append(members[i:i + size])
+            i += size
+    return households
+
+
 def _reclass_note(p, former: str) -> None:
     """Нарративная нисходящая мобильность: метка «прежде был X» + former_role (для выкупа venue,
     слой B3) — не молчаливая смена ярлыка."""
@@ -424,13 +448,16 @@ def _fill_from_pool(city, keynode, kps):
     rng = random.Random(f"settle|{_wid()}")
     rows = _pool().list_people(limit=100000)
     rng.shuffle(rows)
-    houses = [h.node for h in city.houses.values()]
+    houses = sorted({h.node for h in city.houses.values()})  # дедуп по узлу — семья ⇒ свой дом
     rng.shuffle(houses)
     hi = iter(houses)
-    home_of = {r["id"]: (next(hi, None) or rng.choice(houses)) for r in rows}  # дом каждому
+    home_of = {}                                         # D1: семья живёт в ОДНОМ доме
+    for hh in _households(rows, rng):                    # разбить пул на семьи (по фамилии)
+        home = next(hi, None) or rng.choice(houses)
+        for pid in hh:
+            home_of[pid] = home
     roles = {r["id"]: r["role"] for r in rows}
     jobs = _plan_jobs(city, home_of, roles)              # гравитация venue + реклассификация
-    n2b_kb = {kb.node: bid for bid, kb in city.key_buildings.items()}
     for r in rows:
         pid = r["id"]
         home = home_of[pid]

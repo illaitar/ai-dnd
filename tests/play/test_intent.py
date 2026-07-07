@@ -40,15 +40,17 @@ def test_forecast_is_a_day(world):
 
 def test_follow_pins_to_player_but_yields_to_need(world):
     pid = next(pid for pid, p in world.items() if p.role == "горожанин")
-    core._S["loc"] = 500
+    home = world[pid].home
+    loc = next(n for n in core._S["city"]._xy if n != home)  # узел игрока ≠ дом NPC (RNG-устойч.)
+    core._S["loc"] = loc
     world[pid].state.needs["fatigue"] = 0.1           # сыт/бодр — идёт за игроком
     world[pid].state.needs["hunger"] = 0.1
     ws.set_commit(pid, "follow")
     ws.routine_step(world, core._S["crof"])
-    assert core._S["crof"][pid] == 500                 # follow: у игрока
+    assert core._S["crof"][pid] == loc                 # follow: у игрока
     world[pid].state.needs["fatigue"] = 0.95          # валится с ног — критнужда важнее
     ws.routine_step(world, core._S["crof"])
-    assert core._S["crof"][pid] != 500                 # отошёл (спать/есть)
+    assert core._S["crof"][pid] != loc                 # отошёл (спать/есть) — уступил критнужде
     ws.clear_commit(pid)
 
 

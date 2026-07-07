@@ -140,6 +140,7 @@ def economy_step() -> list:
         elif ch["stock"] <= 0:
             ch["price"] = min(ch["base"] * 4, ch["price"] * 1.08)
     _store().flag_set(_wid(), "econ_chains", json.dumps(chains, ensure_ascii=False))
+    news += venue_buyouts()                           # B3: аспиранты выкупают ремесло
     _wealth_from_purse()
     return news
 
@@ -150,6 +151,60 @@ def _wealth_from_purse() -> None:
     for pid, p in _people().items():
         purse = _store().purse_get(_wid(), pid)
         p.state.needs["wealth"] = round(max(0.05, min(0.95, 1.0 - purse / 30.0)), 2)
+
+
+# ── B3: агенды-выкуп venue (аспирант-подёнщик копит и покупает своё ремесло обратно) ──
+_VENUE_PRICE = {"таверн": 90, "трактир": 90, "гильд": 120, "игорн": 70, "лавк": 60,
+                "оружейн": 70, "кузн": 60, "храм": 0, "молельн": 0, "часовн": 0,
+                "лечебн": 55, "мастерск": 55, "башн": 0, "магич": 0}
+
+
+def venue_buyouts() -> list:
+    """Суточно: если у venue вакансия (владелец умер/мест меньше ёмкости), аспирант-подёнщик
+    со СВОИМ бывшим ремеслом и деньгами ВЫКУПАЕТ место → work=venue, роль восстановлена, deed
+    'acquire'. Убитый производитель цепочки → аспирант оживляет её (экономическое исцеление).
+    Деньги уходят из города (M−), если прежний владелец мёртв, иначе — ему (сохранение)."""
+    from aidnd.server.play.engine import deeds as _deeds
+    from aidnd.server.play.engine.core import _S, _binfo, _mt
+    from aidnd.server.play.engine.world import _WORKCAP
+
+    people = _people()
+    dead = _dead()
+    news = []
+    aspirants = [pid for pid, p in sorted(people.items())
+                 if p.role == "подёнщик" and getattr(p, "former_role", None)
+                 and pid not in dead]
+    for bid in sorted(_S.get("keynode") or {}):
+        info = (_binfo(bid)["kind"] + " " + _binfo(bid)["name"]).lower()
+        price = next((c for w, c in _VENUE_PRICE.items() if w in info), 0)
+        if price <= 0:
+            continue
+        from aidnd.server.play.engine.core import _role_for_building
+        role = _role_for_building(bid)
+        cap = next((c for w, c in _WORKCAP.items() if w in info), 3)
+        workers = [pid for pid, p in people.items()
+                   if p.work == bid and pid not in dead]
+        if len(workers) >= cap:
+            continue                                  # мест нет — не выкупить
+        cand = next((pid for pid in aspirants
+                     if getattr(people[pid], "former_role", None) == role
+                     and _store().purse_get(_wid(), pid) >= price), None)
+        if cand is None:
+            continue
+        p = people[cand]
+        _store().purse_add(_wid(), cand, -price)      # платит цену…
+        owner = next((w for w in workers), None)
+        if owner:
+            _store().purse_add(_wid(), owner, price)  # …прежнему совладельцу (сохранение M)
+        # иначе venue пустой → деньги ушли из города (M−, честно: выкуп у наследников/города)
+        p.work = bid
+        p.role = role                                 # ремесло восстановлено!
+        aspirants.remove(cand)
+        p.state.memory.add(f"выкупил долю в «{_binfo(bid)['name']}» — снова {role}!",
+                           _mt(), 0.8)
+        _deeds.record(cand, "acquire", obj=bid, place=_binfo(bid)["name"], witnesses=[])
+        news.append(f"{p.name} выкупил(а) место в «{_binfo(bid)['name']}» — снова {role}")
+    return news
 
 
 def money_supply() -> int:

@@ -377,7 +377,9 @@ def _plan_jobs(city, homes: dict, roles: dict) -> dict:
 
 
 def _reclass_note(p, former: str) -> None:
-    """Нарративная нисходящая мобильность: метка «прежде был X» — не молчаливая смена ярлыка."""
+    """Нарративная нисходящая мобильность: метка «прежде был X» + former_role (для выкупа venue,
+    слой B3) — не молчаливая смена ярлыка."""
+    p.former_role = former                            # аспирант помнит ремесло (может выкупить)
     if any("прежде был" in m.text for m in p.state.memory.items):
         return
     p.state.memory.add(f"прежде был {former}, да места не нашёл — перебиваюсь подёнщиной",

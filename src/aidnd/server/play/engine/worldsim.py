@@ -85,11 +85,9 @@ def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
     return out
 
 
-def routine_step(people: dict, crof: dict) -> None:
-    """Пересчитать, где каждый житель, по его нуждам/характеру/времени. Дёшево (без LLM/БД в цикле):
-    один индекс зданий + O(люди×места) утилити. Мутирует crof (спот) и нужды в people[*].state."""
+def _place_context(people: dict):
+    """Контекст мест города (индекс зданий, окна работы) — общий для routine_step и predict."""
     keynode, kps = _S.get("keynode") or {}, _S.get("kps") or []
-    phase = _phase()
     place_idx = _place_index(people, keynode)
     work_kinds = {}                                  # bid → тип заведения (окно работы)
     for bid in keynode:
@@ -97,6 +95,91 @@ def routine_step(people: dict, crof: dict) -> None:
         ks = society.kinds_of(data)
         if ks:
             work_kinds[bid] = ks[0]
+    return keynode, kps, place_idx, work_kinds
+
+
+# ── СЛОЙ A: ИНТЕНТ как ПРОГНОЗ (docs/citysim.md §A) — query-shaped, ноль персиста ──
+
+
+def predict(pid: str, phase: str | None = None) -> dict:
+    """Куда и ЗАЧЕМ направлен NPC в фазе (прогон утилити вперёд по ТЕКУЩИМ нуждам + окнам
+    фазы; аппрокс — окна фазы доминируют суточный ритм). Обязательства перебивают утилити.
+    Возвращает {node, kind, route}. Ноль хранимого состояния — детерминированный запрос."""
+    people = _S.get("people") or {}
+    crof = _S.get("crof") or {}
+    p = people.get(pid)
+    if p is None:
+        return {"node": None, "kind": None, "route": []}
+    phase = phase or _phase()
+    node = _commit_node(pid, phase, people, crof)     # обязательство (follow/shift/appt)?
+    kind = None
+    if node is None:
+        keynode, kps, place_idx, work_kinds = _place_context(people)
+        rng = random.Random(f"pred|{pid}|{phase}|{_gt() // 30}")
+        cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds)
+        c = society.routine.choose_c(p.state.needs, p.state.config.traits, cands, phase, rng,
+                                     stay=crof.get(pid))
+        if c is not None:
+            node, kind = c.node, c.kind
+    else:
+        kind = (_S.get("commit") or {}).get(pid, {}).get("kind", "appointment")
+    cur = crof.get(pid)
+    route = []
+    if node is not None and cur is not None and cur != node:
+        city = _S.get("city")
+        if city is not None:
+            r = city.route(cur, node)
+            route = list(r.nodes) if getattr(r, "found", False) else [cur, node]
+    return {"node": node, "kind": kind, "route": route}
+
+
+def forecast(pid: str) -> dict:
+    """Распорядок дня NPC: {фаза: вид-занятия} — для карточки распорядка (наблюдаемость)."""
+    return {ph: predict(pid, ph)["kind"] for ph in ("morning", "day", "evening", "night")}
+
+
+def crosses(pid: str, node: int, phase: str | None = None) -> bool:
+    """Пройдёт ли маршрут NPC через узел в фазе — перехват/засада на уровне ПЛАНА, не позиции."""
+    pr = predict(pid, phase)
+    return node in (pr["route"] or []) or pr["node"] == node
+
+
+def set_commit(pid: str, kind: str, node: int | None = None, until_gt: int | None = None) -> None:
+    """Обязательство (follow/shift/errand) — оверрайд рутины для внешних систем.
+    kind=follow: node динамичен (узел игрока); критнужда всё равно уводит поесть/спать."""
+    _S.setdefault("commit", {})[pid] = {"kind": kind, "node": node, "until": until_gt}
+
+
+def clear_commit(pid: str) -> None:
+    (_S.get("commit") or {}).pop(pid, None)
+
+
+_CRIT = {"fatigue": 0.85, "hunger": 0.82}             # нужда выше — перебивает follow (RimWorld)
+
+
+def _commit_node(pid: str, phase: str, people: dict, crof: dict) -> int | None:
+    """Узел-оверрайд по обязательству (приоритет flee>appointment>shift>follow>errand).
+    follow уступает критнужде (голодный спутник отойдёт поесть). None — рутина свободна."""
+    c = (_S.get("commit") or {}).get(pid)
+    if not c:
+        return None
+    if c.get("until") is not None and _gt() > c["until"]:
+        clear_commit(pid)
+        return None
+    kind = c["kind"]
+    if kind == "follow":
+        st = people.get(pid)
+        if st is not None and any(st.state.needs.get(n, 0) >= thr for n, thr in _CRIT.items()):
+            return None                               # критнужда важнее — уходит из follow
+        return _S.get("loc")                          # к игроку (динамично)
+    return c.get("node")
+
+
+def routine_step(people: dict, crof: dict) -> None:
+    """Пересчитать, где каждый житель, по его нуждам/характеру/времени. Дёшево (без LLM/БД в цикле):
+    один индекс зданий + O(люди×места) утилити. Мутирует crof (спот) и нужды в people[*].state."""
+    phase = _phase()
+    keynode, kps, place_idx, work_kinds = _place_context(people)
     day, gt = _gt() // 1440, _gt()
     node2kind = {}  # где сейчас стоит NPC → тип места (гасит нужды)
     for kind, nodes in place_idx.items():
@@ -143,11 +226,20 @@ def routine_step(people: dict, crof: dict) -> None:
         if here is None and crof.get(pid) == p.home:
             here = "home"
         rng = random.Random(f"rout|{pid}|{phase}|{gt // 30}")
-        cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds,
-                            load=load, n2b=n2b)
-        if pid in appts:                              # уговор в силе: место встречи зовёт
-            cands.append(society.Candidate("appointment", appts[pid]))
-        node, akind = society.step(st, cands, phase, mins, here, rng, stay=crof.get(pid))
+        # нужды продвигаются ВСЕГДА (даже под обязательством — иначе follow не уступит критнужде)
+        society.advance(st.needs, mins,
+                               society.PLACE[here].sates if here in society.PLACE else {})
+        cnode = appts.get(pid) or _commit_node(pid, phase, people, crof)  # обязательство?
+        if cnode is not None:                         # оверрайд: место встречи/смена/за игроком
+            node, akind = cnode, ((_S.get("commit") or {}).get(pid, {}).get("kind")
+                                  or "appointment")
+        else:
+            cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds,
+                                load=load, n2b=n2b)
+            node, akind = society.routine.choose(st.needs, st.config.traits, cands, phase, rng,
+                                                 stay=crof.get(pid)), None
+            if node is not None:
+                akind = next((c.kind for c in cands if c.node == node), None)
         if node is not None:
             crof[pid] = node
             kind_of[pid] = akind

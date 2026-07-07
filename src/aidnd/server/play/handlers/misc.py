@@ -43,6 +43,27 @@ def debug_log_clear():
     return {"ok": True}
 
 
+@router.get("/api/play/schedule")
+def npc_schedule(npc: str = ""):
+    """Распорядок дня NPC (карточка Bombers' Notebook): где он в какую фазу — из predict().
+    Виден лишь для ЗНАКОМОГО (talk); незнакомца читать нельзя (туман личности)."""
+    from aidnd.server.play.engine.core import _S, _met
+    from aidnd.server.play.engine.worldsim import forecast, predict
+    people = _S.get("people") or {}
+    p = people.get(npc)
+    if p is None:
+        return {"error": "нет такого"}
+    if npc not in _met():
+        return {"error": "ты его не знаешь — заговори сперва"}
+    RU = {"home": "дома", "work": "за работой", "tavern": "в трактире", "temple": "в храме",
+          "market": "на рынке", "street": "на улице", "patrol": "в дозоре",
+          "prowl": "на промысле", "appointment": "по уговору", "follow": "с тобой", None: "?"}
+    fc = forecast(npc)
+    return {"npc": npc, "name": p.name, "role": p.role,
+            "day": {ph: RU.get(k, k) for ph, k in fc.items()},
+            "now": RU.get(predict(npc)["kind"], "?")}
+
+
 @router.get("/api/play/deeds")
 def deeds_list(limit: int = 12):
     """Хроника мира: последние ДЕЛА (журнал deeds) — сырьё для UI-хроники и дебага."""

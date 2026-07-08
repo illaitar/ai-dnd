@@ -44,6 +44,9 @@ class Body:
     charisma: float = 0.3       # attractiveness/charm [0..1] (draws toward TALK, not rob)
     attention: float = 0.7      # vigilance [0..1] (low → easy to pickpocket)
     faction: str = "town"
+    race: str = "human"         # visible race/species token (appraisal reads this)
+    squalor: float = 0.0        # visible grime/disrepair [0..1] (0 kept ... 1 filthy)
+    marks: list = field(default_factory=list)       # visible tokens (scars, brands, insignia, ...)
     carrying: list = field(default_factory=list)    # Item — in plain sight
     loot: list = field(default_factory=list)        # Item — loot (wallet, etc.)
     attacking: str | None = None                    # whom to attack right now (to defend an ally)
@@ -52,6 +55,9 @@ class Body:
 
     def down(self) -> bool:
         return self.hp <= 0 or not self.alive
+
+    def armed(self) -> bool:
+        return any(getattr(i, "kind", "") == "weapon" for i in self.carrying)
 
 
 @dataclass

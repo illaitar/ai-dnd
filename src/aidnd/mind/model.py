@@ -22,7 +22,7 @@ TRAITS = ("bravery", "greed", "honesty", "curiosity", "pride", "loyalty",
           "sociability", "ambition", "lawful", "irritability", "malice")
 ABILITIES = ("str", "dex", "con", "int", "wis", "cha")
 NEEDS = ("fatigue", "hunger", "social", "purpose", "wealth", "comfort", "novelty")
-EMOTIONS = ("anger", "fear", "joy", "distress")
+EMOTIONS = ("anger", "fear", "joy", "distress", "disgust")
 
 
 @dataclass
@@ -82,7 +82,8 @@ class NpcState:
         return {"anger": 0.6 + t.get("irritability", 0.5),
                 "fear": 0.6 + (1 - t.get("bravery", 0.5)),
                 "joy": 0.6 + t.get("sociability", 0.5),
-                "distress": 0.6 + (1 - t.get("bravery", 0.5)) * 0.5}.get(channel, 1.0)
+                "distress": 0.6 + (1 - t.get("bravery", 0.5)) * 0.5,
+                "disgust": 0.6 + t.get("pride", 0.5)}.get(channel, 1.0)
 
     def emotion_baseline(self, channel: str) -> float:
         t = self.config.traits

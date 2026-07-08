@@ -51,18 +51,21 @@ def advance(state: NpcState, scene: Scene, ticks: int = 1, stim: dict | None = N
 # ── appraisal: measurement vector → emotion deltas (fixed function, small "table") ──
 def appraise(state: NpcState, dims: dict, source: str | None = None) -> dict:
     """dims: goal_impact[-1..1], intent(deliberate?), desert[-1..1], harm[0..1], control[0..1],
-    norm[-1..1]. Updates emotion channels (×gain from traits) + targeted anger reduction when norm>0."""
+    norm[-1..1], revulsion[0..1]. Updates emotion channels (×gain from traits) + targeted anger
+    reduction when norm>0."""
     gi = float(dims.get("goal_impact", 0.0))
     desert = float(dims.get("desert", 0.0))
     harm = float(dims.get("harm", 0.0))
     control = float(dims.get("control", 0.0))
     norm = float(dims.get("norm", 0.0))
+    rev = float(dims.get("revulsion", 0.0))
     deliberate = bool(dims.get("intent") in (True, "deliberate"))
     delta = {
         "joy": max(0.0, gi),
         "distress": max(0.0, -gi) * (1 - control),
         "anger": max(0.0, -gi) * max(0.0, -desert) * (1.0 if deliberate else 0.3),
         "fear": harm * (1 - control),
+        "disgust": max(0.0, rev),
     }
     for e, d in delta.items():
         if d <= 0:

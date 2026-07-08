@@ -69,10 +69,19 @@ def bench_world(seed: int) -> Iterator[Harness]:
     fresh session (city=None) so `_play()` rebuilds the whole city from `seed` on the first
     request instead of reusing whatever "world 1" happened to be cached in this process (_SESS
     is a module-global dict that otherwise survives across bench_world calls/tests).
+
+    Also saves/restores core._CUR (the contextvar `core._S` resolves through): normally it's only
+    ever `.set()` inside a request, in a TestClient portal thread that's thrown away afterward —
+    invisible to the caller's thread. But callers that touch `core._S`/`_play()` directly on THIS
+    thread (as bench.snapshot.snapshot() does, to work without a prior HTTP turn) trip the same
+    lazy `_CUR.set()` fallback here on the calling thread, which otherwise durably pins it to this
+    world's session dict — orphaned once `_SESS[1]` is restored below, silently feeding a stale
+    seed/city to any later test that reads `core._S` expecting the untouched default.
     """
     tmpdir = tempfile.mkdtemp(prefix="bench_world_")
     store = WorldStore(os.path.join(tmpdir, "live.db"))
     prev_sess1 = core._SESS.get(1)
+    prev_cur = core._CUR.get()
     core._SESS[1] = core._fresh_sess(1, seed)
     client = TestClient(app)
     try:
@@ -87,4 +96,5 @@ def bench_world(seed: int) -> Iterator[Harness]:
             core._SESS[1] = prev_sess1
         else:
             core._SESS.pop(1, None)
+        core._CUR.set(prev_cur)
         shutil.rmtree(tmpdir, ignore_errors=True)

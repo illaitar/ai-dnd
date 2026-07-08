@@ -7,6 +7,7 @@ test_distance_drops_tier    : the same voice two zones away drops to a lower tie
 test_far_zone_inaudible     : far enough → None (inaudible).
 test_missing_centroid_none  : a zone without a centroid is treated as inaudible.
 test_boost_lifts_tier       : boost=1 lifts L2→L1 (the listen primitive).
+test_boost_promotes_l3_to_l2 : boost=1 lifts L3→L2 (wiring check for `listen`, Task 7).
 """
 
 from aidnd.server.play.engine.sound import audibility, cutout, overheard_line, zone_source
@@ -17,6 +18,11 @@ def _z(zid, cx=None, cy=None):
     if cx is not None:
         z["cx"], z["cy"] = cx, cy
     return z
+
+
+def _z_rank(t):
+    """Numeric rank of a fidelity tier string ("L1"->1 ... "L3"->3); lower = louder/closer."""
+    return int(t[1])
 
 
 def test_same_zone_is_l1():
@@ -42,6 +48,17 @@ def test_missing_centroid_none():
 def test_boost_lifts_tier():
     a, b = _z("z0", 0.0, 0.0), _z("z1", 10.0, 0.0)
     assert audibility(a, b, 0.8, boost=1) == "L1"  # L2 lifted one tier
+
+
+def test_boost_promotes_l3_to_l2():
+    # heard = 0.8 - 0.045*12 = 0.26 -> in [t3=0.12, t2=0.35) -> L3 unboosted.
+    # boost=1 lifts one tier -> L2. Neither call is None: the assertion is unambiguous.
+    a, b = _z("z0", 0.0, 0.0), _z("z1", 12.0, 0.0)
+    base = audibility(a, b, 0.8)
+    boosted = audibility(a, b, 0.8, boost=1)
+    assert base == "L3"
+    assert boosted == "L2"
+    assert _z_rank(boosted) < _z_rank(base)  # boost never lowers fidelity
 
 
 def test_zone_source_by_object():

@@ -10,7 +10,6 @@ import random
 from fastapi import Request
 
 from aidnd import society
-from aidnd.citygraph import CityParams, generate, visual
 from aidnd.citygraph.model import NodeKind
 from aidnd.inference import LLMBadOutput, LLMUnavailable
 from aidnd.mind import Body, advance_agendas
@@ -46,10 +45,8 @@ from aidnd.server.play.engine.core import (
     _pc_remember,
     _pc_save,
     _phase,
-    _pool,
     _portrait_url,
     _role_at,
-    _role_for_building,
     _scene_descriptors,
     _store,
     _tokens_ru,
@@ -60,6 +57,9 @@ from aidnd.server.play.engine.core import (
 )
 from aidnd.server.play.engine.resolve import _STANCE, _VOICE, _world_lookup
 from aidnd.server.play.engine.sound import audibility, overheard_line
+from aidnd.server.play.engine.worldbuild.assembly import _fill_from_pool as _fill_from_pool
+from aidnd.server.play.engine.worldbuild.assembly import _play as _play
+from aidnd.server.play.engine.worldbuild.assembly import _settle_fresh as _settle_fresh
 from aidnd.server.play.engine.worldbuild.building import (
     _building_containers as _building_containers,
 )
@@ -68,7 +68,15 @@ from aidnd.server.play.engine.worldbuild.building import _building_rooms as _bui
 from aidnd.server.play.engine.worldbuild.building import _res_binfo as _res_binfo
 from aidnd.server.play.engine.worldbuild.geom import _build_geom as _build_geom
 from aidnd.server.play.engine.worldbuild.geom import _scene_zones as _scene_zones
+from aidnd.server.play.engine.worldbuild.jobs import _WORKCAP as _WORKCAP
+from aidnd.server.play.engine.worldbuild.jobs import _assign_key_buildings as _assign_key_buildings
+from aidnd.server.play.engine.worldbuild.jobs import _plan_jobs as _plan_jobs
 from aidnd.server.play.engine.worldbuild.person import _person_from_row as _person_from_row
+from aidnd.server.play.engine.worldbuild.population import _households as _households
+from aidnd.server.play.engine.worldbuild.population import _reclass_note as _reclass_note
+from aidnd.server.play.engine.worldbuild.population import _restore_placed as _restore_placed
+from aidnd.server.play.engine.worldbuild.population import _surname as _surname
+from aidnd.server.play.engine.worldbuild.population import _topup_dependents as _topup_dependents
 from aidnd.server.play.engine.worldbuild.ties import _weave_locals as _weave_locals
 from aidnd.server.play.engine.worldbuild.ties import _weave_ties as _weave_ties
 from aidnd.server.play.engine.worldsim import routine_step
@@ -92,7 +100,6 @@ from aidnd.server.play.mechanics.items import (
     _materialize_npc,
     _merchant_restock,
     _pc_coins,
-    _seed_item_pool,
 )
 
 
@@ -154,269 +161,6 @@ def _apply_routine() -> None:
     except Exception:  # noqa: BLE001 — economy doesn't crash the world
         pass
     routine_step(_S["people"], _S["crof"], pin=set(_here(_S["loc"], _S["crof"])))
-
-
-def _assign_key_buildings(city) -> None:
-    """World created → distribute key building slots FROM POOL by slot type-hint (guild → guild).
-    Written to live-DB once; re-entry reads ready data."""
-    store, pool = _store(), _pool()
-    have = store.building_ids(_wid())
-    todo = [bid for bid in city.key_buildings if bid not in have]
-    if not todo:
-        return
-    from aidnd.worldgen.enrichment import _SIGNIFICANT
-
-    rows = pool.pool_buildings("key")
-    rng = random.Random(f"bassign|{_wid()}")
-    rng.shuffle(rows)
-    used = set()
-
-    def take(hint):
-        h = hint.split()[0].lower()  # 'Temple of Fortune' → temple
-        for r in rows:  # by type first, then any
-            if r["id"] not in used and h in r["btype"].lower():
-                used.add(r["id"])
-                return r
-        for r in rows:
-            if r["id"] not in used:
-                used.add(r["id"])
-                return r
-        return rows[0]
-
-    for bid in sorted(todo):
-        idx = int(bid.split(":")[1]) - 1
-        hint = _SIGNIFICANT[idx % len(_SIGNIFICANT)]
-        r = take(hint)
-        kb = city.key_buildings[bid]
-        store.save_building(_wid(), bid, True, kb.interior, r["data"].get("name"), r["data"])
-
-
-# Profession categories (role→needs venue vs produces at home). Data in code — small table;
-# scale up later to content/professions.json.
-_VENUE_NEED = {"трактирщик", "лавочник", "оружейник", "жрец", "маг"}   # no venue ⟹ day laborer
-_HOME_PRODUCER = {"дубильщик", "сапожник", "мельник", "кузнец", "знахарка"}  # craft at home
-_MOBILE_ROLE = {"стражник", "головорез", "бродяга", "бард", "горожанин"}
-_WORKCAP = {"таверн": 6, "трактир": 6, "гильд": 6, "игорн": 4, "лавк": 3, "оружейн": 2,
-            "кузн": 3, "храм": 3, "молельн": 3, "часовн": 3, "лечебн": 3, "мастерск": 3,
-            "башн": 2, "магич": 2}
-
-
-def _plan_jobs(city, homes: dict, roles: dict) -> dict:
-    """DETERMINISTIC: who works at which venue (gravity — nearest by home) + who to reclassify.
-    Returns pid → (work_bid|None, role_override|None). Pure function of (city, homes, roles) —
-    same result in both settlement paths (fresh/restore)."""
-    xy = {n.id: (n.x, n.y) for n in city.nodes()}
-
-    def dist(pid, node):
-        h = homes.get(pid)
-        if h not in xy or node not in xy:
-            return 1e9
-        (ax, ay), (bx, by) = xy[h], xy[node]
-        return (ax - bx) ** 2 + (ay - by) ** 2
-
-    out: dict = {}
-    assigned: set = set()
-    for bid, kb in sorted(city.key_buildings.items()):  # venue recruits NEAREST by role
-        want = _role_for_building(bid)
-        info = (_binfo(bid)["kind"] + " " + _binfo(bid)["name"]).lower()
-        cap = next((c for w, c in _WORKCAP.items() if w in info), 3)
-        cand = sorted((pid for pid, r in roles.items()
-                       if r == want and pid not in assigned),
-                      key=lambda pid: dist(pid, kb.node))
-        for pid in cand[:cap]:
-            out[pid] = (bid, None)
-            assigned.add(pid)
-    for pid, r in roles.items():                        # remainder: home-producer / day laborer
-        if pid in assigned:
-            continue
-        if r in _VENUE_NEED:                            # service without venue won't work — day laborer
-            out[pid] = (None, "подёнщик")
-        # HOME_PRODUCER and MOBILE — no override (produce at home / mobile), work=None
-    return out
-
-
-def _surname(name: str) -> str:
-    """Surname = last name token (else empty) — same logic as pre-acquaintance kin."""
-    parts = name.split()
-    return parts[-1] if len(parts) > 1 else ""
-
-
-def _households(rows: list, rng) -> list:
-    """D1: split pool into FAMILY households — small groups of one surname (couple/siblings),
-    each lives in one house. Deterministic (rng from settle|wid). Size 1-5, peak 2-3."""
-    by_sur: dict = {}
-    for r in rows:
-        by_sur.setdefault(_surname(r["name"]) or r["id"], []).append(r["id"])
-    households = []
-    for sur in sorted(by_sur):
-        members = sorted(by_sur[sur])
-        rng.shuffle(members)
-        i = 0
-        while i < len(members):
-            size = rng.choices([1, 2, 3, 4, 5], weights=[2, 4, 4, 2, 1])[0]
-            households.append(members[i:i + size])
-            i += size
-    return households
-
-
-def _reclass_note(p, former: str) -> None:
-    """Narrative downward mobility: mark 'was once X' + former_role (for venue buyout,
-    layer B3) — not silent role change."""
-    p.former_role = former                            # grad student remembers craft (can buy out)
-    if any("прежде был" in m.text for m in p.state.memory.items):
-        return
-    p.state.memory.add(f"прежде был {former}, да места не нашёл — перебиваюсь подёнщиной",
-                       _mt(), 0.5)
-
-
-def _restore_placed(city, placed):
-    """Rebuild the SAME residents from stored placements (persisted across re-entry): drop the
-    dead/captive, re-plan jobs (venue gravity may have shifted), then top up any dependents forged
-    into the pool after this world was first settled. Returns (people, spot); may be empty."""
-    store, by_id = _store(), {r["id"]: r for r in _pool().list_people(limit=100000)}
-    dead = {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "dead|")} | \
-        {k.split("|", 1)[1] for k in store.flags_prefix(_wid(), "captive|")}  # captives don't roam
-    homes = {pid: pl["home"] for pid, pl in placed.items() if pid not in dead}
-    roles = {pid: by_id[pid]["role"] for pid in homes if pid in by_id}
-    jobs = _plan_jobs(city, homes, roles)               # venue gravity + reclassification
-    people, spot = {}, {}
-    for pid, pl in placed.items():
-        if pid in dead or pid not in by_id:
-            continue  # the dead do not return
-        work, override = jobs.get(pid, (None, None))
-        p = _person_from_row(by_id[pid], pl["home"], work)
-        if override:
-            _reclass_note(p, p.role)
-            p.role = override
-        people[pid] = p
-        spot[pid] = pl["node"]
-    _topup_dependents(city, by_id, placed, dead, homes, people, spot)
-    return people, spot
-
-
-def _topup_dependents(city, by_id, placed, dead, homes, people, spot):
-    """D2 top-up: dependents added to the pool AFTER this world was settled — house each with its
-    family head once (without disturbing placed adults); thereafter they live via placements.
-    Mutates people/spot in place and persists the placement."""
-    store = _store()
-    for pid, row in by_id.items():
-        if pid in placed or pid in dead or not (row.get("mech") or {}).get("dependent"):
-            continue
-        head = (row["mech"] or {}).get("head")
-        home = homes.get(head) or (placed.get(head) or {}).get("home")
-        if home is None:                                # head dead/unplaced — skip
-            continue
-        people[pid] = _person_from_row(row, home, None)
-        spot[pid] = home
-        store.place_person(_wid(), pid, home, home, None)
-
-
-def _settle_fresh(city):
-    """First settlement of a world: shuffle the pool, group adults into families (one house each),
-    house each dependent with their family head, plan jobs by venue gravity, and place everyone.
-    Returns (people, spot) and writes placements so re-entry restores the same people."""
-    store = _store()
-    rng = random.Random(f"settle|{_wid()}")
-    rows = _pool().list_people(limit=100000)
-    rng.shuffle(rows)
-    houses = sorted({h.node for h in city.houses.values()})  # dedup by node — one family, one house
-    rng.shuffle(houses)
-    hi = iter(houses)
-    adults = [r for r in rows if not (r.get("mech") or {}).get("dependent")]
-    deps = [r for r in rows if (r.get("mech") or {}).get("dependent")]  # D2: children/elders
-    home_of = {}                                         # D1: a family lives in ONE house
-    for hh in _households(adults, rng):                  # split adults into families (by surname)
-        home = next(hi, None) or rng.choice(houses)
-        for pid in hh:
-            home_of[pid] = home
-    for r in deps:                                       # D2: dependent → their family head's house
-        head = (r.get("mech") or {}).get("head")
-        home_of[r["id"]] = home_of.get(head) or (next(hi, None) or rng.choice(houses))
-    roles = {r["id"]: r["role"] for r in rows}
-    jobs = _plan_jobs(city, home_of, roles)              # venue gravity + reclassification
-    people, spot = {}, {}
-    for r in rows:
-        pid = r["id"]
-        home = home_of[pid]
-        work, override = jobs.get(pid, (None, None))
-        node = (city.key_buildings[work].node if work else home)  # a venue worker stands there
-        p = _person_from_row(r, home, work)
-        if override:
-            _reclass_note(p, p.role)
-            p.role = override
-        people[pid] = p
-        spot[pid] = node
-        store.place_person(_wid(), pid, node, home, work)
-    return people, spot
-
-
-def _fill_from_pool(city, keynode, kps):
-    """Populate the crowd from the NPC BANK (worldgen.people): if the world was already settled,
-    restore stored placements (re-planning jobs, topping up new dependents); otherwise settle it
-    fresh. Empty bank = broken data supply → hard error (we never build a world without people)."""
-    if _pool().people_count() == 0:
-        raise RuntimeError("банк NPC (worlds.db:people) пуст — мир не построить; проверь поставку пулов")
-    store = _store()
-    placed = {pl["npc_id"]: pl for pl in store.placements_for(_wid())}
-    if placed and not all(
-        pl["node"] in city._xy and pl["home"] in city._xy  # noqa: SLF001
-        for pl in placed.values()
-    ):
-        store.clear_placements(_wid())  # city graph changed — stale nodes; re-place (memory kept)
-        placed = {}
-    if placed:
-        people, spot = _restore_placed(city, placed)
-        if people:
-            return people, spot
-    return _settle_fresh(city)
-
-
-def _play():
-    if _S["city"] is None:
-        params = CityParams(seed=_S["seed"], key_buildings=12, river=True, walls=True, segment=16)
-        city = generate(params)
-        _assign_key_buildings(city)  # user's world: buildings from POOL, no LLM
-        _seed_item_pool()  # world items pool (seed-set, data)
-        vis = visual(params, interactive=True)  # rich visual + clickable houses
-        xy = {n.id: (n.x, n.y) for n in city.nodes()}
-        keynode = {
-            bid: kb.node for bid, kb in city.key_buildings.items()
-        }  # building → NEAREST point (door)
-        kps = city.key_points()
-        people, spot = _fill_from_pool(city, keynode, kps)  # only bank; empty bank = error
-        n2b = {}  # node-point → building (key before homes)
-        for bid, kb in city.key_buildings.items():
-            n2b.setdefault(kb.node, bid)
-        for hid, ho in city.houses.items():  # residential houses also enterable (fact sheet from pool)
-            n2b.setdefault(ho.node, hid)
-        start = (
-            next(
-                (keynode.get(p.work) for p in people.values() if p.role == "трактирщик" and p.work),
-                None,
-            )
-            or kps[0]
-        )
-        _weave_ties(people)  # person ties → real pool people
-        _weave_locals(people)  # local-tavern regulars → mild mutual acquaintance
-        row = _store().get_pc(_wid()) or {}  # player position SURVIVES restart/deploy
-        saved_loc = row.get("loc")
-        if saved_loc in xy:
-            start = saved_loc
-        _S.update(
-            city=city,
-            people=people,
-            crof=spot,
-            cr2b=n2b,
-            loc=start,
-            geom=_build_geom(city, xy, n2b, vis),
-            keynode=keynode,
-            kps=kps,
-        )
-        if saved_loc in xy and row.get("inside") in n2b.values():
-            _S["inside"], _S["room"] = row["inside"], row.get("room")
-            _S["zone"] = row.get("zone")             # and place in hall — also position
-    _apply_routine()  # spots = f(time): daily schedule
-    return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]
 
 
 def _look_key(loc, inside) -> str:

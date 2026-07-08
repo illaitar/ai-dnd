@@ -52,6 +52,7 @@ Each file covers one domain. Together they form a complete picture of the projec
 | [plot.md](plot.md) | main plot: regressor player, LLM bible (design doc, not in runtime) |
 | [service.md](service.md) | service: auth, LLM limits, invite codes, deploy, UI scaffold |
 | [structure.md](structure.md) | code tree: current, pain points, target + migration plan |
+| [refactor-map.md](refactor-map.md) | full module-per-system current→target map for server/play (supersedes structure.md target) |
 
 ## How to read
 

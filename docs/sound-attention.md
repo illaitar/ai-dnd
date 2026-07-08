@@ -177,6 +177,19 @@ written today; it folds naturally into Pillar 2, where overheard content becomes
 Follow-ups: the narrator's conversation context (`resolve.py` "ПОСЛЕДНИЕ РЕПЛИКИ") still uses the
 old same-zone/eaves gate rather than the 3-tier model; the live 3-grey gradient wants an eyeball in
 playtest.
+
+**Playtest tune — a lively tavern (on prod, commit 2cd97b5).** First playtest found taverns silent
+(`разговоров=0`): the sound system had nothing to overhear because NPCs never talked — `converse`
+among strangers is structurally capped below need-driven `use` (everyone just ate). Fix, three
+parts: (1) **social fabric** — `world._weave_locals` seeds mild MUTUAL acquaintance among colleagues
+at the same venue (a tavern's on-shift staff become familiar faces reliably co-present); (2) **mind**
+— a leisure venue lifts `converse` toward ACQUAINTANCES only (`NpcState.venue_social`, set in
+`_live_build` for a `tavern`, read in `goals.py`; `PB["leisure_social_lift"]`), so regulars talk but
+strangers stay quiet ("not too much stranger activity"); (3) **worldsim** — `_candidates` routes
+leisure to the LOCAL tavern (nearest home), so neighbours share a pub. Plus `_rel_line` now names the
+bond in words ("добрый знакомый") so an NPC greets a colleague by name, not as a "путник". Verified:
+converse draw 0.39→0.96 for a co-worker under the lift, 0 lift for strangers; live LLM greets the
+known colleague by name. Belongs to the Pillar-2 attention economy when that lands.
 1. **Audibility foundation.** Per-zone `(cx,cy)` in furnish; `content/sound_sources.json`; pure
    `audibility(listener_zone, source_zone, loudness) → tier` + `PB` thresholds. Unit-tested; no
    behavior change yet.

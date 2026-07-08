@@ -23,6 +23,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from aidnd import config
 
+from .narrator.voice import _DM_SYS as _DM_SYS
+from .narrator.voice import _spurns as _spurns
+from .narrator.voice import _topics_for as _topics_for
 from .pc.fatigue import _fat_add as _fat_add
 from .pc.fatigue import _fatigue as _fatigue
 from .pc.glyphs import _STARTER_GLYPHS as _STARTER_GLYPHS
@@ -51,7 +54,8 @@ from .pc.mana import _mana_rate as _mana_rate
 from .pc.mana import _mana_sleep as _mana_sleep
 from .pc.mana import _mana_spend as _mana_spend
 from .session.config import _GT0 as _GT0
-from .session.config import PB, PLAYER
+from .session.config import PB as PB
+from .session.config import PLAYER
 from .session.persist import _pool, _store
 from .session.state import (
     _CUR,
@@ -196,35 +200,6 @@ def _city_name() -> str:
                 _store().flag_set(_wid(), "city_name", v)
         v = _S["city_name"] = v or "городок"
     return v
-
-
-def _topics_for(p) -> list:
-    """Conversation topics — from PERSONA (rumors/wants), not from role table."""
-    per = p.persona or {}
-    out = [t[:40] for t in (per.get("rumors") or [])[:2]] + [
-        t[:40] for t in (per.get("wants") or [])[:1]
-    ]
-    return out or ["что нового?", "о городе", "о жизни здесь"]
-
-
-def _spurns(p) -> bool:
-    """Doesn't want to deal with you: enmity or fresh targeted anger."""
-    rel = p.state.relationships.get(PLAYER) or {}
-    ang = p.state.emotion.get("anger", 0)
-    return rel.get("affinity", 0) < PB["hostile_aff"] or (
-        ang > 0.5 and p.state.emotion_target.get("anger") == PLAYER
-    )
-
-
-_DM_SYS = (
-    "Ты — мастер настольной игры. Игрок заявил действие, которое НЕ ИСПОЛНЯЕТСЯ механикой — "
-    "мир от него НЕ изменится. Тебе дан СНИМОК живой сцены (место, время, люди и их занятия, "
-    "последние реплики, предметы рядом) — это ЕДИНСТВЕННАЯ правда: опирайся на неё и вплетай её "
-    "детали (кто рядом чем занят, что слышно), НИЧЕГО не выдумывай сверх снимка и не противоречь "
-    "ему (если люди греются у очага — очаг горит). Ответь 1-2 фразами: 2-е лицо, настоящее время, "
-    "сухо. НИКОГДА не подтверждай свершение заявленного (особенно разрушительного): покажи, почему "
-    "оно не происходит или на чём останавливается — либо, для созерцательного, что игрок видит."
-)
 
 
 def _model():

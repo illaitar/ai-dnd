@@ -103,9 +103,13 @@ def _rel_line(state, entity: str) -> str:
     r = state.relationships.get(entity)
     if not r:
         return "незнаком"
+    aff = r.get("affinity", 0.0)
     parts = []
-    if r.get("affinity"):
-        parts.append(("симпатия" if r["affinity"] > 0 else "неприязнь") + f" {abs(r['affinity']):.1f}")
+    if aff > 0:                                          # a KNOWN, liked face — name the bond in words so
+        parts.append("близкий друг" if aff >= 0.6 else   # the NPC greets an acquaintance, not a "stranger"
+                     "добрый знакомый" if aff >= 0.25 else "знакомый")
+    elif aff < 0:
+        parts.append(("враг" if aff <= -0.5 else "неприязнь") + f" {abs(aff):.1f}")
     if r.get("fear"):
         parts.append(f"боишься {r['fear']:.1f}")
     if r.get("trust"):

@@ -100,12 +100,16 @@ def propose_goals(state, world, percept) -> list:
     # RECIPROCITY (they're talking to ME now) amplifies — stable talk pairs form this way.
     soc = state.needs.get("social", 0.0)
     socbl = tr.get("sociability", 0.5)
+    # LEISURE VENUE (tavern): a familiar face is worth talking to over idle needs — lift ACQUAINTANCES
+    # only (affinity>0), so a social venue gathers conversation among regulars, not chatter at strangers.
+    lz = getattr(state, "venue_social", 0.0)
     if soc > 0.12:
         for b in percept.present:
             if b.id == me.id or hostility(state, me, b) > 0.3 or b.down():
                 continue
             aff = (state.relationships.get(b.id) or {}).get("affinity", 0.0)
-            draw = soc * (0.3 + socbl) * (0.3 + 0.5 * max(0.0, aff) + 0.6 * getattr(b, "charisma", 0.3))
+            acq = max(0.0, aff)
+            draw = soc * (0.3 + socbl) * (0.3 + 0.5 * acq + 0.6 * getattr(b, "charisma", 0.3) + lz * acq)
             suitors = sum(1 for ob in percept.present
                           if ob.id not in (me.id, b.id) and getattr(ob, "talking_to", None) == b.id)
             if getattr(b, "talking_to", None) == me.id:

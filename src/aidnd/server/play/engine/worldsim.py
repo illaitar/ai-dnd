@@ -68,11 +68,20 @@ def _building_cap(bid) -> int:
     return _BCAP[bid]
 
 
+def _sqd(xy: dict, a, b) -> float:
+    """Squared distance between two nodes by their (x,y); large if either is unplaced."""
+    if a not in xy or b not in xy:
+        return 1e18
+    (ax, ay), (bx, by) = xy[a], xy[b]
+    return (ax - bx) ** 2 + (ay - by) ** 2
+
+
 def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
                 work_kinds: dict | None = None, load: dict | None = None,
-                n2b: dict | None = None) -> list:
+                n2b: dict | None = None, xy: dict | None = None) -> list:
     """Available places for this NPC as list of society.Candidate. Home/work personal;
-    tavern/temple/market — "own" from city (seeded choice); street/patrol/prowl — graph node."""
+    tavern — the LOCAL nearest home (regulars = neighbours, so acquaintances gather); temple/market
+    seeded "own"; street/patrol/prowl — graph node."""
     out = []
     home = p.home if p.home is not None else (rng.choice(kps) if kps else None)
     if home is not None:
@@ -85,7 +94,10 @@ def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
     for kind in ("tavern", "temple", "market"):  # tied to buildings places
         nodes = place_idx.get(kind)
         if nodes and _gate_ok(kind, p):
-            node = nodes[hash((p.state.config.id, kind)) % len(nodes)]
+            if kind == "tavern" and xy and home in xy:   # local pub — nearest to home, so neighbours meet
+                node = min(nodes, key=lambda n: _sqd(xy, home, n))
+            else:
+                node = nodes[hash((p.state.config.id, kind)) % len(nodes)]
             if load is not None and n2b is not None:  # capacity: full building doesn't call
                 bid = n2b.get(node)
                 if bid and load.get(node, 0) >= _building_cap(bid):
@@ -111,7 +123,9 @@ def _place_context(people: dict):
         ks = society.kinds_of(data)
         if ks:
             work_kinds[bid] = ks[0]
-    return keynode, kps, place_idx, work_kinds
+    city = _S.get("city")
+    xy = {n.id: (n.x, n.y) for n in city.nodes()} if city is not None else {}
+    return keynode, kps, place_idx, work_kinds, xy
 
 
 # ── LAYER A: INTENT as FORECAST (docs/citysim.md §A) — query-shaped, zero persist ──
@@ -130,9 +144,9 @@ def predict(pid: str, phase: str | None = None) -> dict:
     node = _commit_node(pid, phase, people, crof)     # commitment (follow/shift/appt)?
     kind = None
     if node is None:
-        keynode, kps, place_idx, work_kinds = _place_context(people)
+        keynode, kps, place_idx, work_kinds, xy = _place_context(people)
         rng = random.Random(f"pred|{pid}|{phase}|{_gt() // 30}")
-        cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds)
+        cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds, xy=xy)
         c = society.routine.choose_c(p.state.needs, p.state.config.traits, cands, phase, rng,
                                      stay=crof.get(pid))
         if c is not None:
@@ -197,7 +211,7 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
     `pin` — residents present in the player's live scene (ring A owns them): skipped here so ring A
     and ring B never both move the same NPC (docs/loop.md LOD rings)."""
     phase = _phase()
-    keynode, kps, place_idx, work_kinds = _place_context(people)
+    keynode, kps, place_idx, work_kinds, xy = _place_context(people)
     gt = _gt()
     node2kind = {}  # where NPC stands now → place type (sates needs)
     for kind, nodes in place_idx.items():
@@ -255,7 +269,7 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
                                   or "appointment")
         else:
             cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds,
-                                load=load, n2b=n2b)
+                                load=load, n2b=n2b, xy=xy)
             node, akind = society.routine.choose(st.needs, st.config.traits, cands, phase, rng,
                                                  stay=crof.get(pid)), None
             if node is not None:

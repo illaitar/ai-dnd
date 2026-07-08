@@ -208,6 +208,30 @@ def _weave_ties(people) -> None:
             )
 
 
+def _weave_locals(people) -> None:
+    """Colleagues at the same venue know each other — mild MUTUAL acquaintance. A venue's on-shift
+    crowd (a tavern's staff, a workshop's hands) are then familiar faces who converse rather than
+    strangers who sit apart. Small tight groups that are reliably co-present. Idempotent by mark."""
+    bywork: dict = {}
+    for pid in sorted(people):
+        if people[pid].work:
+            bywork.setdefault(people[pid].work, []).append(pid)
+    for members in bywork.values():
+        if len(members) < 2:
+            continue
+        for pid in members:
+            st = people[pid].state
+            if any("здесь все свои — лица знакомы" in m.text for m in st.memory.items):
+                continue                                 # already woven (idempotent)
+            for oid in members:
+                if oid == pid:
+                    continue
+                ar, br = st.rel(oid), people[oid].state.rel(pid)
+                ar["affinity"], ar["trust"] = max(ar["affinity"], 0.3), max(ar["trust"], 0.15)
+                br["affinity"], br["trust"] = max(br["affinity"], 0.3), max(br["trust"], 0.15)
+            st.memory.add("здесь все свои — лица знакомы", _mt(), 0.3, kind="fact")
+
+
 def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
     """Ready NPC from bank → Townsperson with mind + rich persona/portraits."""
     mech = row.get("mech") or {}
@@ -547,6 +571,7 @@ def _play():
             or kps[0]
         )
         _weave_ties(people)  # person ties → real pool people
+        _weave_locals(people)  # local-tavern regulars → mild mutual acquaintance
         row = _store().get_pc(_wid()) or {}  # player position SURVIVES restart/deploy
         saved_loc = row.get("loc")
         if saved_loc in xy:
@@ -978,6 +1003,9 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     rng = random.Random(f"live|{loc}")
     npc_map: dict = {}  # pid → {thing name: item_id} (thefts real)
     here_all = _here(loc, crof)  # everyone present — no LOD cap (buildings bounded by _building_cap)
+    leisure = PB["leisure_social_lift"] if "tavern" in society.kinds_of(data or {}) else 0.0
+    for _pid in here_all:                            # leisure venue lifts converse toward acquaintances
+        people[_pid].state.venue_social = leisure
     workers = {pid for pid in here_all if people[pid].work == bid}
     zonemap = assign_zones({pid: people[pid].state for pid in here_all}, zones,
                            f"zones|{_wid()}|{bid}|{_phase()}",

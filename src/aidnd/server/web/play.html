@@ -233,6 +233,9 @@
   .lf .lfto{color:var(--faint);font-size:11px}
   .lf.lfd{color:var(--faint)}
   .lf.lfq{font-style:italic;color:var(--faint)}
+  .lf.t1{color:var(--ink)}
+  .lf.t2{color:var(--dim)}
+  .lf.t3{color:var(--faint);font-style:italic}
   .hidden{display:none}
   .miniscene{padding:2px 12px 12px;display:flex;flex-direction:column;gap:10px}
   #combat{position:fixed;inset:0;background:rgba(10,11,15,.94);z-index:50;display:flex;gap:14px;padding:22px}
@@ -748,7 +751,7 @@ function showDice(d){
 
 function renderFeed(){const el=$('lfeed');if(!el)return;
   el.innerHTML=LIVEF.length?LIVEF.slice(-14).map(f=>
-    f.k==='speech'?`<div class="lf"><b>${esc(f.who)}</b> <span class="lfto">→ ${esc(f.to)}</span>: «${esc(f.text)}»</div>`
+    f.k==='speech'?`<div class="lf t${f.tier||1}"><b>${esc(f.who)}</b> <span class="lfto">→ ${esc(f.to)}</span>: «${esc(f.text)}»</div>`
                   :`<div class="lf lfd">${esc(f.who)} · <i>${esc(f.text)}</i></div>`).join('')
     :'<div class="lf lfq">тихо — слышен лишь шум места</div>';
   el.scrollTop=el.scrollHeight;}

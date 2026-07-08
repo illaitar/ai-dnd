@@ -13,7 +13,7 @@ from aidnd import society
 from aidnd.citygraph import CityParams, generate, visual
 from aidnd.citygraph.model import NodeKind
 from aidnd.inference import LLMBadOutput, LLMUnavailable
-from aidnd.mind import Body, NpcConfig, NpcState, advance_agendas
+from aidnd.mind import Body, advance_agendas
 from aidnd.mind import Item as MItem
 from aidnd.mind import World as MWorld
 from aidnd.mind import perceive as mind_perceive
@@ -33,7 +33,6 @@ from aidnd.server.play.engine.core import (
     _gt,
     _gt_add,
     _here,
-    _in_room,
     _mana,
     _mana_cap,
     _mark_seen,
@@ -61,6 +60,17 @@ from aidnd.server.play.engine.core import (
 )
 from aidnd.server.play.engine.resolve import _STANCE, _VOICE, _world_lookup
 from aidnd.server.play.engine.sound import audibility, overheard_line
+from aidnd.server.play.engine.worldbuild.building import (
+    _building_containers as _building_containers,
+)
+from aidnd.server.play.engine.worldbuild.building import _building_keys as _building_keys
+from aidnd.server.play.engine.worldbuild.building import _building_rooms as _building_rooms
+from aidnd.server.play.engine.worldbuild.building import _res_binfo as _res_binfo
+from aidnd.server.play.engine.worldbuild.geom import _build_geom as _build_geom
+from aidnd.server.play.engine.worldbuild.geom import _scene_zones as _scene_zones
+from aidnd.server.play.engine.worldbuild.person import _person_from_row as _person_from_row
+from aidnd.server.play.engine.worldbuild.ties import _weave_locals as _weave_locals
+from aidnd.server.play.engine.worldbuild.ties import _weave_ties as _weave_ties
 from aidnd.server.play.engine.worldsim import routine_step
 from aidnd.server.play.mechanics.combat import (
     _guild_bid,
@@ -84,7 +94,6 @@ from aidnd.server.play.mechanics.items import (
     _pc_coins,
     _seed_item_pool,
 )
-from aidnd.worldgen.population import Townsperson
 
 
 def _overheard(text, player_zone, speaker_zone, zone_name, seed, boost=0):
@@ -147,176 +156,6 @@ def _apply_routine() -> None:
     routine_step(_S["people"], _S["crof"], pin=set(_here(_S["loc"], _S["crof"])))
 
 
-_TIE_ROLES = {
-    "головорез": "головорез",
-    "шайк": "головорез",
-    "стражн": "стражник",
-    "лавочн": "лавочник",
-    "куп": "лавочник",
-    "трактир": "трактирщик",
-    "жрец": "жрец",
-    "знахар": "знахарка",
-    "кузнец": "кузнец",
-    "мельник": "мельник",
-    "бард": "бард",
-    "бродя": "бродяга",
-    "сапожн": "сапожник",
-    "дубильщ": "дубильщик",
-    "стар": "жрец",
-}
-
-
-def _weave_ties(people) -> None:
-    """Person ties ('owes cutthroats', 'feuds with elder') are BOUND to real pool people:
-    mutual relations in mind + memory with real name. Graph 'who knows whom' becomes real;
-    deterministic, idempotent (by memory mark)."""
-    rng = random.Random("ties|1")
-    byrole: dict = {}
-    for oid, o in sorted(people.items()):
-        byrole.setdefault(o.role, []).append(oid)
-    for pid, p in sorted(people.items()):
-        st = p.state
-        if any("— это про" in m.text for m in st.memory.items):
-            continue  # already bound (incl. restored from npc_state)
-        for tie in ((p.persona or {}).get("ties") or [])[:2]:
-            tl = tie.lower()
-            role = next((r for w, r in _TIE_ROLES.items() if w in tl), None)
-            cands = [x for x in byrole.get(role, []) if x != pid]
-            if not cands:
-                continue
-            oid = rng.choice(cands)
-            o = people[oid]
-            ar, br = st.rel(oid), o.state.rel(pid)
-            hostile = any(w in tl for w in ("вражд", "подозр", "ненавид", "угрож", "презир"))
-            debt = any(w in tl for w in ("должен", "долг", "задолж"))
-            fear = any(w in tl for w in ("боит", "страш", "опаса"))
-            if hostile:  # real feud — mutual negative
-                ar["fear"] = max(ar["fear"], 0.3)
-                ar["affinity"] = min(ar["affinity"], -0.2)
-                br["affinity"] = min(br["affinity"], -0.1)
-            elif debt:  # debt — obligation, NOT hatred
-                ar["fear"] = max(ar["fear"], 0.2)  # debtor slightly fears creditor
-            elif fear:  # fear without feud — affinity neutral
-                ar["fear"] = max(ar["fear"], 0.35)
-            else:  # good acquaintance/kinship
-                ar["affinity"] = max(ar["affinity"], 0.4)
-                ar["trust"] = max(ar["trust"], 0.3)
-                br["affinity"] = max(br["affinity"], 0.3)
-            st.memory.add(f"{tie} — это про {o.name}", _mt(), 0.5, kind="fact", about=[oid])
-            o.state.memory.add(
-                f"{p.name}: {tie[:90]} — нас связывает", _mt(), 0.4, kind="fact", about=[pid]
-            )
-
-
-def _weave_locals(people) -> None:
-    """Colleagues at the same venue know each other — mild MUTUAL acquaintance. A venue's on-shift
-    crowd (a tavern's staff, a workshop's hands) are then familiar faces who converse rather than
-    strangers who sit apart. Small tight groups that are reliably co-present. Idempotent by mark."""
-    bywork: dict = {}
-    for pid in sorted(people):
-        if people[pid].work:
-            bywork.setdefault(people[pid].work, []).append(pid)
-    for members in bywork.values():
-        if len(members) < 2:
-            continue
-        for pid in members:
-            st = people[pid].state
-            if any("здесь все свои — лица знакомы" in m.text for m in st.memory.items):
-                continue                                 # already woven (idempotent)
-            for oid in members:
-                if oid == pid:
-                    continue
-                ar, br = st.rel(oid), people[oid].state.rel(pid)
-                ar["affinity"], ar["trust"] = max(ar["affinity"], 0.3), max(ar["trust"], 0.15)
-                br["affinity"], br["trust"] = max(br["affinity"], 0.3), max(br["trust"], 0.15)
-            st.memory.add("здесь все свои — лица знакомы", _mt(), 0.3, kind="fact")
-
-
-def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
-    """Ready NPC from bank → Townsperson with mind + rich persona/portraits."""
-    mech = row.get("mech") or {}
-    cfg = NpcConfig(
-        id=row["id"],
-        name=row["name"],
-        role=row["role"],
-        traits=mech.get("traits") or {},
-        abilities=mech.get("abilities") or {},
-    )
-    st = NpcState.from_config(cfg)
-    r = random.Random(row["id"])  # light background needs, deterministic
-    for n in st.needs:
-        st.needs[n] = round(r.uniform(0.1, 0.35), 2)
-    saved = _store().get_npc_state(_wid(), row["id"])  # lived experience survives restart
-    if saved:
-        st.relationships = saved.get("relationships") or {}
-        st.needs.update(saved.get("needs") or {})
-        for m in saved.get("memory") or []:
-            mm = st.memory.add(
-                m["text"],
-                m["t"],
-                m.get("importance", 0.3),
-                kind=m.get("kind", "observation"),
-                about=m.get("about") or [],
-            )
-            mm.last_access = m.get("last_access", m["t"])
-    tp = Townsperson(
-        id=row["id"],
-        name=row["name"],
-        role=row["role"],
-        home=home,
-        work=work,
-        charisma=row["charisma"],
-        appearance=row["appearance"],
-        state=st,
-        persona=row.get("persona"),
-        portraits=row.get("portraits") or {},
-    )
-    if work:  # building owner → keys to his locked containers
-        tp.keys = _building_keys(work)
-    return tp
-
-
-def _building_keys(bid: str) -> list:
-    """Keys to unlock LOCKED containers in building (for owner)."""
-    bd = _store().get_building(_wid(), bid)
-    if not bd:
-        return []
-    return [
-        {"name": c["key"]["name"], "opens": c["name"], "where": c.get("where", "")}
-        for c in (bd["data"].get("containers") or [])
-        if c.get("access") == "locked" and c.get("key")
-    ]
-
-
-def _building_rooms(bid: str) -> list:
-    """Building sub-rooms (mini-graph): name/kind/access/hidden (hidden visible only on keen inspection)."""
-    bd = _store().get_building(_wid(), bid)
-    if not bd:
-        return []
-    return [
-        {"name": s["name"], "kind": s.get("kind", "backroom"), "access": s.get("access", "public")}
-        for s in (bd["data"].get("sub_rooms") or [])
-    ]
-
-
-def _building_containers(bid: str, room: str | None = None) -> list:
-    """Containers of CURRENT room (without contents — opened by interaction)."""
-    bd = _store().get_building(_wid(), bid)
-    if not bd:
-        return []
-    rooms = bd["data"].get("sub_rooms") or []
-    return [
-        {
-            "name": c["name"],
-            "kind": c["kind"],
-            "where": c.get("where", ""),
-            "locked": c.get("access") == "locked",
-        }
-        for c in (bd["data"].get("containers") or [])
-        if _in_room(c.get("where", ""), room, rooms)
-    ]
-
-
 def _assign_key_buildings(city) -> None:
     """World created → distribute key building slots FROM POOL by slot type-hint (guild → guild).
     Written to live-DB once; re-entry reads ready data."""
@@ -350,19 +189,6 @@ def _assign_key_buildings(city) -> None:
         r = take(hint)
         kb = city.key_buildings[bid]
         store.save_building(_wid(), bid, True, kb.interior, r["data"].get("name"), r["data"])
-
-
-_RES_POOL = None
-
-
-def _res_binfo(bid: str) -> dict | None:
-    """Residential building: fact sheet deterministic from pool (no DB write — function of (world, building))."""
-    global _RES_POOL
-    if _RES_POOL is None:
-        _RES_POOL = _pool().pool_buildings("res")
-    if not _RES_POOL:
-        return None
-    return random.Random(f"res|{_wid()}|{bid}").choice(_RES_POOL)["data"]
 
 
 # Profession categories (role→needs venue vs produces at home). Data in code — small table;
@@ -591,56 +417,6 @@ def _play():
             _S["zone"] = row.get("zone")             # and place in hall — also position
     _apply_routine()  # spots = f(time): daily schedule
     return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]
-
-
-def _build_geom(city, xy, n2b, vis) -> dict:
-    """Light interactive layer over rich visual: coordinate system — render canvas 0 0 W H.
-    Houses/streets/river/walls drawn by SVG itself (vis['inner']); click house → its NEAREST
-    road point (h2n = h.node, NOT crossroad). Building labels above; _xy — node→xy for routing."""
-    h2n = {h.id: h.node for h in city.houses.values()}
-    road = (NodeKind.CROSSROAD, NodeKind.POINT, NodeKind.BRIDGE, NodeKind.GATE)
-    points = [
-        {
-            "id": n,
-            "x": round(xy[n][0], 1),
-            "y": round(xy[n][1], 1),
-        }  # ALL road nodes (not just crossroads)
-        for n in xy
-        if city.node_kind(n) in road
-    ]
-    keys = []
-    for bid, kb in sorted(city.key_buildings.items()):
-        keys.append(
-            {
-                "node": kb.node,
-                "x": round(kb.x, 1),
-                "y": round(kb.y, 1),
-                "label": _binfo(bid)["label"],
-                "bid": bid,
-            }
-        )
-    cx, cy = vis["W"] / 2, vis["H"] / 2  # BOARD-POST: crossroad closest to center
-    cross = [n for n in xy if city.node_kind(n) == NodeKind.CROSSROAD]
-    plaza = min(cross, key=lambda n: (xy[n][0] - cx) ** 2 + (xy[n][1] - cy) ** 2) if cross else None
-    if plaza is not None:
-        keys.append(
-            {
-                "node": plaza,
-                "x": round(xy[plaza][0], 1),
-                "y": round(xy[plaza][1], 1),
-                "label": "Доска",
-                "bid": "board:plaza",
-            }
-        )
-    return {
-        "viewBox": [0, 0, vis["W"], vis["H"]],
-        "svg": vis["inner"],
-        "h2n": h2n,
-        "points": points,
-        "keys": keys,
-        "plaza": plaza,
-        "_xy": {n: [round(xy[n][0], 1), round(xy[n][1], 1)] for n in xy},
-    }
 
 
 def _look_key(loc, inside) -> str:
@@ -1203,23 +979,6 @@ def _gossip(actor_st, actor_name: str, target_st) -> None:
     if any(x.text == tale for x in target_st.memory.items[-30:]):
         return  # heard this gossip already
     target_st.memory.add(tale, _mt(), max(0.25, m.importance - 0.15), kind="gossip", about=m.about)
-
-
-def _scene_zones() -> list[dict]:
-    """Zones of CURRENT player position — wherever: live scene (interior OR street) — truth;
-    no scene — building template or street template of node. Single source for intent."""
-    lv = _S.get("live") or {}
-    if lv.get("zones") and lv.get("loc") == _S.get("loc"):
-        return lv["zones"]
-    from aidnd.server.play.engine.zones import building_zones
-    if _S.get("inside"):
-        return building_zones(_S["inside"])[1]
-    bid = (_S.get("cr2b") or {}).get(_S.get("loc"))
-    if bid:
-        return building_zones(bid)[1]
-    from aidnd.worldgen.furnish import zones_for
-    kind = "площадь" if _S.get("loc") == (_S.get("geom") or {}).get("plaza") else "улица"
-    return zones_for(kind, {}, kind="street")
 
 
 def _live_tick(people) -> tuple:

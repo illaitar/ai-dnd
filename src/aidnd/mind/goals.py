@@ -23,6 +23,7 @@ from .world import Item  # noqa: F401  (used by calling scenarios)
 # need weight = how much an NPC is driven by this need (trait amplifies)
 NEED_WEIGHT = {"social": "sociability", "purpose": "ambition",
                "wealth": "greed", "novelty": "curiosity"}
+_CROWD_REPEL = 0.6      # each body already around a converse target divides its pull (spreads groups)
 
 
 @dataclass
@@ -104,17 +105,24 @@ def propose_goals(state, world, percept) -> list:
     # only (affinity>0), so a social venue gathers conversation among regulars, not chatter at strangers.
     lz = getattr(state, "venue_social", 0.0)
     if soc > 0.12:
-        for b in percept.present:
+        # candidates: co-located `present`, PLUS — in a leisure venue — nearby ACQUAINTANCES, so an idle
+        # regular goes to sit WITH a specific friend at another table rather than drift to the crowd.
+        cands = list(percept.present)
+        if lz:
+            cands += [b for b in percept.nearby
+                      if (state.relationships.get(b.id) or {}).get("affinity", 0.0) > 0.15]
+        for b in cands:
             if b.id == me.id or hostility(state, me, b) > 0.3 or b.down():
                 continue
             aff = (state.relationships.get(b.id) or {}).get("affinity", 0.0)
             acq = max(0.0, aff)
             draw = soc * (0.3 + socbl) * (0.3 + 0.5 * acq + 0.6 * getattr(b, "charisma", 0.3) + lz * acq)
-            suitors = sum(1 for ob in percept.present
-                          if ob.id not in (me.id, b.id) and getattr(ob, "talking_to", None) == b.id)
-            if getattr(b, "talking_to", None) == me.id:
+            # CROWD around the target repels: once a few gather, others peel off to a freer friend, so
+            # small groups form across the room instead of one mob on the most popular person.
+            crowd = len(world.present_at(b.place, exclude=(b.id, me.id)))
+            draw /= (1.0 + _CROWD_REPEL * crowd)
+            if getattr(b, "talking_to", None) == me.id:                # they turned to ME — reciprocate
                 draw *= 1.6
-            draw /= (1.0 + 0.5 * suitors)
             if draw > 0.12:
                 goals.append(Goal("converse", b.id, min(1.0, draw)))
 

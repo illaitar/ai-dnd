@@ -41,6 +41,7 @@ Each file covers one domain. Together they form a complete picture of the projec
 | [loop.md](loop.md) | game loop: session_step → game_tick, handlers, services, interrupts |
 | [mind.md](mind.md) | NPC minds: utility core, decide_hybrid, memory, agendas; society (needs→routine) |
 | [npc-brain.md](npc-brain.md) | NPC/player as one entity: two-layer surface/hidden, appraisal (disgust), attention economy, freeform talk (design) |
+| [sound-attention.md](sound-attention.md) | hearing: spatial audibility, 3-tier conversation fidelity, sound sources; attention economy as a utility term (design) |
 | [citysim.md](citysim.md) | city simulation: housing, work, daily rhythm, day GIF |
 | [worldgen.md](worldgen.md) | generation: city graph → pools → per-user world assembly |
 | [combat.md](combat.md) | combat BG-lite: grid, initiative, auto-resolve, lairs, permanent death |

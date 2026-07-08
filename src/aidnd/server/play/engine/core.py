@@ -16,16 +16,40 @@ _model() : Get LLM model manager instance with usage tracking.
 
 from __future__ import annotations
 
-import json
 import os
 import random
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from aidnd import config
-from aidnd.items import Capability
-from aidnd.mind import NpcConfig, NpcState
 
+from .pc.fatigue import _fat_add as _fat_add
+from .pc.fatigue import _fatigue as _fatigue
+from .pc.glyphs import _STARTER_GLYPHS as _STARTER_GLYPHS
+from .pc.glyphs import _glyph_learn as _glyph_learn
+from .pc.glyphs import _glyphs_known as _glyphs_known
+from .pc.glyphs import _grimoire_get as _grimoire_get
+from .pc.glyphs import _grimoire_list as _grimoire_list
+from .pc.glyphs import _grimoire_put as _grimoire_put
+from .pc.hero import _PC_CAP as _PC_CAP
+from .pc.hero import _mark_seen as _mark_seen
+from .pc.hero import _met, _npc_save
+from .pc.hero import _pc as _pc
+from .pc.hero import _pc_cap_eff as _pc_cap_eff
+from .pc.hero import _pc_hp as _pc_hp
+from .pc.hero import _pc_name as _pc_name
+from .pc.hero import _pc_remember as _pc_remember
+from .pc.hero import _pc_save as _pc_save
+from .pc.hero import _pc_set_name as _pc_set_name
+from .pc.hero import _seen as _seen
+from .pc.mana import _mana as _mana
+from .pc.mana import _mana_cap as _mana_cap
+from .pc.mana import _mana_grow as _mana_grow
+from .pc.mana import _mana_hardcap as _mana_hardcap
+from .pc.mana import _mana_load as _mana_load
+from .pc.mana import _mana_rate as _mana_rate
+from .pc.mana import _mana_sleep as _mana_sleep
+from .pc.mana import _mana_spend as _mana_spend
 from .session.config import _GT0 as _GT0
 from .session.config import PB, PLAYER
 from .session.persist import _pool, _store
@@ -40,8 +64,9 @@ from .session.state import (
 from .session.state import _SessProxy as _SessProxy
 from .session.state import current_world_id as current_world_id
 from .session.time import _PHASE_RU as _PHASE_RU
-from .session.time import _gt, _mt
+from .session.time import _gt as _gt
 from .session.time import _gt_add as _gt_add
+from .session.time import _mt
 from .session.time import _phase as _phase
 
 
@@ -81,234 +106,6 @@ async def _play_session(request: Request):
 
 
 router = APIRouter(tags=["play"], dependencies=[Depends(_play_session)])
-
-
-# ------------------------------------------------ PLAYER-AGENT (pc_state) -- #
-def _pc() -> NpcState:
-    """Player — same agent: NpcState with memory and relationships. Persists in store."""
-    if _S.get("pc") is None:
-        st = NpcState.from_config(NpcConfig(id=PLAYER, name="ты", role="странник"))
-        row = _store().get_pc(_wid())
-        if row:
-            st.relationships = row.get("relationships") or {}
-            for m in row.get("memory") or []:
-                mm = st.memory.add(
-                    m["text"],
-                    m["t"],
-                    m.get("importance", 0.3),
-                    kind=m.get("kind", "observation"),
-                    about=m.get("about") or [],
-                )
-                mm.last_access = m.get("last_access", m["t"])
-        _S["pc"] = st  # don't touch time: _gt() loads from save itself
-    return _S["pc"]
-
-
-def _pc_hp(delta: int = 0, set_to: int | None = None) -> int:
-    v = _S.get("pc_hp")
-    if v is None:
-        row = _store().get_pc(_wid()) or {}
-        v = _S["pc_hp"] = row.get("hp", PB["pc_max_hp"])
-    if set_to is not None:
-        v = set_to
-    v = max(0, min(PB["pc_max_hp"], v + delta))
-    _S["pc_hp"] = v
-    return v
-
-
-def _pc_name() -> str:
-    v = _S.get("pc_name")
-    if v is None:
-        v = _S["pc_name"] = (
-            (_store().get_pc(_wid()) or {}).get("name") or "Странник"
-        ).strip() or "Странник"
-    return v
-
-
-def _pc_set_name(name: str) -> None:
-    _S["pc_name"] = str(name or "").strip()[:24] or "Странник"
-
-
-_PC_CAP = Capability(abilities={"str": 10, "dex": 11, "con": 10, "int": 11, "wis": 11, "cha": 12})
-
-
-# ------------------------------------------------------------ MANA (magic) --- #
-def _mana_hardcap() -> float:
-    return _PC_CAP.abilities.get("int", 10) * PB["mana_hardcap_per_int"]  # growth ceiling from Int
-
-
-def _mana_load() -> None:
-    if _S.get("mana") is None:
-        row = _store().get_pc(_wid()) or {}
-        _S["mana"] = float(row.get("mana", PB["mana_start"]))
-        _S["mana_cap"] = float(row.get("mana_cap", PB["mana_cap_start"]))
-        _S["mana_gt"] = int(row.get("mana_gt", _gt()))
-        _S["fat"] = int(row.get("fat", 0))
-        _S["fat_until"] = int(row.get("fat_until", 0))
-
-
-def _mana_rate() -> float:
-    """Mana regen per waking hour — from Int/Wis."""
-    return max(0.2, PB["mana_regen_base"] + _PC_CAP.mod("int") + _PC_CAP.mod("wis"))
-
-
-def _mana() -> float:
-    """Current mana with LAZY regen from Int/Wis (no per-tick frame)."""
-    _mana_load()
-    dt_h = max(0, _gt() - _S["mana_gt"]) / 60.0
-    if dt_h > 0:
-        _S["mana"] = min(_S["mana_cap"], _S["mana"] + _mana_rate() * dt_h)
-        _S["mana_gt"] = _gt()
-    return round(_S["mana"], 2)
-
-
-def _mana_sleep(hours: float) -> None:
-    """Sleep fills candle faster than waking (×mana_sleep_mult): bonus on top of lazy regen."""
-    _mana()  # lazy regen for time asleep — at rate ×1
-    bonus = _mana_rate() * max(0.0, hours) * (PB["mana_sleep_mult"] - 1)
-    _S["mana"] = min(_S["mana_cap"], _S["mana"] + bonus)
-
-
-def _mana_cap() -> float:
-    _mana_load()
-    return round(_S["mana_cap"], 2)
-
-
-def _mana_spend(amount: float) -> float:
-    _S["mana"] = max(0.0, _mana() - float(amount))
-    return round(_S["mana"], 2)
-
-
-def _mana_grow(spent: float) -> None:
-    """Cap growth from burning (magic as muscle), up to hard limit Int×N."""
-    if spent <= 0:
-        return
-    _S["mana_cap"] = min(
-        _mana_hardcap(),
-        _S["mana_cap"] + round(PB["mana_grow_frac"] * spent / max(1.0, _S["mana_cap"]), 3),
-    )
-
-
-def _fatigue() -> int:
-    """Current fatigue penalty to ALL stats (fades over time)."""
-    _mana_load()
-    if _gt() >= _S.get("fat_until", 0):
-        _S["fat"], _S["fat_until"] = 0, 0
-    return int(_S.get("fat", 0))
-
-
-def _fat_add(spent: float) -> None:
-    """Burnout after cast: fatigue from burned mana, lasts longer with bigger burnout."""
-    pts = 1 + int(spent) // PB["fatigue_div"]
-    _S["fat"] = _fatigue() + pts
-    _S["fat_until"] = _gt() + pts * PB["fatigue_min_per_pt"]
-
-
-# player starter glyph set (§M1e): enough for fire arrow and healing; rest must be learned
-_STARTER_GLYPHS = ("огонь", "свет", "стрела", "исцелить", "больше")
-
-
-def _glyphs_known() -> list:
-    """Glyphs OWNED by player (persists in pc_state); others must be learned from mage."""
-    if _S.get("glyphs") is None:
-        row = _store().get_pc(_wid()) or {}
-        g = row.get("glyphs")
-        _S["glyphs"] = list(dict.fromkeys(g if g is not None else _STARTER_GLYPHS))
-    return list(_S["glyphs"])
-
-
-def _glyph_learn(gid: str) -> bool:
-    """Add glyph to player arsenal. True — learned for first time, False — already knew."""
-    known = _glyphs_known()
-    if gid in known:
-        return False
-    _S["glyphs"] = known + [gid]
-    return True
-
-
-def _pc_cap_eff():
-    """Player abilities WITH FATIGUE applied (for new rolls/casts) — all stats penalized."""
-    fat = _fatigue()
-    if not fat:
-        return _PC_CAP
-    from aidnd.items import Capability
-
-    return Capability(
-        abilities={k: max(1, v - fat) for k, v in _PC_CAP.abilities.items()},
-        competencies=_PC_CAP.competencies,
-        tools=_PC_CAP.tools,
-    )
-
-
-def _pc_save() -> None:
-    st = _pc()
-    _mana_load()
-    _store().save_pc(
-        _wid(),
-        {
-            "gt": _gt(),
-            "hp": _pc_hp(),
-            "name": _pc_name(),
-            "relationships": st.relationships,
-            "mana": round(_S["mana"], 2),
-            "mana_cap": round(_S["mana_cap"], 2),
-            "mana_gt": _S["mana_gt"],
-            "fat": _S.get("fat", 0),
-            "fat_until": _S.get("fat_until", 0),
-            "glyphs": _glyphs_known(),
-            "loc": _S.get("loc"),
-            "inside": _S.get("inside"),
-            "room": _S.get("room"),  # position survives restart
-            "zone": _S.get("zone"),
-            "memory": [
-                {
-                    "text": m.text,
-                    "t": m.t,
-                    "importance": m.importance,
-                    "last_access": m.last_access,
-                    "kind": m.kind,
-                    "about": m.about,
-                }
-                for m in st.memory.items[-400:]
-            ],
-        },
-    )  # tail — log doesn't grow infinitely
-
-
-def _met() -> set:
-    return set(_pc().relationships)
-
-
-def _pc_remember(text: str, importance: float = 0.3, about=None, kind: str = "observation") -> None:
-    _pc().memory.add(text, _mt(), importance, kind=kind, about=list(about or []))
-    _pc_save()
-
-
-def _npc_save(pid: str) -> None:
-    """NPC lived experience (memory/relationships/needs) → DB: survives server restart."""
-    p = (_S.get("people") or {}).get(pid)
-    if not p:
-        return
-    st = p.state
-    _store().save_npc_state(
-        _wid(),
-        pid,
-        {
-            "relationships": st.relationships,
-            "needs": st.needs,
-            "memory": [
-                {
-                    "text": m.text,
-                    "t": m.t,
-                    "importance": m.importance,
-                    "last_access": m.last_access,
-                    "kind": m.kind,
-                    "about": m.about,
-                }
-                for m in st.memory.items[-200:]
-            ],
-        },
-    )
 
 
 def _llm_day_key(uid) -> str:
@@ -401,20 +198,6 @@ def _city_name() -> str:
     return v
 
 
-def _seen() -> set:
-    if _S.get("seen") is None:
-        _S["seen"] = {k.split("|", 1)[1] for k in _store().flags_prefix(_wid(), "seen|")}
-    return _S["seen"]
-
-
-def _mark_seen(bid: str | None) -> None:
-    """Fog of war: location becomes known (map marker) when player LEARNS it —
-    came themselves or heard from people/info."""
-    if bid and bid not in _seen():
-        _S["seen"].add(bid)
-        _store().flag_set(_wid(), f"seen|{bid}")
-
-
 def _topics_for(p) -> list:
     """Conversation topics — from PERSONA (rumors/wants), not from role table."""
     per = p.persona or {}
@@ -461,27 +244,6 @@ def _inscriber():
 
         _S["inscriber"] = LLMInscriber(_model())
     return _S["inscriber"]
-
-
-def _grimoire_get(h: str) -> dict | None:
-    """Inscribed circle law (by composition hash) for current world — or None."""
-    raw = _store().flag_get(_wid(), f"grim|{h}")
-    return json.loads(raw) if raw else None
-
-
-def _grimoire_put(h: str, entry: dict) -> None:
-    _store().flag_set(_wid(), f"grim|{h}", json.dumps(entry, ensure_ascii=False))
-
-
-def _grimoire_list() -> list:
-    """All circles inscribed in world (player grimoire), in order of first creation."""
-    out = []
-    for v in _store().flags_prefix(_wid(), "grim|").values():
-        try:
-            out.append(json.loads(v))
-        except (ValueError, TypeError):
-            pass
-    return sorted(out, key=lambda e: e.get("first_gt", 0))
 
 
 def _in_room(where: str, room: str | None, rooms: list) -> bool:

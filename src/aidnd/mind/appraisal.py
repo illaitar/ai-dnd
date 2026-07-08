@@ -6,6 +6,8 @@ load_race_relations : lazily load + cache the race_relations.json sentiment tabl
 race_sentiment : how race `a` feels about race `b` (self -> mild positive, else table lookup).
 impression : pure appraisal — observer traits x another's visible surface + culture + personal
     history -> an Impression (valence, emotion dims, relationship prior, memorable note).
+appraise_present : each tick, apply the impression of everyone present — moves emotion, seeds
+    a relationship prior once, remembers a strong first read once.
 """
 
 from __future__ import annotations
@@ -37,6 +39,12 @@ def load_race_relations() -> dict:
         with open(p, encoding="utf-8") as f:
             _RACE_RELATIONS = json.load(f)
     return _RACE_RELATIONS
+
+
+def _race_rel() -> dict:
+    """Module-cached race_relations table for callers (e.g. decide_hybrid) that just need the
+    sentiment table without threading it through their own state."""
+    return load_race_relations()
 
 
 def race_sentiment(race_rel: dict, a: str, b: str) -> float:
@@ -92,6 +100,29 @@ def _remember(valence: float, other: Body, revulsion: float, cult: float) -> str
     if valence >= 0.5:
         return "родная душа" if cult < 0 else "приятный собеседник"
     return None
+
+
+def appraise_present(state: NpcState, world, percept, race_rel: dict) -> None:
+    """Apply the impression of everyone visibly present this tick.
+
+    Every present other moves emotion each tick (a lingering threat/delight stays felt).
+    A relationship prior and the memorable note are seeded only ONCE, on first encounter —
+    once `state.relationships` holds an entry for `other.id`, later ticks skip both (personal
+    history, once formed, is no longer overwritten by a fresh first-glance read).
+    """
+    from .tick import appraise  # local import: avoids a module-load cycle with tick.py
+
+    clock = getattr(world, "clock", 0)
+    for other in percept.present:
+        if other.id == state.config.id:
+            continue
+        imp = impression(state, other, race_rel)
+        appraise(state, imp.emo, source=other.id)
+        if other.id in state.relationships:
+            continue                                    # already know them — no re-seed, no re-remember
+        state.relationships[other.id] = dict(imp.prior)
+        if imp.remember:
+            state.memory.add(imp.remember, clock, importance=0.4, about=[other.id])
 
 
 def impression(observer: NpcState, other: Body, race_rel: dict) -> Impression:

@@ -26,6 +26,7 @@ import re
 from ..inference import LLMBadOutput
 from .act import score
 from .agenda import Agenda, Milestone
+from .appraisal import _race_rel, appraise_present
 
 NEED_RU = {"fatigue": "усталость", "hunger": "голод", "social": "тяга к общению",
            "purpose": "нужда в деле", "wealth": "жажда наживы", "comfort": "тяга к уюту",
@@ -239,6 +240,7 @@ def _ask(manager, messages, temperature: float, who: str) -> dict:
 def decide_hybrid(state, world, percept, manager, ctx: dict) -> dict:
     """HYBRID: mechanical core provides ranked DRIVES (assertiveness/consistency), LLM
     chooses from top IN CHARACTER, adds dialogue and DESCRIBES what it does/thinks."""
+    appraise_present(state, world, percept, _race_rel())   # seeing them moves emotion/relationships FIRST
     ranked = score(state, world, percept)
     prefs = [(a.label(), (g.kind if g else "idle"), u) for a, g, u in ranked[:5]]
     data = _ask(manager, build_prompt(state, world, percept, ctx, prefs=prefs), 0.55, state.config.id)

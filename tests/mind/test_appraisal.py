@@ -8,12 +8,15 @@ test_race_sentiment : race_sentiment reads the race_relations table (self, autho
 test_proud_recoils_from_squalor : a proud observer reads a squalid beggar with negative valence.
 test_race_enemy_stirs_anger_and_fear : culture (race_sentiment) drives negative valence + desert.
 test_personal_bond_overrides_race_hate : an existing personal affinity outweighs race hostility.
+test_appraise_present_moves_emotion_and_seeds_prior : appraise_present applies impression emotion
+    deltas and seeds a fresh relationship prior from a present body.
 """
 
-from aidnd.mind.appraisal import impression, load_race_relations, race_sentiment
+from aidnd.mind.appraisal import appraise_present, impression, load_race_relations, race_sentiment
 from aidnd.mind.model import EMOTIONS, NpcConfig, NpcState
+from aidnd.mind.sim import perceive
 from aidnd.mind.tick import appraise
-from aidnd.mind.world import Body, Item
+from aidnd.mind.world import Body, Item, World
 
 
 def test_revulsion_raises_disgust():
@@ -58,3 +61,13 @@ def test_personal_bond_overrides_race_hate():
     dwarf.rel("o")["affinity"] = 0.8            # he saved my life
     imp = impression(dwarf, Body(id="o", place="зал", race="орк"), rr)
     assert imp.valence > 0                       # personal beats culture
+
+
+def test_appraise_present_moves_emotion_and_seeds_prior():
+    w = World(); w.link("зал", "улица")
+    obs = NpcState.from_config(NpcConfig(id="obs", race="человек", traits={"pride": 0.9}))
+    w.add(Body(id="obs", place="зал")); w.bodies["obs"]  # ensure present
+    w.add(Body(id="beg", place="зал", appearance=0.05, squalor=0.8))
+    appraise_present(obs, w, perceive(obs, w), load_race_relations())
+    assert obs.emotion["disgust"] > 0.2
+    assert "beg" in obs.relationships and obs.relationships["beg"]["affinity"] < 0

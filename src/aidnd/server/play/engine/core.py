@@ -139,6 +139,17 @@ PB = {
     "listen_dc_base": 8,
     "listen_noise_k": 8,
     "listen_ticks": 3,
+    # SOUND (docs/sound-attention.md): heard = loudness − sound_k · euclid(centroids); tier by thresholds
+    "sound_k": 0.045,          # falloff per cell of centroid distance
+    "sound_t1": 0.6,           # heard ≥ t1 → L1 (verbatim)
+    "sound_t2": 0.35,          # heard ≥ t2 → L2 (cutout)
+    "sound_t3": 0.12,          # heard ≥ t3 → L3 (presence only); below → inaudible
+    "sound_voice": 0.8,        # loudness of ordinary conversation
+    "sound_cutout_keep": 0.4,  # fraction of words kept at L2
+    "sound_mem_l1": 0.18,      # overheard-memory weight at L1 (matches today's same-zone weight)
+    "sound_mem_l2": 0.12,
+    "sound_mem_l3": 0.06,
+    "sound_murmur_k": 0.5,     # crowd-murmur loudness = occupancy_frac × zone.noise × this
     "bg_feed_p": 0.25,  # background activity appears in feed with this probability (LOD)
     # gift: affinity gain = min(cap, base + worth/div)
     "gift_aff_base": 0.05,

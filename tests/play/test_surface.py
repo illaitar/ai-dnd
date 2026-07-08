@@ -6,6 +6,7 @@ import tempfile
 import pytest
 
 from aidnd.server.play.engine import core
+from aidnd.server.play.engine.session import persist
 
 
 @pytest.fixture
@@ -13,7 +14,7 @@ def world(monkeypatch):
     from aidnd.server.play.engine import world as world_m
     from aidnd.worldgen import WorldStore
 
-    monkeypatch.setattr(core, "_STORE",
+    monkeypatch.setattr(persist, "_STORE",
                         WorldStore(os.path.join(tempfile.mkdtemp(), "live.db")))
     core._S["city"] = None                              # форс пересборки мира в СВЕЖИЙ store
     # agenda planning is LLM-backed and irrelevant here — stub it so the fixture is deterministic

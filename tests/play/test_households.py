@@ -9,6 +9,7 @@ from collections import defaultdict
 import pytest
 
 from aidnd.server.play.engine import core
+from aidnd.server.play.engine.session import persist
 
 
 @pytest.fixture
@@ -16,7 +17,7 @@ def world(monkeypatch):
     from aidnd.server.play.engine.world import _play
     from aidnd.worldgen import WorldStore
 
-    monkeypatch.setattr(core, "_STORE",
+    monkeypatch.setattr(persist, "_STORE",
                         WorldStore(os.path.join(tempfile.mkdtemp(), "live.db")))
     core._S["city"] = None                              # свежее расселение в чистый store
     _city, people, _crof, _cr2b, _loc = _play()

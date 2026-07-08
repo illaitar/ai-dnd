@@ -7,6 +7,7 @@ import pytest
 
 from aidnd.server.play.engine import core
 from aidnd.server.play.engine import worldsim as ws
+from aidnd.server.play.engine.session import persist
 
 
 @pytest.fixture
@@ -14,7 +15,7 @@ def world(monkeypatch):
     from aidnd.server.play.engine.world import _play
     from aidnd.worldgen import WorldStore
 
-    monkeypatch.setattr(core, "_STORE",
+    monkeypatch.setattr(persist, "_STORE",
                         WorldStore(os.path.join(tempfile.mkdtemp(), "live.db")))
     _city, people, _crof, _cr2b, _loc = _play()
     core._S["gt"] = 9 * 60

@@ -55,10 +55,11 @@ def test_floor_switch_in_game_payload(monkeypatch):
     import tempfile
 
     from aidnd.server.play.engine import core
+    from aidnd.server.play.engine.session import persist
     from aidnd.server.play.handlers import dungeon as dh
     from aidnd.worldgen import WorldStore
 
-    monkeypatch.setattr(core, "_STORE",
+    monkeypatch.setattr(persist, "_STORE",
                         WorldStore(os.path.join(tempfile.mkdtemp(), "live.db")))
     d = next(x for x in _multi("fp", "Hill"))
     e = next(e for e in d["edges"] if e["kind"] == "stairs")

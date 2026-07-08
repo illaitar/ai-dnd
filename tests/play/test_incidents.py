@@ -7,6 +7,7 @@ import pytest
 
 from aidnd.server.play.engine import core
 from aidnd.server.play.engine import incidents as inc_m
+from aidnd.server.play.engine.session import persist
 
 
 @pytest.fixture
@@ -14,7 +15,7 @@ def world(monkeypatch):
     from aidnd.worldgen import WorldStore
 
     tmp = tempfile.mkdtemp()
-    monkeypatch.setattr(core, "_STORE", WorldStore(os.path.join(tmp, "live.db")))
+    monkeypatch.setattr(persist, "_STORE", WorldStore(os.path.join(tmp, "live.db")))
     monkeypatch.setitem(core.PB, "incident_p", 1.0)   # утро обязано родить происшествие
     from aidnd.server.play.engine.world import _play
 

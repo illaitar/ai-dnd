@@ -7,6 +7,7 @@ import pytest
 
 from aidnd.server.play.engine import core
 from aidnd.server.play.engine import economy as ec
+from aidnd.server.play.engine.session import persist
 
 
 @pytest.fixture
@@ -14,7 +15,7 @@ def world(monkeypatch):
     from aidnd.server.play.engine.world import _play
     from aidnd.worldgen import WorldStore
 
-    monkeypatch.setattr(core, "_STORE",
+    monkeypatch.setattr(persist, "_STORE",
                         WorldStore(os.path.join(tempfile.mkdtemp(), "live.db")))
     core._S["city"] = None                              # форс пересборки мира в СВЕЖИЙ store
     _city, people, _crof, _cr2b, _loc = _play()
@@ -76,7 +77,7 @@ def test_aspirant_buys_out_venue(world):
     for pid in workers:
         core._store().flag_set(core._wid(), f"dead|{pid}")  # вакансия
     # детерминированно: ТОЛЬКО наш аспирант годен (прочих обесточиваем/лишаем ремесла)
-    for pid, p in world.items():
+    for _pid, p in world.items():
         if p.role == "подёнщик":
             p.former_role = None
     asp = next(pid for pid, p in world.items() if p.work != bid)

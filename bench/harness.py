@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient
 
 from aidnd.server.app import app
 from aidnd.server.play.engine import core
+from aidnd.server.play.engine.session import persist
 from aidnd.worldgen import WorldStore
 
 # /api/play/* endpoints that are GET (everything else in the real registry is POST — see
@@ -65,7 +66,7 @@ class Harness:
 def bench_world(seed: int) -> Iterator[Harness]:
     """Isolated, seeded world driven over TestClient(app) via the open-play auth bypass.
 
-    Builds a temp live.db, patches core._STORE onto it, and force-seeds core._SESS[1] with a
+    Builds a temp live.db, patches session.persist._STORE onto it, and force-seeds core._SESS[1] with a
     fresh session (city=None) so `_play()` rebuilds the whole city from `seed` on the first
     request instead of reusing whatever "world 1" happened to be cached in this process (_SESS
     is a module-global dict that otherwise survives across bench_world calls/tests).
@@ -86,7 +87,7 @@ def bench_world(seed: int) -> Iterator[Harness]:
     client = TestClient(app)
     try:
         with (
-            patch.object(core, "_STORE", store),
+            patch.object(persist, "_STORE", store),
             patch.dict(os.environ, {"AIDND_OPEN_PLAY": "1"}),
         ):
             yield Harness(client=client, store=store, seed=seed)

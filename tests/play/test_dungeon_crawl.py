@@ -7,6 +7,7 @@ import tempfile
 import pytest
 
 from aidnd.server.play.engine import core
+from aidnd.server.play.engine.session import persist
 from aidnd.server.play.handlers import dungeon as dh
 
 
@@ -23,7 +24,7 @@ def crawl(monkeypatch):
     from aidnd.worldgen import WorldStore
 
     tmp = tempfile.mkdtemp()
-    monkeypatch.setattr(core, "_STORE", WorldStore(os.path.join(tmp, "live.db")))
+    monkeypatch.setattr(persist, "_STORE", WorldStore(os.path.join(tmp, "live.db")))
     lair = {"id": "lair:t", "name": "Тест-логово", "env": "Caverns", "cr": 0.8,
             "cleared": False}
     r = dh.delve_enter(lair)
@@ -85,7 +86,7 @@ def test_trap_rolls_and_sprung_once(crawl):
     r = _move(ex["room"])
     assert r.get("dice") and r["dice"]["dc"] == 12
     assert ex["room"] in st["sprung"]
-    back = _move(st["d"]["entrance"])
+    _move(st["d"]["entrance"])
     again = _move(ex["room"])                          # разряжена — второй раз не бьёт
     assert not again.get("dice")
 

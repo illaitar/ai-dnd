@@ -43,6 +43,7 @@ BAL = {
     "idle": 0.05,
     "need_urgency_coin": 0.5,                         # bird in hand — poverty accelerates the deal
     "info_value": 0.6,
+    "proxemics": 0.2,                                 # social distance pull: small, never overrides needs/safety
 }
 
 
@@ -139,11 +140,27 @@ def _approach(a, target_place, me, world):
     return None
 
 
+def _proxemics(a, state, world, percept, me) -> float:
+    """Social distance pull for a move: Σ affinity(other) × proximity(dest, other), over everyone
+    in the scene (present + nearby, excluding me). Disliked other (affinity<0) near the destination
+    lowers utility (avoid them); liked other near the destination raises it (approach them). Scaled
+    small (BAL['proxemics']) so it nudges positioning without overriding needs/safety terms."""
+    if a.kind != "move":
+        return 0.0
+    others = [b for b in (percept.present + percept.nearby) if b.id != me.id]
+    social = sum(
+        state.relationships.get(b.id, {}).get("affinity", 0.0) * proximity(world.dist(a.to, b.place))
+        for b in others
+    )
+    return BAL["proxemics"] * social
+
+
 # utility(action | goal): single dispatcher by goal TYPE (not by script)
 def utility(a, g, state, world, percept) -> float:
     me = percept.me
     fn = _GOAL.get(g.kind)
-    return fn(a, g, state, world, percept, me) if fn else -_eff(a)
+    base = fn(a, g, state, world, percept, me) if fn else -_eff(a)
+    return base + _proxemics(a, state, world, percept, me)
 
 
 def _acq_pay(g, state) -> float:

@@ -10,12 +10,17 @@ test_race_enemy_stirs_anger_and_fear : culture (race_sentiment) drives negative 
 test_personal_bond_overrides_race_hate : an existing personal affinity outweighs race hostility.
 test_appraise_present_moves_emotion_and_seeds_prior : appraise_present applies impression emotion
     deltas and seeds a fresh relationship prior from a present body.
+test_proxemics_moves_away_from_disliked : move-utility proxemics term scores fleeing a disliked
+    other higher than approaching them (Task 7).
 """
 
+from aidnd.mind.act import Action
 from aidnd.mind.appraisal import appraise_present, impression, load_race_relations, race_sentiment
+from aidnd.mind.goals import Goal
 from aidnd.mind.model import EMOTIONS, NpcConfig, NpcState
 from aidnd.mind.sim import perceive
 from aidnd.mind.tick import appraise
+from aidnd.mind.value import utility
 from aidnd.mind.world import Body, Item, World
 
 
@@ -71,3 +76,21 @@ def test_appraise_present_moves_emotion_and_seeds_prior():
     appraise_present(obs, w, perceive(obs, w), load_race_relations())
     assert obs.emotion["disgust"] > 0.2
     assert "beg" in obs.relationships and obs.relationships["beg"]["affinity"] < 0
+
+
+def test_proxemics_moves_away_from_disliked():
+    """A disliked other stands at place A; B is a free place. Fleeing (move->B) must score
+    higher than approaching (move->A) under a goal that doesn't itself favor either destination."""
+    w = World(); w.link("C", "A"); w.link("C", "B")
+    me = NpcState.from_config(NpcConfig(id="me"))
+    w.add(Body(id="me", place="C"))
+    w.add(Body(id="foe", place="A"))
+    me.rel("foe")["affinity"] = -0.7          # disliked (Task 5 would have seeded this)
+
+    percept = perceive(me, w)
+    g = Goal(kind="need", target="dummy", value=0.0)   # no source -> move base is destination-agnostic
+
+    u_a = utility(Action("move", to="A"), g, me, w, percept)
+    u_b = utility(Action("move", to="B"), g, me, w, percept)
+
+    assert u_b > u_a                          # moving away from the disliked other scores higher

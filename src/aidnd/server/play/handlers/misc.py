@@ -163,3 +163,45 @@ async def new_world():
     _store().destroy_world(wid)  # runtime only — worlds.db pools (people/buildings/portraits) untouched
     _SESS.pop(wid, None)         # drop the cached session → next request rebuilds a fresh city from pools
     return {"ok": True, "reload": True}
+
+
+@router.post("/api/play/debug/skip")
+def debug_skip(hours: float = 0.0, to_phase: str = ""):
+    """DEV ONLY (AIDND_OPEN_PLAY): fast-forward game time and repopulate the world, so a scene can be
+    observed at a busy hour without playing through it. `hours` — advance by N game-hours; `to_phase`
+    — advance to the next morning|day|evening|night. Re-runs the routine so NPCs relocate to the new
+    time; the next /scene rebuilds presence. No-op (and refused) outside open-play/dev mode."""
+    import os
+
+    from aidnd.server.play.engine.core import _S, _gt, _gt_add, _phase
+    from aidnd.server.play.engine.world import _apply_routine
+    if not os.environ.get("AIDND_OPEN_PLAY"):
+        return {"error": "debug skip доступен только в dev-режиме (AIDND_OPEN_PLAY)"}
+    _play()
+    if to_phase:
+        for _ in range(48):                          # up to 24h in 30-min steps until the phase matches
+            if _phase() == to_phase:
+                break
+            _gt_add(30)
+    elif hours:
+        _gt_add(int(hours * 60))
+    _S["routine_key"] = None                         # force the throttled routine to recompute now
+    _apply_routine()
+    from aidnd import society
+    city, crof = _S.get("city"), _S.get("crof") or {}
+    taverns = []
+    if city is not None:
+        from collections import Counter
+        pop = Counter(crof.values())
+        for bid, kb in city.key_buildings.items():
+            data = (_store_dbg(bid) or {})
+            if "tavern" in society.kinds_of(data):
+                taverns.append({"building": bid, "node": kb.node, "souls": pop.get(kb.node, 0)})
+    return {"ok": True, "gt": _gt(), "phase": _phase(),
+            "time": f"{_gt() // 60 % 24:02d}:{_gt() % 60:02d}", "taverns": taverns}
+
+
+def _store_dbg(bid: str) -> dict:
+    """Building data for the current world (debug helper for the skip report)."""
+    from aidnd.server.play.engine.core import _store, _wid
+    return (_store().get_building(_wid(), bid) or {}).get("data") or {}

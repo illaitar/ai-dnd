@@ -1,6 +1,6 @@
-"""Игровой контур — ПРЕДМЕТЫ: инвентарь, ковка, пул, редкость, крафт по графу материалов.
+"""Game loop — ITEMS: inventory, forging, pool, rarity, crafting along materials graph.
 
-Слой mechanics/ (см. docs/loop.md).
+Mechanics layer (see docs/loop.md).
 
 Key functions
 -------------
@@ -39,7 +39,7 @@ from aidnd.server.play.engine.core import (
 
 
 def _seed_item_pool() -> None:
-    """Наполнить пул предметов мира сид-набором (данные, без LLM). Раз на мир."""
+    """Populate world item pool with seed templates (data, no LLM). Once per world."""
     if _store().item_pool_count(_wid()) > 0:
         return
     for t in loot_pool.seed_templates():
@@ -47,8 +47,8 @@ def _seed_item_pool() -> None:
 
 
 def _pool_draw(seed: str, tier: str | None = None, holder: str = "pc") -> dict | None:
-    """Вытянуть предмет из пула мира (по весу редкости, минуя выпавшие уникальные), сковать его
-    настоящим предметом держателю и — если уникальный — пометить, чтоб больше не выпал."""
+    """Draw item from world pool (by rarity weight, skipping used uniques), forge it as real item
+    for holder, and—if unique—mark so it won't drop again."""
     pool = _store().pool_items(_wid())
     if not pool:
         _seed_item_pool()
@@ -70,7 +70,7 @@ def _pool_draw(seed: str, tier: str | None = None, holder: str = "pc") -> dict |
 
 
 def _pool_add_new(it: dict) -> None:
-    """Новый предмет (крафт/трофей) добавляется в ПУЛ мира — как в спеке §5."""
+    """New item (crafted/loot) added to world POOL—as per spec §5."""
     rar = it.get("rarity", "common")
     _store().pool_add_item(
         _wid(),
@@ -94,7 +94,7 @@ def _rar_tag(it: dict) -> str:
 
 
 def _merchant_restock(seed: str) -> str | None:
-    """Событие спавна: подсыпать торговцу предмет из пула (зачистка логова / караван)."""
+    """Spawn event: restock merchant from item pool (lair clear / caravan)."""
     people = _S.get("people") or {}
     sellers = [pid for pid, p in sorted(people.items()) if p.work]
     if not sellers:
@@ -104,7 +104,7 @@ def _merchant_restock(seed: str) -> str | None:
     return f"{people[pid].name} выставил на продажу «{it['name']}»{_rar_tag(it)}" if it else None
 
 
-# станок из ребра графа материалов → в каких зданиях он есть (ключевые слова типа/имени)
+# Lathe from edge of materials graph → in which buildings it exists (keywords for type/name)
 STATION_HINTS = {
     "anvil": ("кузн", "оружейн"),
     "forge": ("кузн", "оружейн"),
@@ -122,8 +122,8 @@ STATION_RU = {
 
 
 def _do_craft(detail: str, out: dict) -> dict:
-    """Крафт по ГРАФУ материалов: имеющееся в сумке → цель по пути с гейтами (место=мастерская,
-    время из рёбер). Тратит листья-материалы, кует результат, добавляет его в пул мира."""
+    """Craft along MATERIALS GRAPH: inventory items → goal via path with gates (place=workshop,
+    time from edges). Consumes leaf materials, forges result, adds to world pool."""
     graph = materials_graph()
     nodes = {n["id"]: n for n in graph["nodes"]}
     dtok = _tokens_ru(detail)
@@ -132,7 +132,7 @@ def _do_craft(detail: str, out: dict) -> dict:
         for nid in nodes
     ]
     best = max(scored, key=lambda s: s[1])
-    want = best[0] if best[1] > 0 else None  # больше всего совпавших слов
+    want = best[0] if best[1] > 0 else None  # most matched words
     if not want:
         out["narr"].append(
             "Не пойму, что сковать — назови вещь ремесла (клинок, лук, доспех, отвар…)."
@@ -150,12 +150,12 @@ def _do_craft(detail: str, out: dict) -> dict:
         out["narr"].append(f"«{want}» у тебя уже есть.")
         return out
     inside = _S.get("inside")
-    if not inside:  # гейт-место: нужна мастерская
+    if not inside:  # gate-place: need workshop
         out["narr"].append("Тут не смастеришь — зайди в мастерскую/кузницу.")
         return out
     binfo = _binfo(inside)
     btok = (binfo["name"] + " " + binfo["kind"]).lower()
-    for e in path:  # гейт-станок: у ЗДАНИЯ есть нужный
+    for e in path:  # gate-machine: BUILDING must have required
         hints = STATION_HINTS.get(e.get("place", "bench"), ())
         if hints and not any(h in btok for h in hints):
             need = STATION_RU.get(e.get("place"), e.get("place", ""))
@@ -168,7 +168,7 @@ def _do_craft(detail: str, out: dict) -> dict:
         out["narr"].append("Не хватает: " + ", ".join(missing) + ".")
         return out
     skills = {e["skill"] for e in path if e.get("skill")}
-    if skills - set(_PC_CAP.competencies):  # гейт-навык: незнакомое ремесло — бросок
+    if skills - set(_PC_CAP.competencies):  # gate-skill: unfamiliar craft—roll
         roll = random.Random(f"craftskill|{want}|{_mt()}").randint(1, 20)
         total_r = roll + _PC_CAP.mod("int")
         out["dice"] = {
@@ -186,7 +186,7 @@ def _do_craft(detail: str, out: dict) -> dict:
                 "Работа не задалась — заготовка цела, но время ушло. Попробуй позже."
             )
             return out
-    for name in leaves:  # тратим базовые материалы из сумки
+    for name in leaves:  # consume base materials from bag
         iid = next((i for i, itm in inv if itm and itm["name"] == name), None)
         if iid:
             _store().inv_drop(_wid(), iid)
@@ -209,7 +209,7 @@ def _do_craft(detail: str, out: dict) -> dict:
     return out
 
 
-# --------------------------------------------------- ПРЕДМЕТЫ (срез 1) ---- #
+# --------------------------------------------------- ITEMS (slice 1) ---- #
 _ROLE_COMP = {
     "кузнец": {"metalwork"},
     "знахарка": {"herbs", "poison", "medicine"},
@@ -223,7 +223,7 @@ _ROLE_COMP = {
 
 def _smith():
     if _S.get("smith") is None:
-        _S["smith"] = LLMSmith(_model())  # только LLM — без фоллбэков
+        _S["smith"] = LLMSmith(_model())  # LLM only—no fallbacks
     return _S["smith"]
 
 
@@ -232,7 +232,7 @@ def _npc_cap(p) -> Capability:
     return Capability(abilities=ab, competencies=_ROLE_COMP.get(p.role, set()))
 
 
-# ---------------------------------- ЕДИНЫЙ ИНВЕНТАРЬ (держатели: pc | npc | cont:) ----
+# ---------------------------------- UNIFIED INVENTORY (holders: pc | npc | cont:) ----
 _TIER_Q = {"poor": "crude", "modest": "plain", "fine": "fine", "rich": "exquisite"}
 _TIER_W = {"poor": 1, "modest": 4, "fine": 15, "rich": 40}
 
@@ -246,9 +246,9 @@ def _zone_holder(bid: str, zid: str) -> str:
 
 
 def _materialize_zones(bid: str) -> None:
-    """Обстановка здания → НАСТОЯЩИЕ предметы live.db (holder=zone:<bid>/<zid>), лениво при
-    первом входе. Идемпотентно: id из сида, inv_add OR IGNORE — взятое НЕ возвращается
-    на место (PK world+item хранит нового держателя). Последний слой «всё настоящее»."""
+    """Building décor → REAL items in live.db (holder=zone:<bid>/<zid>), lazily on first entry.
+    Idempotent: id from seed, inv_add OR IGNORE—taken NOT returned (PK world+item tracks new holder).
+    Final layer 'all real'."""
     from aidnd.server.play.engine.zones import building_zones
 
     _zd, zones = building_zones(bid)
@@ -262,14 +262,14 @@ def _materialize_zones(bid: str) -> None:
             if not _store().get_item(iid):
                 it = item_normalize(o)
                 it["id"] = iid
-                it["fixed"] = bool(o.get("fixed"))    # роли зоны едут с предметом
+                it["fixed"] = bool(o.get("fixed"))    # zone roles travel with item
                 it["afford"] = dict(o.get("afford") or {})
                 _store().save_item(it)
             _store().inv_add(_wid(), iid, holder=holder)
 
 
 def _zone_stock(bid: str, zid: str) -> list[tuple[str, dict]]:
-    """Что СЕЙЧАС лежит в зоне (после всех краж/взятий) — [(item_id, фактшит)]."""
+    """What currently sits in zone (after all thefts/pickups)—[(item_id, factsheet)]."""
     out = []
     for r in _store().inventory(_wid(), _zone_holder(bid, zid)):
         it = _store().get_item(r["item_id"])
@@ -288,8 +288,8 @@ def _put_item(
     mods=None,
     holder: str = "pc",
 ) -> str:
-    """Механическая ковка предмета из тега персоны/фактшита (без LLM — флейвор уже придуман)
-    + положить держателю. Идемпотентно по seed."""
+    """Mechanical forging of item from persona/factsheet tag (no LLM—flavor already authored)
+    + place for holder. Idempotent by seed."""
     iid = "it:" + hashlib.md5(seed.encode()).hexdigest()[:10]
     if not _store().get_item(iid):
         w = _TIER_W.get(tier, 3)
@@ -311,8 +311,8 @@ def _put_item(
 
 
 def _materialize_npc(pid: str, layer: str = "visible") -> None:
-    """Инвентарь NPC из персоны → настоящие предметы, ПО СЛОЯМ: visible (экипировка+ключи —
-    видно глазами) при первом касании; pockets (карманы/ценное/монеты) — при краже/обыске."""
+    """NPC inventory from persona → real items, BY LAYER: visible (gear+keys—visible to eye)
+    on first touch; pockets (pockets/valuables/coins)—on theft/search."""
     p = (_S.get("people") or {}).get(pid)
     if not p or _store().flag_get(_wid(), f"mat|{pid}|{layer}"):
         return
@@ -344,7 +344,7 @@ def _materialize_npc(pid: str, layer: str = "visible") -> None:
                 note=t.get("note", ""),
                 holder=pid,
             )
-        for k in p.keys or []:  # ключи владельца — НАСТОЯЩИЕ предметы
+        for k in p.keys or []:  # owner keys—REAL items
             _put_item(
                 f"npcinv|{pid}|key|{k['opens']}",
                 k["name"],
@@ -373,11 +373,11 @@ def _materialize_npc(pid: str, layer: str = "visible") -> None:
         _store().purse_add(
             _wid(), pid, int(c.get("coins") or 0) + (PB["merchant_float"] if p.work else 0)
         )
-    _store().flag_set(_wid(), f"mat|{pid}|{layer}")  # работнику — торговая наличность
+    _store().flag_set(_wid(), f"mat|{pid}|{layer}")  # worker—trade float
 
 
 def _pc_coins() -> int:
-    """Кошель игрока (настоящий). Первый доступ — стартовые 12 зм (как в шапке UI)."""
+    """Player purse (real). First access—12 coins starting (as in UI header)."""
     if not _store().flag_get(_wid(), "purse_init|pc"):
         _store().purse_add(_wid(), "pc", PB["start_coins"])
         _store().flag_set(_wid(), "purse_init|pc")
@@ -385,14 +385,14 @@ def _pc_coins() -> int:
 
 
 def _npc_sees(it: dict, cap: Capability, observer: str) -> dict:
-    """Что ТОРГОВЕЦ видит в предмете: его глаз (компетенции/броски) вскрывает свои гейты.
-    Асимметрия знания: он может видеть сапфир, которого не видишь ты — и наоборот."""
+    """What MERCHANT sees in item: their eye (competencies/rolls) reveals its gates.
+    Knowledge asymmetry: they may see sapphire you don't—and vice versa."""
     res = item_inspect(it, cap, "expert", observer=observer)
     return item_view(it, {h["prop"] for h in res["revealed"]})
 
 
 def _pc_key_for(cont_name: str) -> dict | None:
-    """Ключ в сумке игрока, открывающий эту ёмкость (mod special:opens с cond=имя)."""
+    """Key in player bag that opens this container (mod special:opens with cond=name)."""
     for r in _store().inventory(_wid(), "pc"):
         it = _store().get_item(r["item_id"])
         if (
@@ -408,13 +408,13 @@ def _pc_key_for(cont_name: str) -> dict | None:
 
 
 def _forge(seed: str, kind: str, name_hint: str, source: str, band: str = "plain") -> dict:
-    """Ленивая выковка предмета (кэш на id по seed) — строка → фактшит с surface/hidden."""
+    """Lazy item forging (cache by id per seed)—string → factsheet with surface/hidden."""
     iid = "it:" + hashlib.md5(seed.encode()).hexdigest()[:10]
     ex = _store().get_item(iid)
     if ex:
         return ex
     ctx = ItemCtx(kind=kind, name_hint=name_hint, source=source, quality_band=band)
-    it = _smith().forge(ctx)  # ошибки LLM честно летят наверх
+    it = _smith().forge(ctx)  # LLM errors surface honestly
     it["id"] = iid
     _store().save_item(it)
     return it
@@ -425,11 +425,11 @@ def _item_card(it: dict, known) -> dict:
     v["id"] = it["id"]
     v["condition"] = item_condition(it)
     v["make"] = it.get("make")
-    v["rarity"] = it.get("rarity", "common")  # ось редкости для UI/цены
+    v["rarity"] = it.get("rarity", "common")  # rarity axis for UI/price
     return v
 
 
-_CRAFT = ROLE_RECIPES  # рецепты — данные предметной системы
+_CRAFT = ROLE_RECIPES  # recipes—item system data
 
 
 def _known(iid: str) -> set:

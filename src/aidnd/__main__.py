@@ -1,10 +1,10 @@
-"""CLI-точка входа НОВОГО контура.
+"""CLI entry point for the NEW control loop.
 
-Запуск:  python -m aidnd            (веб-сервер)
-         python -m aidnd serve      (то же)
+Run:     python -m aidnd            (web server)
+         python -m aidnd serve      (same)
 
-Старый терминальный игровой цикл (bootstrap/runtime/rules) снесён — интерфейс игрока
-строится заново на mind+citygraph+worldgen (население — worldgen.population).
+The old terminal game loop (bootstrap/runtime/rules) has been removed — the player interface
+is rebuilt from scratch on mind+citygraph+worldgen (population — worldgen.population).
 
 Key functions
 -------------

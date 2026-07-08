@@ -1,13 +1,14 @@
-"""Граф-мозг MODULARBRAIN — проход по узлам за один тик с ТРАССИРОВКОЙ пути.
+"""Graph-brain MODULARBRAIN — traverse nodes in a single tick with PATH TRACING.
 
-Сейчас реализованы фазы 1-2 + минимальная сквозная модуляция (Фаза 4 «мягко»): существующее
-реактивное ядро (perceive→propose_goals→score→decide) обёрнуто как узлы графа; вектор урджей и шина
-модуляторов вычисляются и (при modulate=True) домножают полезности — НЕЙТРАЛЬНО в норме, кусается под
-давлением. Каждый узел пишет в trace {id,label,active,llm,content}, чтобы дебаг подсветил ПУТЬ.
+Currently phases 1-2 implemented + minimal cross-cutting modulation (Phase 4 "soft"):
+existing reactive core (perceive→propose_goals→score→decide) wrapped as graph nodes;
+urges vector and modulators bus computed and (when modulate=True) multiply utilities —
+NEUTRAL normally, bites under pressure. Each node writes to trace {id,label,active,llm,content}
+so debug highlights the PATH.
 
-Модуляция общая (по КЛАССУ действия/цели, не по ситуации): нетерпёж (arousal) дисконтирует
-ожидание/подход и тянет к немедленному (и рушит «держать цену» в торге → голодный соглашается);
-пессимизм (valence↓) добавляет риск-аверсию к атаке. Argmax остаётся у ядра — меняется РАНЖИРОВАНИЕ.
+Common modulation (by ACTION/GOAL CLASS, not by situation): impatience (arousal) discounts
+waiting/approach and pulls toward immediate (breaks "hold price" in negotiation → hungry agrees);
+pessimism (valence↓) adds risk-aversion to attack. Argmax stays with core — only RANKING changes.
 
 Key functions
 --------------
@@ -25,24 +26,24 @@ from .sim import perceive
 
 
 def _mfactor(a, gkind, m) -> float:
-    """Множитель полезности от модуляторов — по классу действия (общо, без ситуаций)."""
+    """Utility multiplier from modulators — by action class (general, no situation-specifics)."""
     da = m["arousal"] - 0.5
     dv = 0.5 - m["valence"]
     dd = m["dominance"] - 0.5
     say = getattr(a, "say", None)
     f = 1.0
     if a.kind == "wait" or (a.kind == "move" and gkind in ("acquire", "harm", "need", "affiliate", "inform")):
-        f *= 1 - 0.55 * da                     # нетерпёж дисконтирует ожидание/подход
+        f *= 1 - 0.55 * da                     # impatience discounts waiting/approach
     if a.kind in ("attack", "take", "use") or (a.kind == "say" and say == "accept"):
-        f *= 1 + 0.35 * da                     # нетерпёж тянет к немедленному
+        f *= 1 + 0.35 * da                     # impatience pulls toward immediate
     if a.kind == "say" and say == "counter":
-        f *= 1 - 0.7 * da                      # импульсивный не держит цену (голодный уступает)
+        f *= 1 - 0.7 * da                      # impulsive doesn't hold price (hungry gives in)
     if a.kind in ("attack", "take") or (a.kind == "say" and say == "threat"):
-        f *= 1 - 0.6 * dv                      # пессимизм → осторожность на ЛЮБОМ рисковом акте
+        f *= 1 - 0.6 * dv                      # pessimism → caution on ANY risky act
     if a.kind == "attack":
-        f *= 1 + 0.4 * dd                      # власть/кураж → готовность бить
+        f *= 1 + 0.4 * dd                      # power/courage → willingness to strike
     if a.kind == "move" and gkind == "safe":
-        f *= 1 - 0.4 * dd                      # низкая власть (страх) → бегство привлекательнее
+        f *= 1 - 0.4 * dd                      # low power (fear) → flight more attractive
     return max(0.2, f)
 
 
@@ -57,7 +58,7 @@ def _r(x):
 
 
 def think(state, world, percept=None, modulate: bool = True) -> dict:
-    """Полный проход графа с трассировкой. Возвращает урджи/модуляторы/цели/ранжирование/выбор/trace."""
+    """Full graph traversal with tracing. Returns urges/modulators/goals/ranking/choice/trace."""
     p = percept or perceive(state, world)
     urg = urges(state)
     mods = modulators(state)
@@ -103,5 +104,5 @@ def think(state, world, percept=None, modulate: bool = True) -> dict:
 
 
 def node(nid, label, active, content):
-    llm = nid in ("n3_decompose", "n4_appraise", "n10_motives", "n21_execute")   # только смысловые узлы
+    llm = nid in ("n3_decompose", "n4_appraise", "n10_motives", "n21_execute")   # only semantic nodes
     return {"id": nid, "label": label, "active": bool(active), "llm": llm, "content": content}

@@ -1,9 +1,9 @@
-"""Память NPC + SOTA-ретрива (retrieve→rerank).
+"""NPC memory + SOTA-retrieval (retrieve→rerank).
 
-Кандидаты по скору recency·importance·relevance (память Generative Agents), затем точный LLM-rerank
-выбирает top-k самых релевантных ВОПРОСУ. Обращение освежает last_access (доступ укрепляет память).
-Реранкер подключаем (LLMReranker) или None — тогда shortlist по механическому скору как есть
-(это ранжирование, не контент: единственное санкционированное «без LLM» место).
+Candidates scored by recency·importance·relevance (Generative Agents memory), then precise LLM-rerank
+selects top-k most relevant to QUERY. Access refreshes last_access (access strengthens memory).
+Plug in a Reranker (LLMReranker) or None — then shortlist by mechanical score as-is
+(this is ranking, not content: the only sanctioned 'no-LLM' place).
 
 Key functions
 -------------
@@ -45,15 +45,15 @@ def _parse_json(text: str | None) -> dict | None:
 class Memory:
     id: int
     text: str
-    t: int                       # тик создания
-    importance: float = 0.3      # яркость [0,1]
-    last_access: int = 0         # тик последнего обращения (освежается ретривой)
+    t: int                       # tick of creation
+    importance: float = 0.3      # brightness [0,1]
+    last_access: int = 0         # tick of last access (refreshed by retrieval)
     kind: str = "observation"    # observation | reflection | fact
-    about: list = field(default_factory=list)   # id сущностей, которых касается
+    about: list = field(default_factory=list)   # id of entities this concerns
 
 
 def _recency(m: Memory, now: int, halflife: int = 144) -> float:
-    return 0.5 ** (max(0, now - m.last_access) / halflife)   # 144 тика ≈ сутки
+    return 0.5 ** (max(0, now - m.last_access) / halflife)   # 144 ticks ≈ day
 
 
 def relevance_lexical(query: str, m: Memory) -> float:
@@ -75,7 +75,7 @@ class Reranker:
 
 
 class LLMReranker(Reranker):
-    """Точный отбор top-k релевантных вопросу через модель (роль cognition)."""
+    """Precise top-k selection of memories most relevant to query via model (cognition role)."""
 
     def __init__(self, manager):
         self.manager = manager
@@ -96,7 +96,7 @@ class LLMReranker(Reranker):
 
 
 class MemoryStore:
-    W_REC, W_IMP, W_REL = 0.5, 1.0, 1.5     # релевантность и яркость важнее свежести
+    W_REC, W_IMP, W_REL = 0.5, 1.0, 1.5     # relevance and brightness more important than recency
 
     def __init__(self):
         self.items: list[Memory] = []
@@ -111,7 +111,7 @@ class MemoryStore:
 
     def recall(self, query: str, now: int, k: int = 10, reranker: Reranker | None = None,
                pool: int = 30, relevance=relevance_lexical) -> list[Memory]:
-        """Top-k воспоминаний по вопросу: дешёвый скор → пул → точный rerank. Освежает last_access."""
+        """Top-k memories for query: cheap scoring → pool → precise rerank. Refreshes last_access."""
         if not self.items:
             return []
         rec = _norm({m.id: _recency(m, now) for m in self.items})

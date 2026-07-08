@@ -1,10 +1,10 @@
-"""Граф состояний NPC: routine | leisure | converse | threat.
+"""NPC state graph: routine | leisure | converse | threat.
 
-Переход — приоритетный, с ПРЕРЫВАНИЕМ: каждый тик считаем urgency каждого режима из стимулов+эмоций+нужд;
-если лучший бид превышает hold(текущего)+гистерезис — переключаемся, иначе держим режим (в routine —
-следующий шаг плана). hold(routine)=важность плана → важная рутина устойчива к мелочам, пустяковая рвётся.
+Transition is prioritized with INTERRUPTION: each tick we compute urgency for each mode from stimuli+emotions+needs;
+if the best bid exceeds hold(current)+hysteresis — we switch, otherwise keep the mode (in routine —
+execute next plan step). hold(routine)=plan importance → important routine is resilient to trifles, trivial one breaks.
 
-Решения внутри режима (выбор инструмента) — отдельный слой; здесь только КАКОЙ режим.
+Decisions within a mode (tool choice) — separate layer; here only WHICH mode.
 
 Key functions
 -------------
@@ -18,10 +18,10 @@ from __future__ import annotations
 
 from .model import NEEDS, NpcState, Plan
 
-HYST = 0.1                                  # гистерезис против дребезга
+HYST = 0.1                                  # hysteresis against chatter
 _NEED_WEIGHT = {"social": "sociability", "purpose": "ambition",
                 "wealth": "greed", "novelty": "curiosity"}
-# шаблоны планов по доминирующей нужде (LLM-построение рутины — позже)
+# plan templates by dominant need (LLM-building routine — later)
 _PLAN_BY_NEED = {
     "hunger":  ("утолить голод", ["идти к еде", "поесть"], 0.6),
     "fatigue": ("выспаться", ["идти домой", "спать"], 0.7),
@@ -33,7 +33,7 @@ _PLAN_BY_NEED = {
 
 
 def dominant_need(state: NpcState) -> tuple:
-    """(нужда, значение, взвешенный_приоритет) — самая давящая с учётом черт."""
+    """(need, value, weighted_priority) — most pressing with traits accounted for."""
     best = ("", 0.0, 0.0)
     for nd in NEEDS:
         val = state.needs.get(nd, 0.0)
@@ -50,7 +50,7 @@ def _build_plan(state: NpcState) -> Plan:
 
 
 def urgency(state: NpcState, stim: dict | None = None) -> dict:
-    """Бид каждого режима [0..1]."""
+    """Bid for each mode [0..1]."""
     stim = stim or {}
     e, n, t = state.emotion, state.needs, state.config.traits
     threat = max(e.get("fear", 0.0), 0.7 * e.get("anger", 0.0), float(stim.get("danger", 0.0)))
@@ -62,14 +62,14 @@ def urgency(state: NpcState, stim: dict | None = None) -> dict:
         routine = state.plan.importance
     else:
         nd = dominant_need(state)
-        routine = nd[2] if nd[1] > 0.6 else 0.0          # рутину строит только давящая нужда
-    routine = min(0.85, routine)                         # ниже угрозы (≤1.0) — threat надёжно прерывает
+        routine = nd[2] if nd[1] > 0.6 else 0.0          # routine is built only by pressing need
+    routine = min(0.85, routine)                         # below threat (≤1.0) — threat reliably interrupts
     leisure = 0.15 + 0.25 * max(n.values(), default=0.0)
     return {"threat": threat, "converse": converse, "routine": routine, "leisure": leisure}
 
 
 def hold(state: NpcState) -> float:
-    """Стойкость текущего режима к прерыванию. threat держится, ПОКА есть страх/гнев — иначе спадает."""
+    """Stickiness of current mode against interruption. threat persists WHILE fear/anger exists — otherwise decays."""
     threat_h = 0.2 + max(state.emotion.get("fear", 0.0), 0.7 * state.emotion.get("anger", 0.0))
     return {"threat": threat_h,
             "converse": max(0.4, state.engagement),
@@ -78,8 +78,8 @@ def hold(state: NpcState) -> float:
 
 
 def step(state: NpcState, scene, stim: dict | None = None) -> dict:
-    """Один шаг графа: пересчёт режима. Возвращает трассу перехода (для маршрута на стенде)."""
-    if stim and stim.get("danger"):                      # опасность оставляет след страха (угасает в тике)
+    """One step of the graph: recompute mode. Returns transition trace (for route on the dashboard)."""
+    if stim and stim.get("danger"):                      # danger leaves a fear trace (decays in tick)
         state.emotion["fear"] = max(state.emotion.get("fear", 0.0), float(stim["danger"]))
     bids = urgency(state, stim)
     best = max(bids, key=bids.get)
@@ -97,14 +97,14 @@ def step(state: NpcState, scene, stim: dict | None = None) -> dict:
             state.engagement = 0.0
     else:
         if cur == "routine" and state.plan and not state.plan.done():
-            state.plan.cursor += 1                       # выполнили шаг рутины
+            state.plan.cursor += 1                       # executed a routine step
             if state.plan.done():
                 reason = f"план «{state.plan.goal}» выполнен"
         elif cur == "routine":
             state.plan = None
             reason = "рутины нет — к решению"
         elif cur == "converse":
-            state.engagement = min(0.8, state.engagement + 0.1)   # глубже в разговоре
+            state.engagement = min(0.8, state.engagement + 0.1)   # deeper in conversation
         elif cur == "threat" and bids["threat"] < 0.3:
             reason = "угроза спала"
 

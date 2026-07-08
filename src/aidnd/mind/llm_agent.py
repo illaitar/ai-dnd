@@ -1,13 +1,13 @@
-"""АЛЬТЕРНАТИВА механическому ядру: каждый NPC каждый тик задаёт модели ПОЛНЫЙ вопрос «что делаю
-дальше», получая на вход ВЕСЬ контекст, а на выход — последовательность вызовов инструментов.
+"""ALTERNATIVE to mechanical core: each NPC each tick poses the model a FULL question 'what do I do
+next', taking ALL context as input and receiving a sequence of tool calls as output.
 
-Сравнение с utility-ядром: тут ноль формул — весь выбор у LLM. В промпте: кто ты (черты/способности/
-HP), твои нужды и эмоции (с адресатом), отношения, описание места и выходов, ВСЕ видимые NPC (здесь и
-рядом) + их действие в прошлый тик, твои последние 10 действий, время. Инструменты включают и
-само-регуляцию (менять свои эмоции/нужды) и заметку в память.
+Comparison with utility core: zero formulas here — all choice in LLM. In prompt: who are you (traits/abilities/
+HP), your needs and emotions (with target), relationships, place description and exits, ALL visible NPCs (here and
+nearby) + their action last tick, your last 10 actions, time. Tools include both
+self-regulation (change your emotions/needs) and a memory note.
 
-manager — aidnd.inference.ModelManager. Нет модели → LLMUnavailable, не разобрали ответ (после
-повтора) → LLMBadOutput: фоллбэков нет, ошибка честно летит наверх.
+manager — aidnd.inference.ModelManager. No model → LLMUnavailable, failed to parse answer (after
+retry) → LLMBadOutput: no fallbacks, error surfaces honestly.
 
 Key functions
 -------------
@@ -116,7 +116,7 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     me = percept.me
     cfg = state.config
     roles = ctx.get("roles", {})
-    names = ctx.get("names", {})                   # id → человеческое имя (читаемые промпты и цели say/attack)
+    names = ctx.get("names", {})                   # id → human-readable name (for readable prompts and say/attack goals)
     nm = lambda i: names.get(i, i)                 # noqa: E731
     last = ctx.get("last_actions", {})
     place_desc = ctx.get("place_desc", {})
@@ -129,14 +129,14 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
                  + f", {roles.get(cfg.id, cfg.role)}. HP {me.hp}/{me.max_hp}. "
                  "Говори о себе и спрягай глаголы СТРОГО в своём роде.")
     lines.append(f"Черты: {_traits_line(cfg.traits)}.")
-    persona = ctx.get("personas", {}).get(cfg.id)  # богатая персона из пула: манера/причуда/стремления
+    persona = ctx.get("personas", {}).get(cfg.id)  # rich persona from the pool: manner/quirk/aspirations
     if persona:
         lines.append(f"КТО ТЫ: {persona}")
     lines.append(f"Нужды: {_needs_line(state.needs)}.")
     lines.append(f"Эмоции: {_emo_line(state.emotion, state.emotion_target)}.")
 
     lines.append("")
-    zones = ctx.get("zones", {})                   # id → имя зоны («стол у окна») — где кто в помещении
+    zones = ctx.get("zones", {})                   # id → zone name ('table by the window') — who is where in the building
     my_zone = zones.get(cfg.id)
     lines.append(f"МЕСТО: {me.place}. {place_desc.get(me.place, '')}"
                  + (f" Ты сейчас — {my_zone}." if my_zone else ""))
@@ -158,7 +158,7 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
         lines.append(f"  ⚡ ТОЛЬКО ЧТО: {ev} — отреагируй по своему характеру (страх/любопытство/"
                      "вмешаться/не моё дело).")
     now = ctx.get("now") or []
-    if now:                                            # анти-хор: волна видит заявки предыдущей
+    if now:                                            # anti-chorus: wave sees requests from previous one
         lines.append("  ⏱ В ЭТУ САМУЮ МИНУТУ уже: " + "; ".join(now[:5]) + ". "
                      "НЕ повторяй чужое действие, жест, предмет или тему слово-в-слово — "
                      "у тебя СВОЯ жизнь: другой предмет, другая тема, или просто продолжай своё.")
@@ -225,8 +225,8 @@ def _parse(text: str | None) -> dict | None:
 
 
 def _ask(manager, messages, temperature: float, who: str) -> dict:
-    """Вызов модели + разбор JSON: одна повторная попытка на кривой ответ, затем LLMBadOutput.
-    (Транспортные ошибки ретраит и кидает сам ModelManager.call — тут не ловим.)"""
+    """Model call + JSON parsing: one retry on bad response, then LLMBadOutput.
+    (Transport errors are retried and raised by ModelManager.call — not caught here.)"""
     for _attempt in range(2):
         resp = manager.call("npc_mind", messages, schema=True,
                             options={"temperature": temperature})
@@ -237,8 +237,8 @@ def _ask(manager, messages, temperature: float, who: str) -> dict:
 
 
 def decide_hybrid(state, world, percept, manager, ctx: dict) -> dict:
-    """ГИБРИД: механическое ядро даёт ранжированные ПОБУЖДЕНИЯ (решительность/консеквентность), LLM
-    выбирает из верхних В ХАРАКТЕРЕ, добавляет реплику и ОПИСЫВАЕТ, что делает/думает."""
+    """HYBRID: mechanical core provides ranked DRIVES (assertiveness/consistency), LLM
+    chooses from top IN CHARACTER, adds dialogue and DESCRIBES what it does/thinks."""
     ranked = score(state, world, percept)
     prefs = [(a.label(), (g.kind if g else "idle"), u) for a, g, u in ranked[:5]]
     data = _ask(manager, build_prompt(state, world, percept, ctx, prefs=prefs), 0.55, state.config.id)
@@ -249,7 +249,7 @@ def decide_hybrid(state, world, percept, manager, ctx: dict) -> dict:
 
 
 def decide_llm(state, world, percept, manager, ctx: dict) -> dict:
-    """Полный вопрос модели. Возвращает {'think', 'actions':[...]}."""
+    """Full question to model. Returns {'think', 'actions':[...]}."""
     data = _ask(manager, build_prompt(state, world, percept, ctx), 0.7, state.config.id)
     if not isinstance(data.get("actions"), list):
         raise LLMBadOutput(f"npc_mind: нет actions в решении ({state.config.id})")
@@ -273,9 +273,9 @@ _PLAN_SYS = (
 
 
 def plan_agenda(state, world, ctx: dict, manager) -> Agenda | None:
-    """Рефлексивный вызов (НЕ каждый тик): натура+память+ситуация → одна долгосрочная агенда.
-    Механическое ядро потом тянет текущую веху реактивно. None — только если модель ответила,
-    но вех не дала (агенды не будет — честный исход, не фоллбэк)."""
+    """Reflective call (NOT every tick): nature+memory+situation → one long-term agenda.
+    Mechanical core then reactively pulls current milestone. None — only if model answered
+    but gave no milestones (no agenda — honest outcome, not fallback)."""
     cfg = state.config
     who = [f"{b.id} ({ctx.get('roles', {}).get(b.id, '?')}, "
            f"{'богат' if b.appearance >= .6 else 'простой'})"
@@ -308,7 +308,7 @@ def plan_agenda(state, world, ctx: dict, manager) -> Agenda | None:
                   float(imp) if isinstance(imp, (int, float)) else 0.75, ms)
 
 
-# ── исполнение последовательности инструментов над миром ──
+# ── tool sequence execution over the world ──
 def _find_body(world, name):
     if not name:
         return None
@@ -316,7 +316,7 @@ def _find_body(world, name):
     for b in world.bodies.values():
         if b.id.lower() == low:
             return b
-    aliases = getattr(world, "aliases", None) or {}         # человеческое имя → id (живая локация)
+    aliases = getattr(world, "aliases", None) or {}         # human-readable name → id (live location)
     bid = aliases.get(low)
     return world.bodies.get(bid) if bid else None
 
@@ -329,7 +329,7 @@ def _find_item(items, name):
 
 
 def apply_actions(actions, state, world, clock: int) -> list:
-    """Исполнить последовательность инструментов. Возвращает список строк-событий (для лога)."""
+    """Execute tool sequence. Returns list of event strings (for log)."""
     me = world.bodies[state.config.id]
     log = []
     for a in actions:
@@ -392,7 +392,7 @@ def apply_actions(actions, state, world, clock: int) -> list:
                 vs = world.npc_minds.get(tb.id) if hasattr(world, "npc_minds") else None
                 if vs is not None:
                     names = getattr(world, "names", None) or {}
-                    who = names.get(me.id) or me.id        # в память — ИМЯ, не голый id
+                    who = names.get(me.id) or me.id        # to memory — NAME, not bare id
                     vs.memory.add(f"{who} сказал(а) мне: «{txt}»", clock, importance=0.4,
                                   kind="heard", about=[me.id])
                 log.append(f"💬{tb.id}:«{txt[:40]}»")
@@ -400,7 +400,7 @@ def apply_actions(actions, state, world, clock: int) -> list:
                 log.append(f"💬:«{txt[:40]}»")
         elif tool == "know":
             q = str(a.get("query") or "")[:80]
-            fn = getattr(world, "lookup", None)             # резолвер знания мира вешает хозяин мира
+            fn = getattr(world, "lookup", None)             # world knowledge resolver is hung by world owner
             if fn and q:
                 info = str(fn(q))[:220]
                 state.memory.add(f"вспомнил: {info}", clock, 0.45, kind="fact")
@@ -427,7 +427,7 @@ def apply_actions(actions, state, world, clock: int) -> list:
         elif tool == "note":
             state.memory.add(str(a.get("text", ""))[:120], clock, importance=0.5, kind="note")
             log.append("✎")
-        elif tool == "promise":                      # СЛОВО: память обеим сторонам; мир пишет deed
+        elif tool == "promise":                      # OATH: memory to both sides; world writes deed
             to = str(a.get("to") or "")
             tid_ = _find_body(world, to)
             what = str(a.get("what") or "")[:100]

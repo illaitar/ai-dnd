@@ -1,10 +1,10 @@
-"""АРБИТР свободного ввода — единый resolve(text) (docs/loop.md «Дальше», принцип 3).
+"""Arbiter of free-form input — single resolve(text) (docs/loop.md "Further", principle 3).
 
-Примитивы объявляет КОД: реестр PRIMITIVES — единственная истина (глагол, цели, «когда»).
-Промпт арбитра ГЕНЕРИТСЯ из реестра: добавить примитив = одна запись, рукописного списка
-глаголов в прозе больше нет. Контекст-сборщик отдаёт арбитру МАКСИМУМ фактов сцены (люди,
-ёмкости, сумка, зоны, предметы рядом, места города, время) — арбитр сам парсит намерение
-и цели; исполнители (примитив×манера×гейты) живут в handlers/freeform._attempt.
+Code declares primitives: the PRIMITIVES registry — sole source of truth (verb, goals, "when").
+Arbiter prompt is GENERATED from the registry: add primitive = one entry, no more hand-written
+verb lists in prose. Context assembler feeds arbiter MAXIMUM scene facts (people, containers, bag,
+zones, nearby items, city locations, time) — arbiter parses intent and goals itself; executors
+(primitive×manner×gates) live in handlers/freeform._attempt.
 
 Key functions
 -------------
@@ -40,7 +40,7 @@ from aidnd.server.play.engine.core import (
     _wid,
 )
 
-# Реестр примитивов: цели — какие поля обязаны быть заполнены; when — как узнать намерение.
+# Registry of primitives: targets — which fields must be filled; when — how to recognize intent.
 PRIMITIVES = (
     {"verb": "talk", "targets": ("npc",), "when": "заговорить/спросить/обратиться к человеку"},
     {"verb": "say", "targets": ("npc",), "manner": "persuasively",
@@ -87,7 +87,7 @@ _FIELD_HINT = {
 
 
 def _sys_prompt() -> str:
-    """Промпт арбитра из реестра — код объявил примитивы, проза производная."""
+    """Arbiter prompt generated from registry — code declared primitives, prose is derived."""
     verbs = "|".join(dict.fromkeys(p["verb"] for p in PRIMITIVES))
     manners = "openly|stealthily|forcefully|persuasively"
     rules = "; ".join(
@@ -112,8 +112,8 @@ def _sys_prompt() -> str:
 
 
 def assemble_context(sc: dict) -> str:
-    """МАКСИМУМ фактов для арбитра: кто/что/где доступно прямо сейчас (диалог = состояние
-    мира). Всё с реальными id — арбитр выбирает цели, не выдумывает."""
+    """Maximum facts for arbiter: who/what/where available right now (dialogue = world state).
+    All with real ids — arbiter chooses targets, not inventing."""
     here = "; ".join(f"{h['id']}={h['name']} ({h['role']})" for h in sc["here"]) or "никого"
     conts = "; ".join(
         c["name"] + (" [заперто]" if c["locked"] else "") for c in sc["location"]["containers"]
@@ -133,7 +133,7 @@ def assemble_context(sc: dict) -> str:
              for nm, iid in (lv.get("zone_fixed", {}).get(pl) or {}).items()][:4]
     zid_of = {v: k for k, v in (lv.get("zone_names") or {}).items()}
     afar, total = [], 0
-    for zpl, imap in (lv.get("zone_items") or {}).items():   # видимое ГЛАЗАМИ по чужим зонам
+    for zpl, imap in (lv.get("zone_items") or {}).items():   # visible BY EYE across other zones
         if zpl == pl or total >= 18:
             continue
         row = [f"{iid}={nm}" for nm, iid in list(imap.items())[:3]]
@@ -151,8 +151,8 @@ def assemble_context(sc: dict) -> str:
 
 
 def resolve(text: str, sc: dict) -> dict | None:
-    """Один тяжёлый контекстный вызов: фраза + сцена → {verb, verdict, цели, manner, detail}.
-    None — ТОЛЬКО «не понял фразу»; недоступность LLM летит исключением."""
+    """Single heavy contextual call: phrase + scene → {verb, verdict, targets, manner, detail}.
+    None — only "didn't understand phrase"; LLM unavailability throws exception."""
     resp = _model().call(
         "narrator",
         [{"role": "system", "content": _sys_prompt()},
@@ -168,11 +168,11 @@ def resolve(text: str, sc: dict) -> dict | None:
 
 
 def normalize_plan(out: dict, cap: int = 3) -> dict:
-    """Ответ арбитра → честный план: список звеньев-словарей, кап длины, wait-балласт
-    выброшен из цепочек (wait осмыслен только соло — как не-действие для нарратора)."""
+    """Arbiter response → honest plan: list of step-dicts, capped length, wait-ballast dropped
+    from chains (wait meaningful only solo — as non-action for narrator)."""
     steps = out.get("plan") if isinstance(out.get("plan"), list) else None
     if steps is None:
-        steps = [out]                                # обратная совместимость: один шаг
+        steps = [out]                                # backward compatibility: single step
     steps = [s for s in steps if isinstance(s, dict)]
     if str(out.get("verdict") or "") == "narrate":
         d = next((s.get("detail") for s in steps if s.get("detail")), out.get("detail"))
@@ -182,8 +182,8 @@ def normalize_plan(out: dict, cap: int = 3) -> dict:
     return {"verdict": out.get("verdict") or "do", "plan": steps[:cap]}
 
 
-# ─── Сервисы нарратора/арбитра, переехавшие из world.py (docs/structure.md, Phase B) ────────
-# Голос NPC, справка мира и DM-снимок — это арбитр/нарратор-слой, не сцена; их дом здесь.
+# ─── Narrator/arbiter services moved from world.py (docs/structure.md, Phase B) ────────
+# NPC voice, world lookup and DM snapshot — these are arbiter/narrator-layer, not scene; home is here.
 _VOICE = {
     "gruff": "грубовато",
     "warm": "тепло",
@@ -206,7 +206,7 @@ def _voice(p, rel, kind, player_text=None) -> str:
     mgr = _model()
     per = getattr(p, "persona", None) or {}
     bits = [f"Ты — {p.name}, {p.role} на фронтире (тёмное фэнтези)."]
-    if per:  # богатая персона из пула
+    if per:  # rich persona from pool
         if per.get("origin"):
             bits.append(f"Родом: {per['origin']}.")
         if per.get("voice"):
@@ -222,7 +222,7 @@ def _voice(p, rel, kind, player_text=None) -> str:
             bits.append(
                 f"У тебя есть тайна (НЕ выдавай без веской причины): {per['secret'].get('what', '')}."
             )
-    if _spurns(p):  # обида/гнев ПЕРЕВЕШИВАЮТ радушие персоны
+    if _spurns(p):  # grievance/anger OUTWEIGH persona's warmth
         bits.append(
             "Ты ЗОЛ на этого человека (вспомни, почему) — никакого радушия: "
             "холод, резкость или презрение, по твоему характеру."
@@ -246,15 +246,15 @@ def _voice(p, rel, kind, player_text=None) -> str:
     mems = p.state.memory.recall(player_text or "разговор с чужаком-игроком", now=_mt(), k=5)
     mine = [m for m in mems if PLAYER in (m.about or [])]
     other = [m for m in mems if PLAYER not in (m.about or [])]
-    if mine:  # непрерывность: NPC помнит ИМЕННО вас
+    if mine:  # continuity: NPC remembers YOU exactly
         bits.append("ТЫ ПОМНИШЬ О СОБЕСЕДНИКЕ: " + "; ".join(m.text for m in mine) + ".")
-    if other:  # прочее — фон, НЕ про собеседника
+    if other:  # other — background, NOT about the interlocutor
         bits.append(
             "ПРОЧЕЕ ИЗ ПАМЯТИ (про ДРУГИХ людей, НЕ про собеседника — не смешивай): "
             + "; ".join(m.text for m in other)
             + "."
         )
-    if player_text:  # вопрос о мире → справка сразу (не выдумывать)
+    if player_text:  # question about world → lookup immediately (no invention)
         info = _world_lookup(player_text, _S.get("loc"))
         if "не скажу" not in info:
             bits.append(
@@ -294,7 +294,7 @@ def _voice(p, rel, kind, player_text=None) -> str:
         return None
 
     d = _parse(content)
-    if d and d.get("ask"):  # тулкол ask: справка мира → второй заход
+    if d and d.get("ask"):  # tool call ask: world lookup → second pass
         info = _world_lookup(str(d["ask"]), _S.get("loc"))
         msgs += [
             {"role": "assistant", "content": content},
@@ -314,8 +314,8 @@ def _voice(p, rel, kind, player_text=None) -> str:
 
 
 def _world_lookup(query: str, from_node: int | None = None) -> str:
-    """Справка мира для тулкола know/ask: здания (с дорогой от точки), люди (местные знают местных).
-    Отвечает ТОЛЬКО реальными фактами графа/пула — не даёт LLM галлюцинировать о городе."""
+    """World lookup for know/ask tool call: buildings (with route from point), people (locals know locals).
+    Answers ONLY with real graph/pool facts — never lets LLM hallucinate about the city."""
     city, people = _S.get("city"), _S.get("people") or {}
     if city is None:
         return "не припомню"
@@ -325,7 +325,7 @@ def _world_lookup(query: str, from_node: int | None = None) -> str:
         nm = info["name"]
         words = (nm + " " + info["kind"]).lower().replace("«", " ").replace("»", " ").split()
         if any(w[:5] in q for w in words if len(w) > 3):
-            _mark_seen(bid)  # рассказали — теперь знаешь, метка на карте
+            _mark_seen(bid)  # told it — now you know, mark on map
             if from_node is not None:
                 r = city.route(from_node, kb.node)
                 if r.found:
@@ -345,8 +345,8 @@ def _world_lookup(query: str, from_node: int | None = None) -> str:
 
 
 def _dm_snapshot(sc: dict) -> str:
-    """СНИМОК живой сцены для нарратора: место/время/погода, кто где и чем занят, последние
-    реплики, предметы вокруг игрока. Нарратор ОПИСЫВАЕТ этот мир, а не выдумывает свой."""
+    """Snapshot of live scene for narrator: place/time/weather, who is where and what they do, last
+    lines, items around player. Narrator DESCRIBES this world, not inventing their own."""
     lv = _S.get("live") or {}
     amb = (sc or {}).get("ambient") or {}
     parts = [f"МЕСТО: {(sc.get('location') or {}).get('name', lv.get('place', 'улица'))}. "
@@ -377,7 +377,7 @@ def _dm_snapshot(sc: dict) -> str:
             znm = (lv.get("zone_names") or {}).get(c.get("zone"))
             audible = (PLAYER in (c.get("members") or []) or c.get("zone") == my
                        or (znm and znm == ev.get("place")))
-            if not audible:                          # чужой стол — нарратору не дарим
+            if not audible:                          # foreign table — don't feed to narrator
                 continue
             for who, txt in c.get("log", [])[-2:]:
                 lines.append(f"{lv.get('names', {}).get(who, who)}: «{txt[:70]}»")

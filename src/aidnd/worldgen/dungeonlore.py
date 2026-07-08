@@ -1,11 +1,11 @@
-"""LLM-вкус подземелий — этап B (docs/dungeons.md): бриф + виньетки комнат, ОФЛАЙН в пул.
+"""LLM flavor of dungeons — stage B (docs/dungeons.md): brief + room vignettes, OFFLINE into pool.
 
-Архитектор пишет БРИФ: история места в 3 слоях (кто построил → что случилось → кто живёт
-теперь), нарративные биты, палитра, именования — НИ ОДНОЙ координаты (наука: LLM не
-контролирует геометрию). Декоратор по брифу пишет виньетки на АРХЕТИПЫ комнат (вход, зал,
-логово вождя, склад…) с уликой-ссылкой на бит истории — валидатор бьёт висячие ссылки
-(Qud-метод: история рационализируется задним числом и оставляет СЛЕДЫ по комнатам).
-Рантайм детерминирован: generate() раздаёт виньетки комнатам по архетипу и сиду.
+Architect writes BRIEF: place history in 3 layers (who built → what happened → who lives
+now), narrative bits, palette, naming — NOT A SINGLE coordinate (science: LLM does not
+control geometry). Decorator per brief writes vignettes for room ARCHETYPES (entrance, hall,
+chief's lair, storage…) with clue-link to history bit — validator breaks hanging links
+(Qud method: history rationalizes retroactively and leaves TRACES across rooms).
+Runtime deterministic: generate() distributes vignettes to rooms by archetype and seed.
 
 Key functions
 -------------
@@ -65,7 +65,7 @@ def _parse(text: str | None) -> dict | None:
 
 
 def forge_dungeon_brief(env: str, folk_hint: list, mgr) -> dict:
-    """Архитектор + декоратор → валидный бриф с виньетками (для пула; LLM только офлайн)."""
+    """Architect + decorator → valid brief with vignettes (for pool; LLM offline only)."""
     user = f"СРЕДА: {env}. ВОЗМОЖНЫЕ ХОЗЯЕВА: {', '.join(folk_hint) or 'дикие твари'}."
     b = _parse(mgr.call("dungeon_architect",
                         [{"role": "system", "content": _ARCH_SYS},
@@ -81,7 +81,7 @@ def forge_dungeon_brief(env: str, folk_hint: list, mgr) -> dict:
                         options={"temperature": 0.8}).get("content"))
     rooms = [v for v in (d or {}).get("rooms") or []
              if isinstance(v, dict) and v.get("arch") in ARCHES and v.get("name")
-             and str(v.get("clue")) in bit_ids]        # висячие ссылки — вон (урок Story2Game)
+             and str(v.get("clue")) in bit_ids]        # hanging links — out (Story2Game lesson)
     if len(rooms) < 8:
         raise LLMBadOutput(f"decorator: виньеток {len(rooms)} < 8 (или битые ссылки)")
     b["rooms"] = rooms
@@ -90,7 +90,7 @@ def forge_dungeon_brief(env: str, folk_hint: list, mgr) -> dict:
 
 
 def room_arch(r: dict) -> str:
-    """Архетип комнаты скелета — по фактам структуры, не по прихоти."""
+    """Room archetype by skeleton structural facts, not by whim."""
     if r["kind"] == "entrance":
         return "entrance"
     if r["kind"] == "goal":
@@ -110,7 +110,7 @@ def room_arch(r: dict) -> str:
 
 
 def apply_brief(d: dict, brief: dict, rng) -> None:
-    """Виньетки брифа → комнаты по архетипу, детерминированно; secret-комнаты — у секреток."""
+    """Brief vignettes → rooms by archetype, deterministically; secret-rooms to secrets."""
     by_arch: dict = {}
     for v in brief.get("rooms") or []:
         by_arch.setdefault(v["arch"], []).append(v)
@@ -121,7 +121,7 @@ def apply_brief(d: dict, brief: dict, rng) -> None:
     d["history"] = brief.get("history") or {}
     d["chief"] = brief.get("chief")
     d["lock_flavor"] = brief.get("lock_flavor")
-    bags: dict = {}                                   # раздача БЕЗ повторов, пока есть чем
+    bags: dict = {}                                   # distribute without repeats while stock available
     for r in d["rooms"]:
         arch = "secret" if r["id"] in secret_rooms and r["kind"] == "room" else room_arch(r)
         pool = by_arch.get(arch) or by_arch.get("hall") or []

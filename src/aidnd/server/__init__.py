@@ -1,4 +1,4 @@
-"""L9 Presentation — FastAPI + WebSocket бэкенд (main §11)."""
+"""L9 Presentation — FastAPI + WebSocket backend (main §11)."""
 
 from .app import app, run
 

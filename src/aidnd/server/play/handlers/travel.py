@@ -1,4 +1,4 @@
-"""Домен ПОХОД (/map /move /enter /exit /room /sign_ack /live) — распил world.py. Позвоночник: граф-путь, прерывания.
+"""Travel domain (/map /move /enter /exit /room /sign_ack /live) — world.py refactoring. Backbone: graph routing, interrupts.
 
 Key functions
 -------------
@@ -51,8 +51,8 @@ from aidnd.server.play.mechanics.items import _pc_coins
 
 
 def _path_interrupt(route_nodes, cr2b, crof, people, to):
-    """Первая помеха на пути (кроме старта и цели): вывеска НЕЗНАКОМОГО ключевого здания
-    или естественное событие (NPC с высокой эмоцией/агендой). None — путь чист."""
+    """First obstacle on route (except start/end): sign for unknown key building
+    or natural event (NPC with high emotion/agenda). None — path clear."""
     for n in route_nodes[1:]:
         if n == to:
             break
@@ -97,7 +97,7 @@ def game_map():
         "points": g["points"],
         "keys": [
             k
-            for k in g["keys"]  # туман: известные + доска (столб виден)
+            for k in g["keys"]  # fog: known + board (pole visible)
             if k["bid"] in _seen() or k["bid"] == "board:plaza"
         ],
         "loc": loc,
@@ -124,16 +124,16 @@ async def move(request: Request):
     r = city.route(loc, to)
     route_nodes = list(r.nodes) if r.found else [loc, to]
     stop = _path_interrupt(route_nodes, cr2b, crof, people, to)
-    dest = stop["stop"] if stop else to  # путь прерывается на помехе
+    dest = stop["stop"] if stop else to  # path breaks at obstacle
     seg = route_nodes[: route_nodes.index(dest) + 1] if dest in route_nodes else [dest]
     path = [xy[n] for n in seg if n in xy]
     _S["loc"] = dest
-    _S["dlg"] = None  # ушёл — разговор оборвался
-    _gt_add(PB["step_min"] * max(1, len(seg) - 1))  # время дороги: минут за пройденный шаг
-    _apply_routine()  # за дорогу мир мог перейти в другую фазу
-    ct_done = _contract_on_move(dest)  # visit-уговор: дошёл — исполнил
+    _S["dlg"] = None  # left — conversation interrupted
+    _gt_add(PB["step_min"] * max(1, len(seg) - 1))  # travel time: minutes per step taken
+    _apply_routine()  # world may shift phases during travel
+    ct_done = _contract_on_move(dest)  # visit-contract: reached — fulfilled
     sc = _scene_dict(city, people, crof, cr2b, dest)
-    t = _world_tick()  # мир получает ход (пошаговость)
+    t = _world_tick()  # world gets turn (turn-based)
     extra = {}
     if stop:
         extra["stopped"] = stop["kind"]
@@ -156,20 +156,20 @@ async def move(request: Request):
 
 @router.post("/api/play/sign_ack")
 async def sign_ack(request: Request):
-    """Реакция на вывеску: записать здание на карту (record) или пройти мимо (signskip)."""
+    """React to sign: record building on map (record) or skip (signskip)."""
     _play()
     b = await request.json()
     bid, record = b.get("bid"), bool(b.get("record"))
     if record:
         _mark_seen(bid)
     else:
-        _store().flag_set(_wid(), f"signskip|{bid}")  # больше не прерывать этой вывеской
+        _store().flag_set(_wid(), f"signskip|{bid}")  # don't interrupt on this sign again
     return {"ok": True}
 
 
 @router.post("/api/play/enter")
 async def enter(request: Request):
-    """Войти в здание у которого стоишь. Внутри — своё «осмотреться», карта блокируется."""
+    """Enter building at current location. Inside — own "look around", map blocked."""
     city, people, crof, cr2b, loc = _play()
     bid = cr2b.get(loc)
     if not bid:
@@ -177,7 +177,7 @@ async def enter(request: Request):
     _S["inside"] = bid
     _S["room"] = None
     _S["zone"] = None
-    _S["dlg"] = None  # вошёл внутрь — уличный разговор оборвался
+    _S["dlg"] = None  # entered — street conversation interrupted
     _gt_add(PB["give_min"])
     _pc_remember(f"вошёл в {_binfo(bid)['name']}", 0.25)
     t = _world_tick()
@@ -193,22 +193,22 @@ async def enter(request: Request):
 
 @router.post("/api/play/room")
 async def go_room(request: Request):
-    """Перейти в суб-помещение здания (или в зал, room=null). Гейты: public — свободно;
-    staff — по доверию работника ИЛИ скрытности; locked — по ключу; hidden — уже раскрыто."""
+    """Move to sub-room of building (or hall, room=null). Gates: public — free;
+    staff — by worker trust OR stealth; locked — by key; hidden — already revealed."""
     city, people, crof, cr2b, loc = _play()
     inside = _S.get("inside")
     if not inside:
         return {"error": "ты не внутри здания"}
     want = (await request.json()).get("room")
     out = {"narr": []}
-    if not want:  # вернуться в общий зал
+    if not want:  # return to main hall
         _S["room"] = None
     else:
         room = next((r for r in _building_rooms(inside) if r["name"] == want), None)
         if not room:
             return {"error": "такого помещения тут нет"}
         acc = room["access"]
-        if acc in ("staff",):  # служебное — доверие работника или скрытно
+        if acc in ("staff",):  # staff room — worker trust or stealth
             worker = next(
                 (people[pid] for pid in _here(loc, crof) if people[pid].work == inside), None
             )
@@ -231,11 +231,11 @@ async def go_room(request: Request):
                         f"«{want}» — не для чужих. На тебя косятся, пришлось отступить."
                     )
                     return {**out, **_scene_dict(city, people, crof, cr2b, loc), "gt": _gt()}
-        elif acc == "locked":  # заперто — нужен ключ ЭТОГО здания
+        elif acc == "locked":  # locked — need this building's key
             bd = _store().get_building(_wid(), inside) or {}
             local = _tokens_ru(_binfo(inside)["name"]) | _tokens_ru(want)
             for cnt in bd.get("data", {}).get("containers") or []:
-                local |= _tokens_ru(cnt.get("name", ""))  # ключи хозяина ходят по его ёмкостям
+                local |= _tokens_ru(cnt.get("name", ""))  # owner keys apply across their containers
             has_key = any(
                 it
                 and it["kind"] == "key"
@@ -252,7 +252,7 @@ async def go_room(request: Request):
                 return {**out, **_scene_dict(city, people, crof, cr2b, loc), "gt": _gt()}
         _S["room"] = want
         out["narr"].append(f"Ты проходишь в: {want}.")
-    _S["dlg"] = None  # перешёл в другое помещение — беседа прервана
+    _S["dlg"] = None  # moved to different room — conversation broken
     _gt_add(PB["give_min"])
     return {
         **out,
@@ -268,7 +268,7 @@ async def exit_building(request: Request):
     city, people, crof, cr2b, loc = _play()
     _S["inside"] = None
     _S["zone"] = None
-    _S["dlg"] = None  # вышел — разговор в зале оборвался
+    _S["dlg"] = None  # exited — hall conversation interrupted
     _gt_add(PB["give_min"])
     t = _world_tick()
     return {
@@ -283,16 +283,16 @@ async def exit_building(request: Request):
 
 @router.post("/api/play/live")
 async def live(request: Request):
-    """Кнопка «ждать»: потратить время и дать миру ход. (Поллинга больше нет — мир пошаговый.)"""
+    """Wait button: spend time, give world a turn. (No polling — world is turn-based.)"""
     _play()
     t = _world_tick()
     return {**t, "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}
 
 
-# ─────────────────────────── ПЛАН ЗДАНИЯ (бумажный, docs/locations.md этап C) ──
+# ─────────────────────────── BUILDING PLAN (paper, docs/locations.md stage C) ──
 
 def _plan_payload() -> dict:
-    """Бумажный план текущего здания с людьми по зонам. Нет зон (не из дебаг-партии) → None."""
+    """Paper plan of current building with people by zones. No zones (not from debug session) → None."""
     from aidnd.server.play.engine.zones import building_zones
     from aidnd.worldgen.floorart import paper_svg
     from aidnd.worldgen.floorplan import plan_location
@@ -306,18 +306,18 @@ def _plan_payload() -> dict:
         return {"plan": None}
     plan = plan_location(data, seed_key=f"{_wid()}|{bid}")
     here = [pid for pid in _here(loc, crof) if pid != PLAYER]
-    here.sort(key=lambda i: (people[i].work != bid, i))      # работники дома — первыми
-    more = max(0, len(here) - PB["here_show_cap"])           # LOD сцены: как «кто здесь»
+    here.sort(key=lambda i: (people[i].work != bid, i))      # workers at home — first
+    more = max(0, len(here) - PB["here_show_cap"])           # LOD scene: like "who's here"
     here = here[: PB["here_show_cap"]]
     from aidnd.server.play.engine.world import _looked_level
 
-    if _looked_level(loc, bid) < 1:                          # туман людей — как в сцене:
-        more += len(here)                                    # не осмотрелся → лишь «сколько душ»
+    if _looked_level(loc, bid) < 1:                          # fog of people — like in scene:
+        more += len(here)                                    # haven't looked — only "how many souls"
         here = []
     lv = _S.get("live")
-    if lv and lv.get("loc") == loc and lv.get("zonemap"):    # живая сцена = истина позиций
+    if lv and lv.get("loc") == loc and lv.get("zonemap"):    # live scene = source of truth for positions
         seats = {p: z for p, z in lv["zonemap"].items() if p in here and z}
-        for pid in here:                                     # хвост вне LLM-ядра — рассадка
+        for pid in here:                                     # tail outside LLM core — seating
             if pid not in seats:
                 seats.update(_zone_seats(people, [pid], zones, f"seats|{_wid()}|{bid}"))
     else:
@@ -327,7 +327,7 @@ def _plan_payload() -> dict:
              "color": f"hsl({(hash(pid) % 360)} 55% 45%)"} for pid in here]
     npcs.append({"id": "pc", "name": _S.get("pc_name") or "ты", "init": "☉",
                  "zone": _S.get("zone"), "color": "#b08a2e", "is_player": True})
-    hidden = [z["id"] for z in zones if z.get("lockable")]  # комнаты постоя: пока не снял — туман
+    hidden = [z["id"] for z in zones if z.get("lockable")]  # guest rooms: until uncovered — fog
     svg = paper_svg(plan, data, seed_key=f"{_wid()}|{bid}",
                     game={"npcs": npcs, "hidden_zones": hidden, "interactive": True,
                           "more": more})
@@ -336,8 +336,8 @@ def _plan_payload() -> dict:
 
 
 def _zone_seats(people, here, zones, seed: str) -> dict:
-    """Рассадка NPC по зонам: пост — по роли, прочие — детерминированно по вместимости.
-    (Временная механика до шага 2 материализации: тогда зоны станут позициями мира.)"""
+    """NPC seating by zones: post — by role, others — deterministic by capacity.
+    (Temp mechanic until step 2 materialization: then zones become world positions.)"""
     rng = random.Random(seed)
     out, load = {}, {z["id"]: 0 for z in zones}
     posts = [z for z in zones if z.get("post")]
@@ -361,33 +361,33 @@ def _zone_seats(people, here, zones, seed: str) -> dict:
 
 @router.get("/api/play/plan")
 async def play_plan():
-    """План текущего здания (пергамент, люди по зонам, туман на запертом)."""
+    """Plan of current building (parchment, people by zones, fog on locked)."""
     return _plan_payload()
 
 
 @router.post("/api/play/zone")
 async def play_zone(request: Request):
-    """Подойти к зоне на плане: позиция игрока внутри здания (время из PB)."""
+    """Approach zone on plan: player position inside building (time from PB)."""
     b = await request.json()
     zid = str(b.get("zid") or "")
     cur = _plan_payload()
     if not cur.get("plan") or zid not in (cur.get("zones") or {}):
         return {"error": "тут такого места нет"}
-    line = _zone_go(zid, cur["zones"][zid])       # сначала переезд — потом свежий план
+    line = _zone_go(zid, cur["zones"][zid])       # move first — then fresh plan
     return {**_plan_payload(), "narr": [line], "gt": _gt()}
 
 
 def _zone_go(zid: str, zname: str) -> str:
-    """Переезд игрока в зону: позиция + живая сцена (тело и события) + время + память."""
+    """Move player to zone: position + live scene (body and events) + time + memory."""
     _S["zone"] = zid
     lv = _S.get("live")
-    if lv is not None:                          # сцена видит перемещение чужака
+    if lv is not None:                          # scene sees stranger's movement
         lv.setdefault("zonemap", {})[PLAYER] = zid
         lv["last"][PLAYER] = f"перешёл — {zname}"
         body = lv["world"].bodies.get(PLAYER)
         znm_place = (lv.get("zone_names") or {}).get(zid)
         if body is not None and znm_place and znm_place in lv["world"].places:
-            body.place = znm_place              # тело игрока в мире сцены (волна 2: зоны=места)
+            body.place = znm_place              # player body in scene world (wave 2: zones=places)
     _gt_add(PB["step_min"])
     _pc_remember(f"подошёл: {zname}", 0.1)
     return f"Ты подходишь — {zname}."

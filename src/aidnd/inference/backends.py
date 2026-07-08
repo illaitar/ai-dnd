@@ -1,8 +1,8 @@
-"""Слой LLM-бэкендов: провайдер моделей — чёрный ящик за единым интерфейсом.
+"""LLM backend layer: model provider — black box behind a unified interface.
 
-Агенты зовут ModelManager.call(role, …); тот по активному профилю выбирает (backend, model)
-и дёргает backend.chat(…). Добавить провайдера = новый класс здесь + строчка в profiles.py.
-Каждый бэкенд САМ переводит провайдер-агностичную JSON-схему в своё (Ollama format /
+Agents call ModelManager.call(role, …); it selects (backend, model) by active profile
+and calls backend.chat(…). Add provider = new class here + line in profiles.py.
+Each backend ITSELF translates provider-agnostic JSON schema to its own (Ollama format /
 OpenAI response_format).
 
 Key functions
@@ -29,9 +29,9 @@ except ImportError:                                  # pragma: no cover
 
 
 class OllamaBackend:
-    """Локальная Ollama (наш текущий путь): тюненые адаптеры, грамматико-строгий JSON."""
+    """Local Ollama (current path): tuned adapters, grammar-strict JSON."""
     name = "ollama"
-    parallel_enrich = 1          # своп LoRA/моделей на одной GPU → параллель вредна (последовательно)
+    parallel_enrich = 1          # Swap LoRA/models on single GPU → parallelism harmful (sequential)
 
     def __init__(self, client: OllamaClient | None = None) -> None:
         self.client = client or OllamaClient()
@@ -45,7 +45,7 @@ class OllamaBackend:
             return False
 
     def resolve(self, model: str) -> str:
-        """Имя модели Ollama: терпимо к тегу :latest; нет дообученной → откат на базовую."""
+        """Ollama model name: tolerates :latest tag; if fine-tuned missing → fallback to base."""
         ms = self._models
         if not ms or model in ms:
             return model
@@ -55,7 +55,7 @@ class OllamaBackend:
 
     def chat(self, model, messages, *, schema=None, options=None, on_token=None, think=False) -> dict:
         tools = fmt = None
-        if schema:                                   # схема → нативный tool ИЛИ guided-JSON (как было)
+        if schema:                                   # schema → native tool OR guided-JSON (as before)
             if config.USE_NATIVE_TOOLS:
                 tools = [{"type": "function", "function": schema}]
             else:
@@ -67,15 +67,15 @@ class OllamaBackend:
 
 
 class OpenAICompatBackend:
-    """Любой OpenAI-совместимый провайдер (DeepSeek, vLLM, llama.cpp-server, …).
-    schema → response_format=json_object (мягче грамматики Ollama, но модель следует промпту)."""
+    """Any OpenAI-compatible provider (DeepSeek, vLLM, llama.cpp-server, …).
+    schema → response_format=json_object (softer than Ollama grammar, but model follows prompt)."""
 
     def __init__(self, name: str, base: str, key: str, default_model: str) -> None:
         self.name = name
         self.base = base.rstrip("/")
         self.key = key
         self.default_model = default_model
-        self.parallel_enrich = max(1, config.DEEPSEEK_CONCURRENCY)   # облако: network-bound → параллелим enrich
+        self.parallel_enrich = max(1, config.DEEPSEEK_CONCURRENCY)   # Cloud: network-bound → parallelize enrich
 
     def available(self) -> bool:
         return bool(self.key) and _HAS_HTTPX
@@ -89,7 +89,7 @@ class OpenAICompatBackend:
         if schema:
             body["response_format"] = {"type": "json_object"}
             if not any("json" in (m.get("content") or "").lower() for m in messages):
-                body["messages"] = messages + [{"role": "system",   # json_object требует «json» в промпте
+                body["messages"] = messages + [{"role": "system",   # json_object requires "json" in prompt
                     "content": "Ответь ОДНИМ валидным JSON-объектом по полям из инструкции, без иного текста."}]
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         r = httpx.post(f"{self.base}/chat/completions", json=body, headers=headers,
@@ -97,6 +97,6 @@ class OpenAICompatBackend:
         if r.status_code != 200:
             raise OllamaError(f"{self.name} {r.status_code}: {r.text[:200]}")
         content = (r.json()["choices"][0]["message"].get("content") or "")
-        if on_token and content:                     # стрим не разбиваем (v1): один колбэк целиком
+        if on_token and content:                     # No stream splitting (v1): one callback for all
             on_token(content)
         return {"content": content, "tool_calls": []}

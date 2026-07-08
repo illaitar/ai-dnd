@@ -1,7 +1,7 @@
-"""Инструменты NPC. Два класса:
-  READ (query) — читают состояние, без эффекта, «бесплатны»: perceive, recall, assess, locate.
-  WRITE (act)  — меняют мир, тратят ход: move (далее say/give/take/use/attack/emote/wait).
-Каждый инструмент работает над (state: NpcState, scene: Scene, **params). Реестр TOOLS + run_tool.
+"""NPC tools. Two classes:
+  READ (query) — read state, no side effects, "free": perceive, recall, assess, locate.
+  WRITE (act)  — modify world, consume turn: move (then say/give/take/use/attack/emote/wait).
+Each tool operates over (state: NpcState, scene: Scene, **params). Registry TOOLS + run_tool.
 
 Key functions
 -------------
@@ -19,7 +19,7 @@ from .model import NpcState, Scene
 
 
 def _resolve(city, target):
-    """target → узел графа / id здания (для route). int|'key:N'|имя здания|None."""
+    """target → graph node / building id (for route). int|'key:N'|building name|None."""
     if target is None or target == "":
         return None
     if isinstance(target, int):
@@ -30,7 +30,7 @@ def _resolve(city, target):
     if s in city.key_buildings:
         return s
     low = s.lower()
-    for bid, kb in city.key_buildings.items():       # матч по имени здания
+    for bid, kb in city.key_buildings.items():       # match by building name
         if kb.name and kb.name.lower() in low or low in kb.name.lower():
             return bid
     return None
@@ -38,7 +38,7 @@ def _resolve(city, target):
 
 # ── READ ──────────────────────────────────────────────────────────────────
 def perceive(state: NpcState, scene: Scene, **_) -> dict:
-    """Что вокруг СЕЙЧАС: место, кто present, легальные выходы, предметы."""
+    """What's around NOW: location, who present, legal exits, items."""
     city, node = scene.city, state.node
     here = [n.config.id for n in scene.npcs.values() if n is not state and n.node == node]
     moves = []
@@ -50,7 +50,7 @@ def perceive(state: NpcState, scene: Scene, **_) -> dict:
 
 
 def recall(state: NpcState, scene: Scene, query: str = "", k: int = 10, reranker=None, **_) -> dict:
-    """Ретрива top-k воспоминаний по вопросу (SOTA: скор → rerank)."""
+    """Retrieve top-k memories by query (SOTA: score → rerank)."""
     mems = state.memory.recall(query, scene.clock, k=int(k), reranker=reranker)
     return {"query": query, "memories": [
         {"text": m.text, "importance": round(m.importance, 2), "t": m.t, "kind": m.kind,
@@ -58,7 +58,7 @@ def recall(state: NpcState, scene: Scene, query: str = "", k: int = 10, reranker
 
 
 def assess(state: NpcState, scene: Scene, entity: str = "", **_) -> dict:
-    """Что знаю о КОНКРЕТНОМ X: отношение + факты о нём."""
+    """What I know about a specific entity: relationship + facts about it."""
     rel = state.relationships.get(entity, {"trust": 0.0, "affinity": 0.0, "fear": 0.0})
     facts = [m.text for m in state.memory.items if entity in m.about or entity.lower() in m.text.lower()]
     return {"entity": entity, "relationship": rel, "facts": facts[:10],
@@ -66,7 +66,7 @@ def assess(state: NpcState, scene: Scene, entity: str = "", **_) -> dict:
 
 
 def locate(state: NpcState, scene: Scene, target: str = "", **_) -> dict:
-    """Пространственное знание: путь/румб/ориентиры до цели (гейт перемещения)."""
+    """Spatial knowledge: path/bearing/landmarks to goal (movement gate)."""
     dst = _resolve(scene.city, target)
     if dst is None or state.node is None:
         return {"target": target, "known": False}
@@ -81,7 +81,7 @@ def locate(state: NpcState, scene: Scene, target: str = "", **_) -> dict:
 
 # ── WRITE ─────────────────────────────────────────────────────────────────
 def move(state: NpcState, scene: Scene, target: str = "", **_) -> dict:
-    """Шаг по графу к цели (один узел за вызов; остаток пути возвращаем)."""
+    """Step along graph toward goal (one node per call; return remaining path)."""
     dst = _resolve(scene.city, target)
     if dst is None or state.node is None:
         return {"moved": False, "reason": "цель неизвестна"}

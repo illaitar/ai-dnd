@@ -1,6 +1,6 @@
-"""Модель предмета: фактшит в ДВА слоя знания — surface (видно, может врать) + hidden[] (истина под
-гейтами осмотра). Модификаторы системно-нейтральны (соц-ось mind/функции/цена/улики работают сейчас,
-боевые спят до боёвки). Предмет — dict-фактшит (как здания/персоны), логика — функции рядом.
+"""Item model: factsheet in TWO layers of knowledge — surface (visible, may lie) + hidden[] (truth behind
+inspection gates). Modifiers are system-neutral (socio-axis mind/functions/price/clues work now,
+combat abilities sleep until combat). Item is dict-factsheet (like buildings/persons), logic in nearby functions.
 
 Key functions
 --------------
@@ -16,8 +16,8 @@ from dataclasses import dataclass, field
 KINDS = ("weapon", "armor", "tool", "trinket", "consumable", "key", "document", "valuable", "material", "misc")
 SLOTS = ("main_hand", "off_hand", "body", "head", "worn", "none")
 QUALITY = ("crude", "plain", "fine", "exquisite")
-# ОСЬ РЕДКОСТИ (отдельно от качества выделки): множитель цены и вес спавна из пула.
-# unique — единственный в мире: раз выпал, из пула больше не появляется.
+# RARITY AXIS (separate from craftsmanship quality): price multiplier and spawn weight from pool.
+# unique — one-of-a-kind: once spawned, never appears from pool again.
 RARITY = ("common", "rare", "epic", "unique")
 RARITY_PRICE = {"common": 1.0, "rare": 2.2, "epic": 4.5, "unique": 9.0}
 RARITY_WEIGHT = {"common": 100, "rare": 22, "epic": 5, "unique": 1}
@@ -27,16 +27,16 @@ MOD_WHEN = ("passive", "equipped", "worn", "on_use", "conditional")
 HIDDEN_PROP = ("true_material", "true_worth", "forgery", "provenance", "poison", "enchant",
                "curse", "flaw", "compartment", "function")
 BREAK = ("shatter", "dull", "fray", "snap", "spoil")
-# компетенции для craft_eye/lore-гейтов (у кого «глаз намётан»)
+# competencies for craft_eye/lore gates (those with a trained eye)
 COMPETENCIES = ("metalwork", "gems", "herbs", "poison", "medicine", "letters", "lore", "trade", "faith", "law")
 
 
 @dataclass
 class Capability:
-    """Кто осматривает/крафтит: способности + намётанный глаз (компетенции) + инструменты."""
+    """Inspector/crafter profile: abilities + trained eye (competencies) + tools."""
     abilities: dict = field(default_factory=dict)          # {int, wis, dex, …} ~8..16
     competencies: set = field(default_factory=set)         # {metalwork, gems, poison, …}
-    tools: set = field(default_factory=set)                # {лупа, детект-магии, пробирный набор}
+    tools: set = field(default_factory=set)                # {magnifier, magic-detector, assay kit}
 
     def mod(self, ability: str) -> int:
         return (int(self.abilities.get(ability, 10)) - 10) // 2
@@ -92,14 +92,14 @@ def norm_durability(d) -> dict | None:
     return {"max": mx, "current": min(mx, max(0, _num(d.get("current", mx), mx))),
             "break_behavior": _enum(d.get("break_behavior"), BREAK, "snap"),
             "repair_dc": max(0, _num(d.get("repair_dc", 10), 10)),
-            "weak_at": round(min(0.9, max(0.0, _num(d.get("weak_at", 0.0), 0.0))), 2)}  # порог ранней поломки (брак)
+            "weak_at": round(min(0.9, max(0.0, _num(d.get("weak_at", 0.0), 0.0))), 2)}  # early break threshold (defect)
 
 
 def normalize(d: dict) -> dict:
-    """LLM/скелет-dict → чистый фактшит предмета."""
+    """LLM/skeleton-dict → clean item factsheet."""
     d = d or {}
     app = _num(d.get("apparent_worth", 0), 0)
-    worth = _num(d.get("worth", app), app)                 # истинная цена ≥ видимой (если ценность скрыта)
+    worth = _num(d.get("worth", app), app)                 # true price ≥ apparent (if value is hidden)
     return {
         "kind": _enum(d.get("kind"), KINDS, "misc"),
         "name": str(d.get("name") or "предмет").strip(),
@@ -118,5 +118,5 @@ def normalize(d: dict) -> dict:
 
 
 def rarity_price(worth: float, rarity: str) -> int:
-    """Цена с учётом ОСИ РЕДКОСТИ поверх базовой ценности выделки."""
+    """Price with RARITY AXIS multiplier over base craftsmanship worth."""
     return max(1, round(worth * RARITY_PRICE.get(rarity, 1.0)))

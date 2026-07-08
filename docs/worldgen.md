@@ -1,57 +1,57 @@
-# Генерация мира
+# World Generation
 
-Откуда мир берётся. Правило [принципа 7](README.md): дорогое куётся ОФЛАЙН в пулы,
-мир пользователя собирается из пулов **< 1 сек, без единого LLM-вызова**.
+Where the world comes from. Rule [principle 7](README.md): expensive work is forged OFFLINE in pools,
+a user's world is assembled from pools **< 1 sec, without a single LLM call**.
 
-## Граф города — citygraph (чистый пакет)
+## City graph — citygraph (pure package)
 
-`src/aidnd/citygraph`: генерация по `CityParams(seed, key_buildings=12, river, walls,
-segment=16)` → узлы/рёбра улиц, дома-полигоны (~24% прямоугольных), живые дворы
-(сад/застройка/пусто) с узлами движения, чистый берег, поля/хутора. A*-маршруты со
-знаками-ориентирами (`route → Signs`). Город ХОДИТ по графу; здания — места на нём
-(правка генератора → placements самолечатся). Визуал-рендер SVG (кликабельные дома,
-вывески) — сейчас `server/web/citygen.py` (переезд: [structure.md](structure.md)).
-Стенд: `/citydebug`.
+`src/aidnd/citygraph`: generation from `CityParams(seed, key_buildings=12, river, walls,
+segment=16)` → street nodes/edges, building polygons (~24% rectangular), live courtyards
+(garden/built-up/empty) with movement nodes, clear riverbank, fields/farmsteads. A*-routes with
+landmark signs (`route → Signs`). City walks the graph; buildings are locations on it
+(generator fix → placements self-heal). Visual SVG render (clickable buildings, signage) — currently
+`server/web/citygen.py` (migration: [structure.md](structure.md)).
+Testbed: `/citydebug`.
 
-## Пулы (офлайн-скрипты; LLM обязателен — стаб-контентом пулы не травим)
+## Pools (offline scripts; LLM required — we don't poison pools with stub content)
 
-| пул | скрипт | роль LLM | что куётся |
+| pool | script | LLM role | what gets forged |
 |---|---|---|---|
-| люди (~900) | `scripts/peoplegen.py` | character_writer | механика (черты/способности) + персона (происхождение/голос/речь/причуды/стремления/тайна/ценности) + портреты Flux ×4 эмоции (fal.ai, ключ `.secrets/fal.key`; потолок ~500 душ) |
-| здания (599) | по типам-хинтам | location_writer | фактшит: ярус/размер/возраст/состояние/фичи/услуги/sub_rooms/containers (enum-теги, не проза) |
-| имена городов (100) | — | — | kind `city_name` в building_pool |
-| предметы | сид-шаблоны | — | данные с весами редкости ([items.md](items.md)) |
-| обстановка зон | `scripts/furnish.py` | furnisher, layout_architect | зоны локаций + каждый предмет отдельной записью + пресет планировки ([locations.md](locations.md)) |
+| people (~900) | `scripts/peoplegen.py` | character_writer | mechanics (traits/abilities) + persona (origin/voice/speech/quirks/aspirations/secret/values) + Flux portraits ×4 emotions (fal.ai, key `.secrets/fal.key`; cap ~500 souls) |
+| buildings (599) | by type-hints | location_writer | factsheet: tier/size/age/condition/features/services/sub_rooms/containers (enum tags, not prose) |
+| city names (100) | — | — | kind `city_name` in building_pool |
+| items | seed-templates | — | data with rarity weights ([items.md](items.md)) |
+| zone furnishings | `scripts/furnish.py` | furnisher, layout_architect | location zones + each item as a separate record + layout preset ([locations.md](locations.md)) |
 
-Портреты — `data/portraits/` (НЕ гит; на прод rsync). Догенерация: `scripts/portraits_topup.py`.
-`enrich_city` (worldgen/enrichment.py): параллельность по бэкенду (облако — параллелим,
-локальная Ollama — последовательно), инкрементальные записи (падение не теряет прогресс).
+Portraits — `data/portraits/` (NOT git; rsync to prod). Top-up generation: `scripts/portraits_topup.py`.
+`enrich_city` (worldgen/enrichment.py): backend parallelization (cloud — parallelize,
+local Ollama — sequentially), incremental writes (crash doesn't lose progress).
 
-**Планы локаций** (`worldgen/floorplan.py` + `floorart.py`): по зонам здания код детерминированно
-раскладывает интерьер (футпринт-архетип + simulated annealing) и рисует «бумажный» лист
-(пергамент/штрих/хэтчинг/глифы мебели). LLM (`layout_architect`) даёт только ВКУС планировки,
-геометрию и гарантии проходимости считает код. Подробно — [locations.md](locations.md).
+**Location floor plans** (`worldgen/floorplan.py` + `floorart.py`): by building zones, the code
+deterministically lays out the interior (footprint archetype + simulated annealing) and draws a
+"paper" page (parchment/hatching/furniture glyphs). The LLM (`layout_architect`) provides only
+the FLAVOR of the layout; the code handles geometry and guarantees traversability. Details —
+[locations.md](locations.md).
 
-## Сборка мира-на-юзера (рантайм, без LLM)
+## Per-user world assembly (runtime, no LLM)
 
-`user_world_create(user)` → новый `world_id` (монотонный счётчик — id не переиспользуются
-после пермасмерти) + seed → граф по seed → `_assign_key_buildings` (значимые из пула по
-типу-хинту слота) → жилые дома детерминированно из res-пула (не пишутся в БД) → имя города
-из пула → **расселение ВСЕХ ~900** (`_fill_from_pool`: дом+работа → placements; пустой банк =
-жёсткая ошибка, голого populate больше нет) → сид-пул предметов. Ключи от контейнеров —
-владельцу здания.
+`user_world_create(user)` → new `world_id` (monotonic counter — IDs not reused after permanent
+death) + seed → graph by seed → `_assign_key_buildings` (key buildings from pool by slot
+type-hint) → residential buildings deterministically from res-pool (not written to DB) → city name
+from pool → **resettlement of ALL ~900** (`_fill_from_pool`: home+work → placements; empty pool =
+hard error, bare populate is gone) → seed item pool. Container keys — belong to building owner.
 
-## Ленивое донасыщение в игре
+## Lazy enrichment in-game
 
-Инвентарь NPC — по требованию (труп/кража/контракт: `_materialize_npc` из карманов персоны);
-ковка предметов — при первом касании (`_forge`, кэш по seed); агенды — при первой нужде
-(`plan_agenda`); законы кругов — при первом касте (гримуар). Всё через LLM, всё персистится.
+NPC inventory — on demand (corpse/theft/contract: `_materialize_npc` from persona's pockets);
+item forging — on first touch (`_forge`, cache by seed); agendas — on first need
+(`plan_agenda`); circle laws — on first cast (grimoire). All via LLM, all persisted.
 
-## Дальше
+## Next
 
-- Суб-локации: движение по комнатам здания = мини-граф внутри (те же гейты/ключи).
-- Пергамент-маска неисследованных районов — полигоны кварталов в geom (сейчас запечены в SVG).
-- Портреты недостающим ~400 душам банка.
+- Sub-locations: movement through building rooms = mini-graph inside (same gates/keys).
+- Parchment mask of unexplored districts — quarter polygons in geom (currently baked in SVG).
+- Portraits for the missing ~400 souls in the pool.
 
-Связано: [entities.md](entities.md) (схемы пулов) · [items.md](items.md) ·
-[service.md](service.md) (деплой пулов)
+Related: [entities.md](entities.md) (pool schemas) · [items.md](items.md) ·
+[service.md](service.md) (pool deployment)

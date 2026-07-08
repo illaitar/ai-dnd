@@ -1,9 +1,9 @@
-"""Предметы: фактшит в два слоя (surface/hidden) + модификаторы + осмотр с гейтами.
+"""Items: two-layer factsheet (surface/hidden) + modifiers + inspection with gates.
 
-Публичный контракт:
+Public contract:
     from aidnd.items import ItemCtx, LLMSmith, StubSmith, Capability, inspect, view, normalize
 
-Крафт/мастерство/прочность (craft.py, durability.py) — следующий срез.
+Craft/mastery/durability (craft.py, durability.py) — next slice.
 
 Key functions
 -------------

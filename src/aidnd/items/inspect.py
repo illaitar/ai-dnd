@@ -1,6 +1,6 @@
-"""Осмотр: резолвим гейт каждого скрытого свойства о Capability наблюдателя. Разный `via` вскрывает
-разное; expert делегирует чужой способности (NPC-знаток). view() — что наблюдатель ЗНАЕТ о предмете
-(surface + вскрытое), с истинной ценой только после вскрытия true_worth/forgery.
+"""Inspection: resolve gate of each hidden property by observer Capability. Different `via` reveals
+different properties; expert delegates to foreign abilities (NPC-expert). view() — what observer
+KNOWS about the item (surface + revealed), with true worth only after revealing true_worth/forgery.
 
 Key functions
 -------------
@@ -16,7 +16,7 @@ from .model import Capability
 
 
 def _roll(seed: str) -> int:
-    return Random(seed).randint(1, 20)                     # стабильный d20 (не перекинуть переосмотром)
+    return Random(seed).randint(1, 20)                     # stable d20 (can't re-roll by re-examining)
 
 
 def _gate(g: dict, cap: Capability, via: str, tool, context, seed: str) -> str:
@@ -30,9 +30,9 @@ def _gate(g: dict, cap: Capability, via: str, tool, context, seed: str) -> str:
     if via == "context":
         return "pass" if g["req"] and context and g["req"] in context else "fail"
     if via == "use":
-        return "fail"                                      # вскрывается использованием, не осмотром
+        return "fail"                                      # revealed by use, not inspection
     if via == "lore" and g["req"] and g["req"] in cap.competencies:
-        return "pass"                                      # знаток видит сразу
+        return "pass"                                      # expert sees immediately
     abil = max(cap.mod("int"), cap.mod("wis")) if via == "appraise" else cap.mod("int")
     total = abil + _roll(seed)
     return "pass" if total >= g["dc"] else "near" if total >= g["dc"] - 3 else "fail"
@@ -40,8 +40,8 @@ def _gate(g: dict, cap: Capability, via: str, tool, context, seed: str) -> str:
 
 def inspect(item: dict, cap: Capability, via: str, *, tool=None, context=None,
             observer: str = "pc", known=None) -> dict:
-    """Осмотреть предмет способом `via`. Возвращает {revealed:[hidden], hints:[fact], via}.
-    via='expert' — знаток пробует РОДНЫМ способом каждого свойства своей способностью."""
+    """Inspect item by method `via`. Returns {revealed:[hidden], hints:[fact], via}.
+    via='expert' — expert tries NATIVE method of each property by their ability."""
     known = set(known or [])
     base = f"{item.get('id') or item.get('name')}|{observer}"
     revealed, hints = [], []
@@ -51,7 +51,7 @@ def inspect(item: dict, cap: Capability, via: str, *, tool=None, context=None,
         g = h["gate"]
         used = g["via"] if via == "expert" else via
         if via != "expert" and used != g["via"]:
-            continue                                       # таким осмотром эту скрытую не вскрыть
+            continue                                       # can't reveal this hidden property with this inspection method
         res = _gate(g, cap, used, tool, context, f"{base}|{h['prop']}|{used}")
         if res == "pass":
             revealed.append(h)
@@ -61,7 +61,7 @@ def inspect(item: dict, cap: Capability, via: str, *, tool=None, context=None,
 
 
 def view(item: dict, known=None) -> dict:
-    """Что наблюдатель ЗНАЕТ о предмете (для UI/торга)."""
+    """What observer KNOWS about the item (for UI/negotiation)."""
     known = set(known or [])
     worth_known = any((h["prop"] in ("true_worth", "forgery"))
                       or any(m["target"] == "worth" for m in h.get("mods", []))

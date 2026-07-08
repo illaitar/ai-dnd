@@ -1,58 +1,58 @@
-# AI-DnD — документация (канон)
+# AI-DnD — Documentation (canon)
 
-Русскоязычная AI-D&D игра: живой фронтирный город (~900 NPC — разум, память, нужды, агенды),
-мир-на-пользователя из предсгенерённых пулов, пошаговый мир (**действие игрока = тик мира**).
-LLM парсит намерение, решает в неоднозначности, говорит голосами людей и арбитрит фриформ;
-детерминированный код владеет кубами, бюджетами, инвентарями и боем — и клампит всё, что
-предлагает модель.
+A Russian-language AI-D&D game: a living frontier town (~900 NPCs — minds, memory, needs, agendas),
+per-user world assembled from pre-generated pools, turn-based world (**player action = world tick**).
+The LLM parses intent, resolves ambiguity, speaks through people's voices, and arbitrates freeform;
+deterministic code owns dice, budgets, inventories, and combat — and clamps everything the model
+proposes.
 
-Каждый файл — один домен. Вместе — полная картина проекта. Формат разделов внутри:
-**как устроено** (канон, на проде) и **дальше** (принятые, но не реализованные решения).
+Each file covers one domain. Together they form a complete picture of the project. Section format:
+**how it works** (canon, in production) and **next** (decided but not yet implemented solutions).
 
-## Сквозные принципы (нарушение = провал ревью)
+## Cross-cutting principles (violation = review failure)
 
-1. **LLM обязателен, фоллбэков нет.** Нет модели → `LLMUnavailable`, кривой ответ →
-   `LLMBadOutput`; сервер отдаёт 503/502 с честной строкой игроку. Заглушки `Stub*` — только
-   в тестах, рантайм их никогда не строит.
-2. **LLM предлагает — код клампит.** Закон круга режется бюджетом рисунка, последствия
-   фриформа — ограниченным меню дельт, цели контрактов — только реальные вещи мира.
-3. **Общие абстрактные системы, не спецкейсы.** Единый резолвер действий, единый Combatant,
-   контракты = предикаты, поведение NPC = утилити над 7 примитивами. Никаких веток-глаголов.
-4. **Никакого хардкода геймплейных чисел.** Пороги/цены/шансы — в таблице `PB`
-   (engine/core.py), контент — в данных (json/пулы), не в строках кода.
-5. **Игрок = такой же агент, как NPC.** Особые ветки «если игрок» — только в UI.
-6. **Никаких механических гейтов на поведение NPC.** Не кулдауны и кэпы, а моделирование
-   недостающего куска мира + весь релевантный контекст в промпт. LOD и дедуп ленты — ок.
-7. **Пулы вместо генерации в рантайме.** Дорогой контент (персоны, здания, портреты)
-   куётся офлайн-скриптами; мир собирается из пулов < 1 сек без LLM.
-8. **Контент ≠ состояние.** `worlds.db` (пулы, в гите) / `live.db` (рантайм, gitignored);
-   деплой не трёт прогресс.
-9. **Всё настоящее.** Кража двигает реальные предметы, речь — действие, записанное в память
-   и историю, квест закрывается фактом мира, смерть NPC оставляет труп и свидетелей.
-10. **Пошаговый мир, LOD-кольца.** Время движется только тратой игрового времени игроком;
-    сцена игрока — полный гибрид с LLM, город — дешёвая симуляция без LLM.
+1. **LLM is mandatory, no fallbacks.** No model → `LLMUnavailable`, bad response →
+   `LLMBadOutput`; server returns 503/502 with an honest message to the player. Stubs `Stub*` exist
+   only in tests; runtime never instantiates them.
+2. **LLM proposes — code clamps.** A circle's law is constrained by the drawing budget, freeform
+   consequences limited to a menu of deltas, quest goals only real things in the world.
+3. **Generic abstract systems, no special cases.** One action resolver, one Combatant, contracts as
+   predicates, NPC behavior as utility over 7 primitives. No verb-based branching.
+4. **No hardcoded gameplay numbers.** Thresholds/prices/chances in the `PB` table (engine/core.py),
+   content in data (JSON/pools), not in code strings.
+5. **Player is an agent like any NPC.** Special branches "if player" only in UI.
+6. **No mechanical gates on NPC behavior.** Not cooldowns and caps, but modeling the missing world
+   piece plus all relevant context in the prompt. LOD and dedup of feeds are fine.
+7. **Pools instead of runtime generation.** Expensive content (personas, buildings, portraits)
+   forged by offline scripts; world assembled from pools in <1 sec without LLM.
+8. **Content ≠ state.** `worlds.db` (pools, in git) / `live.db` (runtime, gitignored); deploy
+   does not wipe progress.
+9. **Everything is real.** Theft moves actual items, speech is an action recorded in memory and
+   history, a quest closes by world fact, NPC death leaves a body and witnesses.
+10. **Turn-based world, LOD rings.** Time only advances via player spending game time; player scene
+    is full hybrid with LLM, city is cheap simulation without LLM.
 
-## Карта документации
+## Documentation map
 
-| файл | о чём |
+| file | topic |
 |---|---|
-| [entities.md](entities.md) | сущности данных: мир, человек, здание, предмет, контракт, закон, знание; обе БД |
-| [locations.md](locations.md) | локации: зоны интерьеров и улицы, объекты-предметы, рантайм сцены, дирижёр |
-| [loop.md](loop.md) | игровой цикл: session_step → game_tick, хендлеры, сервисы, прерывания |
-| [mind.md](mind.md) | разум NPC: утилити-ядро, decide_hybrid, память, агенды; общество (нужды→рутина) |
-| [citysim.md](citysim.md) | симуляция города: дома, работы, суточный ритм, ГИФ дня |
-| [worldgen.md](worldgen.md) | генерация: граф города → пулы → сборка мира-на-юзера |
-| [combat.md](combat.md) | боёвка BG-lite: грид, инициатива, авторезолв, логовища, пермасмерть |
-| [dungeons.md](dungeons.md) | подземелья: циклическая генерация, машины-виньетки, комнаты=зоны сцены |
-| [magic.md](magic.md) | магия кругов: рисунок → бюджет → закон от LLM → кламп; дикая магия |
-| [items.md](items.md) | предметы: фактшит surface/hidden, гейты осмотра, редкость, крафт по графу материалов |
-| [quests.md](quests.md) | контракты-предикаты, доска, гильдия с рангами |
-| [plot.md](plot.md) | основной сюжет: игрок-регрессор, библия от LLM (диздок, не в рантайме) |
-| [service.md](service.md) | сервис: auth, лимиты LLM, инвайт-коды, деплой, UI-каркас |
-| [structure.md](structure.md) | дерево кода: текущее, болячки, целевое + план миграции |
+| [entities.md](entities.md) | data entities: world, person, building, item, contract, law, knowledge; both DBs |
+| [locations.md](locations.md) | locations: interior zones and streets, object-items, runtime scenes, conductor |
+| [loop.md](loop.md) | game loop: session_step → game_tick, handlers, services, interrupts |
+| [mind.md](mind.md) | NPC minds: utility core, decide_hybrid, memory, agendas; society (needs→routine) |
+| [citysim.md](citysim.md) | city simulation: housing, work, daily rhythm, day GIF |
+| [worldgen.md](worldgen.md) | generation: city graph → pools → per-user world assembly |
+| [combat.md](combat.md) | combat BG-lite: grid, initiative, auto-resolve, lairs, permanent death |
+| [dungeons.md](dungeons.md) | dungeons: cyclic generation, vignette machines, rooms as scene zones |
+| [magic.md](magic.md) | circle magic: drawing → budget → law from LLM → clamp; wild magic |
+| [items.md](items.md) | items: fact sheet surface/hidden, inspection gates, rarity, crafting by material graph |
+| [quests.md](quests.md) | predicate contracts, board, guild with ranks |
+| [plot.md](plot.md) | main plot: regressor player, LLM bible (design doc, not in runtime) |
+| [service.md](service.md) | service: auth, LLM limits, invite codes, deploy, UI scaffold |
+| [structure.md](structure.md) | code tree: current, pain points, target + migration plan |
 
-## Как читать
+## How to read
 
-Начни с [entities.md](entities.md) (что существует) → [loop.md](loop.md) (что происходит за
-тик) → [mind.md](mind.md) (почему NPC живые). Остальное — по потребности. История прежних
-документов (SLICE/TASKS/MAGIC/PLOT/UI и доки старого движка) — в git.
+Start with [entities.md](entities.md) (what exists) → [loop.md](loop.md) (what happens per tick)
+→ [mind.md](mind.md) (why NPCs are alive). Everything else by need. History of prior docs
+(SLICE/TASKS/MAGIC/PLOT/UI and old engine docs) is in git.

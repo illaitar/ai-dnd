@@ -1,9 +1,9 @@
-"""ДЕЛА (deeds) — append-only журнал мира (docs/entities.md): единый субстрат сплетен,
-хроники, обязательств и (дальше) стражи/сюжета. Состояние остаётся авторитетным — журнал
-не пересобирает мир, он ПОМНИТ, что случилось.
+"""Deeds — append-only world journal (docs/entities.md): single substrate for intrigues,
+chronicles, obligations and (later) watchers/plot. State remains authoritative — journal
+does not rebuild the world, it REMEMBERS what happened.
 
-Обязательство (promise) — дело со статусом: active → done|broken. Мир напоминает о слове
-в промпте и ведёт на встречу рутиной (worldsim: кандидат «appointment» в срок).
+Promise — a deed with status: active → done|broken. World reminds of the word
+in the prompt and leads to meeting by routine (worldsim: candidate "appointment" on time).
 
 Key functions
 -------------
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from aidnd.server.play.engine.core import _gt, _phase, _store, _wid
 
-# публичные глаголы — годятся в сплетни/новости сцены
+# public verbs - fit for gossip/scene news
 PUBLIC_VERBS = ("theft", "murder", "clear", "arrest", "brawl")
 PHASES = ("morning", "day", "evening", "night")
 PHASE_RU = {"morning": "утром", "day": "днём", "evening": "вечером", "night": "ночью"}
@@ -34,7 +34,7 @@ def record(actor: str, verb: str, obj: str = "", place: str = "",
 
 
 def town_talk(names: dict | None = None, limit: int = 2) -> list[str]:
-    """Свежие ПУБЛИЧНЫЕ дела (за сутки) — материал «о чём судачит город»."""
+    """Fresh PUBLIC deeds (per day) - material for "what the city gossips about"."""
     out = []
     since = _gt() - 1440
     for d in _store().deeds(_wid(), since_gt=since, limit=30):
@@ -59,7 +59,7 @@ def town_talk(names: dict | None = None, limit: int = 2) -> list[str]:
 
 def promise_make(actor: str, to: str, what: str, when_ru: str, where: str,
                  node: int | None, place_label: str, witnesses: list | None) -> int:
-    """Зафиксировать СЛОВО: дело со статусом active. Срок — фаза суток (кламп по словарю)."""
+    """Record a WORD: a deed with status active. Deadline - phase of day (clamped by dictionary)."""
     due = RU2PHASE.get((when_ru or "").strip().lower(), "morning")
     return record(actor, "promise", obj=to, place=place_label, witnesses=witnesses,
                   status="active",
@@ -72,7 +72,7 @@ def promises_active(actor: str | None = None) -> list:
 
 
 def promise_line(d: dict, names: dict | None = None) -> str:
-    """Строка-напоминание для промпта должника."""
+    """Reminder line for the debtor's prompt."""
     to = (names or {}).get(d["obj"], d["obj"])
     where = d["data"].get("where") or d["place"] or ""
     return (f"ТЫ ДАЛ СЛОВО ({to}): {d['data'].get('what', '')} — "

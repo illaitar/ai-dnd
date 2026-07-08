@@ -1,41 +1,25 @@
-# Магия кругов (М-6)
+# Magic Circles (M-6)
 
-`src/aidnd/magic`. Эталон [принципа 2](README.md): **LLM свободен в СУТИ закона, но не в
-МОЩНОСТИ** — грамматика и бюджет детерминированы, кламп жёсткий.
+`src/aidnd/magic`. Reference for [principle 2](README.md): **LLM is free in the ESSENCE of the law, but not in POWER** — grammar and budget are deterministic, clamp is rigid.
 
-## Круг = РИСУНОК
+## Circle = DRAWING
 
-Состав: `[{глиф id, size 0..1, angle 0..360, ring 0|1}]`. Размер = сила, положение =
-обращение круга (на себя/вовне/вокруг), внутреннее кольцо = оттенок. Правила геометрии
-(`RULES_RU`, grammar.py) — те же 5 правил уходят в промпт законописца: размер↔сила,
-позиция↔направление, кольца, противоречия, бюджет.
+Composition: `[{glyph id, size 0..1, angle 0..360, ring 0|1}]`. Size = power, position = circle's orientation (on self/outward/around), inner ring = tint. Geometry rules (`RULES_RU`, grammar.py) — the same 5 rules go into the lawgiver's prompt: size↔power, position↔direction, rings, contradictions, budget.
 
-- **Бюджет силы** = Σ (вес глифа × множитель размера × множитель кольца).
-- **Канонический хэш** рисунка (размер по корзинам, угол по 8 секторам) — ключ кэша.
-- `base_law` — детерминированный СКЕЛЕТ закона по табличной логике; НЕ фоллбэк: `clamp_law`
-  достраивает им пропуски ответа LLM.
+- **Power budget** = Σ (glyph weight × size multiplier × ring multiplier).
+- **Canonical hash** of the drawing (size by bins, angle by 8 sectors) — cache key.
+- `base_law` — deterministic LAW SKELETON by table logic; NOT fallback: `clamp_law` fills in gaps in the LLM's answer.
 
-## Закон от LLM
+## Law from LLM
 
-Роль `spell_scribe`: рисунок + правила + словарь глифов → закон ЦЕЛИКОМ: имя/флейвор/
-sensory/kind (**freeform** — полёт, туман, иллюзия, оковы…)/power/target/range/duration/
-taboo/mech. Сервер клампит (`clamp_law`): power ≤ бюджет, range ≤ 12, duration ≤ 20, кость
-`N≤power`d`≤8`, heal ≤ 2×power, aoe-радиус ≤ 1+power/3, статусы из меню. Кэш — **гримуар-
-на-мир** по хэшу рисунка (`flags: grim|<hash>`; повторный каст того же круга = тот же закон).
+Role `spell_scribe`: drawing + rules + glyph dictionary → law IN FULL: name/flavor/sensory/kind (**freeform** — flight, fog, illusion, shackles…)/power/target/range/duration/taboo/mech. Server clamps (`clamp_law`): power ≤ budget, range ≤ 12, duration ≤ 20, die `N≤power`d`≤8`, heal ≤ 2×power, aoe-radius ≤ 1+power/3, statuses from menu. Cache — **grimoire-per-world** by drawing hash (`flags: grim|<hash>`; re-casting the same circle = same law).
 
-## Каст БЕЗ броска
+## Cast WITHOUT roll
 
-Срыв — только по честным причинам: противоречия в рисунке / перерасход / свеча погасла →
-**дикая магия**: роль `wild_magic` разыгрывает исход из ОГРАНИЧЕННОГО меню
-`backfire · nothing · scorch · warp · boon` (magnitude 1-3, стихия из словаря) — мир не
-сломать. Боевое/тёмное колдовство при свидетелях = табу → очки розыска (PB `taboo_witness`).
+Failure — only for honest reasons: contradictions in the drawing / overspend / candle extinguished → **wild magic**: role `wild_magic` plays out outcome from LIMITED menu `backfire · nothing · scorch · warp · boon` (magnitude 1-3, element from dictionary) — won't break the world. Combat/dark witchcraft with witnesses = taboo → bounty points (PB `taboo_witness`).
 
-## Экономика маны (все числа — PB)
+## Mana economy (all numbers — PB)
 
-Старт 12 / кап 14, жёсткий потолок Int×8; реген 1/час, **сон ×3**; усталость от перерасхода
-(штраф до истечения); черчение на канвасе сливает ману в реальном времени (drag/размер/
-кольца — интерактивный холст в UI). Обучение глифам — у мага/писца за монеты
-(handlers/magic.py: learn/teachers).
+Start 12 / cap 14, hard cap Int×8; regen 1/hour, **sleep ×3**; exhaustion from overspend (penalty until expiration); drawing on canvas drains mana in real time (drag/size/rings — interactive canvas in UI). Learning glyphs — from mage/scribe for coins (handlers/magic.py: learn/teachers).
 
-Связано: [loop.md](loop.md) (хендлер magic) · [combat.md](combat.md) (mech в бою) ·
-[entities.md](entities.md) (гримуар во flags)
+Related: [loop.md](loop.md) (magic handler) · [combat.md](combat.md) (mechanics in combat) · [entities.md](entities.md) (grimoire in flags)

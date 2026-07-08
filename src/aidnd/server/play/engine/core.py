@@ -1,6 +1,6 @@
-"""Игровой контур — ЯДРО: сессии-миры, состояние, БД, время, игрок-агент, общие хелперы.
+"""Game loop — CORE: per-user worlds, state, DB, time, player-agent, utility helpers.
 
-Слой mechanics/ (см. docs/loop.md).
+Layer mechanics/ (see docs/loop.md).
 
 Key functions
 -------------
@@ -30,8 +30,8 @@ from aidnd.worldgen import WorldStore
 
 
 async def _play_session(request: Request):
-    """Зависимость всех /api/play/*: юзер по cookie → ЕГО мир → сессия мира в contextvar.
-    Дев/тесты: AIDND_OPEN_PLAY=1 (или БД сервиса лежит) → общий мир 1 без входа."""
+    """FastAPI dependency for all /api/play/*: user by cookie → their world → world session in contextvar.
+    Dev/tests: AIDND_OPEN_PLAY=1 (or service DB is down) → shared world 1 without login."""
     uid, db_ok = None, True
     token = request.cookies.get("aidnd_session", "")
     try:
@@ -43,13 +43,13 @@ async def _play_session(request: Request):
                 u = await user_for_token(db, token)
                 uid = u.id if u else None
                 request.state.user = u
-    except Exception:  # noqa: BLE001 — сервисная БД лежит
+    except Exception:  # noqa: BLE001 — service DB is down
         db_ok = False
     if uid is None:
         if os.environ.get("AIDND_OPEN_PLAY") or not db_ok:
             if 1 not in _SESS:
                 dev_seed = int(_store().flag_get(0, "dev_seed") or 1)
-                _SESS[1] = _fresh_sess(1, dev_seed)  # дев/демо: общий мир; сид растёт после смерти
+                _SESS[1] = _fresh_sess(1, dev_seed)  # dev/demo: shared world; seed grows after death
             _CUR.set(_SESS[1])
             return
         raise HTTPException(401, "требуется вход")
@@ -70,8 +70,8 @@ PLAYER = "pc"
 _STORE: WorldStore | None = None
 _POOL: WorldStore | None = None
 
-# ЕДИНАЯ таблица баланса play-слоя (по образцу mind.value.BAL): все пороги/коэффициенты/времена
-# ИМЕНОВАНЫ и живут здесь — не россыпью по коду.
+# UNIFIED balance table for play layer (after mind.value.BAL pattern): all thresholds/coefficients/times
+# NAMED and live here — not scattered across code.
 PB = {
     "start_gt": 19 * 60 + 40,
     "start_coins": 12,
@@ -83,26 +83,26 @@ PB = {
     "live_tick_min": 3,
     "live_gap_s": 6.0,
     "give_min": 1,
-    # цены: продать торговцу / купить у него (от ЕГО видения worth)
+    # prices: sell to trader / buy from them (from THEIR vision of worth)
     "sell_base": 0.55,
     "sell_aff": 0.15,
     "sell_greed": -0.2,
     "buy_base": 1.35,
     "buy_greed": 0.25,
     "buy_aff": -0.15,
-    # гейты преступлений
+    # crime gates
     "steal_dc_base": 9,
     "steal_dc_att": 8,
     "rob_dc_base": 10,
     "rob_dc_brav": 8,
-    "purse_cut": 2,  # кража уносит 1/N кошеля
+    "purse_cut": 2,  # theft takes 1/N of purse
     "rob_cut_num": 2,
-    "rob_cut_den": 3,  # грабёж уносит num/den
-    # просьба ключа: bar = base + greed·k + honesty·k
+    "rob_cut_den": 3,  # robbery takes num/den
+    # ask for key: bar = base + greed·k + honesty·k
     "askkey_base": 0.5,
     "askkey_greed": 0.4,
     "askkey_honesty": -0.2,
-    # контракты
+    # contracts
     "contract_enemy_aff": -0.1,
     "contract_poor_purse": 5,
     "contract_reward_min": 2,
@@ -111,12 +111,12 @@ PB = {
     "befriend_aff": 0.25,
     "merchant_float": 30,
     "hostile_aff": -0.2,
-    # распорядок жителей — из НУЖД (aidnd.society), не из вероятностей ролей (см. society/*)
-    "live_llm_cap": 8,      # ПОТОЛОК ЛАТЕНТНОСТИ: сколько NPC получают LLM-ход за тик (дирижёр)
-    "street_lod_cap": 10,   # LOD-кольцо УЛИЦЫ: скольких видим на открытом узле (в здании — все)
-    "impulse_llm": 1.0,  # дирижёр: LLM-ход только при импульсе выше порога (долг/нужда/беседа)
-    "plan_cap": 3,  # цепочка звеньев из одной фразы: план длиннее — обрезаем
-    # СДЕЛКИ игрока (deal-гейт): базовые DC/цены по видам, веса нрава/адекватности ставки
+    # NPC schedule — from NEEDS (aidnd.society), not from role probabilities (see society/*)
+    "live_llm_cap": 8,      # LATENCY CEILING: how many NPCs get LLM turn per tick (conductor)
+    "street_lod_cap": 10,   # LOD-ring STREET: how many we see at open node (in building — all)
+    "impulse_llm": 1.0,  # conductor: LLM turn only if impulse above threshold (debt/need/talk)
+    "plan_cap": 3,  # chain links from one phrase: plan longer — truncate
+    # PLAYER DEALS (deal-gate): base DC/prices by type, weight of temperament/bet adequacy
     "deal_dc_dead": 15,
     "deal_dc_bring": 11,
     "deal_dc_visit": 9,
@@ -129,26 +129,26 @@ PB = {
     "deal_honesty_dead_k": 12,
     "deal_malice_dead_k": 8,
     "deal_adq_k": 5,
-    "deal_adq_clamp": 6,  # адекватность ставки двигает DC максимум на ±6
+    "deal_adq_clamp": 6,  # bet adequacy moves DC maximum by ±6
     "deal_aff_k": 6,
     "deal_fear_k": 4,
     "deal_flat_honesty": 0.75,
-    "deal_flat_malice": 0.35,  # честный и незлобный кровь не берёт БЕЗ броска
-    "deal_kin_aff": 0.3,  # тёплые отношения с целью — «своих не трону»
-    "deal_due_min": 1440,  # сутки на исполнение уговора
-    "deal_night_min": 300,  # на кровь идут не раньше чем через 5 часов (ночью)
-    "crime_solicit": 3,  # подстрекательство к убийству при отказе — розыск
-    # ПОДСЛУШАТЬ (перцептивное звено): DC = база + шум зоны-цели; успех держится N тиков
+    "deal_flat_malice": 0.35,  # honest and harmless won't take blood WITHOUT roll
+    "deal_kin_aff": 0.3,  # warm relations with target — "won't touch own"
+    "deal_due_min": 1440,  # one day to fulfill agreement
+    "deal_night_min": 300,  # blood not before 5 hours (at night)
+    "crime_solicit": 3,  # solicitation of murder on refusal — wanted
+    # EAVESDROP (perceptual link): DC = base + zone noise; success holds N ticks
     "listen_dc_base": 8,
     "listen_noise_k": 8,
     "listen_ticks": 3,
-    "bg_feed_p": 0.25,  # фоновое занятие попадает в ленту с этой вероятностью (LOD)
+    "bg_feed_p": 0.25,  # background activity appears in feed with this probability (LOD)
     "here_show_cap": 12,
-    # подарок: прирост симпатии = min(cap, base + worth/div)
+    # gift: affinity gain = min(cap, base + worth/div)
     "gift_aff_base": 0.05,
     "gift_aff_div": 100,
     "gift_aff_cap": 0.25,
-    # герой и логова
+    # hero and lairs
     "pc_max_hp": 18,
     "lairs": 5,
     "lair_cr_near": 0.8,
@@ -157,17 +157,17 @@ PB = {
     "defeat_coin_cut": 2,
     "loot_coin_per_cr": 6,
     "loot_item_chance": 0.6,
-    "combat_round_s": 5,  # 1 раунд боя = 5 секунд игрового времени
-    "dungeon_waves": 2,  # логово = столько накатов врага
-    "dungeon_step_min": 4,  # переход между комнатами данжа
-    "dungeon_loot_min": 3,  # обыск комнаты
-    "dungeon_wander_n": 2,  # блуждающие: проверка 1-к-6 каждые N переходов
-    "incident_p": 0.6,  # шанс нового городского происшествия за утро (если активных < 2)
-    "incident_gang_malice": 0.55,  # порог гнильцы: из таких горожан сколачиваются шайки
-    "caravan_chance": 0.35,  # шанс каравана с товаром за утро
-    "path_event_dc": 0.7,  # порог эмоции NPC, прерывающий путь
-    "say_cap_per_tick": 3,  # не больше стольких реплик за живой тик (LOD ленты)
-    # СТРАЖА / РОЗЫСК: вес преступлений (очки), порог задержания, спад/сутки, штраф, побег
+    "combat_round_s": 5,  # 1 combat round = 5 seconds game time
+    "dungeon_waves": 2,  # lair = this many enemy waves
+    "dungeon_step_min": 4,  # transition between dungeon rooms
+    "dungeon_loot_min": 3,  # search room
+    "dungeon_wander_n": 2,  # wanderers: 1-in-6 check every N transitions
+    "incident_p": 0.6,  # chance of new city incident in morning (if active < 2)
+    "incident_gang_malice": 0.55,  # threshold for criminals: townspeople form gangs
+    "caravan_chance": 0.35,  # chance of caravan with goods in morning
+    "path_event_dc": 0.7,  # NPC emotion threshold that breaks path
+    "say_cap_per_tick": 3,  # no more than this many lines per live tick (LOD feed)
+    # GUARD / WANTED: crime weight (points), arrest threshold, decay/day, fine, escape
     "crime_pickpocket": 1,
     "crime_rob": 3,
     "crime_assault": 4,
@@ -176,39 +176,39 @@ PB = {
     "wanted_decay": 2,
     "watch_fine_per_pt": 3,
     "watch_flee_dc": 12,
-    "watch_jail_h": 7,  # не заплатил — «отсидка» до утра
-    # МАГИЯ (мана-свеча): старт/потолок/реген/рост/усталость/сложность каста
+    "watch_jail_h": 7,  # didn't pay — "lockup" until morning
+    # MAGIC (mana-candle): start/cap/regen/growth/fatigue/cast difficulty
     "mana_start": 12.0,
     "mana_cap_start": 14.0,
-    "mana_hardcap_per_int": 8,  # потолок ≤ Int×8
+    "mana_hardcap_per_int": 8,  # cap ≤ Int×8
     "mana_regen_base": 1.0,
     "mana_grow_frac": 0.1,
-    "mana_sleep_mult": 3,  # сон наполняет свечу быстрее
+    "mana_sleep_mult": 3,  # sleep fills candle faster
     "fatigue_div": 8,
-    "fatigue_min_per_pt": 24,  # усталость: 1+спалено/8 на статы, отходит
-    # ЧЕРЧЕНИЕ (М-5.2): свеча тает ~drain/сек (мягче от Int+Wis) + вес глифа при нанесении;
-    # известный круг из гримуара — мгновенно за долю сложности; выброс (маны 0) → misfire+усталость×mult
+    "fatigue_min_per_pt": 24,  # fatigue: 1+burned/8 to stats, fades over time
+    # DRAWING (M-5.2): candle drains ~drain/sec (softer from Int+Wis) + glyph weight when inscribed;
+    # known circle from grimoire — instant for fraction of complexity; burnout (mana 0) → misfire+fatigue×mult
     "draw_drain_per_s": 1.5,
     "draw_intwis_k": 0.12,
     "known_cost_k": 0.6,
     "burnout_fat_mult": 2,
-    # обучение глифам у мага/писца: цена = base + вес·k; ниже симпатии — не учит; высокая → даром
+    # glyph teaching from mage/scribe: price = base + weight·k; below affinity — won't teach; high → free
     "learn_base": 6,
     "learn_per_weight": 5,
     "learn_aff_min": -0.15,
     "learn_aff_free": 0.5,
-    "taboo_witness": 2,  # атакующая магия при свидетелях → розыск
+    "taboo_witness": 2,  # attack magic with witnesses → wanted
     "craft_skill_dc": 12,
-    "craft_fail_min": 15,  # незнакомое ремесло: бросок Int / цена провала
+    "craft_fail_min": 15,  # unfamiliar craft: Int roll / failure cost
     "guild_float": 120,
     "guild_reward_per_cr": 8,
     "guild_mark_fine": 15,
-    # NPC-зачистки: шанс утреннего похода смелой пары
+    # NPC delves: chance of brave pair morning expedition
     "npc_delve_chance": 0.6,
     "npc_brave_min": 0.55,
     "fighter_roles": ("стражник", "охотник", "головорез", "бродяга", "наёмник"),
     "board_max_ads": 4,
-    "board_npc_fulfill": 0.4,  # столб: потолок объявлений, шанс закрытия NPC
+    "board_npc_fulfill": 0.4,  # board: cap ads, NPC fulfillment chance
     "rest_cost": 2,
     "rest_until_h": 7,
     "tone_friendly_aff": 0.04,
@@ -223,8 +223,8 @@ _GT0 = PB["start_gt"]
 
 def _gt() -> int:
     v = _S.get("gt")
-    if v is None:  # холодный старт: время — ИЗ СЕЙВА, не с нуля
-        row = _store().get_pc(_wid()) or {}  # (иначе распорядок/фаза дня строятся по 19:40)
+    if v is None:  # cold start: time — FROM SAVE, not from zero
+        row = _store().get_pc(_wid()) or {}  # (else schedule/day phase built on 19:40)
         v = _S["gt"] = int(row.get("gt", _GT0))
     return v
 
@@ -235,7 +235,7 @@ def _gt_add(minutes: int) -> int:
 
 
 def _mt() -> int:
-    return _gt() // 10  # такт памяти (halflife ретривы 144 такта ≈ сутки)
+    return _gt() // 10  # memory tick (halflife retrieves 144 ticks ≈ one day)
 
 
 def _phase(gt: int | None = None) -> str:
@@ -257,7 +257,7 @@ _PHASE_RU = {"morning": "утро", "day": "день", "evening": "вечер", 
 
 
 def _store() -> WorldStore:
-    """РАНТАЙМ миров (data/live.db, в гит не идёт): placements/items/flags/контракты/состояния."""
+    """RUNTIME worlds (data/live.db, not in git): placements/items/flags/contracts/states."""
     global _STORE
     if _STORE is None:
         base = os.path.dirname(WorldStore().path)
@@ -266,16 +266,16 @@ def _store() -> WorldStore:
 
 
 def _pool() -> WorldStore:
-    """КОНТЕНТ-ПУЛЫ (data/worlds.db, коммитится): банк людей, банк зданий."""
+    """CONTENT POOLS (data/worlds.db, committed): people bank, buildings bank."""
     global _POOL
     if _POOL is None:
         _POOL = WorldStore()
     return _POOL
 
 
-# ------------------------------------------------ ИГРОК-АГЕНТ (pc_state) -- #
+# ------------------------------------------------ PLAYER-AGENT (pc_state) -- #
 def _pc() -> NpcState:
-    """Игрок — такой же агент: NpcState с памятью и отношениями. Персист в store."""
+    """Player — same agent: NpcState with memory and relationships. Persists in store."""
     if _S.get("pc") is None:
         st = NpcState.from_config(NpcConfig(id=PLAYER, name="ты", role="странник"))
         row = _store().get_pc(_wid())
@@ -290,7 +290,7 @@ def _pc() -> NpcState:
                     about=m.get("about") or [],
                 )
                 mm.last_access = m.get("last_access", m["t"])
-        _S["pc"] = st  # время НЕ трогаем: _gt() сам грузит из сейва
+        _S["pc"] = st  # don't touch time: _gt() loads from save itself
     return _S["pc"]
 
 
@@ -322,9 +322,9 @@ def _pc_set_name(name: str) -> None:
 _PC_CAP = Capability(abilities={"str": 10, "dex": 11, "con": 10, "int": 11, "wis": 11, "cha": 12})
 
 
-# ------------------------------------------------------------ МАНА (магия) --- #
+# ------------------------------------------------------------ MANA (magic) --- #
 def _mana_hardcap() -> float:
-    return _PC_CAP.abilities.get("int", 10) * PB["mana_hardcap_per_int"]  # предел роста от Int
+    return _PC_CAP.abilities.get("int", 10) * PB["mana_hardcap_per_int"]  # growth ceiling from Int
 
 
 def _mana_load() -> None:
@@ -338,12 +338,12 @@ def _mana_load() -> None:
 
 
 def _mana_rate() -> float:
-    """Реген маны в час бодрствования — от Int/Wis."""
+    """Mana regen per waking hour — from Int/Wis."""
     return max(0.2, PB["mana_regen_base"] + _PC_CAP.mod("int") + _PC_CAP.mod("wis"))
 
 
 def _mana() -> float:
-    """Текущая мана с ЛЕНИВЫМ регеном от Int/Wis (без покадрового тика)."""
+    """Current mana with LAZY regen from Int/Wis (no per-tick frame)."""
     _mana_load()
     dt_h = max(0, _gt() - _S["mana_gt"]) / 60.0
     if dt_h > 0:
@@ -353,8 +353,8 @@ def _mana() -> float:
 
 
 def _mana_sleep(hours: float) -> None:
-    """Сон наполняет свечу быстрее бодрствования (×mana_sleep_mult): добор сверх ленивого регена."""
-    _mana()  # ленивый реген за проспанное — по ставке ×1
+    """Sleep fills candle faster than waking (×mana_sleep_mult): bonus on top of lazy regen."""
+    _mana()  # lazy regen for time asleep — at rate ×1
     bonus = _mana_rate() * max(0.0, hours) * (PB["mana_sleep_mult"] - 1)
     _S["mana"] = min(_S["mana_cap"], _S["mana"] + bonus)
 
@@ -370,7 +370,7 @@ def _mana_spend(amount: float) -> float:
 
 
 def _mana_grow(spent: float) -> None:
-    """Рост потолка от выжигания (магия как мышца), до жёсткого предела Int×N."""
+    """Cap growth from burning (magic as muscle), up to hard limit Int×N."""
     if spent <= 0:
         return
     _S["mana_cap"] = min(
@@ -380,7 +380,7 @@ def _mana_grow(spent: float) -> None:
 
 
 def _fatigue() -> int:
-    """Текущий штраф усталости ко ВСЕМ характеристикам (спадает со временем)."""
+    """Current fatigue penalty to ALL stats (fades over time)."""
     _mana_load()
     if _gt() >= _S.get("fat_until", 0):
         _S["fat"], _S["fat_until"] = 0, 0
@@ -388,18 +388,18 @@ def _fatigue() -> int:
 
 
 def _fat_add(spent: float) -> None:
-    """Надрыв после каста: усталость по спалённой мане, длится дольше при большем выгорании."""
+    """Burnout after cast: fatigue from burned mana, lasts longer with bigger burnout."""
     pts = 1 + int(spent) // PB["fatigue_div"]
     _S["fat"] = _fatigue() + pts
     _S["fat_until"] = _gt() + pts * PB["fatigue_min_per_pt"]
 
 
-# стартовый набор глифов игрока (§М1e): хватает на огненную стрелу и лечение; остальное — учить
+# player starter glyph set (§M1e): enough for fire arrow and healing; rest must be learned
 _STARTER_GLYPHS = ("огонь", "свет", "стрела", "исцелить", "больше")
 
 
 def _glyphs_known() -> list:
-    """Глифы, которыми ВЛАДЕЕТ игрок (персист в pc_state); прочие надо выучить у мага."""
+    """Glyphs OWNED by player (persists in pc_state); others must be learned from mage."""
     if _S.get("glyphs") is None:
         row = _store().get_pc(_wid()) or {}
         g = row.get("glyphs")
@@ -408,7 +408,7 @@ def _glyphs_known() -> list:
 
 
 def _glyph_learn(gid: str) -> bool:
-    """Добавить глиф в арсенал игрока. True — впервые выучен, False — уже знал."""
+    """Add glyph to player arsenal. True — learned for first time, False — already knew."""
     known = _glyphs_known()
     if gid in known:
         return False
@@ -417,7 +417,7 @@ def _glyph_learn(gid: str) -> bool:
 
 
 def _pc_cap_eff():
-    """Способности игрока С УЧЁТОМ усталости (для новых бросков/каста) — все статы просажены."""
+    """Player abilities WITH FATIGUE applied (for new rolls/casts) — all stats penalized."""
     fat = _fatigue()
     if not fat:
         return _PC_CAP
@@ -448,7 +448,7 @@ def _pc_save() -> None:
             "glyphs": _glyphs_known(),
             "loc": _S.get("loc"),
             "inside": _S.get("inside"),
-            "room": _S.get("room"),  # позиция переживает рестарт
+            "room": _S.get("room"),  # position survives restart
             "zone": _S.get("zone"),
             "memory": [
                 {
@@ -462,7 +462,7 @@ def _pc_save() -> None:
                 for m in st.memory.items[-400:]
             ],
         },
-    )  # хвост — журнал не разрастается бесконечно
+    )  # tail — log doesn't grow infinitely
 
 
 def _met() -> set:
@@ -475,7 +475,7 @@ def _pc_remember(text: str, importance: float = 0.3, about=None, kind: str = "ob
 
 
 def _npc_save(pid: str) -> None:
-    """Прожитое NPC (память/отношения/нужды) → БД: переживает рестарт сервера."""
+    """NPC lived experience (memory/relationships/needs) → DB: survives server restart."""
     p = (_S.get("people") or {}).get(pid)
     if not p:
         return
@@ -501,7 +501,7 @@ def _npc_save(pid: str) -> None:
     )
 
 
-_SESS: dict = {}  # world_id → сессия мира (в памяти)
+_SESS: dict = {}  # world_id → world session (in memory)
 _CUR = contextvars.ContextVar("play_sess", default=None)
 _UID = contextvars.ContextVar("play_uid", default=None)
 
@@ -517,7 +517,7 @@ def _llm_used(uid) -> int:
 
 
 def _llm_hook(role, model) -> None:
-    """Каждый LLM-вызов в игровом контуре — тик счётчика пользователя (лимит без кода)."""
+    """Each LLM call in game loop — tick of user counter (limit without code)."""
     uid = _UID.get()
     if uid is not None:
         _store().flag_set(0, _llm_day_key(uid), str(_llm_used(uid) + 1))
@@ -538,8 +538,8 @@ def _fresh_sess(wid: int, seed: int) -> dict:
 
 
 class _SessProxy:
-    """Код по-прежнему говорит _S[...] — за ним стоит сессия ТЕКУЩЕГО мира (contextvar).
-    Вне auth-контура (тесты/дев) — общий мир 1."""
+    """Code still says _S[...] — behind it stands CURRENT world session (contextvar).
+    Outside auth boundary (tests/dev) — shared world 1."""
 
     def _d(self) -> dict:
         d = _CUR.get()
@@ -578,7 +578,7 @@ def _wid() -> int:
 
 
 def current_world_id():
-    """ID мира текущего запроса (для тегирования логов) или None вне play-сессии."""
+    """World ID of current request (for log tagging) or None outside play session."""
     s = _CUR.get()
     return s.get("wid") if s else None
 
@@ -587,8 +587,8 @@ _COLORS = ["#c98a52", "#6f8f6a", "#8a6fae", "#a86a6a", "#5f8296", "#b0894a"]
 
 
 def _binfo(bid: str | None) -> dict:
-    """Имя/вид/метка места — из ФАКТШИТА здания (enrichment генерит name/atmosphere/type),
-    не из кода. Фоллбэк — вывеска графа."""
+    """Name/kind/label of place — from building FACTSHEET (enrichment generates name/atmosphere/type),
+    not from code. Fallback — sign from DB."""
     bd = _store().get_building(_wid(), bid) if bid else None
     data = (bd or {}).get("data") or {}
     name = data.get("name") or (bd or {}).get("sign") or "Здание"
@@ -597,7 +597,7 @@ def _binfo(bid: str | None) -> dict:
     return {"name": name, "kind": kind, "label": label}
 
 
-# тип здания (из фактшита) → роль работника; таблица данных, порядок = приоритет совпадения
+# building type (from factsheet) → worker role; data table, order = match priority
 _TYPE_ROLE = (
     ("таверн", "трактирщик"),
     ("трактир", "трактирщик"),
@@ -632,12 +632,12 @@ _TYPE_ROLE = (
     ("гильди", "стражник"),
 )
 
-# роли, что учат магии (§М-4): маг в башне — стихиям и глифам; писец — «глаголам» письма
+# roles that teach magic (§M-4): mage in tower — elements and glyphs; scribe — "words" of writing
 TEACHER_ROLES = ("маг", "писец", "писарь")
 
 
 def _role_for_building(bid: str) -> str:
-    """Роль работника — ИЗ ДАННЫХ здания (тип/имя из фактшита), не по порядковому кругу."""
+    """Worker role — FROM BUILDING DATA (type/name from factsheet), not from ordinal circle."""
     info = _binfo(bid)
     t = (info["kind"] + " " + info["name"]).lower()
     return next((r for w, r in _TYPE_ROLE if w in t), "горожанин")
@@ -647,7 +647,7 @@ def _city_name() -> str:
     v = _S.get("city_name")
     if v is None:
         v = _store().flag_get(_wid(), "city_name")
-        if not v:  # новый мир: имя — из ПУЛА имён (без LLM)
+        if not v:  # new world: name — from NAME POOL (no LLM)
             names = _pool().pool_buildings("city_name")
             if names:
                 v = random.Random(f"cname|{_wid()}").choice(names)["data"]["name"]
@@ -663,15 +663,15 @@ def _seen() -> set:
 
 
 def _mark_seen(bid: str | None) -> None:
-    """Туман войны: локация становится известной (метка на карте), когда игрок её УЗНАЛ —
-    пришёл сам или услышал от людей/справки."""
+    """Fog of war: location becomes known (map marker) when player LEARNS it —
+    came themselves or heard from people/info."""
     if bid and bid not in _seen():
         _S["seen"].add(bid)
         _store().flag_set(_wid(), f"seen|{bid}")
 
 
 def _topics_for(p) -> list:
-    """Темы разговора — из ПЕРСОНЫ (слухи/стремления), не из таблицы ролей."""
+    """Conversation topics — from PERSONA (rumors/wants), not from role table."""
     per = p.persona or {}
     out = [t[:40] for t in (per.get("rumors") or [])[:2]] + [
         t[:40] for t in (per.get("wants") or [])[:1]
@@ -680,7 +680,7 @@ def _topics_for(p) -> list:
 
 
 def _spurns(p) -> bool:
-    """Не желает иметь с тобой дела: вражда или свежий адресный гнев."""
+    """Doesn't want to deal with you: enmity or fresh targeted anger."""
     rel = p.state.relationships.get(PLAYER) or {}
     ang = p.state.emotion.get("anger", 0)
     return rel.get("affinity", 0) < PB["hostile_aff"] or (
@@ -704,13 +704,13 @@ def _model():
         from aidnd.inference import ModelManager
 
         mgr = ModelManager()
-        mgr.on_call = _llm_hook  # каждый вызов — тик лимита юзера
+        mgr.on_call = _llm_hook  # each call — tick of user limit
         _S["model"] = mgr
     return _S["model"]
 
 
 def _inscriber():
-    """Инскриптор магии (роль А — закон круга, роль Б — дикий хаос). Только LLM — без фоллбэков."""
+    """Magic inscriber (role A — circle law, role B — wild chaos). LLM only — no fallbacks."""
     if _S.get("inscriber") is None:
         from aidnd.magic import LLMInscriber
 
@@ -719,7 +719,7 @@ def _inscriber():
 
 
 def _grimoire_get(h: str) -> dict | None:
-    """Вписанный закон круга (по хэшу состава) для текущего мира — или None."""
+    """Inscribed circle law (by composition hash) for current world — or None."""
     raw = _store().flag_get(_wid(), f"grim|{h}")
     return json.loads(raw) if raw else None
 
@@ -729,7 +729,7 @@ def _grimoire_put(h: str, entry: dict) -> None:
 
 
 def _grimoire_list() -> list:
-    """Все вписанные в мир круги (гримуар игрока), в порядке первого творения."""
+    """All circles inscribed in world (player grimoire), in order of first creation."""
     out = []
     for v in _store().flags_prefix(_wid(), "grim|").values():
         try:
@@ -740,12 +740,12 @@ def _grimoire_list() -> list:
 
 
 def _in_room(where: str, room: str | None, rooms: list) -> bool:
-    """Ёмкость принадлежит помещению: по совпадению слов комнаты в where (падежи не мешают);
-    иначе — общий зал."""
+    """Container belongs to room: by matching room words in where (cases don't matter);
+    else — common hall."""
     wt = _tokens_ru(where)
     if room:
         return bool(_tokens_ru(room) & wt)
-    return not any(_tokens_ru(r["name"]) & wt for r in rooms)  # в зале — не привязанное к комнатам
+    return not any(_tokens_ru(r["name"]) & wt for r in rooms)  # in hall — not tied to rooms
 
 
 def _role_at(node, people, spot, n2b):
@@ -778,8 +778,8 @@ _PORT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "p
 
 
 def _portrait_url(p, emo: str | None = None) -> str | None:
-    """URL портрета NPC под эмоцию (статика /portraits). None, если файла нет на диске —
-    так прод без ещё не залитых картинок отдаёт инициалы, а не битые ссылки (персона живёт в БД)."""
+    """Portrait URL for NPC by emotion (static /portraits). None if file not on disk —
+    so prod without uploaded images returns initials, not broken links (persona lives in DB)."""
     ports = getattr(p, "portraits", None) or {}
     if not ports:
         return None
@@ -789,7 +789,7 @@ def _portrait_url(p, emo: str | None = None) -> str | None:
 
 
 def _tokens_ru(s: str) -> set:
-    """Грубый стем: префикс-5 (падежи не мешают «медяки»↔«медяков»)."""
+    """Crude stem: prefix-5 (cases don't matter "медяки"↔"медяков")."""
     return {
         w[:5] for w in str(s).lower().replace("«", " ").replace("»", " ").split() if len(w) >= 4
     }
@@ -800,9 +800,9 @@ def _wanted() -> int:
 
 
 def _wanted_add(pts: int, reason: str = "") -> None:
-    """Очки розыска: копятся от засвидетельствованных преступлений, спадают со временем."""
+    """Wanted points: accumulate from witnessed crimes, decay over time."""
     _store().flag_set(_wid(), "wanted|pc", str(max(0, _wanted() + int(pts))))
-    if reason and pts > 0:  # хроника — для реплики стражи
+    if reason and pts > 0:  # chronicle — for guard dialogue
         prior = _store().flag_get(_wid(), "crimes|pc") or ""
         _store().flag_set(
             _wid(), "crimes|pc", ((prior + "; " + reason) if prior else reason)[-240:]
@@ -815,8 +815,8 @@ def _wanted_clear() -> None:
 
 
 def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
-    """Преступление на глазах: жертва в гневе, свидетели пишут память (сплетни разнесут),
-    очки розыска растут (жертва доносит + чем больше глаз, тем жарче)."""
+    """Crime in plain sight: victim enraged, witnesses record memory (gossip spreads),
+    wanted points grow (victim reports + more eyes = hotter)."""
     p = people[npc]
     rel = p.state.rel(PLAYER)
     rel["affinity"] = min(rel["affinity"], -0.5)
@@ -830,13 +830,13 @@ def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
         )
         _npc_save(w)
     _npc_save(npc)
-    _wanted_add(weight + min(3, len(wit)), what)  # жертва + очевидцы → розыск
+    _wanted_add(weight + min(3, len(wit)), what)  # victim + witnesses → wanted
     return len(wit)
 
 
 def _descriptor(p) -> str:
-    """Незнакомец различим ГЛАЗАМИ: пол + УНИКАЛЬНАЯ примета (look.marks/hair/face из персоны),
-    одежда — вторично. Три «мужика в балахонах» должны быть тремя разными людьми."""
+    """Stranger distinguished BY EYES: sex + UNIQUE mark (look.marks/hair/face from persona),
+    clothing — secondary. Three "guys in cloaks" must be three different people."""
     per = p.persona or {}
     look = per.get("look") or {}
     sex = "женщина" if per.get("sex") == "f" else "мужчина"
@@ -852,9 +852,9 @@ def _descriptor(p) -> str:
 
 
 def _scene_descriptors(people, pids) -> dict:
-    """Дескрипторы, РАЗЛИЧАЮЩИЕ незнакомцев в ЭТОЙ сцене: пул штампует «шрам на щеке» половине
-    города — жадно выбираем каждому примету КАТЕГОРИИ, ещё не занятой соседями по сцене
-    (метка → волосы → лицо → одежда → сложение); всё занято — склеиваем две приметы."""
+    """Descriptors DISTINGUISHING strangers in THIS scene: pool stamps "scar on cheek" on half
+    the city — greedily pick for each a CATEGORY mark not yet taken by scene neighbors
+    (mark → hair → face → clothing → build); all taken — combine two marks."""
     used: set = set()
     out: dict = {}
     for pid in sorted(pids):
@@ -870,24 +870,25 @@ def _scene_descriptors(people, pids) -> dict:
                 cands.append(c)
         pick = None
         for c in cands:
-            cat = c.split()[0][:5]                     # категория = стем первого слова («шрам…»)
+            cat = c.split()[0][:5]                     # category = stem of first word ("scar…")
             if cat not in used:
                 used.add(cat)
                 pick = c
                 break
-        if pick is None and cands:                     # все категории заняты — двойная примета
+        if pick is None and cands:                     # all categories taken — combine two marks
             pick = cands[0] + (", " + cands[1] if len(cands) > 1 else "")
         out[pid] = f"{sex} — {pick}" if pick else sex
     return out
 
 
 def _display(pid: str, people) -> str:
+    """Display name for character in narrative."""
     if pid == PLAYER:
         return "ты"
     p = people.get(pid)
     if not p:
-        return "прохожий"  # неизвестный в этой сцене — но НИКОГДА не сырой id
+        return "прохожий"  # unknown in this scene — but NEVER raw id
     if pid in _met():
         return p.name
-    d = ((_S.get("live") or {}).get("descr") or {}).get(pid)  # сцен-дескриптор различает соседей
+    d = ((_S.get("live") or {}).get("descr") or {}).get(pid)  # scene descriptor distinguishes neighbors
     return d or _descriptor(p)

@@ -1,11 +1,11 @@
-"""Рутина: НУЖДЫ + характер + время → куда пойти. Эмерджентно, БЕЗ хардкода ролей.
+"""Routine: NEEDS + character + time → where to go. Emergent, NO role hardcoding.
 
-Один шаг NPC: (1) нужды эволюционировали за прошедшее время, гасясь тем местом, где он стоял;
-(2) из доступных ему мест (Candidate) выбираем по utility (places.score); близкие по счёту —
-разыгрываем сидированным rng (живая вариативность, но воспроизводимость мира без игрока).
+One NPC step: (1) needs have evolved over elapsed time, dampening at the place where they stood;
+(2) from available places (Candidate), select by utility (places.score); close by score —
+draw with seeded rng (live variation, but world reproducibility without player).
 
-Место-агностично: candidates строит адаптер (server/play/worldsim), зная здания мира. Здесь —
-чистая логика выбора. Ни сервера, ни БД.
+Location-agnostic: candidates built by adapter (server/play/worldsim), knowing world buildings. Here —
+pure selection logic. No server, no DB.
 
 Key functions
 -------------
@@ -26,8 +26,8 @@ from . import places as _places
 
 @dataclass
 class Candidate:
-    """Доступное NPC место: тип (place-kind) + узел графа, куда идти.
-    window_kind — чьё ОКНО суток применять (работник таверны живёт её вечерним окном)."""
+    """Available NPC location: kind (place-kind) + graph node to go to.
+    window_kind — whose time window to apply (tavern worker lives by its evening window)."""
     kind: str
     node: int
     window_kind: str | None = None
@@ -35,9 +35,9 @@ class Candidate:
 
 def step(state, candidates: list, phase: str, minutes: float, here_kind: str | None, rng,
          stay: int | None = None):
-    """Продвинуть нужды NPC и вернуть (узел, вид-занятия), куда он направляется.
-    state — NpcState (нужды в .needs, черты в .config.traits); here_kind — тип места, где он
-    стоял (гасил нужды); candidates — куда он МОЖЕТ пойти; stay — узел, где стоял (инерция)."""
+    """Advance NPC needs and return (node, kind-of-activity) for direction.
+    state — NpcState (needs in .needs, traits in .config.traits); here_kind — place type where they
+    stood (dampening needs); candidates — where they CAN go; stay — node where they stood (inertia)."""
     traits = state.config.traits
     sated = _places.PLACE[here_kind].sates if here_kind in _places.PLACE else {}
     _needs.advance(state.needs, minutes, sated)
@@ -46,8 +46,8 @@ def step(state, candidates: list, phase: str, minutes: float, here_kind: str | N
 
 
 def choose_c(needs: dict, traits: dict, candidates: list, phase: str, rng, stay: int | None = None):
-    """Выбрать КАНДИДАТА по полезности (близкие — жребием). stay — узел, где стоял: лёгкая
-    инерция против дёрганья между равными местами (урок Sims)."""
+    """Select best CANDIDATE by utility (close by score — draw by lot). stay — node where stood: light
+    inertia against thrashing between equal places (Sims lesson)."""
     pressured = _needs.pressure(needs, traits)
     scored = sorted(((_places.score(c.kind, pressured, traits, phase,
                                     window_kind=c.window_kind)
@@ -62,13 +62,13 @@ def choose_c(needs: dict, traits: dict, candidates: list, phase: str, rng, stay:
 
 
 def choose(needs: dict, traits: dict, candidates: list, phase: str, rng, stay: int | None = None):
-    """Узел лучшего кандидата (обратная совместимость)."""
+    """Node of best candidate (backward-compatible wrapper)."""
     c = choose_c(needs, traits, candidates, phase, rng, stay=stay)
     return c.node if c is not None else None
 
 
 def explain(needs: dict, traits: dict, candidates: list, phase: str) -> list:
-    """Диагностика (для /minddebug и тестов): [(kind, score)] по убыванию — почему пошёл туда."""
+    """Diagnostics (for /minddebug and tests): [(kind, score)] descending — why they went there."""
     pressured = _needs.pressure(needs, traits)
     return sorted(((c.kind, round(_places.score(c.kind, pressured, traits, phase), 3))
                    for c in candidates if c.node is not None), key=lambda x: x[1], reverse=True)

@@ -1,8 +1,8 @@
-"""Дебаг-граф города: страница + API. Доступ только для владельца (по email).
+"""City debug graph: page + API. Access only by owner (via email).
 
-Внешний код видит лишь aidnd.citygraph (City/CityParams) — детали генерации сюда не текут.
-Города детерминированы по параметрам, поэтому держим маленький процессный кэш, чтобы
-запрос маршрута не пересобирал город заново.
+External code sees only aidnd.citygraph (City/CityParams) — generation details don't flow here.
+Cities are deterministic by parameters, so we maintain a small process cache to prevent
+route requests from rebuilding the city from scratch.
 
 Key functions
 -------------
@@ -54,7 +54,7 @@ def _store() -> WorldStore:
     return _STORE
 
 
-if os.environ.get("AIDND_OPEN_PLAY"):                    # дев-режим: стенд без входа (как в /play)
+if os.environ.get("AIDND_OPEN_PLAY"):                    # dev mode: bench without login (like /play)
     def _gate() -> User | None:
         return None
 else:
@@ -118,7 +118,7 @@ def citydebug_route(_: Owner, a: str, b: str, seed: int = 7, key_buildings: int 
 def citydebug_node(_: Owner, node: int, seed: int = 7, key_buildings: int = 8,
                    river: bool = True, walls: bool = True,
                    segment: float | None = None) -> dict:
-    """Легальные переходы из узла (заход/выход/дорога с румбом) — «куда отсюда можно пойти»."""
+    """Legal transitions from a node (entrance/exit/road with heading) — "where can I go from here"."""
     city = _city(seed, key_buildings, river, walls, segment)
     return {"node": node, "kind": str(city.node_kind(node) or ""),
             "moves": [{"to": m.to, "kind": m.kind, "heading": m.heading, "name": m.name}
@@ -129,9 +129,9 @@ def citydebug_node(_: Owner, node: int, seed: int = 7, key_buildings: int = 8,
 def citydebug_location(_: Owner, node: int, seed: int = 7, key_buildings: int = 8,
                        river: bool = True, walls: bool = True,
                        segment: float | None = None) -> dict:
-    """Карточка локации: имя/вид узла + легальные выходы + ближайшие здания + ориентиры."""
+    """Location card: node name/type + legal exits + nearby buildings + landmarks."""
     city = _city(seed, key_buildings, river, walls, segment)
-    if node not in city._xy:                                  # noqa: SLF001 — дебаг
+    if node not in city._xy:                                  # noqa: SLF001 — debug
         return {"node": node, "exists": False}
     x, y = city._xy[node]                                     # noqa: SLF001
     name = next((kb.name for kb in city.key_buildings.values() if node in (kb.node, kb.interior)), None)
@@ -148,7 +148,7 @@ def citydebug_location(_: Owner, node: int, seed: int = 7, key_buildings: int = 
 @router.get("/api/citydebug/citysvg")
 def citydebug_citysvg(_: Owner, seed: int = 7, key_buildings: int = 8, river: bool = True,
                       walls: bool = True, segment: float | None = None) -> dict:
-    """Реальный городской визуал (тот же, что на карте игры) — SVG-рендер генератора."""
+    """Actual city visuals (same as in-game map) — SVG render from generator."""
     p = CityParams(seed=seed, key_buildings=key_buildings, river=river, walls=walls).normalized()
     cg = _citygen()
     m = cg.build_city(p.seed, p.width, p.height, buildings=[], key_houses=[])
@@ -158,8 +158,8 @@ def citydebug_citysvg(_: Owner, seed: int = 7, key_buildings: int = 8, river: bo
 @router.get("/api/citydebug/building")
 def citydebug_building(_: Owner, bid: str, seed: int = 7, key_buildings: int = 8, river: bool = True,
                        walls: bool = True, segment: float | None = None) -> dict:
-    """Здание (любое — ВСЕ строения это дома; ключевые лишь с вывеской): графо-факты + фактшит характеристик.
-    Сначала из БД мира (если параметры совпали), иначе ленивая генерация (кэш на городе)."""
+    """Building (any — ALL structures are houses; key ones just have a sign): graph facts + factsheet of characteristics.
+    First from world DB (if params matched), else lazy generation (cache on city)."""
     city = _city(seed, key_buildings, river, walls, segment)
     is_key = bid in city.key_buildings
     if is_key:
@@ -174,10 +174,10 @@ def citydebug_building(_: Owner, bid: str, seed: int = 7, key_buildings: int = 8
         row = _store().get_building(wid, bid)
         if row:
             data, sign = row["data"], row["sign"]
-    if data is None:                                         # нет в БД — генерим лениво (кэш на городе)
+    if data is None:                                         # not in DB — generate lazily (cache on city)
         cache = city.__dict__.setdefault("_enrich", {})
         if bid not in cache:
-            enr = LLMEnricher(_model())            # только LLM — без фоллбэков
+            enr = LLMEnricher(_model())            # LLM only — no fallbacks
             cache[bid] = enr.describe_building(building_ctx(city, bid, is_key, idx)) or {}
         data = cache[bid]
     landmarks = city._landmarks_at(node) if node in city._xy else []   # noqa: SLF001
@@ -188,7 +188,7 @@ def citydebug_building(_: Owner, bid: str, seed: int = 7, key_buildings: int = 8
 
 @router.get("/api/citydebug/pool")
 def citydebug_pool(_: Owner, kind: str = "key", furnished: bool = True) -> dict:
-    """Браузер ПУЛА зданий (worlds.db): список для дебага обстановки зон (docs/locations.md шаг 1)."""
+    """Building POOL browser (worlds.db): list for debugging zone furnishing (docs/locations.md step 1)."""
     rows = _store().pool_buildings(kind)
     out = []
     for r in rows:
@@ -202,21 +202,21 @@ def citydebug_pool(_: Owner, kind: str = "key", furnished: bool = True) -> dict:
 
 @router.get("/citydebug/plans")
 def citydebug_plans_page(_: Owner) -> HTMLResponse:
-    """Галерея бумажных планов всех обставленных зданий пула — стенд вкуса рендера."""
+    """Gallery of paper floor plans of all furnished pool buildings — taste test of render."""
     with open(os.path.join(WEB_DIR, "plansdebug.html"), encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
 @router.get("/citydebug/dungeons")
 def citydebug_dungeons_page(_: Owner) -> HTMLResponse:
-    """Галерея скелетов подземелий — стенд циклической генерации (этап A)."""
+    """Gallery of dungeon skeletons — test bench for cyclic generation (stage A)."""
     with open(os.path.join(WEB_DIR, "dungeonsdebug.html"), encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
 @router.get("/api/citydebug/dungeonart")
 def citydebug_dungeonart(_: Owner, seed: str, env: str = "Ruin") -> dict:
-    """Данж по сиду: скелет + наполнение + бриф из пула (детерминированно, LLM в рантайме нет)."""
+    """Dungeon by seed: skeleton + interior + brief from pool (deterministic, no LLM at runtime)."""
     import random as _random
 
     from ..worldgen.dungeongen import dungeon_svg, generate
@@ -233,7 +233,7 @@ def citydebug_dungeonart(_: Owner, seed: str, env: str = "Ruin") -> dict:
 
 @router.get("/api/citydebug/planart")
 def citydebug_planart(_: Owner, bid: str) -> dict:
-    """Бумажный (пергаментный) рендер плана здания пула."""
+    """Paper (parchment) render of pool building floor plan."""
     from ..worldgen.floorart import paper_svg
     from ..worldgen.floorplan import plan_location
     for kind in ("key", "res"):
@@ -246,7 +246,7 @@ def citydebug_planart(_: Owner, bid: str) -> dict:
 
 @router.get("/api/citydebug/poolbuilding")
 def citydebug_poolbuilding(_: Owner, bid: str) -> dict:
-    """Полный фактшит здания из пула — с зонами, предметами обстановки и планом-SVG."""
+    """Complete factsheet of pool building — with zones, furnishing objects, and floor plan SVG."""
     from ..worldgen.floorplan import plan_location, plan_svg
     for kind in ("key", "res"):
         for r in _store().pool_buildings(kind):
@@ -261,7 +261,7 @@ def citydebug_poolbuilding(_: Owner, bid: str) -> dict:
 def citydebug_subspace(_: Owner, building: str, name: str = "Подвал", seed: int = 7,
                        key_buildings: int = 8, river: bool = True, walls: bool = True,
                        segment: float | None = None) -> dict:
-    """Добавить под-здание (подвал и т.п.) к зданию/нутру; возвращает обновлённые данные карты."""
+    """Add a sub-building (basement, etc.) to a building/interior; returns updated map data."""
     city = _city(seed, key_buildings, river, walls, segment)
     node = city.add_subspace(_parse(building), name)
     return {"added": node, "data": city.debug_data()}

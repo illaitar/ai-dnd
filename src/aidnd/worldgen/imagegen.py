@@ -1,9 +1,9 @@
-"""Генерация изображений (fal.ai Flux). Портрет NPC = НАБОР ЭМОЦИЙ одного лица (подход B из
-прототипа: отдельные генерации flux/schnell с ОБЩИМ seed + детальным описанием → лицо держится,
-эмоции выразительны, единый «домашний» стиль общим style-хвостом). Слайсинг не нужен.
+"""Image generation (fal.ai Flux). NPC portrait = SET OF EMOTIONS of one face (approach B from
+prototype: separate flux/schnell generations with SHARED seed + detailed description → face holds,
+emotions expressive, unified "home" style with shared style-tail). Slicing not needed.
 
-Ключ: env FAL_KEY или .secrets/fal.key. Картинки тяжёлые — падают файлами в data/portraits/<id>/,
-в гит НЕ идут (rsync на прод). Промпт зданий (build_prompt) оставлен как был.
+Key: env FAL_KEY or .secrets/fal.key. Images are heavy — fall as files into data/portraits/<id>/,
+don't go to git (rsync to prod). Building prompt (build_prompt) left as was.
 
 Key functions
 -------------
@@ -28,12 +28,12 @@ except ImportError:
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FAL = "https://fal.run/"
 
-# единый стиль всего пула — главный рычаг когерентности (тот же, что в прототипе)
+# unified style of entire pool — main lever of coherence (same as in prototype)
 STYLE = ("dark grim low-fantasy D&D character portrait, painterly semi-realistic, muted earthy "
          "palette, dramatic chiaroscuro lighting, plain dark background, head and shoulders bust, "
          "centered, no text, no watermark, no frame")
 
-# 4 эмоции: ключ ложится на mind._emo / play (спокойное/тёплое/раздражённое/настороженное)
+# 4 emotions: key maps to mind._emo / play (calm/warm/irritated/wary)
 EMOTIONS = (("спокойное", "calm neutral expression"),
             ("тёплое", "warm friendly smile"),
             ("раздражённое", "angry scowling expression"),
@@ -52,22 +52,22 @@ def _fal_key() -> str | None:
 
 
 def portrait_prompt(persona: dict, expr: str) -> str:
-    """Промпт лица: ВЕДЁМ явной фразой пол+возраст (сильный якорь для Flux — голый тег 'f' слаб),
-    затем визуальные теги персоны, эмоция, единый стиль."""
+    """Face prompt: LEAD with explicit phrase sex+age (strong anchor for Flux — bare tag 'f' weak),
+    then visual tags of persona, emotion, unified style."""
     sexw = {"m": "man", "f": "woman"}.get(persona.get("sex"), "person")
     agew = {"young": "young ", "middle": "middle-aged ", "old": "old ", "elder": "elderly "}.get(
         persona.get("age"), "")
     lead = f"a {agew}{sexw}"
-    drop = {"m", "f", "male", "female", "man", "woman"}     # выкидываем слабые/дублирующие пол-теги
+    drop = {"m", "f", "male", "female", "man", "woman"}     # drop weak/duplicating gender tags
     tags = [str(t) for t in (persona.get("portrait") or []) if str(t).strip().lower() not in drop]
-    if not tags:                                            # фоллбэк, если LLM не заполнил
+    if not tags:                                            # fallback if LLM didn't populate
         tags = [persona.get("build", "average"), (persona.get("look") or {}).get("hair", "")]
     body = ", ".join(t for t in tags if t)
     return f"{lead}, {body}, {expr}, {STYLE}" if body else f"{lead}, {expr}, {STYLE}"
 
 
 class ImageGen:
-    """База: ничего не генерит (хук выключен)."""
+    """Base: doesn't generate anything (hook disabled)."""
 
     def available(self) -> bool:
         return False
@@ -80,7 +80,7 @@ class ImageGen:
 
 
 class FluxImageGen(ImageGen):
-    """fal.ai Flux schnell. Один вызов = одна эмоция; общий seed на NPC держит лицо."""
+    """fal.ai Flux schnell. One call = one emotion; shared seed per NPC keeps face."""
 
     def __init__(self, api_key: str | None = None, model: str = "fal-ai/flux/schnell"):
         self.api_key = api_key or _fal_key()
@@ -90,7 +90,7 @@ class FluxImageGen(ImageGen):
         return bool(self.api_key) and _HAS_HTTPX
 
     def generate(self, prompt: str, *, seed: int | None = None, kind: str = "portrait") -> str | None:
-        """Один вызов fal.run → URL картинки (или None + причина в исключении не глушим наружу выше)."""
+        """One call to fal.run → image URL (or None; exception reason not suppressed above)."""
         if not self.available():
             return None
         payload = {"prompt": prompt, "image_size": "square_hd", "num_inference_steps": 4,
@@ -105,7 +105,7 @@ class FluxImageGen(ImageGen):
         return imgs[0]["url"] if imgs else None
 
     def portraits(self, npc_id: str, persona: dict, seed: int, out_dir: str) -> dict:
-        """4 эмоции одного лица → файлы out_dir/<npc_id>/<emo>.png. Возвращает {emo: '<id>/<emo>.png'}."""
+        """4 emotions of one face → files out_dir/<npc_id>/<emo>.png. Returns {emo: '<id>/<emo>.png'}."""
         if not self.available():
             return {}
         d = os.path.join(out_dir, npc_id)
@@ -128,7 +128,7 @@ def get_imagegen() -> ImageGen:
 
 
 def build_prompt(data: dict, *, sign: str | None = None) -> str:
-    """Промпт под ЗДАНИЕ из фактшита характеристик (без изменений)."""
+    """Prompt for BUILDING from characteristics sheet (unchanged)."""
     parts = [sign or data.get("type", "здание"), data.get("type", ""),
              data.get("tier", ""), data.get("condition", "")]
     mat = data.get("materials") or {}

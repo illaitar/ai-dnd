@@ -1,7 +1,7 @@
-"""Подробный лог ТЕКУЩЕЙ сессии в файл (data/debug/play.log) — для отладки. Пишем ВСЁ на DEBUG
-(логгеры aidnd/uvicorn/…) + ПОЛНЫЕ трейсбеки необработанных исключений (через middleware в app).
-Каждая запись помечена id мира. Скачивается/чистится через /api/play/debuglog. Шумный сторонний
-DEBUG (httpx/asyncio/…) приглушён до INFO.
+"""Detailed log of the CURRENT session to a file (data/debug/play.log) — for debugging. Write ALL
+to DEBUG (loggers aidnd/uvicorn/…) + FULL tracebacks of unhandled exceptions (via middleware in app).
+Each record is tagged with world id. Downloaded/cleared via /api/play/debuglog. Noisy third-party
+DEBUG (httpx/asyncio/…) suppressed to INFO.
 
 Key functions
 -------------
@@ -20,21 +20,21 @@ _DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..",
 LOG_PATH = os.path.join(_DIR, "play.log")
 
 _configured = False
-_wid_getter = lambda: None                                 # noqa: E731 — переустановим в setup()
+_wid_getter = lambda: None                                 # noqa: E731 — will be reset in setup()
 
 
 class _WorldFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             record.world = _wid_getter()
-        except Exception:                                  # noqa: BLE001 — тег не должен ронять лог
+        except Exception:                                  # noqa: BLE001 — tag must not crash the log
             record.world = None
         record.world = record.world if record.world is not None else "-"
         return True
 
 
 def setup(wid_getter=None) -> str:
-    """Поднять файловый лог (идемпотентно). wid_getter — как узнать id мира текущего запроса."""
+    """Initialize file logging (idempotent). wid_getter — how to get the current request's world id."""
     global _configured, _wid_getter
     if wid_getter:
         _wid_getter = wid_getter

@@ -1,8 +1,8 @@
-"""Глобальная конфигурация движка.
+"""Global engine configuration.
 
-Адрес Ollama и параметры запроса модели взяты из проекта ai-dnd (это
-единственное, что переиспользуется оттуда). Остальные параметры — из
-открытых решений основного диздока §8 и доков 06-09.
+Ollama address and model request parameters are taken from the ai-dnd project
+(the only thing reused from there). Other parameters are from open solutions in
+the main design doc §8 and docs 06-09.
 """
 
 from __future__ import annotations
@@ -10,121 +10,121 @@ from __future__ import annotations
 import os
 
 # --------------------------------------------------------------------------- #
-#  Инференс. Запрос модели с сервера (механизм из ai-dnd/ollama_client.py).    #
+#  Inference. Model request from server (mechanism from ai-dnd/ollama_client.py). #
 # --------------------------------------------------------------------------- #
-# Сервер Ollama обычно проброшен SSH-туннелем на localhost:
+# Ollama server is typically tunneled via SSH to localhost:
 #   ssh -L 11434:localhost:11434 nikalutis@192.168.3.26
-# поэтому по умолчанию ходим на localhost. Прод живёт на профиле deepseek.
-# Правило проекта: без LLM движок НЕ работает (нет модели → LLMUnavailable).
+# so by default we connect to localhost. Prod runs on the deepseek profile.
+# Project rule: the engine does NOT work without LLM (no model → LLMUnavailable).
 OLLAMA_HOST: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
-# Базовая модель (открытое решение §8). По дизайну — Qwen3-8B / Qwen3.5-9B.
+# Base model (open solution §8). Design choice: Qwen3-8B / Qwen3.5-9B.
 BASE_MODEL: str = os.environ.get("AIDND_MODEL", "qwen3.5:9b")
-# Крошечная модель интент-парсера держится отдельно ради мгновенности (док 08 §3).
+# Tiny intent-parser model kept separate for speed (doc 08 §3).
 INTENT_MODEL: str = os.environ.get("AIDND_INTENT_MODEL", "qwen3.5:2b")
-# Дообученный квест-генератор (LoRA на BASE_MODEL, смерджен и экспортирован в Ollama
-# как aidnd-quest; 0%→85% валидных квестов на отложенной выборке, см. training/).
-# Если модели нет на сервере — model_for() откатывается на BASE_MODEL.
+# Fine-tuned quest generator (LoRA on BASE_MODEL, merged and exported to Ollama
+# as aidnd-quest; 0%→85% valid quests on held-out sample, see training/).
+# If model not on server — model_for() falls back to BASE_MODEL.
 QUEST_MODEL: str = os.environ.get("AIDND_QUEST_MODEL", "aidnd-quest")
-# Дообученный роутер намерений (LoRA на BASE_MODEL → aidnd-router в Ollama;
-# held-out kind 75%→92%, full 50%→71%, см. training/). Откат на BASE_MODEL, если нет.
+# Fine-tuned intent router (LoRA on BASE_MODEL → aidnd-router in Ollama;
+# held-out kind 75%→92%, full 50%→71%, see training/). Falls back to BASE_MODEL if missing.
 ROUTER_MODEL: str = os.environ.get("AIDND_ROUTER_MODEL", "aidnd-router")
-# Дообученный арбитр freeform-действий (decide_resolution → aidnd-arbiter в Ollama;
-# held-out resolution 10%→83%, dc±2 100%, см. training/). Откат на BASE_MODEL, если нет.
+# Fine-tuned arbiter for freeform actions (decide_resolution → aidnd-arbiter in Ollama;
+# held-out resolution 10%→83%, dc±2 100%, see training/). Falls back to BASE_MODEL if missing.
 ARBITER_MODEL: str = os.environ.get("AIDND_ARBITER_MODEL", "aidnd-arbiter")
-# Дообученный агент последствий (world_effects → aidnd-consequence в Ollama;
-# held-out valid-схема 47%→100%, full 43%→83%, см. training/). Откат на BASE_MODEL.
+# Fine-tuned consequence agent (world_effects → aidnd-consequence in Ollama;
+# held-out valid-schema 47%→100%, full 43%→83%, see training/). Falls back to BASE_MODEL.
 CONSEQUENCE_MODEL: str = os.environ.get("AIDND_CONSEQUENCE_MODEL", "aidnd-consequence")
-# Дообученный нарратор (LoRA на BASE_MODEL → aidnd-narrator в Ollama; 522 примера
-# проза по mode, before/after: канон-имена не коверкает, сухой живой стиль вместо
-# наигранного, см. training/). Откат на BASE_MODEL, если модели нет.
+# Fine-tuned narrator (LoRA on BASE_MODEL → aidnd-narrator in Ollama; 522 samples
+# of prose by mode, before/after: canon names not mangled, dry live style instead of
+# theatrical, see training/). Falls back to BASE_MODEL if model missing.
 NARRATOR_MODEL: str = os.environ.get("AIDND_NARRATOR_MODEL", "aidnd-narrator")
-# Генератор описаний локаций (отдельный LoRA на 14B → aidnd-location в Ollama; 14B лучше всего
-# в описаниях, см. training/). До тренировки откат на голую qwen3:14b (тоже лучшая база описаний).
+# Location description generator (separate LoRA on 14B → aidnd-location in Ollama; 14B performs best
+# at descriptions, see training/). Before training, falls back to bare qwen3:14b (also best base for descriptions).
 LOCATION_MODEL: str = os.environ.get("AIDND_LOCATION_MODEL", "qwen3:14b")
 
-# --- профиль запуска: какой бэкенд/модель за какой ролью (см. inference/profiles.py) ---
-# local (по умолчанию, тюненое в Ollama) | deepseek (всё в DeepSeek) | hybrid (мозги в DeepSeek)
+# --- launch profile: which backend/model for which role (see inference/profiles.py) ---
+# local (default, tuned in Ollama) | deepseek (all in DeepSeek) | hybrid (brains in DeepSeek)
 LLM_PROFILE: str = os.environ.get("AIDND_PROFILE", "local")
 DEEPSEEK_API_KEY: str = os.environ.get("DEEPSEEK_API_KEY", "")
-if not DEEPSEEK_API_KEY:                # дев-удобство: ключ из .secrets, если env пуст
+if not DEEPSEEK_API_KEY:                # dev convenience: key from .secrets if env empty
     _KEY_PATH = os.path.join(os.path.dirname(__file__), "..", "..", ".secrets", "deepseek.key")
     if os.path.exists(_KEY_PATH):
         with open(_KEY_PATH, encoding="utf-8") as _f:
             DEEPSEEK_API_KEY = _f.read().strip()
 DEEPSEEK_BASE: str = os.environ.get("DEEPSEEK_BASE", "https://api.deepseek.com")
 DEEPSEEK_MODEL: str = os.environ.get("AIDND_DEEPSEEK_MODEL", "deepseek-chat")
-# параллельность enrich: облако (network-bound) параллелим, локальная Ollama — нет (своп на 1 GPU)
+# enrich parallelism: cloud (network-bound) parallelized, local Ollama not (swap on 1 GPU)
 DEEPSEEK_CONCURRENCY: int = int(os.environ.get("AIDND_DEEPSEEK_CONCURRENCY", "8"))
 
-# --- сервис: БД пользователей/сессий/игр (Postgres, async) + auth ---
+# --- service: user/session/game DB (Postgres, async) + auth ---
 DATABASE_URL: str = os.environ.get("AIDND_DATABASE_URL", "postgresql+asyncpg://localhost/aidnd_dev")
 SESSION_TTL_DAYS: int = int(os.environ.get("AIDND_SESSION_TTL_DAYS", "30"))
-COOKIE_SECURE: bool = os.environ.get("AIDND_COOKIE_SECURE", "0") == "1"   # Secure-кука (только HTTPS, за TLS)
-FREE_ENRICH: int = int(os.environ.get("AIDND_FREE_ENRICH", "1"))       # бесплатных генераций мира
-FREE_REQUESTS: int = int(os.environ.get("AIDND_FREE_REQUESTS", "100"))  # бесплатных игровых запросов
-DAILY_LLM: int = int(os.environ.get("AIDND_DAILY_LLM", "300"))          # LLM-вызовов в сутки без кода
+COOKIE_SECURE: bool = os.environ.get("AIDND_COOKIE_SECURE", "0") == "1"   # Secure cookie (HTTPS only, behind TLS)
+FREE_ENRICH: int = int(os.environ.get("AIDND_FREE_ENRICH", "1"))       # free world generations
+FREE_REQUESTS: int = int(os.environ.get("AIDND_FREE_REQUESTS", "100"))  # free game requests
+DAILY_LLM: int = int(os.environ.get("AIDND_DAILY_LLM", "300"))          # LLM calls per day without code
 GOOGLE_CLIENT_ID: str = os.environ.get("AIDND_GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET: str = os.environ.get("AIDND_GOOGLE_CLIENT_SECRET", "")
 
 KEEP_ALIVE: str = os.environ.get("AIDND_KEEP_ALIVE", "30m")
 HTTP_TIMEOUT: float = float(os.environ.get("AIDND_TIMEOUT", "300"))
 
-# Режим reasoning у qwen3.x: тысячи скрытых токенов → +15-20 c. По умолчанию off.
+# Reasoning mode in qwen3.x: thousands of hidden tokens → +15-20 sec. Default off.
 THINK_DEFAULT: bool = os.environ.get("AIDND_THINK", "0") == "1"
 
-# Нативные tool-calls Ollama. Маленькие модели ломаются → по умолчанию текстовый
-# маркер-протокол. Включить для крупных моделей с надёжным function calling.
+# Native Ollama tool-calls. Small models break → default is text
+# marker protocol. Enable for large models with reliable function calling.
 USE_NATIVE_TOOLS: bool = os.environ.get("AIDND_NATIVE_TOOLS", "0") == "1"
 
 # --------------------------------------------------------------------------- #
-#  Мир и детерминизм                                                           #
+#  World and determinism                                                        #
 # --------------------------------------------------------------------------- #
 WORLD_SEED: int = int(os.environ.get("AIDND_SEED", "1337"))
 SAVE_DIR: str = os.environ.get("AIDND_SAVE_DIR", os.path.expanduser("~/.aidnd/save"))
 
-# Язык нарратива (открытое решение §8). Системные промпты на английском для
-# качества, язык вывода игроку — отдельный конфиг.
+# Narrative language (open solution §8). System prompts in English for
+# quality; output language to player is a separate config.
 NARRATIVE_LANGUAGE: str = os.environ.get("AIDND_LANG", "ru")
 
-# Режим доверия бросков (док 07 §8): trust | server_animated | manual_physical.
+# Dice trust mode (doc 07 §8): trust | server_animated | manual_physical.
 DICE_TRUST_MODE: str = os.environ.get("AIDND_DICE_MODE", "server_animated")
 
 # --------------------------------------------------------------------------- #
-#  LOD-симуляция (main §4.2)                                                   #
+#  LOD simulation (main §4.2)                                                   #
 # --------------------------------------------------------------------------- #
-TAU_HIGH: float = 0.7        # порог промоушна в L3 (с диалогом)
-TAU_MID: float = 0.35        # порог L2
-AOI_HOPS: int = 2            # окрестность интереса: переходы по графу локаций
-MAX_L3_NPCS: int = 3         # кап дорогих когниций за тик (main §4.2)
-DEMOTE_COOLDOWN_TICKS: int = 30  # гистерезис демоушна с L3
+TAU_HIGH: float = 0.7        # promotion threshold to L3 (with dialogue)
+TAU_MID: float = 0.35        # L2 threshold
+AOI_HOPS: int = 2            # area of interest: location graph hops
+MAX_L3_NPCS: int = 3         # cap of expensive cognitions per tick (main §4.2)
+DEMOTE_COOLDOWN_TICKS: int = 30  # hysteresis for demotion from L3
 
-# Веса salience
+# Salience weights
 W_DIST, W_ROLE, W_RECENT, W_ACTIVE = 0.4, 0.3, 0.2, 0.3
 
-# Индекс важности места: накапливается при взаимодействии (визиты, осмотр интерьера).
-# Достигнув порога, рядовое место (дом) повышается в ключевое и подписывается на карте.
+# Place importance index: accumulates on interaction (visits, interior inspection).
+# Upon reaching threshold, ordinary place (house) promoted to key and labeled on map.
 PLACE_IMPORTANCE_KEY: int = 3
 
-# Каталог сейвов (JSON). Загрузка = пре-ген из seed + реплей рантайм-хвоста.
+# Save directory (JSON). Loading = pre-gen from seed + replay runtime tail.
 SAVE_DIR: str = os.environ.get("AIDND_SAVE_DIR", os.path.expanduser("~/.aidnd/saves"))
 
 # --------------------------------------------------------------------------- #
-#  Время и окружение (док 08 §8)                                              #
+#  Time and environment (doc 08 §8)                                            #
 # --------------------------------------------------------------------------- #
 SIM_MINUTES_PER_TICK: int = 10
-START_HOUR: int = 9             # час начала новой игры (утро — лавки открыты, не глухая ночь)
-START_SEASON: str = os.environ.get("AIDND_SEASON", "autumn")  # стартовый сезон
+START_HOUR: int = 9             # start hour for new game (morning — shops open, not dead night)
+START_SEASON: str = os.environ.get("AIDND_SEASON", "autumn")  # starting season
 DAYS_PER_SEASON: int = 28
 
 # --------------------------------------------------------------------------- #
-#  Память (main §5.2-5.3)                                                      #
+#  Memory (main §5.2-5.3)                                                      #
 # --------------------------------------------------------------------------- #
-MEM_RECENCY_LAMBDA: float = 0.01   # спад recency
+MEM_RECENCY_LAMBDA: float = 0.01   # recency decay
 MEM_ALPHA, MEM_BETA, MEM_GAMMA = 1.0, 1.0, 1.0  # recency/importance/relevance
 MEM_FORGET_TAU: float = 200.0
 MEM_TOPK: int = 12
 
-# Диффузия знаний: каждые DIFFUSE_EVERY тиков слух переходит к новым NPC (граф знаний)
+# Knowledge diffusion: every DIFFUSE_EVERY ticks rumor spreads to new NPCs (knowledge graph)
 DIFFUSE_EVERY: int = 6
 DIFFUSE_MAX_PER_STEP: int = 3

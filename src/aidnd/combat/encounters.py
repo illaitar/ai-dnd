@@ -1,5 +1,5 @@
-"""Сборка энкаунтеров из ДАННЫХ бестиария: бюджет CR + среда → набор монстров. Никакого
-хардкода видов — что водится в такой среде, то и выйдет.
+"""Assembly of encounters from BESTIARY DATA: CR budget + environment → set of monsters. No
+hardcoding of species — what inhabits such an environment will emerge.
 
 Key functions
 -------------
@@ -15,7 +15,7 @@ from .model import bestiary, from_monster
 
 
 def pick_encounter(cr_budget: float, env: str, seed: str, max_units: int = 5) -> list:
-    """Жадный набор: виды из подходящей среды, поштучно до бюджета (стая слабых или пара сильных)."""
+    """Greedy assembly: species from suitable environment, one by one up to budget (pack of weak or pair of strong)."""
     rng = Random(f"pick|{seed}")
     pool = [m for m in bestiary()
             if m.get("attack") and 0 < m.get("cr", 0) <= max(0.125, cr_budget * 0.75)
@@ -24,7 +24,7 @@ def pick_encounter(cr_budget: float, env: str, seed: str, max_units: int = 5) ->
         pool = [m for m in bestiary() if m.get("attack") and 0 < m.get("cr", 0) <= cr_budget]
     if not pool:
         return []
-    kind = rng.choice(pool)                                # логово ОДНОГО вида (+вожак не в v1)
+    kind = rng.choice(pool)                                # lair of ONE species (+leader not in v1)
     out, spent, i = [], 0.0, 0
     while spent + kind["cr"] <= cr_budget and len(out) < max_units:
         out.append(from_monster(kind, f"m{i}"))
@@ -34,7 +34,7 @@ def pick_encounter(cr_budget: float, env: str, seed: str, max_units: int = 5) ->
 
 
 def lair_name(units: list, rng: Random) -> str:
-    """Имя логова из его обитателей (данные, не выдумка)."""
+    """Lair name from its inhabitants (data, not invention)."""
     if not units:
         return "пустое логово"
     base = units[0].name

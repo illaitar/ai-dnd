@@ -1,12 +1,12 @@
-"""Граф города и единая система передвижения по нему.
+"""City graph and unified movement system.
 
-Слой 1 — улицы: перекрёстки (узлы сети) + дороги, разбитые на точки ~равной длины, + мосты, ворота.
-Слой 2 — дома: каждый дом приписан РОВНО к одному перекрёстку (ближайшему); дом между двумя
-перекрёстками попадает только в один. Ключевые здания селятся в равномерно разнесённые дома.
+Layer 1 — streets: crossroads (network nodes) + roads broken into ~equal-length segments + bridges, gates.
+Layer 2 — houses: each house assigned EXACTLY to one crossroad (nearest); house between two
+crossroads belongs to only one. Key buildings settle in evenly distributed houses.
 
-Передвижение — A* по графу: `route(a, b)` отдаёт реберные переходы, цепочку ключевых точек и
-вывески (линки на ключевые здания по пути). Это и есть API, которым пользуются все снаружи;
-детали Вороного/SVG сюда не протекают.
+Movement — A* through graph: `route(a, b)` returns edge transitions, chain of key points, and
+signs (links to key buildings along path). This is the API used by everything outside;
+Voronoi/SVG details do not leak here.
 
 Key functions
 -------------
@@ -36,7 +36,7 @@ def _ek(a: int, b: int) -> tuple:
 
 
 def _dist2_seg(p, a, b) -> float:
-    """Квадрат расстояния от точки p до отрезка ab."""
+    """Square distance from point p to segment ab."""
     ax, ay = a
     bx, by = b
     dx, dy = bx - ax, by - ay
@@ -60,7 +60,7 @@ def _dist2_to_polyline(p, pts) -> float:
 
 
 def _dist2_to_poly(p, poly) -> float:
-    """Квадрат расстояния до ЗАМКНУТОГО контура (стены)."""
+    """Square distance to closed contour (wall)."""
     if not poly:
         return 1e30
     n, best = len(poly), 1e30
@@ -72,7 +72,7 @@ def _dist2_to_poly(p, poly) -> float:
 
 
 class City:
-    """Граф города + передвижение. Строится из «сырой» геометрии (см. generate.py)."""
+    """City graph + movement. Built from raw geometry (see generate.py)."""
 
     def __init__(self, params, raw: dict):
         self.params = params
@@ -80,7 +80,7 @@ class City:
         if params.key_buildings:
             self.assign_key_buildings(params.key_buildings)
 
-    # ----------------------------------------------------- построение ------ #
+    # ----------------------------------------------------- build ------ #
     def _build(self, raw: dict) -> None:
         src_xy = [(float(x), float(y)) for x, y in raw["nodes"]]
         src_adj = [list(a) for a in raw["adj"]]
@@ -95,9 +95,9 @@ class City:
         self._partition_houses(raw.get("houses") or [])
         self.key_buildings: dict[str, KeyBuilding] = {}
         self._landmarks = list(raw.get("keys") or [])
-        self._interior_name: dict[int, str] = {}             # узел-нутро → имя здания/под-здания
-        self._interior_building: dict[int, str | None] = {}  # узел-нутро → id корневого ключевого здания
-        self._interior_parent: dict[int, int | None] = {}    # под-здание → родительское нутро
+        self._interior_name: dict[int, str] = {}             # interior node → building/subbuilding name
+        self._interior_building: dict[int, str | None] = {}  # interior node → root key building id
+        self._interior_parent: dict[int, int | None] = {}    # subbuilding → parent interior
 
     def _pick_interval(self, xy: list, adj: list) -> float:
         if self.params.segment:
@@ -114,8 +114,8 @@ class City:
         return max(18.0, min(36.0, seg[len(seg) // 2])) if seg else 28.0
 
     def _merge_short(self, xy: list, adj: list, eps: float):
-        """Схлопнуть смежные узлы ближе eps (короткие рёбра Вороного и артефакты округления) —
-        без этого равных отрезков не выходит. Union-find ТОЛЬКО по соединённым близким парам."""
+        """Merge adjacent nodes closer than eps (short Voronoi edges and rounding artifacts)—
+        without this, equal segments don't work. Union-find ONLY for connected close pairs."""
         parent = list(range(len(xy)))
 
         def find(a):
@@ -149,7 +149,7 @@ class City:
         return new_xy, new_adj
 
     def _trace_polylines(self, adj: dict):
-        """Развернуть граф в полилинии между РАЗВИЛКАМИ (degree≠2). degree-2 — изгиб внутри дороги."""
+        """Unfold graph into polylines between JUNCTIONS (degree≠2). degree-2 — bend inside road."""
         deg = {n: len(nb) for n, nb in adj.items()}
         junctions = {n for n in adj if deg[n] != 2}
         seen = set()
@@ -158,7 +158,7 @@ class City:
             return (a, b) if a < b else (b, a)
 
         polylines = []
-        for j in (junctions or set(adj)):              # кольцо без развилок — стартуем откуда угодно
+        for j in (junctions or set(adj)):              # ring without junctions — start anywhere
             for nb in adj[j]:
                 if ek(j, nb) in seen:
                     continue
@@ -188,7 +188,7 @@ class City:
         return nid
 
     def _resample(self, polylines: list, xy: dict, junctions: set) -> None:
-        """Полилинии → узлы: развилки=перекрёстки, внутри — точки через РАВНЫЙ интервал по длине дуги."""
+        """Polylines → nodes: junctions=crossroads, inside — points at EQUAL arc-length intervals."""
         self._xy, self._kind, self._adj, self._ekind, self._next = {}, {}, {}, {}, 0
         cr_map: dict[int, int] = {}
 
@@ -229,7 +229,7 @@ class City:
         return pts[-1]
 
     def _tag_bridges(self, crosses: list) -> None:
-        """Узел у каждой переправы → BRIDGE; рёбра у реки помечаем как мосты."""
+        """Node at each crossing → BRIDGE; edges at river marked as bridges."""
         self._bridge_nodes: list[int] = []
         for x, y in crosses:
             nd = self._nearest_node(x, y)
@@ -258,7 +258,7 @@ class City:
                 self._gate_nodes.append(nd)
 
     def _partition_houses(self, raw_houses: list) -> None:
-        """Раздел домов: дом → ближайшая точка дороги (дверь) И ровно один перекрёсток."""
+        """House partitioning: house → nearest road point (door) AND exactly one crossroad."""
         self.houses: dict[str, House] = {}
         self._node_houses: dict[int, list[str]] = {}
         self._cr_houses: dict[int, list[str]] = {}
@@ -271,7 +271,7 @@ class City:
             self._node_houses.setdefault(nd, []).append(h["id"])
             self._cr_houses.setdefault(cr, []).append(h["id"])
 
-    # ----------------------------------------------------- геометрия ------- #
+    # ----------------------------------------------------- geometry ------- #
     def _nearest_node(self, x: float, y: float, kinds: set | None = None) -> int | None:
         best, bd = None, 1e30
         for i, (nx, ny) in self._xy.items():
@@ -301,11 +301,11 @@ class City:
                     out.append(e)
         return out
 
-    # ----------------------------------------------------- ключевые здания - #
+    # ----------------------------------------------------- key buildings - #
     def assign_key_buildings(self, n: int, names: list[str] | None = None) -> list[KeyBuilding]:
-        """Выбрать n равномерно разнесённых домов (farthest-point sampling) и поселить в них
-        ключевые здания: каждому — узел-нутро + door-ребро к ближайшей точке дороги (вход/выход).
-        Перезаписывает прежнее распределение (вместе с под-зданиями)."""
+        """Select n evenly spread houses (farthest-point sampling) and settle
+        key buildings in them: each gets interior node + door edge to nearest road point (enter/exit).
+        Overwrites previous distribution (including subbuildings)."""
         self._clear_interiors()
         ids = list(self.houses)
         n = max(0, min(int(n), len(ids)))
@@ -319,7 +319,7 @@ class City:
             bid = f"key:{k + 1}"
             ho.building = bid
             interior = self._new_node((ho.x, ho.y), NodeKind.INTERIOR)
-            self._link(interior, ho.node, kind="door")        # вход/выход к ближайшей точке дороги
+            self._link(interior, ho.node, kind="door")        # enter/exit to nearest road point
             self._interior_name[interior] = nm
             self._interior_building[interior] = bid
             self._interior_parent[interior] = None
@@ -329,8 +329,8 @@ class City:
         return list(self.key_buildings.values())
 
     def add_subspace(self, building, name: str) -> int | None:
-        """Добавить под-здание (подвал и т.п.) к ключевому зданию ИЛИ к другому нутру (вложенность).
-        Связь — internal-ребро; легальные переходы те же. Возвращает id нового узла-нутра."""
+        """Add subbuilding (basement etc) to key building OR to another interior (nesting).
+        Link is internal edge; legal transitions same. Returns new interior node id."""
         if building in self.key_buildings:
             parent, root = self.key_buildings[building].interior, building
         elif isinstance(building, int) and self._kind.get(building) == NodeKind.INTERIOR:
@@ -359,13 +359,13 @@ class City:
         self._kind.pop(n, None)
 
     def _spread_select(self, ids: list, n: int) -> list:
-        """Жадная равномерная выборка n точек: каждый раз берём самую далёкую от уже выбранных."""
+        """Greedy uniform sampling of n points: each time pick farthest from already chosen."""
         if n <= 0 or not ids:
             return []
         if n >= len(ids):
             return list(ids)
         pts = {i: (self.houses[i].x, self.houses[i].y) for i in ids}
-        start = min(ids, key=lambda i: (pts[i][0], pts[i][1]))      # детерминированный старт
+        start = min(ids, key=lambda i: (pts[i][0], pts[i][1]))      # deterministic start
         chosen = [start]
         chosen_set = {start}
         dist = {i: _dist(pts[i], pts[start]) for i in ids}
@@ -379,10 +379,10 @@ class City:
                     dist[i] = d
         return chosen
 
-    # ----------------------------------------------------- передвижение ---- #
+    # ----------------------------------------------------- movement ---- #
     def _resolve(self, e) -> int | None:
-        """Конечная точка: id узла | id дома | id ключевого здания → узел графа.
-        Здание → его НУТРО (чтобы маршрут включал выход/вход явными шагами)."""
+        """End point: node id | house id | key building id → graph node.
+        Building → its INTERIOR (so route includes exit/enter as explicit steps)."""
         if isinstance(e, int):
             return e if e in self._xy else None
         if e in self.key_buildings:
@@ -392,7 +392,7 @@ class City:
         return None
 
     def _heading(self, a: int, b: int) -> str:
-        """Румб перехода a→b (8 сторон; экран: y вниз, поэтому север = вверх)."""
+        """Bearing of transition a→b (8 directions; screen: y down, so north = up)."""
         ax, ay = self._xy[a]
         bx, by = self._xy[b]
         ang = math.degrees(math.atan2(-(by - ay), bx - ax)) % 360.0
@@ -410,8 +410,8 @@ class City:
         return Step(u, v, "road", heading=self._heading(u, v))
 
     def exits(self, node: int) -> list[Move]:
-        """Легальные переходы из узла, категоризованные: road (с румбом) | enter | exit | internal.
-        Это и есть «куда отсюда можно легально пойти» для любой ключевой точки/здания."""
+        """Legal transitions from node, categorized: road (with bearing) | enter | exit | internal.
+        This is "where can legally go from here" for any key point/building."""
         if node not in self._adj:
             return []
         interior = self._kind.get(node) == NodeKind.INTERIOR
@@ -462,7 +462,7 @@ class City:
         return out[::-1]
 
     def route(self, a, b) -> Route:
-        """Проход А→Б по графу (A*). a/b — id узла, дома или ключевого здания."""
+        """Route A→B through graph (A*). a/b — node id, house, or key building id."""
         src, dst = self._resolve(a), self._resolve(b)
         if src is None or dst is None:
             return Route(found=False)
@@ -483,7 +483,7 @@ class City:
                      landmarks=self._landmarks_at(end))
 
     def _nearest_other_building(self, node: int) -> Nearby | None:
-        """Ближайшее (по прямой) ключевое здание к узлу, КРОМЕ здания самого узла."""
+        """Nearest (as crow flies) key building to node, EXCEPT node's own building."""
         x, y = self._xy[node]
         self_b = next((bid for bid, kb in self.key_buildings.items() if kb.interior == node), None)
         best, bd = None, 1e30
@@ -496,7 +496,7 @@ class City:
         return Nearby(best.id, best.name, round(bd ** 0.5, 1)) if best else None
 
     def _landmarks_at(self, node: int) -> list[str]:
-        """Ориентиры у узла: у реки / у стены / у ворот / у моста (геометрия карты)."""
+        """Landmarks at node: at river / at wall / at gate / at bridge (map geometry)."""
         x, y = self._xy[node]
         thr = (self._interval * 1.5) ** 2
         tags = []
@@ -515,8 +515,8 @@ class City:
         return tags
 
     def _signs_along(self, nodes: list[int], a, b) -> list[Sign]:
-        """Вывески: ключевые здания, мимо которых реально проходишь (дверь на маршруте ИЛИ дверь в
-        пределах ~1.6 отрезка от любой точки пути — «видно с дороги»). В порядке прохода."""
+        """Signs: key buildings you actually pass (door on route OR door within
+        ~1.6 segments from any point on path — "visible from road"). In passage order."""
         ends = {a, b}
         nset = set(nodes)
         crset = {n for n in nodes if self._kind[n] == NodeKind.CROSSROAD}
@@ -539,7 +539,7 @@ class City:
         out.sort(key=lambda t: t[0])
         return [s for _, s in out]
 
-    # ----------------------------------------------------- публичные виды -- #
+    # ----------------------------------------------------- public views -- #
     def nodes(self) -> list[Node]:
         return [Node(i, x, y, self._kind[i]) for i, (x, y) in self._xy.items()]
 
@@ -549,14 +549,14 @@ class City:
                 for a, b in self._unique_edges()]
 
     def houses_at_crossroad(self, cr: int) -> list[str]:
-        """Дома, приписанные к этому перекрёстку (раздел «один перекрёсток на дом»)."""
+        """Houses assigned to this crossroad (one crossroad per house)."""
         return list(self._cr_houses.get(cr, []))
 
     def node_kind(self, node: int) -> NodeKind | None:
         return self._kind.get(node)
 
     def key_points(self) -> list[int]:
-        """Ключевые точки графа — развилки-перекрёстки (включая узлы мостов/ворот)."""
+        """Key points of graph — junction-crossroads (including bridge/gate nodes)."""
         return sorted(self._crossroads)
 
     def stats(self) -> dict:
@@ -568,7 +568,7 @@ class City:
                 "key_buildings": len(self.key_buildings), "interval": round(self._interval, 1)}
 
     def debug_data(self) -> dict:
-        """Слоистый JSON для дебаг-визуализации (узлы по видам, рёбра, дома→перекрёсток, река, стены)."""
+        """Layered JSON for debug visualization (nodes by kind, edges, houses→crossroad, river, walls)."""
         return {
             "params": {"seed": self.params.seed, "key_buildings": self.params.key_buildings,
                        "river": self.params.river, "walls": self.params.walls},

@@ -1,11 +1,11 @@
-"""Граф города как самодостаточный модуль.
+"""City graph as a self-contained module.
 
-Публичный контракт — и только он виден снаружи:
+Public contract — and only it is visible outside:
     from aidnd.citygraph import generate, CityParams
     city = generate(CityParams(seed=7, key_buildings=8, river=True, walls=True))
-    route = city.route("key:1", "key:2")     # реберные переходы + ключевые точки + вывески
+    route = city.route("key:1", "key:2")     # edge transitions + key points + signage
 
-Детали генерации (Вороной), разбиения дорог, привязки домов — приватны и наружу не текут.
+Generation details (Voronoi), road division, building bindings — private and do not leak outside.
 
 Key functions
 -------------

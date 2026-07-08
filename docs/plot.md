@@ -1,43 +1,43 @@
-# Основной сюжет — игрок-регрессор
+# Main Plot — Regressor Player
 
-`src/aidnd/plot` — диздок зафиксирован, пакет **НЕ в рантайме** (модель данных + валидатор +
-кастинг готовы; интеграция впереди). Сюжет — книга, распластанная по ЖИВОМУ городу: не второй
-мир, а нанизывание на существующих людей (~80% каста — placed NPC из пула; новички — только
-где матчер не нашёл персону).
+`src/aidnd/plot` — design doc fixed, package **NOT in runtime** (data model + validator +
+casting ready; integration ahead). Plot — a book unfolded across the LIVING city: not a second
+world, but threading onto existing people (~80% of cast — placed NPCs from pool; newcomers — only
+where the matcher couldn't find a person).
 
-## Ядро идеи
+## Core Idea
 
-**Игрок — РЕГРЕССОР**: уже прожил этот кошмар. Драма не «кто злодей», а «как остановить,
-зная всё, но будучи никем»:
+**Player — REGRESSOR**: already lived through this nightmare. The drama isn't "who's the villain,"
+but "how to stop it, knowing everything yet being nobody":
 
-- Знает только ОБЩЕЕ (3-6 крупных мазков: культ существует, исчезновения не случайны, беда
-  по расписанию, страже верить нельзя, чем кончилось) + 2-6 СМУТНЫХ лиц. **Правда библии
-  скрыта и от игрока** — добывается заново.
-- **Доказательств нет** (пойдёшь к страже — ты чужак-клеветник, а стража куплена);
-  **сил нет** (врагов 12+, у них иерархия и деньги); **память несовершенна** — минимум один
-  узел, где память ВРЁТ («в этот раз иначе» — обязательный реверс); **союзники не помнят** —
-  вербовать с нуля, зная о них больше, чем они сами.
+- Knows only the GENERAL (3-6 broad strokes: the cult exists, disappearances aren't random,
+  disaster follows a schedule, the guard can't be trusted, how it ended) + 2-6 VAGUE faces.
+  **The truth of the scripture is hidden even from the player** — uncovered anew.
+- **No proof** (go to the guard — you're a foreign slanderer, and the guard is bought);
+  **no power** (12+ enemies, they have hierarchy and money); **memory is imperfect** — at least one
+  node where memory LIES ("this time it's different" — mandatory reversal); **allies don't remember** —
+  recruit from scratch, knowing more about them than they know about themselves.
 
-## Библия сюжета
+## Plot Bible
 
-Роль `plot_architect` [LLM]: сид (профиль города) + фракции + срез placed NPC → структурный
-JSON на мир: тема · конфликт · тайна (для города) · правда (регрессор знает с пролога) ·
-прошлый цикл · дельта (узлы, где память врёт) · каст трёх категорий (враги/союзники/важные
-нейтралы). **Иерархия** и **важность в повествовании** — два РАЗНЫХ измерения. Генерация —
-лениво в фоне после постройки мира; до готовности город живёт обычной жизнью.
+The role of `plot_architect` [LLM]: seed (city profile) + factions + slice of placed NPCs → structural
+JSON for the world: theme · conflict · mystery (for the city) · truth (regressor knows from prologue) ·
+previous cycle · delta (nodes where memory lies) · cast in three categories (enemies/allies/important
+neutrals). **Hierarchy** and **narrative importance** — two DIFFERENT dimensions. Generation —
+lazy in the background after world construction; until ready, the city lives its ordinary life.
 
-Кастинг (`casting.py`): матчинг ролей библии на реальных жителей по персоне/чертам.
-Валидатор (`validate_bible`) — жёсткие структурные правила.
+Casting (`casting.py`): matching roles from the bible to real residents by persona/traits.
+Validator (`validate_bible`) — strict structural rules.
 
-## Интеграция (план)
+## Integration (plan)
 
-Сюжет живёт ВНУТРИ существующих механик: зацепки → контракты-предикаты
-([quests.md](quests.md)), вербовка = befriend/доверие ([mind.md](mind.md)), улики = предметы
-с hidden ([items.md](items.md)), столкновения = боёвка ([combat.md](combat.md)), plot-хендлер
-в тике ([loop.md](loop.md)). Память регрессора — пролог книги в UI.
+Plot lives INSIDE existing mechanics: hooks → predicate contracts
+([quests.md](quests.md)), recruitment = befriend/trust ([mind.md](mind.md)), clues = items
+with hidden ([items.md](items.md)), encounters = combat ([combat.md](combat.md)), plot-handler
+in tick ([loop.md](loop.md)). Regressor's memory — book prologue in UI.
 
-**Долг no-fallback:** `StubArchitect` (валидный шаблон «культ жертв») пока жив как
-референс-архитектор — при интеграции сюжета уходит в тесты, рантайм строит только
-LLM-архитектора ([принцип 1](README.md)).
+**No-fallback duty:** `StubArchitect` (valid template "cult of victims") stays alive for now as
+reference architect — upon plot integration, it goes to tests, runtime builds only
+LLM-architect ([principle 1](README.md)).
 
-Связано: [quests.md](quests.md) · [mind.md](mind.md) · [entities.md](entities.md)
+Related: [quests.md](quests.md) · [mind.md](mind.md) · [entities.md](entities.md)

@@ -1,8 +1,8 @@
-"""Конвенция идентификаторов (00_Index §4).
+"""Identifier convention (00_Index §4).
 
-Единое правило неймспейсинга: <тип>:<имя>. id уникален и стабилен на всё время
-жизни мира — сущность рождается с id и сохраняет его навсегда (нужно для event
-log, KG и провенанса).
+Single namespace rule: <type>:<name>. id is unique and stable for the entire
+lifespan of the world — an entity is born with an id and retains it forever
+(needed for event log, KG, and provenance).
 
 Key functions
 -------------
@@ -18,51 +18,51 @@ from __future__ import annotations
 
 import re
 
-# Префиксы типов из 00_Index §4.
+# Type prefixes from 00_Index §4.
 PREFIXES = {
-    "entity",     # родовая сущность
-    "npc",        # неигровой персонаж
-    "pc",         # игровой персонаж
-    "it",         # инстанс предмета
-    "tmpl",       # шаблон предмета (flyweight)
-    "srd",        # ссылка на SRD-контент (стат-блок, заклинание)
-    "place",      # локация, регион, сцена
-    "building",   # здание
-    "room",       # комната
-    "container",  # контейнер (сундук, труп, лавка, земля)
-    "faction",    # фракция
-    "quest",      # квест
-    "household",  # домохозяйство
-    "item",       # именной авторский предмет
-    "shop",       # лавка (контейнер с ценовой политикой)
-    "district",   # район поселения
-    "corpse",     # труп как контейнер
-    "carry",      # инвентарь переноски персонажа
-    "wallet",     # кошелёк
+    "entity",     # generic entity
+    "npc",        # non-player character
+    "pc",         # player character
+    "it",         # item instance
+    "tmpl",       # item template (flyweight)
+    "srd",        # reference to SRD content (stat block, spell)
+    "place",      # location, region, scene
+    "building",   # building
+    "room",       # room
+    "container",  # container (chest, corpse, shop, ground)
+    "faction",    # faction
+    "quest",      # quest
+    "household",  # household
+    "item",       # named authored item
+    "shop",       # shop (container with pricing policy)
+    "district",   # settlement district
+    "corpse",     # corpse as container
+    "carry",      # character carry inventory
+    "wallet",     # wallet
 }
 
 _SLUG_RE = re.compile(r"[^a-z0-9_]+")
 
 
 def slug(text: str) -> str:
-    """Нормализует произвольную строку в стабильный slug для id."""
+    """Normalize arbitrary string to stable slug for id."""
     return _SLUG_RE.sub("_", text.strip().lower()).strip("_")
 
 
 def make(prefix: str, name: str) -> str:
-    """Собирает id вида prefix:name."""
+    """Build id as prefix:name."""
     if prefix not in PREFIXES:
         raise ValueError(f"неизвестный префикс id: {prefix!r}")
     return f"{prefix}:{slug(name)}"
 
 
 def kind_of(eid: str) -> str:
-    """Возвращает префикс типа из id (часть до двоеточия)."""
+    """Return type prefix from id (part before colon)."""
     return eid.split(":", 1)[0] if ":" in eid else "entity"
 
 
 def name_of(eid: str) -> str:
-    """Возвращает имя из id (часть после двоеточия)."""
+    """Return name from id (part after colon)."""
     return eid.split(":", 1)[1] if ":" in eid else eid
 
 

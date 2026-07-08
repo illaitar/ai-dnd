@@ -1,4 +1,4 @@
-"""Домен ОСМОТР (/look) — распил world.py. Восприятие снимает туман; affordances из society-каталога.
+"""OBSERVE domain (/look) — world.py slice. Perception removes fog of war; affordances from society catalog.
 
 Key functions
 -------------
@@ -28,7 +28,7 @@ from aidnd.server.play.mechanics.items import _pc_coins
 
 @router.post("/api/play/look")
 async def look(request: Request):
-    """Осмотреться: бросок d20+Wis против DC — снимает туман (людей/ёмкости различаешь)."""
+    """Look around: d20+Wis roll against DC — removes fog of war (discern NPCs/containers)."""
     city, people, crof, cr2b, loc = _play()
     inside = _S.get("inside")
     key = _look_key(loc, inside)
@@ -37,7 +37,7 @@ async def look(request: Request):
     roll = random.Random(f"look|{key}|{n}").randint(1, 20)
     mod = _PC_CAP.mod("wis")
     stay = min(6, ((_S.get("live") or {}).get("clock", 0))
-               if (_S.get("live") or {}).get("loc") == loc else 0)   # час в зале = пригляделся
+               if (_S.get("live") or {}).get("loc") == loc else 0)   # hour in room = got acclimated
     total = roll + mod + stay
     lvl = 2 if total >= PB["look_good"] else 1 if total >= PB["look_dc"] else 0
     prev = _looked_level(loc, inside)

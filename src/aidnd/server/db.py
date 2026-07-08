@@ -1,7 +1,7 @@
-"""Асинхронный слой БД сервиса (Postgres): движок, фабрика сессий, Base, init_db.
+"""Async DB layer for service (Postgres): engine, session factory, Base, init_db.
 
-Пользователи / сессии-токены / игры. URL — config.DATABASE_URL (env AIDND_DATABASE_URL).
-SQLAlchemy 2.0 async + asyncpg. Схема создаётся через create_all (Alembic — позже).
+Users / session-tokens / games. URL — config.DATABASE_URL (env AIDND_DATABASE_URL).
+SQLAlchemy 2.0 async + asyncpg. Schema created via create_all (Alembic — later).
 
 Key functions
 -------------
@@ -30,23 +30,23 @@ class Base(DeclarativeBase):
     pass
 
 
-# NullPool: свежее соединение на операцию. asyncpg-соединения привязаны к event-loop;
-# без пула нет кросс-loop проблем (HTTP+WS, тесты). Для нашего масштаба оверхед минимален.
+# NullPool: fresh connection per operation. asyncpg connections are bound to event-loop;
+# without a pool, no cross-loop issues (HTTP+WS, tests). For our scale, overhead is minimal.
 engine = create_async_engine(config.DATABASE_URL, poolclass=NullPool)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 async def init_db() -> None:
-    """Создать таблицы, если их нет (идемпотентно)."""
-    from . import models  # noqa: F401 — регистрирует таблицы в Base.metadata
+    """Create tables if they don't exist (idempotent)."""
+    from . import models  # noqa: F401 — registers tables in Base.metadata
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
-    """Зависимость FastAPI: сессия БД на запрос."""
+    """FastAPI dependency: DB session per request."""
     async with SessionLocal() as session:
         yield session
 
 
-DbSession = Annotated[AsyncSession, Depends(get_session)]   # тип-алиас зависимости для ручек
+DbSession = Annotated[AsyncSession, Depends(get_session)]   # type alias for dependency injection in route handlers

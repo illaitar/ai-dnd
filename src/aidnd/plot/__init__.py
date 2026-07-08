@@ -1,5 +1,5 @@
-"""Основной сюжет: библия (тема/правда/каст 30+ с иерархией≠важностью), архитектор, кастинг.
-Игрок — регрессор. См. docs/PLOT.md.
+"""Main plot: bible (theme/truth/cast 30+ with hierarchy≠importance), architect, casting.
+Player — regressor. See docs/PLOT.md.
 
 Key functions
 -------------

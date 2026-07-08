@@ -1,60 +1,60 @@
-# Предметы
+# Items
 
-`src/aidnd/items`. Предмет — не строка лута, а **фактшит с двойным дном** + знание
-наблюдателя. Монеты и ключи — тоже настоящие предметы ([принцип 9](README.md)).
+`src/aidnd/items`. An item is not a loot string, but a **factsheet with a hidden layer** + observer
+knowledge. Coins and keys are also real items ([principle 9](README.md)).
 
-## Фактшит: surface / hidden / known
+## Factsheet: surface / hidden / known
 
-- **surface** — что видно: имя, материал, вес, `apparent_worth` — МОЖЕТ ВРАТЬ.
-- **hidden** — истина под гейтом: `{prop, value, fact, gate {via, dc, req}, mods}`.
-  Гейты `via`: glance/handle/**appraise**/lore/**craft_eye**/tool/context/use/**expert**
-  (осмотр знатока-NPC). Раскрытие пишется в `known` наблюдателя — знание индивидуально.
-- **Mod/Gate/Capability**: модификаторы бьют по цене/статам при раскрытии; способность
-  осмотрщика = абилки + компетенции роли (кузнец видит металл, знахарка — яды).
+- **surface** — what's visible: name, material, weight, `apparent_worth` — CAN LIE.
+- **hidden** — truth behind the gate: `{prop, value, fact, gate {via, dc, req}, mods}`.
+  Gates `via`: glance/handle/**appraise**/lore/**craft_eye**/tool/context/use/**expert**
+  (expert-NPC inspection). Revelation is written to `known` of the observer — knowledge is individual.
+- **Mod/Gate/Capability**: modifiers affect price/stats upon revelation; inspector capability
+  = abilities + role competencies (blacksmith sees metal, herbalist sees poisons).
 
-## Две оси ценности
+## Two axes of value
 
-- **Качество выделки**: crude/plain/fine/exquisite → кость урона в бою, цена.
-- **Редкость** (отдельная ось!): common/rare/epic/**unique** — вес в пуле мира;
-  `unique` после подбора помечается и из пула БОЛЬШЕ НЕ РЕСПАВНИТСЯ.
+- **Craftsmanship quality**: crude/plain/fine/exquisite → damage die in combat, price.
+- **Rarity** (separate axis!): common/rare/epic/**unique** — weight in the world pool;
+  `unique` is marked after pickup and NO LONGER RESPAWNS from the pool.
 
-## Держатели: у каждой вещи есть место
+## Holders: every item has its place
 
-`inventory(world, item, holder)` — одна таблица на все руки мира: `pc` · `<pid>` (карман
-NPC) · `cont:<bid>:<имя>` (ёмкость) · `zone:<bid>/<zid>` (**обстановка зоны**) · `used`
-(израсходовано). Перенос = `inv_move` — кража/лут/покупка/дар/подбор один механизм.
+`inventory(world, item, holder)` — one table for all slots in the world: `pc` · `<pid>` (NPC
+pocket) · `cont:<bid>:<name>` (container) · `zone:<bid>/<zid>` (**zone fixtures**) · `used`
+(spent). Transfer = `inv_move` — theft/loot/purchase/gift/pickup all use one mechanism.
 
-**Материализация обстановки** (2026-07-06): объекты зон пула → настоящие предметы live.db
-ЛЕНИВО при первом входе в здание; идемпотентно (id из сида + `INSERT OR IGNORE` по ключу
-мира) — взятое НЕ возвращается на место. Сцена читает живой сток зоны (`_zone_stock`).
-Игрок берёт loose своей зоны («ПРЕДМЕТЫ РЯДОМ» в контексте арбитра); при работнике
-заведения — свидетели `_witness_crime`, тайком — бросок ловкости; `fixed` не унести.
-NPC-подбор с ground зоны — тоже настоящий `inv_move` (мониторится диффом ground).
+**Fixture materialization** (2026-07-06): pool zone objects → real items in live.db
+LAZILY on first entry to building; idempotent (id from seed + `INSERT OR IGNORE` on world key)
+— taken items do NOT return to place. Scene reads live zone stock (`_zone_stock`).
+Player picks loose items from their zone ("ITEMS NEARBY" in arbiter context); with establishment
+employee present — witnesses via `_witness_crime`, stealthily — Dexterity check; `fixed` items cannot be taken.
+NPC pickup from zone ground — also real `inv_move` (monitored by ground diff).
 
-## Пул предметов мира
+## World item pool
 
-`item_pool` на мир: сид-шаблоны (данные) + всё скованное игрой (`made:<имя>` — крафт/трофей
-добавляется в пул). Спавн: лут ёмкостей, карманы NPC (материализация по требованию —
-труп/кража/контракт), события (караван `caravan_chance`, restock торговца после зачистки).
+`item_pool` per world: seed templates (data) + everything forged by the game (`made:<name>` — craft/trophy
+added to pool). Spawn: container loot, NPC pockets (materialization on demand —
+corpse/theft/contract), events (caravan `caravan_chance`, merchant restock after clearing).
 
-## Ковка — item_smith [LLM]
+## Forging — item_smith [LLM]
 
-`LLMSmith.forge(ItemCtx{kind, name_hint, source, quality_band, region})` → фактшит с
-природой скрытого («выглядит как X, на деле Y»); табличный скелет качества/цены/DC — код.
-Ленивая ковка `_forge` — кэш по seed (одна и та же строка мира = один предмет).
+`LLMSmith.forge(ItemCtx{kind, name_hint, source, quality_band, region})` → factsheet with
+hidden nature ("looks like X, actually Y"); tabular skeleton of quality/price/DC — code.
+Lazy forging `_forge` — cache by seed (same world string = one item).
 
-## Крафт по графу материалов
+## Crafting via material graph
 
-Материалы — сами предметы; граф переходов — таблица данных (`content/`, gen_materials).
-Крафт = **путь по графу с гейтами**: место (мастерская со станком: наковальня/горн/верстак/
-котёл/дубильня — по ключевым словам здания), навык (незнакомое ремесло → бросок Int vs
-`PB[craft_skill_dc]`), время (сумма рёбер), листья-материалы тратятся из сумки. Результат —
-своей ковки, уходит и в пул мира. Починка/заказ — commission/repair (inventory-хендлер).
+Materials are themselves items; transition graph is a data table (`content/`, gen_materials).
+Crafting = **path through graph with gates**: location (workshop with station: anvil/forge/workbench/
+cauldron/tannery — by building keywords), skill (unfamiliar craft → Int roll vs
+`PB[craft_skill_dc]`), time (sum of edges), leaf-materials consumed from bag. Result —
+own forging, enters world pool. Repair/commission — commission/repair (inventory-handler).
 
-## Дальше
+## Next
 
-- Мастерство и прочность (срез 2 предметов).
-- Больше станков/рецептов из данных; редкие спавны от новых событий.
+- Mastery and durability (slice 2 of items).
+- More stations/recipes from data; rare spawns from new events.
 
-Связано: [entities.md](entities.md) · [worldgen.md](worldgen.md) (сид-пул) ·
-[combat.md](combat.md) (оружие) · [quests.md](quests.md) (bring/deliver цели)
+Related: [entities.md](entities.md) · [worldgen.md](worldgen.md) (seed pool) ·
+[combat.md](combat.md) (weapons) · [quests.md](quests.md) (bring/deliver targets)

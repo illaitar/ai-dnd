@@ -1,12 +1,12 @@
-"""Инскрипция: LLM «проявляет» чистый круг в ЗАКОН мира (роль А) и разыгрывает ДИКУЮ магию (роль Б).
+"""Inscribe: LLM "manifests" pure circle into world LAW (role A) and plays out WILD MAGIC (role B).
 
-Роль А — законописец: получает РИСУНОК круга (глифы × размер × положение × кольца) и правила
-геометрии; выдаёт закон ЦЕЛИКОМ — суть (kind, свободная!), силу, цель, механику. Freeform: полёт,
-иллюзия, туман, свет — что угодно, что честно следует из рисунка. Сервер КЛАМПИТ закон по бюджету
-силы (power_budget) — LLM свободен в сути, но не в мощности. Кэш в гримуаре-на-мир по хэшу рисунка.
-Роль Б — сорванный круг: исход из ОГРАНИЧЕННОГО меню (мир не сломать).
+Role A — law-scribe: receives circle DRAWING (glyphs × size × position × rings) and geometry rules;
+outputs law ENTIRELY — essence (kind, free-form!), power, target, mechanics. Freeform: flight,
+illusion, mist, light — anything that honestly follows from the drawing. Server CLAMPS law to power
+budget (power_budget) — LLM free in essence, not in power. Cache in world-grimoire by drawing hash.
+Role B — broken circle: outcome from LIMITED menu (cannot break world).
 
-LLMInscriber — единственный рантайм-путь (роли spell_scribe/wild_magic); StubInscriber — ТОЛЬКО тесты.
+LLMInscriber — sole runtime path (roles spell_scribe/wild_magic); StubInscriber — TESTS ONLY.
 
 Key functions
 -------------
@@ -23,10 +23,10 @@ import re
 from ..inference import LLMBadOutput
 from .grammar import RULES_RU, anchor, base_law, describe, load, power_budget
 
-# исходы дикой магии — механически безопасное меню (маг. хаос ограничен этим списком) --------
+# wild magic outcomes — mechanically safe menu (magical chaos bounded by this list) --------
 WILD_EFFECTS = ("backfire", "nothing", "scorch", "warp", "boon")
 
-# свободные виды законов — подсказка законописцу (список открыт: kind может быть и иным словом)
+# free law kinds — hint to law-scribe (list is open: kind can be another word)
 LAW_KINDS = ("damage", "heal", "status", "ward", "light", "reveal", "unlock", "illusion",
              "movement", "environment", "communication", "conjure", "other")
 
@@ -75,9 +75,9 @@ _WILD_SYS = (
 
 
 def clamp_law(d: dict, comp) -> dict:
-    """Закон LLM → в рамки бюджета рисунка (LLM свободен в сути, но не в мощности)."""
+    """LLM law → constrained to drawing budget (LLM free in essence, not in power)."""
     budget = max(1, round(power_budget(comp)))
-    law = dict(base_law(comp))                          # скелет: недостающее — из детерминированной грамматики
+    law = dict(base_law(comp))                          # skeleton: missing fields — from deterministic grammar
     law["name"] = str(d.get("name") or law["name"])[:40]
     for k in ("flavor", "sensory", "law", "kind", "target"):
         if d.get(k):
@@ -120,21 +120,21 @@ def clamp_law(d: dict, comp) -> dict:
     for flag in ("light", "reveal", "unlock"):
         if m.get(flag):
             mech[flag] = True
-    if mech or "mech" in d:                                 # LLM дал механику (пусть и пустую) — верим ей
+    if mech or "mech" in d:                                 # LLM provided mechanics (even if empty) — trust it
         law["mech"] = mech
     return law
 
 
 class Inscriber:
-    def scribe_law(self, comp, cls: dict) -> dict | None:        # роль А: рисунок → закон
+    def scribe_law(self, comp, cls: dict) -> dict | None:        # role A: drawing → law
         raise NotImplementedError
 
-    def wild(self, comp, reason: str, in_combat: bool) -> dict | None:  # роль Б
+    def wild(self, comp, reason: str, in_combat: bool) -> dict | None:  # role B
         raise NotImplementedError
 
 
 class StubInscriber(Inscriber):
-    """ТОЛЬКО для тестов (рантайм никогда не строит): закон из base_law, отдача по-умолчанию."""
+    """TESTS ONLY (runtime never builds): law from base_law, default backfire."""
 
     def scribe_law(self, comp, cls: dict) -> dict:
         return base_law(comp)
@@ -146,7 +146,7 @@ class StubInscriber(Inscriber):
 
 
 class LLMInscriber(Inscriber):
-    """Реальный путь: роль spell_scribe проявляет закон, wild_magic разыгрывает хаос."""
+    """Real path: spell_scribe role manifests law, wild_magic role plays out chaos."""
 
     def __init__(self, manager):
         self.manager = manager

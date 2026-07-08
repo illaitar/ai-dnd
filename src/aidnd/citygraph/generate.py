@@ -1,8 +1,8 @@
-"""Мост к процедурному генератору (диаграмма Вороного и пр.) → чистый граф города.
+"""Bridge to procedural generator (Voronoi diagram, etc.) → clean city graph.
 
-Сам генератор (`citygraph/render.py`, порт citygen.js) наружу не виден: внешний код работает
-только с City/CityParams. Здесь мы лишь вытаскиваем нейтральную геометрию (улицы, дома, мосты,
-река, стена, ворота) и отдаём её графу.
+The generator itself (`citygraph/render.py`, citygen.js port) is not exposed: external code works
+only with City/CityParams. Here we merely extract neutral geometry (streets, houses, bridges,
+river, wall, gates) and hand it to the graph.
 
 Key functions
 -------------
@@ -25,12 +25,12 @@ from .params import CityParams
 
 
 def _citygen():
-    """Self-contained генератор (build_city / render_svg) — теперь обычный модуль пакета."""
+    """Self-contained generator (build_city / render_svg) — now a normal package module."""
     return _render_mod
 
 
 def _gate_points(gate_edges, wall_poly) -> list:
-    """Ворота → точки. gate_edges генератора — ИНДЕКСЫ рёбер контура стены (берём середину ребра)."""
+    """Gates → points. Generator's gate_edges — INDICES of wall contour edges (take edge midpoint)."""
     out, n = [], len(wall_poly)
     for ge in gate_edges or []:
         try:
@@ -50,7 +50,7 @@ def _gate_points(gate_edges, wall_poly) -> list:
 
 
 def _extract(m: dict, p: CityParams) -> dict:
-    """Сырая геометрия генератора → нейтральный контракт для City. Учитывает флаги river/walls."""
+    """Raw generator geometry → neutral contract for City. Honors river/walls flags."""
     streets = m.get("streets") or {"nodes": [], "adj": []}
     nodes = [(float(x), float(y)) for x, y in streets["nodes"]]
     adj = [list(a) for a in streets["adj"]]
@@ -72,26 +72,26 @@ def _extract(m: dict, p: CityParams) -> dict:
 
 
 def generate(params: CityParams) -> City:
-    """Сгенерировать город по параметрам и вернуть готовый граф с системой передвижения."""
+    """Generate city by parameters and return a ready graph with movement system."""
     p = params.normalized()
     m = _citygen().build_city(p.seed, p.width, p.height, buildings=[], key_houses=[])
     return City(p, _extract(m, p))
 
 
 def visual(params: CityParams, chrome: bool = True, interactive: bool = False) -> dict:
-    """Богатый визуал города — ТОТ ЖЕ рендер, что на /citydebug (полные дома с крышами, река,
-    стены, мосты, площадь, районы). Тот же build_city(seed,W,H) → одна система координат 0 0 W H
-    с графом, поэтому интерактивный слой (фигура игрока) кладётся поверх без сдвигов.
+    """Rich city visual — SAME render as on /citydebug (full houses with roofs, river,
+    walls, bridges, plaza, districts). Same build_city(seed,W,H) → one coordinate system 0 0 W H
+    with graph, so interactive layer (player figure) sits on top without coordinate shifts.
 
-    interactive=True — каждый дом становится кликабельным полигоном `class="h" data-id="<house-id>"`
-    (по этому id граф отдаёт перекрёсток дома). Встроенный скрипт/стиль рендера при этом вырезаем —
-    клики навешивает фронт игры сам. Возвращает ВНУТРЕННЕЕ содержимое SVG + размеры холста W×H.
+    interactive=True — each house becomes a clickable polygon `class="h" data-id="<house-id>"`
+    (by this id the graph returns the house's intersection). Built-in render script/style is removed in this case —
+    the game front handles clicks itself. Returns INNER SVG content + canvas dimensions W×H.
     """
     p = params.normalized()
     cg = _citygen()
     m = cg.build_city(p.seed, p.width, p.height, buildings=[], key_houses=[])
     full = cg.render_svg(m, chrome=chrome, marks=False, interactive=interactive)
-    si = full.find("<style>.h{")                    # вырезать встроенный style+script интерактива
+    si = full.find("<style>.h{")                    # strip embedded interactive style+script
     if si != -1:
         se = full.find("</script>", si)
         full = full[:si] + (full[se + 9:] if se != -1 else full[si:])

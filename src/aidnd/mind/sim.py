@@ -1,9 +1,9 @@
-"""Симуляция: восприятие → решение → применение к миру → апрейзал эмоций. Один тик = один
-выбор примитива. Это стенд для проверки эмерджентных сценариев (без npcdebug/LLM).
+"""Simulation: perception → decision → application to world → emotion appraisal. One tick = one
+primitive choice. This is a testbed for verifying emergent scenarios (without npcdebug/LLM).
 
-Где был бы LLM (в продовом контуре): apprise неоднозначных событий (Tier-2), формирование НОВОЙ
-ситуативной цели в propose_goals, рендер речевого акта say(...) в текст, rerank в recall. Здесь
-всё механически — чтобы сценарии были детерминированы и проверяемы.
+Where the LLM would be (in the prod loop): apprise ambiguous events (Tier-2), formation of NEW
+situational goal in propose_goals, render speech act say(...) to text, rerank in recall. Here
+everything is mechanical — so scenarios are deterministic and verifiable.
 
 Key functions
 -------------
@@ -25,9 +25,9 @@ from .tick import appraise
 class Percept:
     here: str
     exits: list
-    present: list                   # тела ЗДЕСЬ (со-локация) — свидетели, острые угрозы
-    nearby: list                    # тела в радиусе видимости (соседние места) — цели/опасности вдали
-    me: object                      # моё тело (Body)
+    present: list                   # bodies HERE (co-location) — witnesses, acute threats
+    nearby: list                    # bodies in visibility radius (nearby locations) — targets/hazards at distance
+    me: object                      # my body (Body)
 
 
 def perceive(state, world, radius: int = 1) -> Percept:
@@ -40,10 +40,10 @@ def perceive(state, world, radius: int = 1) -> Percept:
 
 
 def apply(action, state, world) -> dict:
-    """Применить выбранный примитив к миру. Возвращает событие (для лога/апрейзала)."""
+    """Apply chosen primitive to world. Returns event (for log/appraisal)."""
     me = world.bodies[state.config.id]
     ev = {"action": action.label()}
-    me.talking_to = None                                     # любой не-say ход выходит из разговора
+    me.talking_to = None                                     # any non-say action exits conversation
     if action.kind == "move" and action.to:
         me.place = action.to
     elif action.kind == "attack" and action.target in world.bodies:
@@ -52,8 +52,8 @@ def apply(action, state, world) -> dict:
         if tb.hp <= 0:
             tb.alive = False
         ev["hit"] = tb.id
-        # жертва-НПЦ переживает нападение (фикс. апрейзал) И начинает БОЯТЬСЯ нападавшего адресно
-        # → в следующий тик формируется цель «уцелеть» именно от него (бегство/чаще — погоня хищника)
+        # victim-NPC experiences attack (fixed appraisal) AND starts FEARING attacker specifically
+        # → next tick forms goal "survive" from them (flight/often — predator pursuit)
         vs = world.npc_minds.get(tb.id) if hasattr(world, "npc_minds") else None
         if vs is not None:
             appraise(vs, {"goal_impact": -0.8, "intent": "deliberate", "desert": -0.6,
@@ -84,12 +84,12 @@ def apply(action, state, world) -> dict:
     elif action.kind == "say":
         ev["say"] = action.say
         if action.say in ("chat", "flatter", "ask") and action.target in world.bodies:
-            me.talking_to = action.target                    # «я сейчас говорю с ним» (видно всем в зале)
-            state.needs["social"] = max(0.0, state.needs.get("social", 0.0) - 0.25)   # общение закрывает нужду
+            me.talking_to = action.target                    # "I am speaking with them now" (visible to all in room)
+            state.needs["social"] = max(0.0, state.needs.get("social", 0.0) - 0.25)   # conversation satisfies need
             r = state.rel(action.target)
             r["affinity"] = min(1.0, r["affinity"] + (0.06 if action.say == "flatter" else 0.04))
             vs = world.npc_minds.get(action.target) if hasattr(world, "npc_minds") else None
-            if vs is not None:                                    # взаимная симпатия крепнет
+            if vs is not None:                                    # mutual affinity strengthens
                 vs.needs["social"] = max(0.0, vs.needs.get("social", 0.0) - 0.12)
                 rr = vs.rel(me.id)
                 rr["affinity"] = min(1.0, rr["affinity"] + 0.04)
@@ -98,7 +98,7 @@ def apply(action, state, world) -> dict:
 
 
 def tick(state, world, temp: float = 0.0, rng=None) -> dict:
-    """Один ход: восприятие → решение → применение. Эмоции/нужды двигает внешний advance при желании."""
+    """One turn: perception → decision → application. Emotions/needs driven by external advance if desired."""
     p = perceive(state, world)
     (action, goal, u), ranked = decide(state, world, p, temp=temp, rng=rng)
     ev = apply(action, state, world)

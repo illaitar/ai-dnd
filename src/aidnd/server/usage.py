@@ -1,8 +1,8 @@
-"""Лимиты бесплатного тарифа + разблокировка безлимита кодом.
+"""Free tier quota limits + unlimited unlock via code.
 
-На юзера: FREE_ENRICH генераций мира и FREE_REQUESTS игровых запросов. Валидный код,
-введённый в настройках, ставит user.unlimited=True. Коды генерит владелец (server/gencode).
-consume_* перечитывают юзера в текущей сессии БД (кэш на WS-коннекте мог устареть).
+Per user: FREE_ENRICH world generations and FREE_REQUESTS game requests. A valid code
+entered in settings sets user.unlimited=True. The owner generates codes (server/gencode).
+consume_* re-read the user in the current DB session (cache from WS connect may be stale).
 
 Key functions
    -----------
@@ -26,7 +26,7 @@ from .models import UnlockCode, User
 
 
 def snapshot(user: User) -> dict:
-    """Состояние лимитов для UI-шкалы."""
+    """Quota state for UI scale."""
     return {"unlimited": bool(user.unlimited),
             "enrich": {"used": int(user.enrich_used), "free": config.FREE_ENRICH},
             "requests": {"used": int(user.request_used), "free": config.FREE_REQUESTS}}
@@ -37,7 +37,7 @@ async def _get(db: AsyncSession, user_id: int) -> User:
 
 
 async def consume_enrich(db: AsyncSession, user_id: int) -> tuple[bool, User]:
-    """Списать 1 генерацию мира. (ok, свежий user). ok=False — лимит исчерпан."""
+    """Consume 1 world generation. (ok, updated user). ok=False — quota exceeded."""
     user = await _get(db, user_id)
     if not user.unlimited:
         if user.enrich_used >= config.FREE_ENRICH:
@@ -48,7 +48,7 @@ async def consume_enrich(db: AsyncSession, user_id: int) -> tuple[bool, User]:
 
 
 async def consume_request(db: AsyncSession, user_id: int) -> tuple[bool, User]:
-    """Списать 1 игровой запрос. (ok, свежий user). ok=False — лимит исчерпан."""
+    """Consume 1 game request. (ok, updated user). ok=False — quota exceeded."""
     user = await _get(db, user_id)
     if not user.unlimited:
         if user.request_used >= config.FREE_REQUESTS:
@@ -59,7 +59,7 @@ async def consume_request(db: AsyncSession, user_id: int) -> tuple[bool, User]:
 
 
 async def redeem(db: AsyncSession, user_id: int, code: str) -> tuple[bool, User]:
-    """Погасить код → unlimited. (ok, свежий user). ok=False — код неверный/использован."""
+    """Redeem code → unlimited. (ok, updated user). ok=False — code invalid/already used."""
     user = await _get(db, user_id)
     row = (await db.execute(
         select(UnlockCode).where(UnlockCode.code == (code or "").strip()))).scalar_one_or_none()
@@ -73,10 +73,10 @@ async def redeem(db: AsyncSession, user_id: int, code: str) -> tuple[bool, User]
 
 
 async def generate_codes(db: AsyncSession, n: int = 1) -> list[str]:
-    """Создать n кодов разблокировки (для владельца, server/gencode)."""
+    """Generate n unlock codes (for owner, server/gencode)."""
     codes = []
     for _ in range(max(1, n)):
-        c = secrets.token_hex(4).upper()                 # 8 hex-символов, легко продиктовать
+        c = secrets.token_hex(4).upper()                 # 8 hex digits, easy to dictate
         db.add(UnlockCode(code=c))
         codes.append(c)
     await db.commit()

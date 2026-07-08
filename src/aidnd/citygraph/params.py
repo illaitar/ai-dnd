@@ -1,5 +1,5 @@
-"""Параметры генерации города. Передаются снаружи (дебаг-экран/игра), детали генератора
-скрыты за этим простым контрактом.
+"""City generation parameters. Passed from outside (debug screen / game), generator details
+hidden behind this simple contract.
 
 Key functions
 -------------
@@ -16,14 +16,14 @@ class CityParams:
     seed: int = 1
     width: int = 980
     height: int = 700
-    key_buildings: int = 8          # сколько ключевых зданий расставить (в равномерно разнесённые дома)
-    river: bool = True              # рассекает ли город река (→ мосты)
-    walls: bool = True              # обнесён ли стеной (→ ворота)
-    wards: int | None = None        # число кварталов (None — на усмотрение генератора)
-    segment: float | None = None    # целевая длина уличного отрезка (None — авто по медиане)
+    key_buildings: int = 8          # how many key buildings to place (in uniformly spaced houses)
+    river: bool = True              # does a river divide the city (→ bridges)
+    walls: bool = True              # is it walled (→ gates)
+    wards: int | None = None        # number of wards (None — generator's choice)
+    segment: float | None = None    # target street segment length (None — auto by median)
 
     def normalized(self) -> CityParams:
-        """Защита от мусорных значений."""
+        """Protection from garbage values."""
         return CityParams(
             seed=int(self.seed),
             width=max(320, min(2000, int(self.width))),

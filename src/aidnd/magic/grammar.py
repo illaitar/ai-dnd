@@ -1,10 +1,10 @@
-"""Грамматика магии: круг = РИСУНОК (глиф × размер × положение × кольцо) → классификация + бюджет
-силы + канонический хэш. Правила ЧЁТКИЕ и детерминированные (см. RULES_RU — они же уходят в промпт
-законописца); сам ЗАКОН круга проявляет LLM (inscribe), строго в пределах бюджета. base_law —
-детерминированный СКЕЛЕТ закона (табличная логика): clamp_law достраивает им пропуски LLM.
+"""Magic grammar: circle = DRAWING (glyph × size × position × ring) → classification + power
+budget + canonical hash. Rules are STRICT and deterministic (see RULES_RU — they also go into the
+lawscribe prompt); the circle's LAW is manifested by LLM (inscribe), strictly within budget.
+base_law — deterministic LAW SKELETON (table-driven logic): clamp_law fills gaps left by LLM.
 
-Рисунок: [{id, size 0..1, angle 0..360 (0 = верх, по часовой), ring 0|1}]. Голая строка "огонь"
-принимается как {id, size .5, angle авто, ring 0} — обратная совместимость со старым вводом.
+Drawing: [{id, size 0..1, angle 0..360 (0 = top, clockwise), ring 0|1}]. Bare string "огонь"
+is accepted as {id, size .5, angle auto, ring 0} — backward compat with old input.
 
 Key functions
 -------------
@@ -27,7 +27,7 @@ import os
 _G = None
 _GPATH = os.path.join(os.path.dirname(__file__), "glyphs.json")
 
-# ---- правила геометрии (единственный источник истины: и код, и промпт LLM) ----
+# ---- geometry rules (single source of truth: both code and LLM prompt) ----
 RULES_RU = (
     "ПРАВИЛА КРУГА: 1) РАЗМЕР глифа = сила компонента: мелкий ×0.5, средний ×1, крупный ×1.5 от веса. "
     "2) ПОЛОЖЕНИЕ на внешнем кольце — куда обращено заклинание: верх круга = вовне/на цель, "
@@ -39,12 +39,12 @@ RULES_RU = (
     "5) БЮДЖЕТ СИЛЫ круга = сумма (вес × размер × кольцо) — закон не может быть мощнее бюджета."
 )
 
-SIZE_MULT = ((0.34, 0.5), (0.67, 1.0), (1.01, 1.5))        # корзины размера: мелкий/средний/крупный
+SIZE_MULT = ((0.34, 0.5), (0.67, 1.0), (1.01, 1.5))        # size buckets: small/medium/large
 RING_MULT = {0: 1.0, 1: 0.7}
 
 
 def load() -> dict:
-    """{elements: {id:..}, glyphs: {id:..}, all: {id:..}} — словарь символов из данных."""
+    """{elements: {id:..}, glyphs: {id:..}, all: {id:..}} — symbol dictionary from data."""
     global _G
     if _G is None:
         with open(_GPATH, encoding="utf-8") as f:
@@ -67,8 +67,8 @@ def _size_mult(size: float) -> float:
 
 
 def normalize(comp) -> list:
-    """Любой ввод → список размещений [{id,size,angle,ring}]. Неизвестные глифы отброшены.
-    Строки (старый ввод) раскладываются по внешнему кольцу средним размером."""
+    """Any input → list of placements [{id,size,angle,ring}]. Unknown glyphs discarded.
+    Strings (old input) are laid out on outer ring with medium size."""
     g, out = load(), []
     raw = list(comp or [])
     for i, c in enumerate(raw):
@@ -85,28 +85,28 @@ def normalize(comp) -> list:
 
 
 def circle_hash(comp) -> str:
-    """Канонический ключ РИСУНКА: размер → 3 корзины, угол → 8 секторов, кольцо как есть.
-    Слегка сдвинутый тот же рисунок = тот же закон."""
+    """Canonical key of DRAWING: size → 3 buckets, angle → 8 sectors, ring as-is.
+    Slightly shifted same drawing = same law."""
     parts = sorted(f"{p['id']}|{_size_mult(p['size'])}|{int(((p['angle'] + 22.5) % 360) // 45)}|{p['ring']}"
                    for p in normalize(comp))
     return hashlib.sha1(("//".join(parts)).encode("utf-8")).hexdigest()[:12]
 
 
 def power_budget(comp) -> float:
-    """Бюджет силы круга: Σ вес × размер × кольцо. Закон обязан уложиться."""
+    """Circle power budget: Σ weight × size × ring. Law must fit within budget."""
     g = load()
     return round(sum(g["all"][p["id"]].get("weight", 1) * _size_mult(p["size"]) * RING_MULT[p["ring"]]
                      for p in normalize(comp)), 2)
 
 
 def glyph_cost(gid: str, size: float, ring: int) -> float:
-    """Мана за НАНЕСЕНИЕ одного глифа (та же формула, что и вклад в бюджет)."""
+    """Mana for INSCRIBING one glyph (same formula as contribution to budget)."""
     g = load()
     return round(g["all"].get(gid, {}).get("weight", 1) * _size_mult(size) * RING_MULT[1 if ring else 0], 2)
 
 
 def anchor(comp) -> str:
-    """Куда обращён круг: вовне/на цель | на себя | вокруг (по вектору размещений внешнего кольца)."""
+    """Circle orientation: outward/at target | at self | around (by placement vector of outer ring)."""
     pts = [p for p in normalize(comp) if p["ring"] == 0]
     if not pts:
         return "вокруг"
@@ -114,13 +114,13 @@ def anchor(comp) -> str:
     y = sum(math.cos(math.radians(p["angle"])) for p in pts) / len(pts)
     r = math.hypot(x, y)
     if r < 0.35:
-        return "вокруг"                                    # раскидано по кругу — областью
+        return "вокруг"                                    # spread across circle — as an area
     return "вовне/на цель" if y > 0 else "на себя" if y < -0.3 else "вбок/в сторону"
 
 
 def classify(comp) -> dict:
-    """empty (не сходится) | clean | wild. Противоречия рвут круг ТОЛЬКО внутри одного кольца —
-    на разных кольцах контраст обуздан (§4 правил)."""
+    """empty (won't cohere) | clean | wild. Contradictions break circle ONLY within one ring —
+    across different rings contrast is tamed (§4 of rules)."""
     pts = normalize(comp)
     g = load()
     base = {"placements": pts}
@@ -146,7 +146,7 @@ def classify(comp) -> dict:
 
 
 def describe(comp) -> str:
-    """Человекочитаемое описание рисунка — для промпта законописца и гримуара."""
+    """Human-readable drawing description — for lawscribe prompt and grimoire."""
     g = load()
     pts = normalize(comp)
     size_ru = lambda s: "мелко" if _size_mult(s) == 0.5 else "крупно" if _size_mult(s) == 1.5 else "средне"  # noqa: E731
@@ -164,8 +164,8 @@ def describe(comp) -> str:
 
 
 def base_law(comp) -> dict:
-    """Детерминированный СКЕЛЕТ закона (табличная логика грамматики) — основа, которую
-    clamp_law достраивает под ответ LLM. НЕ офлайн-фоллбэк: рантайм без LLM не работает."""
+    """Deterministic LAW SKELETON (table-driven grammar logic) — base that clamp_law fills
+    for LLM response. NOT offline fallback: runtime without LLM fails."""
     g = load()
     pts = normalize(comp)
     kinds = [(p, g["all"][p["id"]]) for p in pts]

@@ -1,8 +1,8 @@
-"""Модель NPC для нового ядра решений (отдельно от старого aidnd/npc).
+"""NPC model for the new decision core (separate from old aidnd/npc).
 
-NpcConfig — редактируемые настройки (характер/характеристики/нужды/эмоции/память/связи).
-NpcState — рантайм (config + позиция на графе + текущие нужды/эмоции/режим + память).
-Scene — лёгкий мир дебага: граф города + часы (тик) + размещённые NPC + предметы.
+NpcConfig — editable settings (traits/characteristics/needs/emotions/memory/relationships).
+NpcState — runtime state (config + position on graph + current needs/emotions/mode + memory).
+Scene — lightweight debug world: city graph + clock (tick) + placed NPCs + items.
 
 Key functions
 --------------
@@ -39,9 +39,9 @@ class NpcConfig:
 
 @dataclass
 class Plan:
-    """План рутины: упорядоченные шаги к цели + важность (стойкость к прерыванию)."""
+    """Routine plan: ordered steps toward a goal + importance (resistance to interruption)."""
     goal: str
-    steps: list = field(default_factory=list)            # описания шагов / вызовы инструментов
+    steps: list = field(default_factory=list)            # step descriptions / tool calls
     importance: float = 0.4
     cursor: int = 0
 
@@ -64,19 +64,19 @@ class NpcState:
     mode: str = "leisure"                                # routine | leisure | converse | threat
     needs: dict = field(default_factory=lambda: dict.fromkeys(NEEDS, 0.2))
     emotion: dict = field(default_factory=lambda: dict.fromkeys(EMOTIONS, 0.0))
-    emotion_target: dict = field(default_factory=dict)   # канал → id источника (на кого/из-за кого)
+    emotion_target: dict = field(default_factory=dict)   # channel → source id (target/reason)
     relationships: dict = field(default_factory=dict)    # id → {trust, affinity, fear}
     memory: MemoryStore = field(default_factory=MemoryStore)
-    plan: Plan | None = None                           # активный план (режим routine)
-    engagement: float = 0.0                              # вовлечённость в диалог (hold для converse)
-    mode_history: list = field(default_factory=list)     # [(tick, mode, switched, reason)] — маршрут
-    agendas: list = field(default_factory=list)          # долгосрочные цели (LLM-планировщик, mind/agenda)
+    plan: Plan | None = None                           # active plan (routine mode)
+    engagement: float = 0.0                              # dialogue engagement (hold for converse)
+    mode_history: list = field(default_factory=list)     # [(tick, mode, switched, reason)] — history
+    agendas: list = field(default_factory=list)          # long-term goals (LLM scheduler, mind/agenda)
 
     @classmethod
     def from_config(cls, cfg: NpcConfig, node: int | None = None) -> NpcState:
         return cls(config=cfg, node=node, hp=cfg.max_hp)
 
-    # эмоц. параметры выводятся из черт (один механизм, черты параметризуют)
+    # emotion parameters derived from traits (one mechanism, traits parameterize)
     def emotion_gain(self, channel: str) -> float:
         t = self.config.traits
         return {"anger": 0.6 + t.get("irritability", 0.5),
@@ -107,5 +107,5 @@ class NpcState:
 class Scene:
     city: object                                         # aidnd.citygraph.City
     clock: int = 0
-    npcs: dict = field(default_factory=dict)             # id → NpcState (все размещённые)
-    items: dict = field(default_factory=dict)            # node → [имена предметов]
+    npcs: dict = field(default_factory=dict)             # id → NpcState (all placed)
+    items: dict = field(default_factory=dict)            # node → [item names]

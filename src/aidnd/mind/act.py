@@ -1,8 +1,8 @@
-"""Действия (общие примитивы) + выбор. enumerate_actions раскрывает примитивы из восприятия;
-decide скорит каждую пару (действие, цель) общей utility и берёт лучшую (softmax, при temp→0 — argmax).
+"""Actions (common primitives) + selection. enumerate_actions unfolds primitives from perception;
+decide scores each (action, target) pair by common utility and takes the best (softmax, at temp→0 — argmax).
 
-Примитивов мало и они общие: move/attack/take/give/say(act)/use/wait. Никакого «follow», «flee»,
-«ambush» — это всё ВЫИГРАВШИЙ примитив под конкретной целью.
+Few primitives and they are common: move/attack/take/give/say(act)/use/wait. No «follow», «flee»,
+«ambush» — these are all WINNING primitives under specific targets.
 
 Key functions
 -------------
@@ -26,8 +26,8 @@ SAY_ACTS = ("chat", "threat", "flatter", "ask", "counter", "accept")
 @dataclass
 class Action:
     kind: str                       # move|attack|take|give|say|use|wait
-    to: str | None = None           # место (move)
-    target: str | None = None       # id тела
+    to: str | None = None           # place (move)
+    target: str | None = None       # body id
     say: str | None = None          # threat|flatter|ask|counter|accept
     item: object = None             # Item (give|take|use)
 
@@ -66,7 +66,7 @@ def enumerate_actions(state, world, percept) -> list:
 
 
 def score(state, world, percept) -> list:
-    """Ранжированный список (action, goal, utility) по всем парам — лучшая цель на каждое действие."""
+    """Ranked list (action, goal, utility) across all pairs — best goal per action."""
     goals = propose_goals(state, world, percept)
     out = []
     for a in enumerate_actions(state, world, percept):
@@ -81,9 +81,9 @@ def score(state, world, percept) -> list:
 
 
 def decide(state, world, percept, temp: float = 0.0, rng=None):
-    """Лучшее действие. temp=0 → argmax (детерминизм для тестов); temp>0 → softmax-выбор.
-    В softmax-пул попадают только ОСМЫСЛЕННЫЕ действия (за которыми стоит цель) + безобидные
-    wait/move — чтобы стохастика не порождала беспричинных ударов/краж (действие без цели ≠ выбор)."""
+    """Best action. temp=0 → argmax (determinism for tests); temp>0 → softmax-selection.
+    The softmax pool contains only MEANINGFUL actions (backed by a goal) + harmless
+    wait/move — so stochastics don't spawn causeless hits/steals (action without goal ≠ choice)."""
     ranked = score(state, world, percept)
     if temp <= 0 or rng is None:
         return ranked[0], ranked

@@ -1,16 +1,16 @@
-"""ПРОИСШЕСТВИЯ города — данжи ВНУТРИ города, рождённые общегородской симуляцией NPC.
+"""City incidents — mini dungeons INSIDE the city, born from the global NPC simulation.
 
-Каждое происшествие привязано к живым нитям мира (docs/dungeons.md «город»):
-- место = дом/работа РЕАЛЬНОГО жителя (его узел, его имя в заголовке заказа);
-- заказчик = живой NPC — награду платит из СВОЕГО кошелька (гильдейские — из кассы гильдии);
-- банда (gang) = сами горожане с гнильцой (malice): днём мельник — ночью грабит; бой с ними
-  реален (смерть = flag dead, город теряет человека); каждое утро банда ВОРУЕТ у соседей
-  (deeds theft от реального актора → сплетни town_talk, общак-стэш растёт, заказ дорожает);
-- haunt = дом того, кто РЕАЛЬНО умер в этом мире (dead-флаги — в т.ч. жертвы заказных
-  убийств игрока: заказал душегубство → в доме жертвы завелась нечисть → новый заказ);
-- missing = житель похищен (flag captive — исчезает из сцен города честно), спасение
-  возвращает; stash = схрон краденого ИЗ deed-журнала (возврат жертвам — реальные кошельки).
-Сам данж — маленький dungeongen (городской масштаб) с брифом пула. LLM в рантайме нет.
+Each incident is tied to the living threads of the world (docs/dungeons.md "city"):
+- location = home/work of a REAL resident (their node, their name in the quest header);
+- patron = a live NPC — pays the reward from THEIR OWN wallet (guild — from guild coffers);
+- gang = the townspeople themselves with malice: miller by day — thief by night; combat with them
+  is real (death = dead flag, city loses a person); each morning the gang STEALS from neighbors
+  (theft deeds from real actor → town gossip, shared stash grows, quest cost rises);
+- haunt = home of someone who REALLY died in this world (dead flags — including victims of
+  player contract murders: ordered assassination → victim's home is haunted → new quest);
+- missing = resident is captured (captive flag — honestly disappears from city scenes), rescue
+  returns them; stash = cache of stolen goods FROM deed journal (return to victims — real wallets).
+The dungeon itself is a small dungeongen (city scale) with pool briefing. No LLM at runtime.
 
 Key functions
 -------------
@@ -62,7 +62,7 @@ def _fam(name: str) -> str:
 
 
 def incident_spawn() -> list:
-    """Утро: мир порождает происшествие из ЖИЗНИ города (≤2 активных, шанс за день)."""
+    """Morning: world spawns an incident from city LIFE (≤2 active, chance per day)."""
     people = _S.get("people") or {}
     if not people:
         return []
@@ -94,7 +94,7 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
     inc = {"type": t["key"], "goal": t["goal"], "env": t["env"], "cr": cr,
            "esc": t.get("esc", False), "made_gt": _gt(), "stash": 0, "members": [],
            "captive": None, "patron": None, "giver": "guild"}
-    if t["victim"] == "dead_home":                    # дом реально умершего в ЭТОМ мире
+    if t["victim"] == "dead_home":                    # home of someone who actually died in THIS world
         if not dead:
             return None
         vid = rng.choice(sorted(dead))
@@ -106,7 +106,7 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
         kin = [pid for pid, p in alive.items()
                if _fam(p.name) == _fam(vic.name) and pid != vid]
         inc["patron"] = kin[0] if kin else None
-    elif t["victim"] in ("home", "work"):             # дом/подворье реального жителя
+    elif t["victim"] in ("home", "work"):             # home/homestead of a real resident
         pool_p = [pid for pid, p in alive.items()
                   if p.persona and (t["victim"] == "home" or p.work)]
         if not pool_p:
@@ -114,10 +114,10 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
         pid = rng.choice(pool_p)
         p = people[pid]
         inc["patron"] = pid
-        inc["giver"] = pid                            # платит из СВОЕГО кошелька
+        inc["giver"] = pid                            # pays from THEIR OWN wallet
         inc["place"] = (f"подворье, где трудится {p.name}" if t["victim"] == "work"
                         else f"дом семьи {_fam(p.name)}")
-        if t["goal"] == "rescue":                     # похищен родич заказчика
+        if t["goal"] == "rescue":                     # patron's relative is kidnapped
             kin = [k for k, pp in alive.items()
                    if _fam(pp.name) == _fam(p.name) and k != pid]
             if not kin:
@@ -126,7 +126,7 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
             inc["captive_name"] = people[inc["captive"]].name
     elif t["victim"] == "vacant":
         inc["place"] = "заброшенный дом у стены"
-    if t["foe"] == "citizens":                        # шайка из СВОИХ: горожане с гнильцой
+    if t["foe"] == "citizens":                        # gang of their own: townspeople with malice
         rogues = [pid for pid, p in alive.items()
                   if p.state.config.traits.get("malice", 0.5) >= PB["incident_gang_malice"]
                   and p.role not in ("стражник",) and pid != inc.get("patron")]
@@ -135,7 +135,7 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
         inc["members"] = rng.sample(rogues, min(4, max(2, len(rogues) // 3 or 2)))
         inc["chief"] = max(inc["members"],
                            key=lambda m: people[m].state.config.traits.get("malice", 0))
-    if t["key"] == "stash":                           # схрон вора из deed-журнала
+    if t["key"] == "stash":                           # thief's cache from deed journal
         thefts = [d for d in _store().deeds(_wid(), verb="theft", limit=30)
                   if d["actor"] in alive]
         if not thefts:
@@ -152,7 +152,7 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
     inc["title"] = t["title"].format(**subs)
     inc["pitch"] = t["pitch"].format(**subs)
     reward = max(2, round(cr * PB["guild_reward_per_cr"]))
-    if inc["giver"] != "guild":                       # личный заказ — кламп по кошельку
+    if inc["giver"] != "guild":                       # personal quest — clamped by wallet
         reward = max(2, min(reward, _store().purse_get(_wid(), inc["giver"])))
     inc["reward"] = reward
     inc["news"] = f"Город гудит: {inc['title']} — {subs['patron']} ищет смельчака"
@@ -160,7 +160,7 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
 
 
 def gang_morning() -> list:
-    """Эскалация: активная шайка ворует у СОСЕДЕЙ — реальные монеты, реальные deeds."""
+    """Escalation: active gang steals from NEIGHBORS — real coins, real deeds."""
     from aidnd.server.play.engine import deeds as _deeds
 
     people = _S.get("people") or {}
@@ -180,7 +180,7 @@ def gang_morning() -> list:
         actor = rng.choice(inc["members"])
         d = {k: v for k, v in inc.items() if k not in ("id", "status")}
         d["stash"] = d.get("stash", 0) + take
-        d["reward"] = d.get("reward", 4) + 1          # город злится — заказ дорожает
+        d["reward"] = d.get("reward", 4) + 1          # city grows angry — quest costs more
         _store().save_contract(_wid(), inc["id"], "incident", d)
         _deeds.record(actor, "theft", obj=mark, place="ночная улица", witnesses=[],
                       data={"coins": take, "gang": inc["id"]})
@@ -191,7 +191,7 @@ def gang_morning() -> list:
 
 
 def incident_jobs() -> list:
-    """Заказы происшествий для доски гильдии (рядом с логовищами)."""
+    """Format incidents as guild board quests (alongside lairs)."""
     people = _S.get("people") or {}
     out = []
     for inc in incidents_active():
@@ -204,8 +204,8 @@ def incident_jobs() -> list:
 
 
 def incident_resolve(inc_id: str, fell_members: list) -> list:
-    """Цель достигнута: награда (кошелёк заказчика/гильдии), пленник домой, краденое —
-    жертвам, память города. Павшие члены шайки — реальные мертвецы города."""
+    """Quest complete: reward (patron/guild wallet), captive freed, stolen goods —
+    to victims, city remembers. Fallen gang members — real dead of the city."""
     from aidnd.server.play.engine import deeds as _deeds
 
     people = _S.get("people") or {}
@@ -240,7 +240,7 @@ def incident_resolve(inc_id: str, fell_members: list) -> list:
                                              about=["pc"])
         _store().purse_add(_wid(), "pc", cut)
         narr.append(f"Схрон: {back} зм возвращаются людям, твоя доля — {cut} зм.")
-    for pid in fell_members:                          # павшие — настоящие покойники города
+    for pid in fell_members:                          # fallen — real dead of the city
         if pid in people:
             _store().flag_set(_wid(), f"dead|{pid}")
             _deeds.record("pc", "clear", obj=pid, place=inc.get("place", ""),

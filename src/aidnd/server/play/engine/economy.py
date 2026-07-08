@@ -1,15 +1,15 @@
-"""ЭКОНОМИКА города — слой B (docs/citysim.md §B): именованные supply-chain + монета M.
+"""City ECONOMY — layer B (docs/citysim.md §B): named supply-chains + coin M.
 
-Ощущаемая экономика = ИМЕНОВАННЫЕ цепочки `сырьё → производитель@venue → товар → продажа →
-потребители` (content/chains.json), которые игрок видит и РВЁТ (убил мельника → хлеб
-дорожает). СОХРАНЕНИЕ ДЕНЕГ: монета города M только ПЕРЕМЕЩАЕТСЯ (покупка = перевод из
-кошелька покупателя в кошелёк производителя), нигде не создаётся/не исчезает — кроме притока/
-оттока игрока (лут → инфляция, скупил и увёз → дефляция). Никакого безусловного «+coin за
-работу»: доход ТОЛЬКО из чужой траты. Цены дышат спросом/запасом (кламп+эластичность).
-`wealth`-нужда — от РЕАЛЬНОГО кошелька (пусто → давление к работе/промыслу/долгу).
+Felt economy = NAMED chains `raw → producer@venue → good → sale →
+consumers` (content/chains.json), which player sees and BREAKS (kill miller → bread
+rises). MONEY CONSERVATION: city coin M only SHIFTS (purchase = transfer from
+buyer's purse to producer's purse), never created/lost — except player inflow/
+outflow (loot → inflation, bought & hauled → deflation). No unconditional «+coin for
+work»: income ONLY from others' spending. Prices breathe with demand/supply (clamp+elasticity).
+`wealth`-need — from REAL purse (empty → pressure toward work/trade/debt).
 
-Рантайм — 0 LLM, суточный шаг (economy_step в _world_events). LOD: цепочки — именованные
-производители (реальные кошельки); безымянная масса — покупатели/дрейф в общем пуле M.
+Runtime — 0 LLM, daily step (economy_step in _world_events). LOD: chains — named
+producers (real purses); nameless mass — buyers/drift in shared pool M.
 
 Key functions
 -------------
@@ -54,7 +54,7 @@ def _dead() -> set:
 
 
 def _seed_coin() -> None:
-    """Раздать стартовую монету M по достатку (appearance = видимое богатство); идемпотентно."""
+    """Distribute initial coin M by wealth (appearance = visible wealth); idempotent."""
     if _store().flag_get(_wid(), "econ_seeded"):
         return
     rng = random.Random(f"coin|{_wid()}")
@@ -66,14 +66,14 @@ def _seed_coin() -> None:
 
 
 def _venue_of(sell_kind: str) -> str | None:
-    """Узел-заведение продажи цепочки: первый venue нужного place-kind (по detect зданий)."""
+    """Chain sale node: first venue of needed place-kind (by building detection)."""
     from aidnd import society
     from aidnd.server.play.engine.core import _S, _binfo
     for bid in sorted(_S.get("keynode") or {}):
         data = (_store().get_building(_wid(), bid) or {}).get("data") or {}
         if sell_kind in society.kinds_of(data):
             return bid
-    if sell_kind == "market":                             # рынок = любая лавка/склад/мастерская
+    if sell_kind == "market":                             # market = any shop/warehouse/workshop
         for bid in sorted(_S.get("keynode") or {}):
             if any(k in _binfo(bid)["kind"] for k in ("лавк", "склад", "мастерск", "рынок")):
                 return bid
@@ -81,8 +81,8 @@ def _venue_of(sell_kind: str) -> str | None:
 
 
 def instantiate() -> list:
-    """Собрать именованные цепочки из реальных производителей+venue (детерминир.). ~3 названных
-    производителя на цепочку; остальная масса роли — фон. Сохраняется в flag econ_chains."""
+    """Assemble named chains from real producers+venues (deterministic). ~3 named
+    producers per chain; remaining mass roles — background. Saved in flag econ_chains."""
     people = _people()
     by_role: dict = {}
     for pid, p in sorted(people.items()):
@@ -107,16 +107,16 @@ def _chains() -> list:
 
 
 def ensure() -> None:
-    """Идемпотентно: сид монеты + инстанцирование цепочек (первый заход в мир)."""
+    """Idempotent: coin seed + chain instantiation (first world entry)."""
     _seed_coin()
     if not _store().flag_get(_wid(), "econ_chains"):
         instantiate()
 
 
 def economy_step(day: int | None = None) -> list:
-    """Суточный шаг (в _world_events): производство → продажа (СОХРАНЕНИЕ монеты, только
-    перевод) → цены (спрос/запас, кламп) → wealth-нужда от кошелька. Возвращает новости.
-    `day` — конкретные сутки для сида (ленивый catch-up гоняет пропущенные дни по-разному)."""
+    """Daily step (in _world_events): production → sale (MONEY CONSERVATION, transfer only)
+    → prices (demand/supply, clamp) → wealth-need from purse. Returns news.
+    `day` — specific day for seed (lazy catch-up runs skipped days differently)."""
     ensure()
     people = _people()
     dead = _dead()
@@ -127,15 +127,15 @@ def economy_step(day: int | None = None) -> list:
     news = []
     for ch in chains:
         alive = [p for p in ch["producers"] if p in people and p not in dead]
-        if not alive:                                     # производитель мёртв — цепочка встала
+        if not alive:                                     # producer dead — chain stalled
             ch["stock"] = max(0, ch["stock"] - 1)
-            ch["price"] = min(ch["base"] * 4, ch["price"] * 1.25)  # дефицит → цена вверх
+            ch["price"] = min(ch["base"] * 4, ch["price"] * 1.25)  # deficit → price up
             if rng.random() < 0.5:
                 news.append(f"{ch['key']}: производить некому — цена растёт ({int(ch['price'])} зм)")
             continue
-        ch["stock"] += ch["output"] * len(alive)          # производство → товар (не монета!)
-        # ПОКУПКА: масса платит производителям — монета ПЕРЕМЕЩАЕТСЯ (сохранение M); спрос за
-        # шаг = demand. Что не покрыто запасом — неудовлетворённый спрос (дефицит).
+        ch["stock"] += ch["output"] * len(alive)          # production → good (not coin!)
+        # PURCHASE: mass pays producers — coin SHIFTS (conservation M); demand per
+        # step = demand. Unmet by stock — unmet demand (deficit).
         price = max(1, round(ch["price"]))
         want = ch["demand"]
         buyers = [pid for pid in rng.sample(sorted(people),
@@ -145,59 +145,59 @@ def economy_step(day: int | None = None) -> list:
         sold = 0
         for pid in buyers[:min(ch["stock"], want)]:
             seller = alive[sold % len(alive)]
-            _store().purse_add(_wid(), pid, -price)       # покупатель платит…
-            _store().purse_add(_wid(), seller, price)     # …производитель получает (сохранение)
+            _store().purse_add(_wid(), pid, -price)       # buyer pays…
+            _store().purse_add(_wid(), seller, price)     # …producer gets (conservation)
             sold += 1
-        ch["stock"] = min(ch["stock"] - sold, ch["demand"] * 8)  # потолок склада (порча/место)
-        # ЦЕНА: спрос не покрыт запасом → ДЕФИЦИТ → вверх; залежался избыток → вниз
+        ch["stock"] = min(ch["stock"] - sold, ch["demand"] * 8)  # stock ceiling (spoilage/space)
+        # PRICE: unmet demand → DEFICIT → up; excess layover → down
         unmet = want - sold
         if unmet > 0:
             ch["price"] = min(ch["base"] * 4, ch["price"] * 1.08)
         elif ch["stock"] > ch["demand"]:
             ch["price"] = max(1.0, ch["price"] * 0.94)
     _store().flag_set(_wid(), "econ_chains", json.dumps(chains, ensure_ascii=False))
-    news += venue_buyouts()                           # B3: аспиранты выкупают ремесло
+    news += venue_buyouts()                           # B3: aspirants buy out crafts
     _wealth_from_purse()
     return news
 
 
 def economy_catchup(cap: int = 7) -> list:
-    """E1 (ленивый catch-up): прогнать суточный оборот за КАЖДЫЙ пропущенный день (прыжок во
-    времени/сон/дорога), не привязываясь к фазе «утро». Идемпотентно через flag econ_day; кап
-    cap дней (LOD — глубокие пропуски не молотим впустую). Возвращает новости ПОСЛЕДНЕГО дня."""
+    """E1 (lazy catch-up): run daily economy for EACH skipped day (time jump/
+    sleep/travel), not tied to «morning» phase. Idempotent via flag econ_day; cap
+    cap days (LOD — deep skips not wasted). Returns news from LAST day."""
     from aidnd.server.play.engine.core import _GT0, _S
     ensure()
     today = _gt() // 1440
     last = _store().flag_get(_wid(), "econ_day")
-    last = int(last) if last is not None else _GT0 // 1440  # базлайн — день СТАРТА мира
+    last = int(last) if last is not None else _GT0 // 1440  # baseline — world START day
     if today <= last:
         return _S.get("econ_news") or []
     news: list = []
-    for d in range(max(last + 1, today - cap + 1), today + 1):  # максимум cap дней
+    for d in range(max(last + 1, today - cap + 1), today + 1):  # max cap days
         news = economy_step(day=d)
     _store().flag_set(_wid(), "econ_day", str(today))
     return news
 
 
 def _wealth_from_purse() -> None:
-    """wealth-нужда = f(кошелёк): пусто → высокая (давление к заработку), богат → низкая.
-    Заземляет `wealth` в реальных деньгах (было — косметика)."""
+    """wealth-need = f(purse): empty → high (pressure to earn), rich → low.
+    Grounds `wealth` in real money (was — cosmetic)."""
     for pid, p in _people().items():
         purse = _store().purse_get(_wid(), pid)
         p.state.needs["wealth"] = round(max(0.05, min(0.95, 1.0 - purse / 30.0)), 2)
 
 
-# ── B3: агенды-выкуп venue (аспирант-подёнщик копит и покупает своё ремесло обратно) ──
+# ── B3: venue buyout agendas (aspirant day-laborer saves and buys back their craft) ──
 _VENUE_PRICE = {"таверн": 90, "трактир": 90, "гильд": 120, "игорн": 70, "лавк": 60,
                 "оружейн": 70, "кузн": 60, "храм": 0, "молельн": 0, "часовн": 0,
                 "лечебн": 55, "мастерск": 55, "башн": 0, "магич": 0}
 
 
 def venue_buyouts() -> list:
-    """Суточно: если у venue вакансия (владелец умер/мест меньше ёмкости), аспирант-подёнщик
-    со СВОИМ бывшим ремеслом и деньгами ВЫКУПАЕТ место → work=venue, роль восстановлена, deed
-    'acquire'. Убитый производитель цепочки → аспирант оживляет её (экономическое исцеление).
-    Деньги уходят из города (M−), если прежний владелец мёртв, иначе — ему (сохранение)."""
+    """Daily: if venue has vacancy (owner dead/slots < capacity), aspirant day-laborer
+    with THEIR former craft and money BUYS the slot → work=venue, role restored, deed
+    'acquire'. Dead chain producer → aspirant revives it (economic healing).
+    Money leaves city (M−) if prior owner dead, else to them (conservation)."""
     from aidnd.server.play.engine import deeds as _deeds
     from aidnd.server.play.engine.core import _S, _binfo, _mt
     from aidnd.server.play.engine.world import _WORKCAP
@@ -219,20 +219,20 @@ def venue_buyouts() -> list:
         workers = [pid for pid, p in people.items()
                    if p.work == bid and pid not in dead]
         if len(workers) >= cap:
-            continue                                  # мест нет — не выкупить
+            continue                                  # no slots — can't buy
         cand = next((pid for pid in aspirants
                      if getattr(people[pid], "former_role", None) == role
                      and _store().purse_get(_wid(), pid) >= price), None)
         if cand is None:
             continue
         p = people[cand]
-        _store().purse_add(_wid(), cand, -price)      # платит цену…
+        _store().purse_add(_wid(), cand, -price)      # pays price…
         owner = next((w for w in workers), None)
         if owner:
-            _store().purse_add(_wid(), owner, price)  # …прежнему совладельцу (сохранение M)
-        # иначе venue пустой → деньги ушли из города (M−, честно: выкуп у наследников/города)
+            _store().purse_add(_wid(), owner, price)  # …to prior co-owner (conservation M)
+        # else venue empty → money left city (M−, fair: buyout from heirs/city)
         p.work = bid
-        p.role = role                                 # ремесло восстановлено!
+        p.role = role                                 # craft restored!
         aspirants.remove(cand)
         p.state.memory.add(f"выкупил долю в «{_binfo(bid)['name']}» — снова {role}!",
                            _mt(), 0.8)
@@ -241,9 +241,9 @@ def venue_buyouts() -> list:
     return news
 
 
-# ── B2: товарный рынок для игрока (покупка/продажа chain-goods двигают запас/цену/M) ──
+# ── B2: goods market for player (buying/selling chain-goods move stock/price/M) ──
 def market_here(bid: str | None) -> list:
-    """Что продаётся в ЭТОМ venue: цепочки, чей узел-заведение == bid (живые цена/запас)."""
+    """What sells at THIS venue: chains whose sale-node == bid (live price/stock)."""
     if not bid:
         return []
     dead = _dead()
@@ -270,8 +270,8 @@ def _larder_add(key: str, d: int) -> int:
 
 
 def player_buy(bid: str | None, key: str, qty: int = 1) -> dict:
-    """Игрок покупает товар цепочки по ЖИВОЙ цене: запас−, цена↑ (спрос), монета pc→
-    производителям (приток извне = ИНФЛЯЦИЯ, M+). Товар кладётся в котомку (pc_larder)."""
+    """Player buys chain good at LIVE price: stock−, price↑ (demand), coin pc→
+    producers (outside inflow = INFLATION, M+). Good goes to backpack (pc_larder)."""
     qty = max(1, int(qty))
     chains = _chains()
     ch = next((c for c in chains if c["key"] == key and c.get("venue") == bid), None)
@@ -287,11 +287,11 @@ def player_buy(bid: str | None, key: str, qty: int = 1) -> dict:
     cost = price * qty
     if _store().purse_get(_wid(), "pc") < cost:
         return {"error": f"не хватает монет (нужно {cost} зм)"}
-    _store().purse_add(_wid(), "pc", -cost)                # монета pc уходит в город (M+)
-    for i in range(qty):                                  # выручка — производителям (round-robin)
+    _store().purse_add(_wid(), "pc", -cost)                # coin pc goes to city (M+)
+    for i in range(qty):                                  # revenue → producers (round-robin)
         _store().purse_add(_wid(), alive[i % len(alive)], price)
     ch["stock"] -= qty
-    ch["price"] = min(ch["base"] * 4, ch["price"] * (1.03 ** qty))  # раскупают → дорожает
+    ch["price"] = min(ch["base"] * 4, ch["price"] * (1.03 ** qty))  # snapped up → costs rise
     _store().flag_set(_wid(), "econ_chains", json.dumps(chains, ensure_ascii=False))
     _wealth_from_purse()
     return {"good": ch["good"], "qty": qty, "cost": cost,
@@ -300,9 +300,9 @@ def player_buy(bid: str | None, key: str, qty: int = 1) -> dict:
 
 
 def player_sell(bid: str | None, key: str, qty: int = 1) -> dict:
-    """Игрок сбывает товар из котомки в цепочку: запас+, цена↓ (переизбыток), монета из
-    кошельков производителей→pc (отток = ДЕФЛЯЦИЯ, M−). Наценка-спред 0.7; неликвид → сколько
-    есть у производителей (клампится по их деньгам)."""
+    """Player sells good from backpack to chain: stock+, price↓ (surplus), coin from
+    producers' purses→pc (outflow = DEFLATION, M−). Markup-spread 0.7; illiquid → how much
+    producers have (clamped by their money)."""
     qty = max(1, int(qty))
     chains = _chains()
     ch = next((c for c in chains if c["key"] == key and c.get("venue") == bid), None)
@@ -315,8 +315,8 @@ def player_sell(bid: str | None, key: str, qty: int = 1) -> dict:
     if not alive:
         return {"error": "скупщика нет — цепочка встала"}
     price = max(1, round(ch["price"]))
-    want = int(price * 0.7) * qty                         # спред: сбыт дешевле покупки
-    paid = 0                                              # тянем из кошельков скупщиков (неликвид)
+    want = int(price * 0.7) * qty                         # spread: sale cheaper than buy
+    paid = 0                                              # draw from buyer purses (illiquid)
     i = 0
     while paid < want and any(_store().purse_get(_wid(), s) > 0 for s in alive):
         s = alive[i % len(alive)]
@@ -324,9 +324,9 @@ def player_sell(bid: str | None, key: str, qty: int = 1) -> dict:
             _store().purse_add(_wid(), s, -1)
             paid += 1
         i += 1
-    _store().purse_add(_wid(), "pc", paid)                # монета уходит из города к игроку (M−)
+    _store().purse_add(_wid(), "pc", paid)                # coin leaves city to player (M−)
     ch["stock"] += qty
-    ch["price"] = max(1.0, ch["price"] * (0.97 ** qty))   # переизбыток → дешевеет
+    ch["price"] = max(1.0, ch["price"] * (0.97 ** qty))   # surplus → price falls
     _store().flag_set(_wid(), "econ_chains", json.dumps(chains, ensure_ascii=False))
     _wealth_from_purse()
     return {"good": ch["good"], "qty": qty, "paid": paid, "partial": paid < want,
@@ -335,12 +335,12 @@ def player_sell(bid: str | None, key: str, qty: int = 1) -> dict:
 
 
 def money_supply() -> int:
-    """M = Σ кошельков (инвариант, кроме притока/оттока игрока) — для теста сохранения/стенда."""
+    """M = Σ purses (invariant, except player inflow/outflow) — for conservation test/bench."""
     return sum(_store().purse_get(_wid(), pid) for pid in _people())
 
 
 def chains_view() -> list:
-    """Приборка экономики (стенд/наблюдаемость): цепочка → цена/запас/производители/дефицит."""
+    """Economy instrumentation (bench/observability): chain → price/stock/producers/deficit."""
     people = _people()
     dead = _dead()
     out = []

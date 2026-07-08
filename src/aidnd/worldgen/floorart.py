@@ -1,9 +1,9 @@
-"""«Бумажный» рендер плана локации: пергамент + чернильный дрожащий штрих + Dyson-хэтчинг +
-глифы мебели + нумерация зон с легендой (эстетика one-page-dungeon / старых D&D-модулей).
+"""Paper-rendered location plan: parchment + inky trembling stroke + Dyson-hatching +
+furniture glyphs + zone numbering with legend (one-page-dungeon / old D&D modules aesthetic).
 
-Чистый SVG (feTurbulence для бумаги и пятен, никакого canvas). Дрожь штриха — сидированная
-(один и тот же дом всегда нарисован одинаково). Геометрию даёт floorplan.plan_location;
-здесь — только красота поверх готовых координат.
+Pure SVG (feTurbulence for paper and stains, no canvas). Stroke tremor is seeded
+(the same building always drawn identically). Geometry from floorplan.plan_location;
+here — only aesthetics over ready coordinates.
 
 Key functions
 -------------
@@ -26,10 +26,10 @@ def _rng(key: str) -> random.Random:
     return random.Random(int(hashlib.md5(("art|" + key).encode()).hexdigest()[:8], 16))
 
 
-# ── дрожащие примитивы (rough.js-стиль, сидированно) ────────────────────────
+# ── Trembling primitives (rough.js-style, seeded) ────────────────────────
 
 def _wob(pts, rng, w=1.0):
-    """Полилиния с дрожью: сегменты дробятся, точки смещаются. Возвращает d-атрибут path."""
+    """Polyline with tremor: segments subdivide, points offset. Returns path d attribute."""
     out = []
     for i in range(len(pts) - 1):
         (x1, y1), (x2, y2) = pts[i], pts[i + 1]
@@ -67,7 +67,7 @@ def _wcircle(out, cx, cy, r, rng, width=1.1, fill="none", opacity=1.0):
 
 
 def _hatch_segments(out, segs, rng):
-    """Dyson-хэтчинг: короткие штрихи наружу вдоль сегментов ((x1,y1),(x2,y2),(nx,ny))."""
+    """Dyson-hatching: short strokes outward along segments ((x1,y1),(x2,y2),(nx,ny))."""
     for (x1, y1), (x2, y2), (nx, ny) in segs:
         L = math.hypot(x2 - x1, y2 - y1)
         if L < 4:
@@ -88,7 +88,7 @@ def _hatch_segments(out, segs, rng):
 
 
 def _outline_segs(pts_px):
-    """Полигон (CW) → сегменты с внешними нормалями."""
+    """Polygon (CW) → segments with outward normals."""
     segs = []
     n = len(pts_px)
     for i in range(n):
@@ -102,7 +102,7 @@ def _outline_segs(pts_px):
     return segs
 
 
-# ── глифы мебели (чернильные, вид сверху) ───────────────────────────────────
+# ── Furniture glyphs (inked, top-down view) ───────────────────────────────────
 
 def _stools(out, cx, cy, r, rng, n):
     for i in range(n):
@@ -147,7 +147,7 @@ def _g_hearth(out, r, rng, left_wall):
     fx = x + w / 2
     flame = [(fx - 5, cy + 5), (fx - 2, cy - 4), (fx, cy + 2), (fx + 2, cy - 5), (fx + 5, cy + 5)]
     _stroke(out, flame, rng, width=1.0, w=0.8)
-    for i in range(4):                                       # тепло-штрихи
+    for i in range(4):                                       # heat-strokes
         a = -math.pi / 2 + (i - 1.5) * 0.5
         sx = fx + math.cos(a) * 10
         sy = cy + math.sin(a) * 10
@@ -157,11 +157,11 @@ def _g_hearth(out, r, rng, left_wall):
 
 def _g_workshop(out, r, rng):
     x, y, w, h = r["px"], r["py"], r["pw"], r["ph"]
-    _wrect(out, x + 3, y + h - 13, w - 6, 10, rng, width=1.2)   # верстак
-    ax, ay = x + w * 0.35, y + h * 0.34                          # наковальня
+    _wrect(out, x + 3, y + h - 13, w - 6, 10, rng, width=1.2)   # workbench
+    ax, ay = x + w * 0.35, y + h * 0.34                          # anvil
     _stroke(out, [(ax - 6, ay + 4), (ax + 6, ay + 4), (ax + 4, ay), (ax + 7, ay - 3),
                   (ax - 3, ay - 3), (ax - 4, ay)], rng, width=1.1, close=True, w=0.5)
-    _stroke(out, [(x + w * 0.7, y + 8), (x + w * 0.7 + 7, y + 13)], rng, width=1.0)  # молот
+    _stroke(out, [(x + w * 0.7, y + 8), (x + w * 0.7 + 7, y + 13)], rng, width=1.0)  # hammer
     _wrect(out, x + w * 0.7 + 5, y + 11, 4, 4, rng, width=0.9)
 
 
@@ -189,8 +189,8 @@ def _g_bed(out, r, rng, small=False):
     if small:
         bw, bh = min(bw, 18), min(bh, 30)
     _wrect(out, bx, by, bw, bh, rng, width=1.2)
-    _wrect(out, bx + 2, by + 2, bw - 4, bh * 0.22, rng, width=0.8)      # подушка
-    for i in range(2):                                                   # одеяло
+    _wrect(out, bx + 2, by + 2, bw - 4, bh * 0.22, rng, width=0.8)      # pillow
+    for i in range(2):                                                   # blanket
         yy = by + bh * (0.5 + i * 0.18)
         _stroke(out, [(bx + 1, yy), (bx + bw - 1, yy)], rng, width=0.6, opacity=0.55)
 
@@ -207,10 +207,10 @@ def _g_shelves(out, r, rng):
 
 def _g_storage(out, r, rng):
     x, y, w, h = r["px"], r["py"], r["pw"], r["ph"]
-    _wcircle(out, x + w * 0.3, y + h * 0.62, min(w, h) * 0.2, rng, width=1.1)      # бочка
+    _wcircle(out, x + w * 0.3, y + h * 0.62, min(w, h) * 0.2, rng, width=1.1)      # barrel
     _wcircle(out, x + w * 0.3, y + h * 0.62, min(w, h) * 0.09, rng, width=0.6)
     bx = x + w * 0.62
-    _wrect(out, bx, y + h * 0.42, min(w, h) * 0.36, min(w, h) * 0.36, rng, width=1.0)  # ящик
+    _wrect(out, bx, y + h * 0.42, min(w, h) * 0.36, min(w, h) * 0.36, rng, width=1.0)  # box
     _stroke(out, [(bx, y + h * 0.42), (bx + min(w, h) * 0.36, y + h * 0.42 + min(w, h) * 0.36)],
             rng, width=0.6, opacity=0.6)
 
@@ -219,7 +219,7 @@ def _g_desk(out, r, rng):
     x, y, w = r["px"], r["py"], r["pw"]
     _wrect(out, x + 5, y + 6, w * 0.5, 12, rng, width=1.1)
     _wcircle(out, x + 5 + w * 0.25, y + 26, 3.4, rng, width=0.9)
-    px, py = x + w * 0.68, y + 8                                        # бумага
+    px, py = x + w * 0.68, y + 8                                        # paper
     out.append(f'<g transform="rotate(9 {px} {py})">')
     _wrect(out, px, py, 9, 12, rng, width=0.7)
     out.append("</g>")
@@ -227,10 +227,10 @@ def _g_desk(out, r, rng):
 
 def _g_cell(out, r, rng):
     x, y, w, h = r["px"], r["py"], r["pw"], r["ph"]
-    for i in range(1, 5):                                               # решётка по входной стене
+    for i in range(1, 5):                                               # gate at entrance wall
         xx = x + w * i / 5
         _stroke(out, [(xx, y + h - 7), (xx, y + h - 1)], rng, width=1.2)
-    _wrect(out, x + 4, y + 5, w - 8, 6, rng, width=0.9)                 # лежак
+    _wrect(out, x + 4, y + 5, w - 8, 6, rng, width=0.9)                 # bunk
 
 
 def _g_bath(out, r, rng):
@@ -249,7 +249,7 @@ def _g_stall(out, r, rng):
         xx = x + 4 + i * (w - 8) / 2
         _stroke(out, [(xx, y + 4), (xx, y + h - 4)], rng, width=1.1)
     _stroke(out, [(x + 3, y + h * 0.4), (x + w - 3, y + h * 0.4)], rng, width=0.8)
-    for _ in range(5):                                                  # сено
+    for _ in range(5):                                                  # hay
         sx, sy = x + rng.uniform(8, w - 8), y + h - rng.uniform(6, 12)
         _stroke(out, [(sx - 3, sy), (sx + 3, sy - 2)], rng, width=0.5, opacity=0.6)
 
@@ -293,7 +293,7 @@ GLYPHS = {
 }
 
 
-# ── сборка листа ─────────────────────────────────────────────────────────────
+# ── Sheet assembly ─────────────────────────────────────────────────────────────
 
 def _defs(seed: int) -> str:
     return f"""<defs>
@@ -311,32 +311,32 @@ def _defs(seed: int) -> str:
 
 
 def _fillers(out, fl, rng, ox, hall_oy):
-    """Обжитость: коврик у входа, дрова у очага, пятна/трещины на свободном полу."""
+    """Habitability: rug at entrance, firewood at hearth, stains/cracks on open floor."""
     occ = {(r["x"] + i, r["y"] + j) for r in fl["zones"]
            for i in range(r["w"]) for j in range(r["h"])}
     d = fl.get("door")
-    if d:                                                    # коврик у входа
+    if d:                                                    # rug at entrance
         cx, cy = ox + d["x"] * CELL + CELL / 2, hall_oy + (fl["h"] - 1.6) * CELL
         _wcircle(out, cx, cy, 8, rng, width=0.8, opacity=0.7)
         _wcircle(out, cx, cy, 5, rng, width=0.5, opacity=0.5)
     hearth = next((r for r in fl["zones"] if r["kind"] == "hearth"), None)
-    if hearth:                                               # дрова у очага
+    if hearth:                                               # firewood at hearth
         hx = ox + hearth["x"] * CELL + (hearth["w"] * CELL + 6 if hearth["x"] < fl["w"] / 2
                                         else -10)
         hy = hall_oy + (hearth["y"] + hearth["h"]) * CELL - 6
         for i in range(3):
             _wcircle(out, hx + (i % 2) * 5, hy - i * 4, 2.6, rng, width=0.7, opacity=0.8)
     hall = fl.get("hall") or {"x": 0, "w": fl["w"]}
-    for _ in range(3):                                       # пятна/трещины пола
+    for _ in range(3):                                       # floor stains/cracks
         x = rng.randint(hall["x"] + 1, hall["x"] + hall["w"] - 2)
         y = rng.randint(1, fl["h"] - 2)
         if (x, y) in occ:
             continue
         px, py = ox + x * CELL + CELL / 2, hall_oy + y * CELL + CELL / 2
-        if rng.random() < 0.5:                               # пятно
+        if rng.random() < 0.5:                               # stain
             _wcircle(out, px, py, rng.uniform(4, 8), rng, width=0.0,
                      fill=INK, opacity=0.05)
-        else:                                                # трещина
+        else:                                                # crack
             pts = [(px, py)]
             for _k in range(3):
                 pts.append((pts[-1][0] + rng.uniform(-9, 9), pts[-1][1] + rng.uniform(3, 8)))
@@ -344,8 +344,8 @@ def _fillers(out, fl, rng, ox, hall_oy):
 
 
 def _npc_markers(out, fl, game, ox, oy, hall_oy):
-    """Метки людей на плане: кружок-инициал у своей зоны; игрок — жирное кольцо.
-    Зоны зала рисуются от hall_oy, комнаты пристройки — от oy (верхняя полоса)."""
+    """People markers on the plan: circle-initial at their zone; player is bold ring.
+    Hall zones drawn from hall_oy, extension rooms from oy (top stripe)."""
     back_ids = {r["id"] for r in fl.get("back", {}).get("rooms", [])}
     zid2rect = {r["id"]: r for r in fl["zones"]}
     zid2rect.update({r["id"]: r for r in fl.get("back", {}).get("rooms", [])})
@@ -359,7 +359,7 @@ def _npc_markers(out, fl, game, ox, oy, hall_oy):
                 base_y = oy if r["id"] in back_ids else hall_oy
                 cx = ox + (r["x"] + r["w"] / 2) * CELL + (i - (len(ps) - 1) / 2) * 13
                 cy = base_y + (r["y"] + r["h"] - 0.45) * CELL
-            else:                                            # без зоны — у входа
+            else:                                            # no zone — at entrance
                 d = fl.get("door") or {"x": 2}
                 cx = ox + d["x"] * CELL + CELL / 2 + (i - (len(ps) - 1) / 2) * 13
                 cy = hall_oy + (fl["h"] - 2.2) * CELL
@@ -374,9 +374,9 @@ def _npc_markers(out, fl, game, ox, oy, hall_oy):
 
 
 def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = None) -> str:
-    """План (floorplan.plan_location) → пергаментный лист с глифами, хэтчингом и легендой.
-    game (игровой режим): {npcs: [{id, name, init, color, zone, is_player}], locked_hidden:
-    bool, interactive: bool} — метки людей, туман на запертых, кликабельные зоны."""
+    """Plan (floorplan.plan_location) → parchment sheet with glyphs, hatching, and legend.
+    game (game mode): {npcs: [{id, name, init, color, zone, is_player}], locked_hidden:
+    bool, interactive: bool} — people markers, fog on locked, clickable zones."""
     rng = _rng(seed_key or plan.get("name", ""))
     seed = int(hashlib.md5((seed_key or "x").encode()).hexdigest()[:6], 16)
     fl = plan["floors"][0]
@@ -390,7 +390,7 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
     title_h = 26
     legend_zones = (fl.get("back", {}).get("rooms", []) + fl["zones"]
                     + (up["zones"] if up else []))
-    # легенда: группы схлопываем («столы 2-9»), якоря поимённо
+    # legend: collapse groups (e.g. "tables 2-9"), anchors by name
     legend, seen_groups = [], set()
     for i, r in enumerate(legend_zones):
         base = r["name"].split(" ")[0]
@@ -412,9 +412,9 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
            f'<rect width="{W}" height="{H}" fill="{PAPER}"/>',
            f'<rect width="{W}" height="{H}" fill="{PAPER}" filter="url(#stains)"/>',
            f'<rect width="{W}" height="{H}" fill="none" filter="url(#grain)"/>']
-    # рамка листа
+    # sheet frame
     _wrect(out, 6, 6, W - 12, H - 12, rng, width=1.0, wob=0.7, opacity=0.5)
-    # титул
+    # title
     name = data.get("name") or plan.get("name") or ""
     out.append(f'<text x="{W / 2}" y="{pad - 6 + 14}" text-anchor="middle" font-size="14" '
                f'font-family="Georgia, serif" font-style="italic" fill="{INK}">{name}</text>')
@@ -427,7 +427,7 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
                 "pw": r["w"] * CELL, "ph": r["h"] * CELL,
                 "cx": ox + (r["x"] + r["w"] / 2) * CELL, "cy": o_y + (r["y"] + r["h"] / 2) * CELL}
 
-    # сетка внутри футпринта (едва заметная)
+    # grid inside footprint (barely visible)
     outline_px = [(ox + x * CELL, hall_oy + y * CELL) for x, y in fl.get("outline", [])]
     if outline_px:
         pid = f"clip{seed % 9999}"
@@ -442,8 +442,8 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
                      f'y2="{hall_oy + gy * CELL}" stroke="{FAINT}" stroke-width="0.5"/>')
         out.append("".join(g) + "</g>")
 
-    # хэтчинг наружу + стены (двойной штрих); при пристройке верх зала не хэтчим —
-    # штрихуем внешний контур БЛОКА пристройки
+    # hatching outward + walls (double stroke); with extension, don't hatch hall top —
+    # hatch outer contour of EXTENSION BLOCK
     hall = fl.get("hall") or {"x": 0, "w": fl["w"]}
     has_back = bool(fl.get("back", {}).get("rooms"))
     bx0, bx1 = ox + hall["x"] * CELL, ox + (hall["x"] + hall["w"]) * CELL
@@ -460,7 +460,7 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
         _hatch_segments(out, segs, rng)
         _stroke(out, outline_px, rng, width=2.3, w=1.1, close=True)
         _stroke(out, outline_px, rng, width=1.0, w=1.3, close=True, opacity=0.55)
-    # пристройки: свой блок стен над залом + перегородки + дверные проёмы с дугой
+    # extensions: own wall block above hall + partitions + doorways with arc
     rooms = fl.get("back", {}).get("rooms", [])
     if rooms:
         bx0, bx1 = ox + hall["x"] * CELL, ox + (hall["x"] + hall["w"]) * CELL
@@ -476,7 +476,7 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
             out.append(f'<path d="M {dx - 7} {hall_oy} A 14 14 0 0 1 {dx + 7} {hall_oy + 14}" '
                        f'fill="none" stroke="{INK}" stroke-width="0.7" opacity="0.7"/>')
 
-    # окна: двойные засечки — ТОЛЬКО на внешних стенах (у L-крыла стена зала внутренняя)
+    # windows: double marks — ONLY on outer walls (L-wing hall wall is interior)
     win = fl.get("windows")
     wing = fl.get("wing")
     wx0, wx1 = ox + hall["x"] * CELL, ox + (hall["x"] + hall["w"]) * CELL
@@ -493,7 +493,7 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
             out.append(f'<line x1="{side_x - 3}" y1="{y1 + 9}" x2="{side_x + 3}" y2="{y1 + 9}" '
                        f'stroke="{INK}" stroke-width="1.4"/>')
 
-    # вход: проём + дуга
+    # entrance: opening + arc
     d = fl.get("door")
     if d:
         dx = ox + d["x"] * CELL + CELL // 2
@@ -503,7 +503,7 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
         out.append(f'<path d="M {dx - 10} {dy} A 20 20 0 0 1 {dx + 10} {dy - 20}" '
                    f'fill="none" stroke="{INK}" stroke-width="0.8" opacity="0.75"/>')
 
-    # лестница
+    # stairs
     if fl.get("stairs"):
         sx, sy = fl["stairs"]
         x0, y0 = ox + sx * CELL, hall_oy + sy * CELL
@@ -511,12 +511,12 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
         for k in range(1, 5):
             _stroke(out, [(x0 + 2, y0 + k * 8), (x0 + 2 * CELL - 4, y0 + k * 8)], rng, width=0.8)
 
-    # глифы зон + номера (+игровой режим: туман скрытых, интерактивные оверлеи)
+    # zone glyphs + numbers (+game mode: fog on hidden, interactive overlays)
     hidden_zones = set((game or {}).get("hidden_zones") or ())
     interactive = bool((game or {}).get("interactive"))
 
     def _fog(rr):
-        for k in range(0, int(rr["pw"] + rr["ph"]), 7):      # диагональная штриховка тумана
+        for k in range(0, int(rr["pw"] + rr["ph"]), 7):      # diagonal fog hatching
             x1 = rr["px"] + max(0, k - rr["ph"])
             y1 = rr["py"] + min(k, rr["ph"])
             x2 = rr["px"] + min(k, rr["pw"])
@@ -564,7 +564,7 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
                        f'font-size="9" font-family="Georgia, serif" font-style="italic" '
                        f'fill="{INK}" opacity="0.75">…и ещё {game["more"]} душ в зале</text>')
 
-    # 2-й этаж — отдельный блок справа
+    # 2nd floor — separate block on the right
     if up:
         ux = pad + main_w + 24
         uy = hall_oy
@@ -593,7 +593,7 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
                        f'font-size="8" font-family="Georgia, serif" fill="{INK}">{num}</text>')
             num += 1
 
-    # легенда двумя колонками
+    # legend in two columns
     ly0 = oy + main_h + 14
     col_w = (W - pad * 2) / 2
     for i, line in enumerate(legend):

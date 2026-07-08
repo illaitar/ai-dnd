@@ -1,5 +1,5 @@
-"""Боевой модуль (5e-lite, дух BG упрощённо): единый Combatant из бестиария/NPC/игрока,
-пошаговый движок на гриде, ИИ, энкаунтеры из данных, авторезолв для офскрин-зачисток.
+"""Combat module (5e-lite, BG spirit simplified): unified Combatant from bestiary/NPC/player,
+turn-based engine on grid, AI, encounters from data, auto-resolve for off-screen cleanups.
 
     from aidnd.combat import Encounter, from_pc, from_npc, from_monster, pick_encounter, resolve
 

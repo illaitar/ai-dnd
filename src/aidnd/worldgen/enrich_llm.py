@@ -1,10 +1,10 @@
-"""Модуль использования LLM для насыщения локаций — ОТДЕЛЬНЫЙ от скрипта генерации.
+"""Module for using LLM to enrich locations — SEPARATE from the generation script.
 
-Описание здания = ФАКТШИТ ХАРАКТЕРИСТИК (теги/энумы/короткие фразы), НЕ проза: прозу нарратор
-соберёт в рантайме из этих фактов. Один вызов на здание (суб-помещения инлайн). Обезличенно —
-людей не выдумываем (NPC отдельным пассом), роли — в occupants_kind.
+Building description = FACTS SHEET OF CHARACTERISTICS (tags/enums/short phrases), NOT prose: the narrator
+will assemble prose at runtime from these facts. One call per building (sub-rooms inline). Depersonalized —
+we don't invent people (NPCs are a separate pass), roles are in occupants_kind.
 
-LLMEnricher — единственный рантайм-путь; StubEnricher — ТОЛЬКО тесты.
+LLMEnricher — the only runtime path; StubEnricher — tests only.
 
 Key functions
 -------------
@@ -106,7 +106,7 @@ def _list(v):
 
 
 def _container(c) -> dict | None:
-    """Ёмкость здания. Для LOCKED гарантируем key — предмет-открывашку (иначе синтезируем именной ключ)."""
+    """Building container. For LOCKED we guarantee a key — an opening item (otherwise we synthesize a named key)."""
     if not isinstance(c, dict) or not str(c.get("name") or "").strip():
         return None
     name = str(c["name"]).strip()
@@ -168,7 +168,7 @@ class Enricher:
 
 
 class StubEnricher(Enricher):
-    """Без LLM: детерминированный фактшит. Для офлайна/тестов/dry-run."""
+    """Without LLM: deterministic fact sheet. For offline/tests/dry-run."""
 
     def describe_building(self, ctx: BuildingCtx) -> dict:
         sig = "значим" in ctx.role_hint
@@ -194,7 +194,7 @@ class StubEnricher(Enricher):
 
 
 class LLMEnricher(Enricher):
-    """Реальный путь: роль location_writer, фактшит-JSON (без прозы)."""
+    """Real path: location_writer role, fact-sheet JSON (without prose)."""
 
     def __init__(self, manager):
         self.manager = manager

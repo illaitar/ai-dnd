@@ -1,10 +1,10 @@
-"""Цели = ЖЕЛАЕМЫЕ ИСХОДЫ с ценностью (не планы и не шаги). Каждый тик формируются из восприятия:
-стоячие (нужды) + возможности (богатая цель рядом → завладеть; угроза → уцелеть; союзник в беде →
-защитить; неопределённость о ценном → разузнать). payoff каждой считается в value.py из черт/эмоций.
+"""Goals = DESIRED OUTCOMES with value (not plans, not steps). Each tick formed from perception:
+standing (needs) + opportunities (rich goal nearby → acquire; threat → survive; ally in trouble →
+protect; uncertainty about valuable → learn). Payoff for each calculated in value.py from traits/emotions.
 
-Здесь НЕТ скриптов поведения — только «что ценно сейчас». Как добиваться — решит utility над
-общими примитивами. Формирование НОВОЙ ситуативной цели — место для LLM (помечено), но базовый
-набор выводится механически, чтобы стенд был детерминирован и проверяем.
+No behavior scripts here — only 'what is valuable now'. How to achieve — decided by utility over
+common primitives. Formation of NEW situational goal — place for LLM (marked), but basic
+set derived mechanically so system is deterministic and verifiable.
 
 Key functions
 --------------
@@ -18,9 +18,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .value import _is_ally, hostility
-from .world import Item  # noqa: F401  (используется вызывающими сценариями)
+from .world import Item  # noqa: F401  (used by calling scenarios)
 
-# вес нужды = насколько НПЦ вообще движим этой нуждой (черта усиливает)
+# need weight = how much an NPC is driven by this need (trait amplifies)
 NEED_WEIGHT = {"social": "sociability", "purpose": "ambition",
                "wealth": "greed", "novelty": "curiosity"}
 
@@ -28,8 +28,8 @@ NEED_WEIGHT = {"social": "sociability", "purpose": "ambition",
 @dataclass
 class Goal:
     kind: str                       # acquire | safe | trade | affiliate | protect | inform | need
-    target: str | None = None       # id тела / имя нужды / тема
-    value: float = 0.0              # сырой payoff до масштабирования чертой (в value.py)
+    target: str | None = None       # body id / need name / topic
+    value: float = 0.0              # raw payoff before scaling by trait (in value.py)
     meta: dict = field(default_factory=dict)
 
     def label(self) -> str:
@@ -37,7 +37,7 @@ class Goal:
 
 
 def standing_needs(state) -> list:
-    """Стоячие цели из нужд — payoff = уровень·вес черты."""
+    """Standing goals from needs — payoff = level × trait weight."""
     out = []
     for nd, lvl in state.needs.items():
         w = state.config.traits.get(NEED_WEIGHT[nd], 0.5) + 0.5 if nd in NEED_WEIGHT else 1.0
@@ -49,8 +49,8 @@ def standing_needs(state) -> list:
 
 
 def _agenda_goals(state) -> list:
-    """Долгосрочные цели → механическая цель ТЕКУЩЕЙ вехи (её ядро тянет реактивно). Гейты формирования
-    не применяются: планировщик уже решил, что это цель (мирный может мстить, скромный — копить)."""
+    """Long-term goals → mechanical goal of CURRENT milestone (its core drives reactively). Formation
+    gates do not apply: planner already decided this is a goal (peaceful can seek revenge, modest can hoard)."""
     out = []
     for ag in getattr(state, "agendas", None) or []:
         if getattr(ag, "status", "") != "active":
@@ -65,13 +65,13 @@ def _agenda_goals(state) -> list:
 
 
 def propose_goals(state, world, percept) -> list:
-    """Полный набор целей-кандидатов на этот тик. Ничего не «выбирает» — выбор делает utility."""
+    """Complete set of goal candidates for this tick. Does not 'choose' anything — utility does the choosing."""
     me = percept.me
-    goals = list(getattr(state, "extra_goals", []))      # сценарии могут подложить trade/affiliate/inform
-    goals += _agenda_goals(state)                        # долгосрочные цели (планировщик)
+    goals = list(getattr(state, "extra_goals", []))      # scenarios may inject trade/affiliate/inform
+    goals += _agenda_goals(state)                        # long-term goals (planner)
     goals += standing_needs(state)
 
-    # ОСТРАЯ угроза — только со-локация (враг в лицо → бегство); дальнего врага обходят (риск узла)
+    # ACUTE threat — co-location only (enemy face-to-face → flee); distant enemy avoided (risk node)
     danger, threat_id = 0.0, None
     for b in percept.present:
         h = hostility(state, me, b)
@@ -81,23 +81,23 @@ def propose_goals(state, world, percept) -> list:
     if safe_val > 0.08 and threat_id:
         goals.append(Goal("safe", threat_id, safe_val))
 
-    # возможность завладеть — НЕ у всех: только при хищной СКЛОННОСТИ и на реально стоящей цели.
-    # Обычный горожанин (честный/законопослушный) не «прикидывает ограбить» соседа — цель не рождается.
+    # opportunity to acquire — NOT for everyone: only with predatory INCLINATION and for truly worthy target.
+    # Common citizen (honest/lawful) does not 'consider robbing' neighbor — goal does not arise.
     tr = state.config.traits
     predatory = tr.get("greed", 0.5) * (1 - tr.get("honesty", 0.5)) * (1 - 0.5 * tr.get("lawful", 0.5))
     malice = tr.get("malice", 0.5)
     for b in percept.present + percept.nearby:
         if b.id == me.id or _is_ally(state, b):
             continue
-        if predatory > 0.30 and b.appearance > 0.25:        # ← LLM-апрейзал ценности подключится здесь
+        if predatory > 0.30 and b.appearance > 0.25:        # ← LLM value appraisal connects here
             goals.append(Goal("acquire", b.id, b.appearance))
-        if malice > 0.6 and not b.down():                   # хищность — отдельная цель, не из жадности
+        if malice > 0.6 and not b.down():                   # predation — separate goal, not from greed
             goals.append(Goal("harm", b.id, malice))
 
-    # социальный заход: поговорить с присутствующим — закрыть соц-нужду ЧЕРЕЗ человека (не ресурс).
-    # Тянет sociability × соц-нужда × (симпатия + ОБАЯНИЕ цели). Красота (charisma) ≠ богатство (appearance).
-    # ТОЛПА у цели разбавляет тягу (все облепили «звезду» → остальные ищут собеседника рядом),
-    # ВЗАИМНОСТЬ (он сейчас говорит со МНОЙ) усиливает — так складываются устойчивые пары беседы.
+    # social approach: talk to present — close social need THROUGH person (not resource).
+    # Driven by sociability × social-need × (affinity + target's CHARISMA). Beauty (charisma) ≠ wealth (appearance).
+    # CROWD around target dilutes pull (all clung to 'star' → others seek talk partner nearby),
+    # RECIPROCITY (they're talking to ME now) amplifies — stable talk pairs form this way.
     soc = state.needs.get("social", 0.0)
     socbl = tr.get("sociability", 0.5)
     if soc > 0.12:
@@ -114,7 +114,7 @@ def propose_goals(state, world, percept) -> list:
             if draw > 0.12:
                 goals.append(Goal("converse", b.id, min(1.0, draw)))
 
-    # защита союзника: со-локация — союзник рядом, которого атакуют
+    # ally protection: co-location — nearby ally under attack
     for b in percept.present:
         if not _is_ally(state, b):
             continue

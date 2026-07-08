@@ -1,9 +1,9 @@
-"""Нужды (urges) — ДЕКЛАРАТИВНЫЙ каталог. Добавить нужду = добавить одну строку в NEEDS.
+"""Needs (urges) — DECLARATIVE catalog. Add a need = add one line to NEEDS.
 
-Модель — «мотивы» The Sims / needs-based utility AI (Zubek; GameAIPro, гл.9 Utility Theory) +
-паттерны-жизни агентных соцсимуляций (Maslow-иерархия нужд, эволюционирующих во времени):
-каждая нужда = число 0..1 («насколько ХОЧУ»), само растёт со временем, гасится в местах, которые
-её «рекламируют» (см. places.py). Черта характера усиливает свою нужду (жадный острее хочет денег).
+Model — The Sims "motives" / needs-based utility AI (Zubek; GameAIPro, ch.9 Utility Theory) +
+life patterns from agent-based social simulations (Maslow need hierarchy, evolving over time):
+each need = number 0..1 ("how much I WANT"), grows naturally over time, is satisfied at places that
+"advertise" it (see places.py). A trait amplifies its need (greedy wants money more urgently).
 
 Key functions
    -----------
@@ -21,8 +21,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Need:
-    """Одна нужда. grow — естественный рост «хочу» в час; trait — черта, что усиливает нужду;
-    start — базовый уровень при рождении NPC."""
+    """One need. grow — natural growth of want per hour; trait — trait that amplifies the need;
+    start — base level at NPC birth."""
     id: str
     ru: str
     grow: float
@@ -31,7 +31,7 @@ class Need:
     desc: str = ""
 
 
-# ── КАТАЛОГ НУЖД (редактируется здесь; те же 7 id, что в mind.NpcState.needs) ──
+# ── NEEDS CATALOG (edit here; same 7 ids as in mind.NpcState.needs) ──
 NEEDS: list[Need] = [
     Need("hunger",  "голод",     grow=0.055, desc="поесть — трактир, очаг, рынок"),
     Need("fatigue", "усталость", grow=0.045, desc="выспаться — дом, ночлег"),
@@ -46,13 +46,13 @@ NEED: dict[str, Need] = {n.id: n for n in NEEDS}
 
 
 def fresh() -> dict:
-    """Стартовый вектор нужд для нового NPC."""
+    """Startup need vector for a new NPC."""
     return {n.id: n.start for n in NEEDS}
 
 
 def pressure(needs: dict, traits: dict | None = None) -> dict:
-    """Давление каждой нужды = уровень × усиление чертой (жадный сильнее тянется к деньгам).
-    Черта 0.5 нейтральна; 1.0 → ×1.5; 0.0 → ×0.5."""
+    """Pressure of each need = level × trait amplification (greedy tug harder toward money).
+    Trait 0.5 is neutral; 1.0 → ×1.5; 0.0 → ×0.5."""
     traits = traits or {}
     out = {}
     for n in NEEDS:
@@ -63,8 +63,8 @@ def pressure(needs: dict, traits: dict | None = None) -> dict:
 
 
 def advance(needs: dict, minutes: float, sated: dict | None = None) -> dict:
-    """Эволюция нужд за `minutes`. Место, где стоит NPC, ГАСИТ рекламируемые им нужды (sated:
-    {need: rate/час}); прочие — растут естественно. Мутирует и возвращает needs."""
+    """Evolve needs over `minutes`. A place where an NPC stands SATISFIES its advertised needs (sated:
+    {need: rate/hour}); others grow naturally. Mutates and returns needs."""
     hours = max(0.0, minutes) / 60.0
     sated = sated or {}
     for n in NEEDS:

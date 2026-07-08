@@ -1,6 +1,6 @@
-"""Сид-набор пула предметов мира (ДАННЫЕ, без LLM): базовый товар/находки городка с осью
-редкости. Мир при создании копирует это в item_pool; лут/награды тянут по весу, пропуская
-уже выпавшие уникальные. Новые предметы (крафт/трофеи) добавляются в пул мира в рантайме.
+"""Seed item pool for the world (DATA, no LLM): basic goods/finds of the town with a rarity axis.
+The world copies this to item_pool on creation; loot/rewards drawn by weight, skipping
+already-drawn uniques. New items (crafted/trophies) are added to the world pool at runtime.
 
 Key functions
 -------------
@@ -14,7 +14,7 @@ from random import Random
 
 from .model import RARITY_WEIGHT
 
-# (имя, вид, качество выделки, ценность, редкость)
+# (name, kind, craftsmanship quality, worth, rarity)
 SEED_POOL = [
     ("ржавый нож", "weapon", "crude", 3, "common"),
     ("крепкий топор", "weapon", "plain", 8, "common"),
@@ -44,7 +44,7 @@ SEED_POOL = [
 
 
 def seed_templates() -> list:
-    """Шаблоны для наполнения item_pool мира: key/data(фактшит)/weight(по редкости)."""
+    """Templates for populating the world's item_pool: key/data(factsheet)/weight(by rarity)."""
     out = []
     for name, kind, quality, worth, rarity in SEED_POOL:
         out.append({"key": f"seed:{name}", "weight": RARITY_WEIGHT[rarity],
@@ -54,8 +54,8 @@ def seed_templates() -> list:
 
 
 def draw(pool: list, taken_uniques: set, seed: str, tier: str | None = None):
-    """Взвешенная выборка из пула (пропуская выпавшие уникальные). tier — минимальная редкость
-    (для наград «rare+»). Возвращает шаблон {key,data,weight} или None."""
+    """Weighted draw from the pool (skipping drawn uniques). tier — minimum rarity (for
+    'rare+' rewards). Returns template {key,data,weight} or None."""
     order = ("common", "rare", "epic", "unique")
     floor = order.index(tier) if tier in order else 0
     cand = [t for t in pool

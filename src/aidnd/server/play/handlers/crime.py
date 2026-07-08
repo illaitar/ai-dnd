@@ -1,4 +1,4 @@
-"""Домен КРАЖА (/steal) — распил world.py. Ловкость vs внимание жертвы; свидетели → розыск.
+"""Crime domain (/steal) — split from world.py. Dexterity vs victim attention; witnesses → investigation.
 
 Key functions
 -------------
@@ -36,8 +36,8 @@ from aidnd.server.play.mechanics.items import _item_card, _materialize_npc, _pc_
 
 @router.post("/api/play/steal")
 async def steal(request: Request):
-    """Обчистить карманы: dex игрока против бдительности жертвы. Провал = поймал + свидетели видели
-    (память+сплетни разнесут). Успех тих — но это преступление, и оно записано в мире."""
+    """Pickpocket attempt: player dex vs victim attentiveness. Failure = caught + witnesses saw
+    (memory+gossip will spread). Success silent — but it's a crime, recorded in the world."""
     _city, people, crof, _cr2b, loc = _play()
     npc = (await request.json()).get("npc")
     if npc not in people:
@@ -51,7 +51,7 @@ async def steal(request: Request):
     roll = random.Random(f"steal|{npc}|{n}").randint(1, 20)
     dc = PB["steal_dc_base"] + round(att * PB["steal_dc_att"])
     _gt_add(PB["act_min"])
-    if roll + _PC_CAP.mod("dex") < dc:  # ПОЙМАН
+    if roll + _PC_CAP.mod("dex") < dc:  # CAUGHT
         rel = p.state.rel(PLAYER)
         rel["affinity"] = min(rel["affinity"], -0.5)
         p.state.emotion["anger"] = min(1.0, p.state.emotion.get("anger", 0) + 0.7)
@@ -79,7 +79,7 @@ async def steal(request: Request):
     ]
     loot_rows = [(iid, it) for iid, it in loot_rows if it and it["kind"] != "key"]
     coins_np = _store().purse_get(_wid(), npc)
-    if coins_np > 0 and (not loot_rows or roll % 2 == 0):  # тянем кошель или вещь
+    if coins_np > 0 and (not loot_rows or roll % 2 == 0):  # take wallet or item
         take = max(1, coins_np // PB["purse_cut"])
         _store().purse_add(_wid(), npc, -take)
         coins = _store().purse_add(_wid(), "pc", take)

@@ -1,95 +1,95 @@
-# Структура кода: текущее → целевое
+# Code Structure: Current → Target
 
-Карта дерева `src/aidnd` (~16.5k строк), честный список болячек и план миграции.
-Кто куда смотрит: `server` оркеструет всех; доменные пакеты (`mind`, `society`, `citygraph`,
-`items`, `combat`, `magic`, `plot`, `inference`, `worldgen`) друг друга НЕ импортируют
-(исключение: mind → items/society) и не знают о сервере.
+Map of the `src/aidnd` tree (~16.5k lines), an honest list of issues and migration plan.
+Module dependencies: `server` orchestrates all; domain packages (`mind`, `society`, `citygraph`,
+`items`, `combat`, `magic`, `plot`, `inference`, `worldgen`) do NOT import each other
+(exception: mind → items/society) and don't know about the server.
 
-## Текущее дерево
+## Current Tree
 
 ```
 src/aidnd/
-  inference/   700   клиент (ретраи→LLMUnavailable) · бэкенды ollama/openai-compat · structured
-  mind/       2000   разум: model/goals/value/act/brain/modulators/fsm/tick/memory/agenda/
-                     llm_agent (decide_hybrid) / trade / tools / world (микромир тестов)
-  society/     235   нужды · места · рутина (декларативные каталоги)
-  citygraph/   850   генерация графа · A* · модель · параметры
-  worldgen/   1800   store (обе sqlite) · enrich зданий · персоны · imagegen · enrichment ·
-                     furnish (роль furnisher: зоны+предметы) · floorplan (футпринт+annealing) ·
-                     floorart (бумажный рендер плана: пергамент/штрих/хэтчинг/глифы)
-  items/       560   модель фактшита · smith · inspect · craft (граф материалов) · durability · loot_pool
+  inference/   700   client (retries→LLMUnavailable) · backends ollama/openai-compat · structured
+  mind/       2000   mind: model/goals/value/act/brain/modulators/fsm/tick/memory/agenda/
+                     llm_agent (decide_hybrid) / trade / tools / world (test microworld)
+  society/     235   needs · places · routines (declarative catalogs)
+  citygraph/   850   graph generation · A* · model · parameters
+  worldgen/   1800   store (both sqlite) · enrich buildings · personas · imagegen · enrichment ·
+                     furnish (furnisher role: zones+items) · floorplan (footprint+annealing) ·
+                     floorart (paper render plan: parchment/stroke/hatching/glyphs)
+  items/       560   model factsheet · smith · inspect · craft (material graph) · durability · loot_pool
   combat/      620   Combatant · Encounter · auto · encounters · dungeon
-  magic/       390   grammar (бюджет/хэш/base_law) · inscribe (scribe_law/wild)
-  plot/        260   bible · architect · casting (НЕ в рантайме)
-  (play/ снесён 2026-07-07 → worldgen/population.py: Townsperson/populate/person_core)
-  content/           bestiary.json (322) · glyphs · материалы · zones.json (шаблоны зон локаций)
-  server/    10950   app · auth · db(postgres) · usage · debug-стенды (+plansdebug: галерея
-                     планов) · web/ (только play.html/ассеты — citygen.py уехал в citygraph/render.py) ·
-                     play/: engine{core 802, world 1400, worldsim, zones (выбор зоны нуждами)} ·
-                     mechanics{items, contracts, combat} · handlers{10 доменных: +план здания
-                     /plan /zone в travel}
-scripts/            furnish.py (обстановка пула зонами) · peoplegen · buildinggen · bench …
+  magic/       390   grammar (budget/hash/base_law) · inscribe (scribe_law/wild)
+  plot/        260   bible · architect · casting (NOT at runtime)
+  (play/ demolished 2026-07-07 → worldgen/population.py: Townsperson/populate/person_core)
+  content/           bestiary.json (322) · glyphs · materials · zones.json (location zone templates)
+  server/    10950   app · auth · db(postgres) · usage · debug-rigs (+plansdebug: gallery
+                     of plans) · web/ (only play.html/assets — citygen.py moved to citygraph/render.py) ·
+                     play/: engine{core 802, world 1400, worldsim, zones (zone selection by needs)} ·
+                     mechanics{items, contracts, combat} · handlers{10 domain: +building plan
+                     /plan /zone in travel}
+scripts/            furnish.py (furnishing pool with zones) · peoplegen · buildinggen · bench …
 ```
 
-## Болячки (по данным ревизии 2026-07-04)
+## Issues (as of revision 2026-07-04)
 
-1. **`engine/world.py` — 1835 строк** (было 1307 на ревизии 2026-07-04 — вырос, не похудел),
-   функции по 200-485 строк (`_live_build` ~258, `_live_tick` ~485, `_world_tick`) знают всё
-   сразу: генерацию, рутину, LLM-планирование, бой. Главная цель распила Phase B.
-2. **`_S` — нетипизированный dict-блоб** в contextvar, трогается из 50+ функций; выходы LLM —
-   сырые dict без схем.
-3. **mechanics → core напрямую** (`_S`, `PB`, `_store`) — механики приварены к сессии.
-4. ✔ ЧАСТИЧНО: `engine/resolve.py` — арбитр `resolve(text)` + контекст-сборщик, промпт из
-   реестра PRIMITIVES (`_INTENT_SYS` умер, 2026-07-06). Сервисы `_voice`/`_world_lookup`/
-   `_dm_snapshot` ПЕРЕЕХАЛИ из world.py в resolve.py (2026-07-08, world.py 1835→1632; функции
-   AST-идентичны, world→resolve без цикла — resolve тянет world лениво). Осталось: consequence-
-   слой и `engine/loop.py`.
-5. ✔ (2026-07-07) **Близнецы снесены**: `aidnd/play` → `worldgen/population.py`;
-   `server/web/citygen.py` → `citygraph/render.py` (обычный импорт сиблинга вместо importlib).
-   Остался долг ≤50-строк: `render.build_city` (~398) и `render.render_svg` (~231) — декомпозиция
-   отдельным проходом под визуальную проверку /citydebug.
-6. Нет deed-журнала: лента/сплетни/розыск/хроника — пять ad-hoc механизмов.
+1. **`engine/world.py` — 1835 lines** (was 1307 at revision 2026-07-04 — grew, didn't shrink),
+   functions of 200-485 lines (`_live_build` ~258, `_live_tick` ~485, `_world_tick`) know everything
+   at once: generation, routines, LLM-planning, combat. Main goal of Phase B refactoring.
+2. **`_S` — untyped dict-blob** in contextvar, touched from 50+ functions; LLM outputs —
+   raw dicts without schemas.
+3. **mechanics → core directly** (`_S`, `PB`, `_store`) — mechanics are welded to the session.
+4. ✔ PARTIAL: `engine/resolve.py` — arbiter `resolve(text)` + context assembler, prompt from
+   PRIMITIVES registry (`_INTENT_SYS` died, 2026-07-06). Services `_voice`/`_world_lookup`/
+   `_dm_snapshot` MOVED from world.py to resolve.py (2026-07-08, world.py 1835→1632; functions
+   are AST-identical, world→resolve with no cycle — resolve pulls world lazily). Remaining: consequence-
+   layer and `engine/loop.py`.
+5. ✔ (2026-07-07) **Twins demolished**: `aidnd/play` → `worldgen/population.py`;
+   `server/web/citygen.py` → `citygraph/render.py` (normal sibling import instead of importlib).
+   Remaining debt ≤50 lines: `render.build_city` (~398) and `render.render_svg` (~231) — decomposition
+   in a separate pass under visual review /citydebug.
+6. No deed-log: feed/gossip/wanted/chronicle — five ad-hoc mechanisms.
 
-## Целевое дерево
+## Target Tree
 
 ```
 src/aidnd/
-  inference/       + schemas.py: ЕДИНАЯ граница — pydantic-схемы ВСЕХ LLM-выходов
+  inference/       + schemas.py: UNIFIED boundary — pydantic-schemas of ALL LLM outputs
                      (Intent, Verdict, Consequence, NpcDecision, SpellLaw, Persona, Contract)
-  mind/ society/   как есть (эталон чистоты)
-  citygraph/       + render.py (переезд server/web/citygen.py — визуал города к графу)
-  worldgen/        + population.py (переезд aidnd/play — Townsperson/расселение); пакет play/ умирает
-  items/ combat/ magic/ plot/ content/   как есть
+  mind/ society/   as is (purity standard)
+  citygraph/       + render.py (moving server/web/citygen.py — city visuals to graph)
+  worldgen/        + population.py (moving aidnd/play — Townsperson/settlement); play/ package dies
+  items/ combat/ magic/ plot/ content/   as is
   server/
-    app.py auth db usage debug-стенды web/
+    app.py auth db usage debug-rigs web/
     play/
       engine/
-        session.py   ТИПИЗИРОВАННАЯ Session (Player / LiveScene / CombatRef) вместо _S-блоба
-        core.py      PB · время · персист (худеет)
-        loop.py      session_step + game_tick + durative-циклы + прерывания   [из world.py]
-        resolve.py   resolve(text)→{домен,цели,args,verdict} · context_assembler ·
-                     consequence(кламп-меню) · voice · world_lookup            [из world/freeform]
-        world.py     только сцена: _live_build/_live_tick/_scene_dict (худеет до ~500)
-        worldsim.py  адаптер society
-        deeds.py     deed-журнал: append + выборки для сплетен/стражи/хроники/plot
-      mechanics/     items · contracts · combat — принимают (session, store, pb) ПАРАМЕТРАМИ
-      handlers/      тонкие эндпоинты: распаковал запрос → сервис → ответ
+        session.py   TYPED Session (Player / LiveScene / CombatRef) instead of _S-blob
+        core.py      PB · time · persist (shrinks)
+        loop.py      session_step + game_tick + durative-cycles + interrupts   [from world.py]
+        resolve.py   resolve(text)→{domain,goals,args,verdict} · context_assembler ·
+                     consequence(clamp-menu) · voice · world_lookup            [from world/freeform]
+        world.py     scene only: _live_build/_live_tick/_scene_dict (shrinks to ~500)
+        worldsim.py  society adapter
+        deeds.py     deed-log: append + queries for gossip/watch/chronicle/plot
+      mechanics/     items · contracts · combat — accept (session, store, pb) as PARAMETERS
+      handlers/      thin endpoints: unpack request → service → response
 ```
 
-## План миграции (порядок = приоритет; каждый шаг — зелёный инкремент на прод)
+## Migration Plan (order = priority; each step — green increment to prod)
 
-1. **`engine/resolve.py` + `engine/loop.py`** — вынести сервисы и тик из `world.py`/
-   `freeform.py`; поведение не меняется, world.py худеет вдвое.
-2. **`inference/schemas.py`** — схемы LLM-выходов, валидация+кламп в одном месте
-   (structured.py становится тонким парсером под схемами).
-3. **Типизированная `Session`** — за фасадом `_S` (инкрементально: поле за полем), механики
-   переводятся на параметры.
-4. ✔ (2026-07-06) **Единый `resolve()`** — арбитр+контекст в `engine/resolve.py`,
-   промпт из реестра примитивов; исполнители пока в `freeform._attempt`.
-5. ✔ (2026-07-07) **Переезды**: `aidnd/play` → `worldgen/population.py` (4 импортёра обновлены);
-   `server/web/citygen.py` → `citygraph/render.py`. Папка-на-домен восстановлена, `server/web/`
-   держит только ассеты.
-6. **`deeds.py`** — журнал дел + перевод сплетен/розыска/хроники/обращений на него
-   ([entities.md](entities.md) «Дальше»).
+1. **`engine/resolve.py` + `engine/loop.py`** — extract services and tick from `world.py`/
+   `freeform.py`; behavior unchanged, world.py shrinks by half.
+2. **`inference/schemas.py`** — LLM output schemas, validation+clamp in one place
+   (structured.py becomes a thin parser under schemas).
+3. **Typed `Session`** — behind `_S` facade (incrementally: field by field), mechanics
+   are moved to parameters.
+4. ✔ (2026-07-06) **Unified `resolve()`** — arbiter+context in `engine/resolve.py`,
+   prompt from primitives registry; executors still in `freeform._attempt`.
+5. ✔ (2026-07-07) **Moves**: `aidnd/play` → `worldgen/population.py` (4 importers updated);
+   `server/web/citygen.py` → `citygraph/render.py`. Folder-per-domain restored, `server/web/`
+   holds only assets.
+6. **`deeds.py`** — deed log + transition gossip/wanted/chronicle/requests to it
+   ([entities.md](entities.md) "Further").
 
-Связано: [README.md](README.md) (принципы) · [loop.md](loop.md) · [entities.md](entities.md)
+Related: [README.md](README.md) (principles) · [loop.md](loop.md) · [entities.md](entities.md)

@@ -1,4 +1,4 @@
-"""Домен ПРЕДМЕТЫ (/loot /inspect /inventory /commission /repair /use /give) — распил world.py.
+"""Items domain (/loot /inspect /inventory /commission /repair /use /give) — split from world.py.
 
 Key functions
 -------------
@@ -54,7 +54,7 @@ from aidnd.server.play.mechanics.items import (
 async def loot(request: Request):
     _city, _people, _crof, cr2b, loc = _play()
     name = (await request.json()).get("container")
-    bid = _S.get("inside")  # ёмкости — только ВНУТРИ здания
+    bid = _S.get("inside")  # containers - only INSIDE a building
     if not bid:
         return {"error": "сначала войди внутрь"}
     bd = _store().get_building(_wid(), bid)
@@ -64,7 +64,7 @@ async def loot(request: Request):
     if not full:
         return {"error": "нет такой ёмкости"}
     rooms = (bd or {}).get("data", {}).get("sub_rooms") or []
-    if not _in_room(full.get("where", ""), _S.get("room"), rooms):  # ёмкость в другом помещении
+    if not _in_room(full.get("where", ""), _S.get("room"), rooms):  # container in another room
         holder_room = next(
             (r["name"] for r in rooms if _tokens_ru(r["name"]) & _tokens_ru(full.get("where", ""))),
             None,
@@ -82,7 +82,7 @@ async def loot(request: Request):
         unlocked = key["name"]
     holder = _cont_holder(bid, name)
     if not _store().flag_get(_wid(), f"seeded|{holder}"):
-        for i, s in enumerate(full.get("contents") or []):  # первое касание: содержимое → ёмкость
+        for i, s in enumerate(full.get("contents") or []):  # first touch: contents → container
             it = _forge(f"{_wid()}|{bid}|{name}|{i}", "misc", s, f"{name} ({full['kind']})")
             _store().inv_add(_wid(), it["id"], holder=holder)
         _store().flag_set(_wid(), f"seeded|{holder}")
@@ -91,7 +91,7 @@ async def loot(request: Request):
     if not rows:
         return {"container": name, "items": [], "empty": True, "unlocked": unlocked, "gt": _gt()}
     out = []
-    for r in rows:  # обшарить = забрать всё (перенос, не копия)
+    for r in rows:  # loot = take all (move, not copy)
         it = _store().get_item(r["item_id"])
         if it:
             _store().inv_move(_wid(), it["id"], "pc")
@@ -144,7 +144,7 @@ def inventory():
 
 @router.post("/api/play/commission")
 async def commission(request: Request):
-    """Заказать вещь у NPC-ремесленника: его МАСТЕРСТВО решает исход (качество/клеймо/брак/прочность)."""
+    """Commission an item from an NPC artisan: their CRAFT determines the outcome (quality/mark/defect/durability)."""
     _city, people, _crof, _cr2b, _loc = _play()
     npc = (await request.json()).get("npc")
     if npc not in people:
@@ -159,7 +159,7 @@ async def commission(request: Request):
     n = len(_store().inventory(_wid()))
     rep = random.Random(f"skill|{npc}").randint(
         -1, 3
-    )  # у каждого мастера своя рука (мир разнороден)
+    )  # each master has their own hand (world is diverse)
     it = item_craft(
         _npc_cap(p),
         rec,
@@ -209,7 +209,7 @@ async def use_item(request: Request):
 
 @router.post("/api/play/give")
 async def give_item(request: Request):
-    """Отдать вещь собеседнику (дар или исполнение уговора) — через единый резолвер."""
+    """Give an item to an interlocutor (gift or fulfillment of a deal) — via unified resolver."""
     _play()
     b = await request.json()
     res = _attempt({"verb": "give", "npc": b.get("npc"), "item": b.get("item")}, {})

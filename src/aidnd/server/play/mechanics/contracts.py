@@ -1,6 +1,6 @@
-"""Игровой контур — КОНТРАКТЫ: квесты из агенд (шаги-предикаты) + доска объявлений.
+"""Game loop — CONTRACTS: quests from agendas (steps-predicates) + bulletin board.
 
-Слой mechanics/ (см. docs/loop.md).
+Layer mechanics/ (see docs/loop.md).
 
 Key functions
 -------------
@@ -37,9 +37,9 @@ from aidnd.server.play.engine.core import (
 )
 from aidnd.server.play.mechanics.items import _cont_holder, _materialize_npc
 
-# ------------------------------------------- КОНТРАКТЫ (квесты из агенд) --- #
-# Квест = делегированная нужда NPC: want-ПРЕДИКАТ над миром (всё равно КАК добудешь) + реальная
-# награда. Цель выбирается из НАСТОЯЩИХ вещей мира (ёмкости зданий, ценное других людей).
+# ------------------------------------------- CONTRACTS (quests from agendas) --- #
+# Quest = delegated NPC need: want-PREDICATE over world (regardless of HOW you obtain) + real
+# reward. Goal chosen from REAL things in world (building containers, valuables of others).
 
 _CONTRACT_SYS = (
     "Ты — житель фронтирного городка, которому нужна помощь чужака. По твоей натуре и долгой цели выбери "
@@ -58,7 +58,7 @@ _CONTRACT_SYS = (
 
 
 def _build_step(spec, npc, p, cands, own, others) -> dict | None:
-    """Проверить и собрать ОДИН шаг уговора из спеки LLM (цель — из реального мира). None — невалиден."""
+    """Check and assemble ONE contract step from LLM spec (goal — from real world). None — invalid."""
     kind = (
         spec.get("kind")
         if spec.get("kind") in ("bring", "deliver", "visit", "befriend", "dead")
@@ -100,7 +100,7 @@ def _build_step(spec, npc, p, cands, own, others) -> dict | None:
         if not who:
             return None
         step.update(target=who[0], target_name=who[1].name, where=f"человек: {who[1].name}")
-    else:  # dead — только настоящий враг гивера
+    else:  # dead — only true enemy of giver
         who = next(
             (
                 (oid, o)
@@ -121,13 +121,13 @@ def _build_step(spec, npc, p, cands, own, others) -> dict | None:
 
 
 def _contract_candidates(giver: str) -> list:
-    """Реальные цели для контракта: содержимое ёмкостей зданий + ценное ДРУГИХ людей."""
+    """Real goals for contract: contents of building containers + valuables OF OTHER people."""
     out = []
     giver_work = (_S.get("people") or {}).get(giver)
     giver_work = giver_work.work if giver_work else None
     for bid in list(_S.get("cr2b", {}).values()):
         if bid == giver_work:
-            continue  # из СВОЕГО здания не просят — абсурд
+            continue  # don't ask from OWN building — absurd
         bd = _store().get_building(_wid(), bid)
         if not bd:
             continue
@@ -144,18 +144,18 @@ def _contract_candidates(giver: str) -> list:
 
 
 def _contract_offer(npc: str) -> dict | None:
-    """Личная просьба в разговоре: раз на человека (флаг coffer). Механика решает ЧТО можно,
-    LLM просит В ХАРАКТЕРЕ."""
+    """Personal request in conversation: once per person (flag coffer). Mechanics decides WHAT is possible,
+    LLM requests IN CHARACTER."""
     p = _S["people"][npc]
     last = _store().flag_get(_wid(), f"coffer|{npc}")
     if last:
         try:
-            if _gt() - int(last) < 2880:             # просил недавно — не канючит; 2 суток и можно снова
+            if _gt() - int(last) < 2880:             # asked recently — doesn't whine; 2 days and can ask again
                 return None
-        except ValueError:                           # старый формат флага (без gt) — протух
+        except ValueError:                           # old flag format (no gt) — expired
             pass
     rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
-    if rel.get("affinity", 0) < PB["contract_enemy_aff"]:  # с явным недругом дел не ведут
+    if rel.get("affinity", 0) < PB["contract_enemy_aff"]:  # don't do business with obvious enemy
         return None
     r = _make_contract(npc, "offered")
     if r:
@@ -164,12 +164,12 @@ def _contract_offer(npc: str) -> dict | None:
 
 
 def _make_contract(npc: str, status: str) -> dict | None:
-    """Ядро генерации уговора для NPC (просьба/объявление): агенда → кандидаты → LLM → шаги.
-    Сохраняет контракт с заданным статусом. None — только «нечего предложить/невалидно»;
-    недоступность LLM летит исключением."""
+    """Core contract generation for NPC (request/announcement): agenda → candidates → LLM → steps.
+    Saves contract with given status. None — only 'nothing to offer/invalid';
+    LLM unavailability raised as exception."""
     p = _S["people"][npc]
     mgr = _model()
-    if not (p.state.agendas or []):  # долгая цель — лениво, при первой нужде
+    if not (p.state.agendas or []):  # long goal — lazy, on first need
         ag0 = plan_agenda(p.state, MWorld(), {"roles": {npc: p.role}}, mgr)
         if ag0:
             p.state.agendas.append(ag0)
@@ -178,7 +178,7 @@ def _make_contract(npc: str, status: str) -> dict | None:
     _materialize_npc(npc, "pockets")
     purse = _store().purse_get(_wid(), npc)
     reward_item = None
-    if purse < PB["contract_poor_purse"]:  # бедняк платит вещью, не монетой
+    if purse < PB["contract_poor_purse"]:  # poor pays with thing, not coin
         rows = [
             (r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), npc)
         ]
@@ -187,7 +187,7 @@ def _make_contract(npc: str, status: str) -> dict | None:
             return None
         reward_item = max(rows, key=lambda x: x[1]["worth"])
     cands = _contract_candidates(npc)
-    random.Random(f"cands|{npc}").shuffle(cands)  # разный порядок разным гиверам — против эха
+    random.Random(f"cands|{npc}").shuffle(cands)  # different order to different givers — against echo
     others = [(pid, o) for pid, o in sorted((_S.get("people") or {}).items()) if pid != npc]
     own = [(r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), npc)]
     own = [(i, it) for i, it in own if it and it["kind"] != "key"]
@@ -231,14 +231,14 @@ def _make_contract(npc: str, status: str) -> dict | None:
         return None
     specs = d.get("steps") if isinstance(d.get("steps"), list) and d["steps"] else [d]
     steps = []
-    for spec in specs[:3]:  # цепочка до 3 шагов; любой невалидный → отказ
+    for spec in specs[:3]:  # chain up to 3 steps; any invalid → reject
         st = _build_step(spec if isinstance(spec, dict) else {}, npc, p, cands, own, others)
         if not st:
             return None
         steps.append(st)
     if not steps:
         return None
-    first = steps[0]  # top-level = ПЕРВЫЙ шаг (совместимость)
+    first = steps[0]  # top-level = FIRST step (compatibility)
     data = {
         "giver": npc,
         "giver_name": p.name,
@@ -270,7 +270,7 @@ _KIND_VERB = {
 
 
 def _ct_steps(ct: dict) -> list:
-    """Шаги уговора. Старый одношаговый контракт (без steps) — оборачиваем в один шаг."""
+    """Contract steps. Old single-step contract (no steps) — wrap in one step."""
     if ct.get("steps"):
         return ct["steps"]
     return [
@@ -297,7 +297,7 @@ def _step_desc(step: dict) -> str:
 
 
 def _ct_advance(ct: dict, step_narr: str) -> str:
-    """Текущий шаг закрыт: если он последний — выплата; иначе шаг++ и подсказка следующего."""
+    """Current step complete: if last — payout; else step++ and hint for next."""
     steps = _ct_steps(ct)
     nstep = ct.get("step", 0) + 1
     if nstep >= len(steps):
@@ -309,11 +309,11 @@ def _ct_advance(ct: dict, step_narr: str) -> str:
 
 
 def _contract_complete(ct: dict) -> str:
-    """Общая выплата ЛЮБОГО исполненного уговора: награда, доверие, память, журнал."""
+    """Full payout of ANY completed contract: reward, trust, memory, log."""
     giver = ct["giver"]
     p = _S["people"][giver]
-    _materialize_npc(giver, "pockets")  # чтоб было чем платить
-    if ct.get("reward_item"):  # награда вещью (бедняк)
+    _materialize_npc(giver, "pockets")  # so there's something to pay with
+    if ct.get("reward_item"):  # reward with thing (poor)
         _store().inv_move(_wid(), ct["reward_item"], "pc")
         paid = f"{p.name} отдаёт обещанное — «{ct.get('reward_name')}»"
     else:
@@ -341,7 +341,7 @@ def _contract_complete(ct: dict) -> str:
 
 
 def _contract_on_give(npc: str, it: dict) -> str | None:
-    """give закрывает ТЕКУЩИЙ шаг: bring (принёс гиверу) и deliver (вручил адресату)."""
+    """give closes CURRENT step: bring (brought to giver) and deliver (handed to recipient)."""
     for ct in _store().contracts(_wid(), "active"):
         cur = _ct_cur(ct)
         kind = cur.get("kind", "bring")
@@ -369,7 +369,7 @@ def _contract_on_give(npc: str, it: dict) -> str | None:
 
 
 def _contract_on_move(loc: int) -> str | None:
-    """visit: дошёл до места — текущий шаг закрыт."""
+    """visit: reached location — current step complete."""
     for ct in _store().contracts(_wid(), "active"):
         cur = _ct_cur(ct)
         if cur.get("kind") == "visit" and cur.get("target") == loc:
@@ -378,7 +378,7 @@ def _contract_on_move(loc: int) -> str | None:
 
 
 def _contract_on_talk(npc: str) -> str | None:
-    """befriend: цель прониклась к тебе — текущий шаг закрыт."""
+    """befriend: target took to you — current step complete."""
     for ct in _store().contracts(_wid(), "active"):
         cur = _ct_cur(ct)
         if cur.get("kind") == "befriend" and cur.get("target") == npc:
@@ -389,7 +389,7 @@ def _contract_on_talk(npc: str) -> str | None:
 
 
 def _board_ads() -> list:
-    """Объявления на столбе — контракты со статусом board (повесили NPC по своим агендам)."""
+    """Announcements on pole — contracts with board status (NPCs posted by their agendas)."""
     out = []
     for ct in _store().contracts(_wid(), "board"):
         cur = _ct_cur(ct)
@@ -410,7 +410,7 @@ def _board_ads() -> list:
 
 
 def _board_publish() -> list:
-    """Утро: занятый горожанин вешает объявление на столб (тот же генератор уговоров)."""
+    """Morning: busy townsperson posts announcement on pole (same contract generator)."""
     people = _S.get("people") or {}
     ads = _store().contracts(_wid(), "board")
     if len(ads) >= PB["board_max_ads"]:
@@ -422,14 +422,14 @@ def _board_publish() -> list:
     npc = random.Random(f"boardpub|{_gt() // 1440}").choice(cands)
     try:
         r = _make_contract(npc, "board")
-    except Exception:  # noqa: BLE001 — публикация не роняет утро
+    except Exception:  # noqa: BLE001 — posting doesn't break morning
         return []
     return [f"{people[npc].name} повесил объявление на городскую доску"] if r else []
 
 
 def _consume_world_item(want: str, where: str) -> None:
-    """Вещь по объявлению закрыл NPC → она РЕАЛЬНО уходит из мира: из строк ёмкости здания
-    (не материализована) или из cont-держателя (материализована). «при человеке» не трогаем."""
+    """Thing from announcement completed by NPC → it REALLY leaves the world: from building container rows
+    (not materialized) or from cont-holder (materialized). Do not touch 'person-carried'."""
     m = re.search(r"\(([^)]+)\)\s*$", where or "")
     if not m:
         return
@@ -442,7 +442,7 @@ def _consume_world_item(want: str, where: str) -> None:
         for cnt in data.get("containers") or []:
             holder = _cont_holder(bid, cnt["name"])
             if _store().flag_get(_wid(), f"seeded|{holder}"):
-                for r in _store().inventory(_wid(), holder):  # ёмкость уже живая
+                for r in _store().inventory(_wid(), holder):  # container already live
                     it = _store().get_item(r["item_id"])
                     if it and (_tokens_ru(it["name"]) & _tokens_ru(want)):
                         _store().inv_drop(_wid(), r["item_id"])
@@ -461,8 +461,8 @@ def _consume_world_item(want: str, where: str) -> None:
 
 
 def _board_npc_fulfill() -> list:
-    """Утро: кто-то из горожан снимает объявление и выполняет его (мир живёт без игрока).
-    bring-вещь при этом РЕАЛЬНО исчезает из ёмкости — мир не врёт."""
+    """Morning: someone from townspeople removes announcement and fulfills it (world lives without player).
+    bring-thing REALLY disappears from container — world doesn't lie."""
     rng = random.Random(f"boardful|{_gt() // 1440}")
     news = []
     for ct in _store().contracts(_wid(), "board"):
@@ -472,7 +472,7 @@ def _board_npc_fulfill() -> list:
         if cur.get("kind") == "bring" and cur.get("want"):
             try:
                 _consume_world_item(cur["want"], cur.get("where", ""))
-            except Exception:  # noqa: BLE001 — уборка не роняет утро
+            except Exception:  # noqa: BLE001 — cleanup doesn't break morning
                 pass
         _store().save_contract(
             _wid(), ct["id"], "done", {k: v for k, v in ct.items() if k not in ("id", "status")}

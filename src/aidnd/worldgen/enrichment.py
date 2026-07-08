@@ -1,6 +1,6 @@
-"""Слой насыщения локаций — ОТДЕЛЬНЫЙ от графа. Один вызов на здание → фактшит характеристик
-(суб-помещения инлайн). Граф не мутирует. Результат можно сложить в БД миров (store) для дешёвого
-переиспользования.
+"""Layer of location enrichment — SEPARATE from the graph. One call per building → fact sheet of characteristics
+(sub-rooms inline). Graph does not mutate. Result can be saved to world DB (store) for cheap
+reuse.
 
 Key functions
 -------------
@@ -32,7 +32,7 @@ class Building:
     node: int
     is_key: bool
     sign: str | None
-    data: dict = field(default_factory=dict)     # фактшит характеристик
+    data: dict = field(default_factory=dict)     # fact sheet of characteristics
 
 
 @dataclass
@@ -67,7 +67,7 @@ def _targets(city, scope: str) -> list[tuple]:
 
 
 def building_ctx(city, bid: str, is_key: bool, idx: int, region: str | None = None):
-    """Контекст здания для енричера (имя-подсказка по типу/ориентиру + роль + ориентиры карты)."""
+    """Building context for enricher (name hint by type/landmark + role + map landmarks)."""
     node = city.key_buildings[bid].interior if is_key else city.houses[bid].node
     landmarks = city._landmarks_at(node) if node in city._xy else []   # noqa: SLF001
     kw = {"region": region} if region else {}
@@ -79,9 +79,9 @@ def building_ctx(city, bid: str, is_key: bool, idx: int, region: str | None = No
 def enrich_city(city, scope: str, enricher: Enricher, max_concurrent: int = 8,
                 on_progress=None, store=None, world_id: int | None = None, resume: bool = False,
                 region: str | None = None) -> Enrichment:
-    """Насытить локации фактшитами (одна фаза). scope: 'keys' | 'all'. Если задан store+world_id —
-    пишем в БД ИНКРЕМЕНТАЛЬНО (каждое здание сразу, в главном потоке → без гонок SQLite; обрыв не теряет
-    прогресс). resume=True — пропускать уже насыщённые в БД (доделать после обрыва)."""
+    """Enrich locations with fact sheets (one phase). scope: 'keys' | 'all'. If store+world_id provided —
+    write to DB INCREMENTALLY (each building immediately, in main thread → no SQLite races; interruption does not lose
+    progress). resume=True — skip already-enriched in DB (finish after interruption)."""
     targets = _targets(city, scope)
     if resume and store is not None and world_id is not None:
         done = store.building_ids(world_id)
@@ -111,7 +111,7 @@ def enrich_city(city, scope: str, enricher: Enricher, max_concurrent: int = 8,
 
 
 def store_world(store, world_id: int, city, enr: Enrichment) -> None:
-    """Сложить насыщенный мир в БД (последовательно — без гонок SQLite)."""
+    """Store enriched world to DB (sequentially — no SQLite races)."""
     p = city.params
     store.upsert_world(world_id, p.seed, p.key_buildings, p.river, p.walls, p.segment)
     for x in enr.buildings.values():

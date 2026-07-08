@@ -1,8 +1,8 @@
-"""Клиент к серверу модели (Ollama HTTP API + OpenAI-совместимые облака).
+"""Client to model server (Ollama HTTP API + OpenAI-compatible clouds).
 
-ПРАВИЛО ПРОЕКТА: офлайн-фоллбэков НЕТ. Нет модели / сеть легла → LLMUnavailable
-(после ретраев), и ошибка честно доходит до игрока. Заглушки (Stub*) допустимы
-ТОЛЬКО в тестах — рантайм их никогда не строит.
+PROJECT RULE: no offline fallbacks. No model / network down → LLMUnavailable
+(after retries), and the error honestly reaches the player. Stubs (Stub*)
+allowed ONLY in tests — runtime never builds them.
 
 Key functions
 -------------
@@ -34,23 +34,23 @@ from .. import config
 try:
     import httpx
     _HAS_HTTPX = True
-except ModuleNotFoundError:         # нет httpx → любой call() упадёт LLMUnavailable
+except ModuleNotFoundError:         # no httpx → any call() fails with LLMUnavailable
     httpx = None                    # type: ignore
     _HAS_HTTPX = False
 
 
 class OllamaError(Exception):
-    """Любая проблема при общении с сервером Ollama (или httpx не установлен)."""
+    """Any problem communicating with Ollama server (or httpx not installed)."""
 
 
 class LLMUnavailable(Exception):
-    """Модель недоступна (нет бэкенда/сети/httpx) — после всех ретраев. Ловится на границе
-    сервера и отдаётся игроку как честная ошибка, НЕ подменяется заглушкой."""
+    """Model unavailable (no backend/network/httpx) — after all retries. Caught at server
+    boundary and returned to player as honest error, NOT substituted with stub."""
 
 
 class LLMBadOutput(Exception):
-    """Модель ответила, но ответ не разобрать (невалидный JSON/пустота) — после ретраев.
-    Тоже честная ошибка: фейковый контент вместо ответа не подставляем."""
+    """Model responded but answer unparseable (invalid JSON/empty) — after retries.
+    Also honest error: fake content not substituted for answer."""
 
 
 class OllamaClient:
@@ -61,7 +61,7 @@ class OllamaClient:
         self.keep_alive = keep_alive or config.KEEP_ALIVE
 
     def preload(self, model: str) -> float:
-        """Загружает модель в VRAM заранее. Возвращает время загрузки (сек)."""
+        """Preload model into VRAM. Returns load time (sec)."""
         import time
         t0 = time.monotonic()
         try:
@@ -76,7 +76,7 @@ class OllamaClient:
         return time.monotonic() - t0
 
     def list_models(self) -> list[str]:
-        """Список установленных моделей (GET /api/tags)."""
+        """List of installed models (GET /api/tags)."""
         try:
             resp = httpx.get(f"{self.host}/api/tags", timeout=10.0)
             resp.raise_for_status()
@@ -91,12 +91,12 @@ class OllamaClient:
         tools: list[dict] | None = None, fmt: dict | None = None,
         options: dict | None = None,
     ) -> dict:
-        """Стримит ответ модели; вызывает on_token(piece).
+        """Stream model response; calls on_token(piece).
 
-        Возвращает {"content": str, "tool_calls": list}. Если think=True, токены
-        размышления идут в on_think. tools — нативные function-calls. fmt — JSON
-        Schema для structured output (грамматико-ограниченный декодинг Ollama,
-        аналог guided_json/XGrammar, main §6.3): гарантирует валидный JSON и enum.
+        Returns {"content": str, "tool_calls": list}. If think=True, thinking tokens
+        go to on_think. tools — native function-calls. fmt — JSON
+        Schema for structured output (grammar-constrained decoding Ollama,
+        like guided_json/XGrammar, main §6.3): guarantees valid JSON and enum.
         """
         payload: dict = {
             "model": model, "messages": messages, "stream": True,
@@ -107,7 +107,7 @@ class OllamaClient:
         if fmt:
             payload["format"] = fmt
         if options:
-            payload["options"] = options    # напр. {"temperature": 0} для классификации
+            payload["options"] = options    # e.g. {"temperature": 0} for classification
         full: list[str] = []
         tool_calls: list[dict] = []
         try:
@@ -138,44 +138,44 @@ class OllamaClient:
 
     def chat(self, model: str, messages: list[dict], tools: list[dict] | None = None,
              think: bool = False, fmt: dict | None = None, options: dict | None = None) -> dict:
-        """Не-стриминговая обёртка: собирает полный ответ."""
+        """Non-streaming wrapper: collects full response."""
         return self.chat_stream(model, messages, on_token=lambda _p: None,
                                 think=think, tools=tools, fmt=fmt, options=options)
 
 
 class ModelManager:
-    """Маршрутизатор вызовов по ролям: профиль → (backend, model) → chat.
+    """Router LLM calls by role: profile → (backend, model) → chat.
 
-    available() — только для health-чеков (doctor/дебаг-стенды); рантайм НЕ ветвится
-    по доступности: call() либо возвращает ответ, либо кидает LLMUnavailable.
+    available() — health checks only (doctor/debug-stands); runtime does NOT branch
+    on availability: call() either returns answer or raises LLMUnavailable.
     """
 
-    # роль -> (модель, опциональный LoRA-адаптер) — main §12
+    # role -> (model, optional LoRA adapter) — main §12
     ROLE_MODELS = {
-        "intent": (config.BASE_MODEL, None),    # legacy verb-классификатор (офлайн-путь)
-        "router": (config.ROUTER_MODEL, "router"),  # дообученный роутер намерений (см. training/)
-        "arbiter": (config.ARBITER_MODEL, "arbiter"),  # дообученный арбитр freeform (decide_resolution)
-        "consequence": (config.CONSEQUENCE_MODEL, "consequence"),  # дообученный агент последствий
-        "narrator": (config.NARRATOR_MODEL, "narrator-persona"),  # дообученный нарратор (см. training/)
-        "location_writer": (config.LOCATION_MODEL, "location"),  # отдельный адаптер описаний мест на 14B (aidnd-location)
+        "intent": (config.BASE_MODEL, None),    # legacy verb-classifier (offline path)
+        "router": (config.ROUTER_MODEL, "router"),  # fine-tuned intent router (see training/)
+        "arbiter": (config.ARBITER_MODEL, "arbiter"),  # fine-tuned freeform arbiter (decide_resolution)
+        "consequence": (config.CONSEQUENCE_MODEL, "consequence"),  # fine-tuned consequence agent
+        "narrator": (config.NARRATOR_MODEL, "narrator-persona"),  # fine-tuned narrator (see training/)
+        "location_writer": (config.LOCATION_MODEL, "location"),  # separate adapter for location descriptions on 14B (aidnd-location)
         "cognition": (config.BASE_MODEL, "lore"),
         "lore_keeper": (config.BASE_MODEL, "lore"),
         "character_gen": (config.BASE_MODEL, "lore"),
-        "persona_gen": (config.BASE_MODEL, "lore"),  # генератор богатых персон (datasets/persona)
+        "persona_gen": (config.BASE_MODEL, "lore"),  # rich persona generator (datasets/persona)
         "tactician": (config.BASE_MODEL, "combat"),
         "reflection": (config.BASE_MODEL, "reflect"),
         "director": (config.BASE_MODEL, None),
-        "quest_writer": (config.QUEST_MODEL, "quest"),   # дообученная модель (см. training/)
+        "quest_writer": (config.QUEST_MODEL, "quest"),   # fine-tuned model (see training/)
         "plausibility": (config.BASE_MODEL, "validator"),
-        "merchant": (config.BASE_MODEL, "lore"),         # торговец: социальный исход торга (числа — движок)
-        "street_event": (config.BASE_MODEL, "lore"),     # случайное уличное событие в пути (контент)
-        "event_batch": (config.BASE_MODEL, "lore"),      # пред-генерация пула событий пачками (контент)
-        "quest_merge": (config.BASE_MODEL, "lore"),       # судья слияния близких объявлений
-        "event_quest": (config.BASE_MODEL, "lore"),       # уличная сценка → зацепка-объявление
-        "map_features": (config.BASE_MODEL, "lore"),      # описание локации → фичи боевой карты
+        "merchant": (config.BASE_MODEL, "lore"),         # merchant: social outcome of trade (numbers — engine)
+        "street_event": (config.BASE_MODEL, "lore"),     # random street event en route (content)
+        "event_batch": (config.BASE_MODEL, "lore"),      # pre-generation of event pool in batches (content)
+        "quest_merge": (config.BASE_MODEL, "lore"),       # judge for merging similar announcements
+        "event_quest": (config.BASE_MODEL, "lore"),       # street scene → hook-announcement
+        "map_features": (config.BASE_MODEL, "lore"),      # location description → battle map features
         "faction_gen": (config.BASE_MODEL, "lore"),
-        "npc_ref": (config.INTENT_MODEL, None),           # лёгкая резолюция ссылки на присутствующего NPC
-        "agenda": (config.BASE_MODEL, "lore"),            # тайный замысел/план важного деятельного NPC
+        "npc_ref": (config.INTENT_MODEL, None),           # light resolution of present NPC reference
+        "agenda": (config.BASE_MODEL, "lore"),            # secret intent/plan of important active NPC
     }
 
     def __init__(self, client: OllamaClient | None = None) -> None:
@@ -183,15 +183,15 @@ class ModelManager:
         self.routing = profiles.routing_for(config.LLM_PROFILE, self.ROLE_MODELS)  # role→(backend,model)
         self.backends = profiles.make_backends(self.routing, client)
         ob = self.backends.get("ollama")
-        self.client = ob.client if ob else None          # compat (тесты/стрим могут дернуть)
+        self.client = ob.client if ob else None          # compat (tests/stream may pull)
         self._available: bool | None = None
-        self._trace: list[dict] = []        # дебаг-трейс роутинга: какие роли→модели дёргались за ход
-        self.on_call = None                 # колбэк(role, model) на каждый LLM-вызов (для ползунка генерации)
+        self._trace: list[dict] = []        # debug-trace routing: which roles→models were called per turn
+        self.on_call = None                 # callback(role, model) on each LLM call (for generation slider)
 
     def available(self, recheck: bool = False) -> bool:
-        """Доступен ли хоть один бэкенд активного профиля (кешируется). ТОЛЬКО для
-        health-чеков — рантайм по этому флагу не ветвится (call() кидает LLMUnavailable).
-        ВАЖНО: чек всех бэкендов (не short-circuit) — иначе Ollama не наполнит список моделей."""
+        """Is any backend of the active profile available (cached)? ONLY for
+        health checks — runtime does not branch on this flag (call() raises LLMUnavailable).
+        IMPORTANT: check all backends (no short-circuit) — otherwise Ollama won't populate model list."""
         if not _HAS_HTTPX or not self.backends:
             return False
         if self._available is None or recheck:
@@ -204,30 +204,30 @@ class ModelManager:
         return backend, (backend.resolve(model) if backend else model)
 
     def model_for(self, role: str) -> str:
-        """Имя модели для роли в активном профиле (compat-хелпер; трейс/on_call — в call())."""
+        """Model name for role in active profile (compat-helper; trace/on_call — in call())."""
         return self._route(role)[1]
 
     def backend_name(self, role: str) -> str | None:
-        """Имя бэкенда роли в активном профиле (для выбора бэкенд-специфичного промпта)."""
+        """Backend name for role in active profile (for selecting backend-specific prompt)."""
         b = self._route(role)[0]
         return b.name if b else None
 
     def enrich_concurrency(self) -> int:
-        """Сколько ген-вызовов enrich гнать параллельно. Облако (network-bound) — параллелим;
-        локальная Ollama (своп моделей на 1 GPU) — последовательно. Берём минимум по бэкендам
-        ключевых ген-ролей (чтобы не зашлюзовать локальный путь)."""
+        """How many enrich gen-calls to run in parallel. Cloud (network-bound) — parallelize;
+        local Ollama (model swap on 1 GPU) — sequential. Take min across backends
+        of key gen-roles (to not bottleneck local path)."""
         roles = ("persona_gen", "location_writer", "faction_gen", "item_smith")
         caps = [getattr(b, "parallel_enrich", 1)
                 for b in (self._route(r)[0] for r in roles) if b is not None]
         return max(1, min(caps)) if caps else 1
 
-    RETRIES = 3          # попытки на транспортную ошибку (сеть/5xx/таймаут), пауза 0.5·n сек
+    RETRIES = 3          # retries for transport error (network/5xx/timeout), pause 0.5·n sec
 
     def call(self, role: str, messages: list, *, schema=None, options=None,
              on_token=None, think: bool = False) -> dict:
-        """ЕДИНАЯ точка вызова модели по роли: профиль → (backend, model) → backend.chat.
-        Возвращает {'content', 'tool_calls'}. Транспортная ошибка → ретраи → LLMUnavailable
-        (никаких None-с-фоллбэком: без модели движок честно ломается)."""
+        """UNIFIED entry point for model call by role: profile → (backend, model) → backend.chat.
+        Returns {'content', 'tool_calls'}. Transport error → retries → LLMUnavailable
+        (no None-with-fallback: without model engine breaks honestly)."""
         if not _HAS_HTTPX:
             raise LLMUnavailable("httpx не установлен — LLM-бэкенды недоступны")
         backend, model = self._route(role)
@@ -236,7 +236,7 @@ class ModelManager:
         self._trace.append({"role": role, "model": model, "t": _perf_counter()})
         if len(self._trace) > 200:
             self._trace = self._trace[-100:]
-        if self.on_call is not None:                     # тик лимита юзера — один на логический вызов
+        if self.on_call is not None:                     # user limit tick — one per logical call
             try:
                 self.on_call(role, model)
             except Exception:
@@ -246,15 +246,15 @@ class ModelManager:
             try:
                 return backend.chat(model, messages, schema=schema, options=options,
                                      on_token=on_token, think=think)
-            except Exception as exc:                     # сеть/сервер/таймаут → ретрай
+            except Exception as exc:                     # network/server/timeout → retry
                 last = exc
                 if attempt + 1 < self.RETRIES:
                     time.sleep(0.5 * (attempt + 1))
         raise LLMUnavailable(f"{role} → {model}: {last}") from last
 
     def trace_take(self) -> list[dict]:
-        """Снять накопленный трейс роутинга (роль→модель + прибл. длительность мс) и очистить.
-        Длительность шага ≈ интервал до следующего вызова model_for (для дебага «куда ушёл ввод»)."""
+        """Extract accumulated routing trace (role→model + approx. duration ms) and clear.
+        Step duration ≈ interval until next model_for call (for debug "where did input go")."""
         tr, self._trace = self._trace, []
         now = _perf_counter()
         out = []

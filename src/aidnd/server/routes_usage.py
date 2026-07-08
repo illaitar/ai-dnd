@@ -1,4 +1,4 @@
-"""HTTP-эндпоинты лимитов: статус использования и разблокировка кодом.
+"""HTTP endpoints for limits: usage status and unlock via code.
 
 Key functions
 -------------

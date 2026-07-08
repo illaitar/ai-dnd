@@ -1,45 +1,45 @@
-# Квесты: контракты, доска, гильдия
+# Quests: contracts, board, guild
 
-`server/play/mechanics/contracts.py` + board-хендлер. Квест — НЕ скрипт: **делегированная
-нужда NPC**, want-предикат над реальным состоянием мира ([принцип 9](README.md)).
-Завершение — фактом мира, всё равно КАК добился.
+`server/play/mechanics/contracts.py` + board-handler. A quest is NOT a script: **delegated
+NPC need**, a want-predicate over real world state ([principle 9](README.md)).
+Completion — by world fact, no matter HOW achieved.
 
-## Контракт
+## Contract
 
-Рождение: агенда NPC ([mind.md](mind.md)) → механика собирает РЕАЛЬНЫХ кандидатов (содержимое
-ёмкостей чужих зданий, ценности других людей, места города) → LLM в характере гивера выбирает
-поручение и формулирует просьбу (`pitch`) → код валидирует каждый шаг (цель обязана
-существовать дословно).
+Birth: NPC agenda ([mind.md](mind.md)) → mechanic collects REAL candidates (contents of other
+buildings' containers, other people's valuables, city locations) → LLM in giver's character
+chooses a task and formulates a request (`pitch`) → code validates each step (the goal must
+exist literally).
 
-- **Виды шагов**: `bring` (добыть вещь) · `deliver` (отнести СВОЮ вещь человеку) · `visit`
-  (сходить-глянуть) · `befriend` (расположить человека) · `dead` (только НАСТОЯЩИЙ враг
-  гивера — affinity < порога; тёмное — если натура стерпит).
-- **Многоэтапность**: цепочка 2-3 шагов AND-последовательностью (деревья — позже).
-- **Награда настоящая**: монеты из кошелька гивера; бедняк платит вещью (лучшей из своих).
-- Личная просьба в разговоре: раз на человека (флаг), не предложит явному недругу.
-- Завершение: `give`/факт мира; контракт персистится (`contracts` в live.db).
+- **Step types**: `bring` (acquire thing) · `deliver` (deliver OWN thing to person) · `visit`
+  (go-look) · `befriend` (win over person) · `dead` (only REAL enemy of giver — affinity < threshold;
+  dark — if nature permits).
+- **Multi-stage**: chain of 2-3 steps AND-sequence (trees — later).
+- **Real reward**: coins from giver's wallet; poor person pays with thing (best of their own).
+- Personal request in conversation: once per person (flag), won't offer to obvious enemy.
+- Completion: `give`/world fact; contract persists (`contracts` in live.db).
 
-## Доска объявлений
+## Board of Notices
 
-Столб на площади (своя точка графа). Кэп объявлений (PB `board_max_ads`), жизненный цикл:
-NPC вешают из агенд, **NPC-прохожие сами берут и закрывают** заказы (вероятность
-`board_npc_fulfill`, исполнение — авторезолвом/фактами), лента новостей доски.
+Post on square (its own graph point). Ad cap (PB `board_max_ads`), lifecycle:
+NPCs post from agendas, **NPC passersby take and close orders themselves** (probability
+`board_npc_fulfill`, execution — auto-resolve/facts), board news feed.
 
-## Гильдия приключенцев
+## Adventurers' Guild
 
-Здание + касса + clear-заказы по CR на 5 логовищ ([combat.md](combat.md)).
+Building + till + clear-orders by CR on 5 lairs ([combat.md](combat.md)).
 
-- **5 рангов**, прогрессивно; ранг = **удостоверение-ПРЕДМЕТ** (жетон).
-- Чужой жетон РАБОТАЕТ, но гильдия проверяет ложь: Insight vs Deception;
-  провал = конфискация + чёрная метка.
-- NPC-партии ходят в вылазки тем же боевым движком (усилены — побеждают ~65%);
-  утренние зачистки возвращают логовищам «жизнь» экономики.
+- **5 ranks**, progressive; rank = **credentials-ITEM** (token).
+- Foreign token WORKS, but guild checks lie: Insight vs Deception;
+  fail = confiscation + blacklist.
+- NPC parties go on sorties via same combat engine (enhanced — win ~65%);
+  morning clears return lairs' "life" to economy.
 
-## Дальше
+## Next
 
-- Деревья этапов (сейчас AND-цепочки); квесты-зацепки из уличных событий.
-- Гильдия шлёт за город в процедурные интерьеры ([combat.md](combat.md) «дальше»).
-- Сюжетные поручения поверх того же механизма ([plot.md](plot.md)).
+- Step trees (now AND-chains); quests-hooks from street events.
+- Guild sends beyond city into procedural interiors ([combat.md](combat.md) "next").
+- Plot tasks over same mechanism ([plot.md](plot.md)).
 
-Связано: [mind.md](mind.md) (агенды) · [items.md](items.md) (цели bring/deliver) ·
-[entities.md](entities.md) (contracts в БД)
+Related: [mind.md](mind.md) (agendas) · [items.md](items.md) (bring/deliver targets) ·
+[entities.md](entities.md) (contracts in DB)

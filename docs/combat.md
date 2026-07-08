@@ -1,48 +1,48 @@
-# Боёвка
+# Combat
 
-`src/aidnd/combat` — BG-lite поверх 5e. Один движок на все бои: игрок, дуэль в городе,
-NPC-вылазка без игрока. [Принцип 3](README.md): единый Combatant, никаких спецкейсов.
+`src/aidnd/combat` — BG-lite on top of 5e. One engine for all combat: player, city duel,
+NPC sortie without player. [Principle 3](README.md): unified Combatant, no special cases.
 
-## Combatant — единая боевая проекция
+## Combatant — unified combat projection
 
-`from_monster` (бестиарий) / `from_npc` (его mech + лучшее оружие) / `from_pc` (герой +
-оружие из сумки): hp/ac/скорость/to-hit/кости урона/тип/резисты/иммуны/CR/статусы.
-Бестиарий — `content/bestiary.json`: 322 статблока из SRD с вариациями (данные, не код).
+`from_monster` (bestiary) / `from_npc` (its mechanics + best weapon) / `from_pc` (hero +
+weapon from bag): hp/ac/speed/to-hit/damage dice/type/resistances/immunities/CR/statuses.
+Bestiary — `content/bestiary.json`: 322 stat blocks from SRD with variations (data, not code).
 
 ## Encounter (engine.py)
 
-Грид с препятствиями · инициатива d20+dex · ход = движение (BFS, 8 направлений) + действие
-(атака/защита/бегство/манёвр) · крит/резисты/иммуны · мораль (бегут, сломавшись) ·
-**дальний бой** «как в BG3»: луки/арбалеты, помеха в упор, ИИ кайтит. Раунд = **5 секунд**
-игрового времени; мир в масштабе минут стоит. Лог боя — построчно, UI — полноэкранный
-оверлей с гридом.
+Grid with obstacles · initiative d20+dex · turn = movement (BFS, 8 directions) + action
+(attack/defend/flee/maneuver) · crits/resistances/immunities · morale (flee when broken) ·
+**ranged combat** "like in BG3": bows/crossbows, disadvantage at close range, AI kites. Round = **5 seconds**
+of game time; world at minute scale is static. Combat log — line by line, UI — full-screen
+overlay with grid.
 
-## Авторезолв (auto.py)
+## Auto-resolve (auto.py)
 
-Бои без игрока прогоняются тем же движком до конца: утренние NPC-зачистки логовищ,
-исполнение clear-контрактов доски. Подбор врагов — `encounters.py` по CR + среде;
-`dungeon.py` — волны логовища.
+Combats without the player run through the same engine to completion: morning NPC lair clearances,
+execution of board clear contracts. Enemy selection — `encounters.py` by CR + environment;
+`dungeon.py` — lair waves.
 
-## Мир вокруг боя
+## World around combat
 
-- **5 логовищ** на открытой местности вокруг города; зачистка = флаг мира + лут + касса
-  гильдии ([quests.md](quests.md)).
-- Дуэли в городе: смерть НАСТОЯЩАЯ — труп лутается, свидетели помнят, стража ищет
-  (розыск: очки wanted, штраф/тюрьма — таблица PB).
-- Магия в бою: закон круга с mech (dice/aoe/status) — [magic.md](magic.md); боевое
-  колдовство при свидетелях = табу (wanted).
+- **5 lairs** in open terrain around the city; clearance = world flag + loot + guild
+  treasury ([quests.md](quests.md)).
+- City duels: death is REAL — corpse is looted, witnesses remember, guards search
+  (manhunt: wanted points, penalty/jail — PB table).
+- Magic in combat: circle law with mechanics (dice/aoe/status) — [magic.md](magic.md); combat
+  spellcasting in front of witnesses = taboo (wanted).
 
-## Смерть героя
+## Player Death
 
-**ПЕРМАСМЕРТЬ**: гибель = уничтожение мира пользователя (запись стирается; следующий заход —
-новый город с нуля). Бегство из боя — легитимное спасение. hp героя персистится; отдых
-восстанавливает ([loop.md](loop.md) rest).
+**PERMADEATH**: death = destruction of the player's world (record is erased; next session —
+new city from scratch). Fleeing from combat — legitimate escape. Player hp persists; rest
+restores it ([loop.md](loop.md) rest).
 
-## Дальше
+## Next
 
-- Ranged-магия/заклинания в тактике; компаньоны/найм в партию (решено: пока без них).
-- Процедурные интерьеры подземелий: поднять battlemap-генератор старого контура
-  (архетип + клеточный автомат) как генератор помещений для вылазок гильдии.
+- Ranged magic/spells in tactics; companions/party hiring (decided: none for now).
+- Procedural dungeon interiors: bring up the old battlemap generator (archetype + cellular automaton)
+  as a room generator for guild sorties.
 
-Связано: [quests.md](quests.md) (гильдия/логовища) · [items.md](items.md) (оружие/лут) ·
+Related: [quests.md](quests.md) (guild/lairs) · [items.md](items.md) (weapons/loot) ·
 [magic.md](magic.md)

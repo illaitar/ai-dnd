@@ -1,6 +1,6 @@
-"""Магия (в духе Witch Hat Atelier): круг из глифов по чётким правилам → эффект.
-Ядро (grammar) — детерминированно из данных, БЕЗ LLM. LLM только именует чистый круг и
-разыгрывает дикую магию (слой inscribe, добавится позже). См. docs/MAGIC.md.
+"""Magic (in the spirit of Witch Hat Atelier): a circle of glyphs by strict rules → effect.
+Core (grammar) — deterministic from data, NO LLM. LLM only names the pure circle and
+plays out wild magic (inscribe layer, will be added later). See docs/MAGIC.md.
 
     from aidnd.magic import load, classify, build_spec, known_ids
 

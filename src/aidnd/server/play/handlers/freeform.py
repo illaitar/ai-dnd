@@ -1,4 +1,4 @@
-"""Домен СВОБОДНЫЙ ВВОД (/act) — распил world.py. Арбитр: намерение→возможность/сложность→исход (LLM).
+"""Free-form input domain (/act) — world.py split. Arbiter: intent→possibility/difficulty→outcome (LLM).
 
 Key functions
 -------------
@@ -49,8 +49,8 @@ from aidnd.server.play.mechanics.items import _do_craft, _materialize_npc, _pc_c
 
 
 def _attempt(intent: dict, sc: dict) -> dict:
-    """ОДИН резолвер на все действия игрока: гейты, броски, перенос, память, последствия.
-    Возвращает {narr:[строки], open_talk?, refresh?}."""
+    """Single resolver for all player actions: gates, rolls, transfers, memory, consequences.
+    Returns {narr:[strings], open_talk?, refresh?}."""
     city, people, crof, cr2b, loc = _play()
     verb = intent.get("verb") or "wait"
     manner = intent.get("manner") or "openly"
@@ -73,7 +73,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
 
         zn = {z["id"]: z["name"] for z in _scene_zones()}
         zid = str(intent["zone"])
-        if zid in zn:                                # зону сматчил LLM-интент, не токены
+        if zid in zn:                                # zone matched by LLM-intent, not tokens
             out["narr"].append(_zone_go(zid, zn[zid]))
             out["refresh"] = True
             return out
@@ -92,7 +92,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             None,
         )
         if tgt:
-            out["goto"] = tgt["node"]  # фронт выполнит обычный move (с ходьбой)
+            out["goto"] = tgt["node"]  # front will execute normal move (with walking)
         else:
             out["narr"].append("Ты не знаешь, где это. Спроси у людей.")
             out["fail"] = True
@@ -115,7 +115,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             nm = it.get("name", "вещь")
             wrk = next((wp for wp in (lv.get("workers") or {}) if wp in people), None)
             caught = False
-            if wrk and manner == "stealthily":       # тайком при хозяине — ловкость против глаз
+            if wrk and manner == "stealthily":       # stealthily with owner present — dexterity against eyes
                 n = int(_store().flag_get(_wid(), f"zsteal|{loc}") or 0) + 1
                 _store().flag_set(_wid(), f"zsteal|{loc}", str(n))
                 roll = random.Random(f"zsteal|{loc}|{n}").randint(1, 20)
@@ -138,7 +138,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
     if verb == "take" and npc:
         p = people[npc]
         _materialize_npc(npc, "pockets")
-        if manner == "forcefully":  # отнять силой: сила против храбрости
+        if manner == "forcefully":  # take by force: strength against bravery
             n = int(_store().flag_get(_wid(), f"rob|{npc}") or 0) + 1
             _store().flag_set(_wid(), f"rob|{npc}", str(n))
             roll = random.Random(f"rob|{npc}|{n}").randint(1, 20)
@@ -170,7 +170,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             out["fail"] = True
             out["refresh"] = True
             return out
-        # stealthily (по умолчанию для take+npc): карманная кража — тот же гейт, что был кнопкой
+        # stealthily (default for take+npc): pickpocketing — same gate as the old button
         n = int(_store().flag_get(_wid(), f"steal|{npc}") or 0) + 1
         _store().flag_set(_wid(), f"steal|{npc}", str(n))
         lv = _S.get("live") or {}
@@ -219,11 +219,11 @@ def _attempt(intent: dict, sc: dict) -> dict:
         from aidnd.server.play.mechanics.deals import deal_attempt
 
         r = deal_attempt(npc, intent["deal"], manner, out, people, crof, loc)
-        if r is not None:                            # не сделка (нет ставки) — обычный диалог
+        if r is not None:                            # not a deal (no stake) — ordinary dialogue
             return r
 
     if verb == "say" and npc and manner == "persuasively":
-        out["open_talk"] = npc  # уговоры — это диалог; ключ просится там
+        out["open_talk"] = npc  # persuasion — this is dialogue; the key is asked for there
         out["say_first"] = detail or None
         return out
 
@@ -260,7 +260,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             return out
         _gt_add(PB["give_min"])
         if it["kind"] == "consumable" or not it.get("durability"):
-            _store().inv_move(_wid(), iid, "used")  # выпито/израсходовано — вещь уходит
+            _store().inv_move(_wid(), iid, "used")  # drunk/consumed — item is gone
             out["narr"].append(f"«{it['name']}» — израсходовано.")
         else:
             ev = item_use(it, 1)
@@ -279,7 +279,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         zones_l = lv.get("zones") or []
         zn = {z["id"]: z for z in zones_l}
         zid = str(intent.get("zone") or "")
-        if zid not in zn:                            # цели нет — ближайший чужой разговор
+        if zid not in zn:                            # no target — nearest other conversation
             my = (lv.get("zonemap") or {}).get(PLAYER)
             c = next((c for c in (lv.get("convs") or []) if c.get("zone") != my), None)
             zid = c.get("zone") if c else None
@@ -326,7 +326,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             out["fail"] = True
             return out
         now = _gt()
-        if _phase(now) == "morning":                 # уже утро — сутки напролёт не спят
+        if _phase(now) == "morning":                 # already morning — they don't sleep through the day
             out["narr"].append("Утро на дворе — какой сон? Разве что вздремнуть, да жалко дня.")
             out["fail"] = True
             return out
@@ -335,7 +335,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         if wake <= now:
             wake += 1440
         _S["gt"] = wake
-        _mana_sleep((wake - now) / 60.0)  # сон наполняет свечу ×3
+        _mana_sleep((wake - now) / 60.0)  # sleep replenishes candle ×3
         _apply_routine()
         _pc_hp(set_to=PB["pc_max_hp"])
         _pc_save()
@@ -367,7 +367,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         out["narr"].append(f"Ты бросаешься на {p.name}. Назад дороги нет.")
         return out
 
-    mgr = _model()  # не-действие: отклик мастера ПО ФАКТАМ живой сцены (снимок, не выдумка)
+    mgr = _model()  # non-action: DM response BASED ON FACTS of live scene (snapshot, not invention)
     text = str(intent.get("_text") or detail or "")
     if text:
         resp = mgr.call(
@@ -389,9 +389,9 @@ def _attempt(intent: dict, sc: dict) -> dict:
 
 
 def _run_plan(steps: list, sc: dict, text: str) -> dict:
-    """Исполнитель цепи: звенья по порядку, БЕЗ отката. Рвёт план: провал звена, смена
-    контура (диалог/бой/лут/переход) и САЛИЕНТНОЕ событие сцены (зал взорвался — мир
-    вклинился, паттерн stopped/remaining городского маршрута)."""
+    """Chain executor: links in order, NO rollback. Breaks plan: link fails, contour change
+    (talk/combat/loot/move) and SALIENT scene event (hall exploded — world intervened, pattern
+    stopped/remaining of city route)."""
     import logging
 
     logging.getLogger("aidnd.scene").debug(
@@ -412,7 +412,7 @@ def _run_plan(steps: list, sc: dict, text: str) -> dict:
         if (len(steps) > 1 and step.get("verb") in ("take", "give", "use", "inspect")
                 and not any(step.get(k) for k in ("item", "container", "npc"))):
             res["narr"].append("Этого нет под рукой — план обрывается.")
-            break                                     # в цепи нарратор НЕ дарит несуществующее
+            break                                     # in the chain narrator does NOT gift non-existent things
         r = _attempt(step, sc)
         narr, refresh = res["narr"] + (r.get("narr") or []), res["refresh"] or bool(
             r.get("refresh"))
@@ -420,7 +420,7 @@ def _run_plan(steps: list, sc: dict, text: str) -> dict:
         res["narr"], res["refresh"] = narr, refresh
         if not sal0 and (_S.get("live") or {}).get("salient"):
             _cut(i, "Зал взрывается — не до задуманного: план обрывается.")
-            break                                     # мир вклинился — как события на дороге
+            break                                     # world intervened — like events on the road
         if r.get("fail"):
             _cut(i, "Задуманное дальше не идёт — план оборвался здесь.")
             break
@@ -431,7 +431,7 @@ def _run_plan(steps: list, sc: dict, text: str) -> dict:
 
 @router.post("/api/play/act")
 async def act(request: Request):
-    """Свободное действие: текст → LLM-интент → единый резолвер. Никаких кнопок-глаголов."""
+    """Free-form action: text → LLM-intent → single resolver. No verb buttons."""
     city, people, crof, cr2b, loc = _play()
     text = str((await request.json()).get("text") or "").strip()
     if not text:

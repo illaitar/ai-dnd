@@ -1,12 +1,12 @@
 """AI-DnD.
 
-Русскоязычная AI-D&D игра: живой город (~900 NPC с разумом/памятью/агендами),
-мир-на-пользователя из предсгенерённых пулов, пошаговый мир (действие игрока = тик).
+Russian-language AI-D&D game: a living city (~900 NPCs with minds/memories/agendas),
+per-user world from pre-generated pools, turn-based world (player action = tick).
 
-Сквозные принципы (канон — docs/README.md):
-- LLM обязателен: офлайн-фоллбэков НЕТ (нет модели → LLMUnavailable, заглушки только в тестах);
-- LLM предлагает — код клампит: кости, бюджеты, инвентари, бой — детерминированный код;
-- общие абстрактные системы, не спецкейсы; игрок — такой же агент, как NPC.
+Core principles (canon — docs/README.md):
+- LLM is required: no offline fallbacks (no model → LLMUnavailable, stubs only in tests);
+- LLM proposes — code clamps: dice, budgets, inventory, combat — deterministic code;
+- general abstract systems, not special cases; player is the same agent as NPC.
 """
 
 __version__ = "0.1.0"

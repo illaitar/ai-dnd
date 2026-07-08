@@ -1,12 +1,12 @@
-"""ФАЗА 1-2 граф-мозга (MODULARBRAIN): вектор УРДЖЕЙ поверх нужд + ШИНА МОДУЛЯТОРОВ.
+"""PHASE 1-2 graph-brain (MODULARBRAIN): vector of URGES over needs + MODULATOR BUS.
 
-Урдж (Бах/PSI): urge_d = |set−cur| (у нас set=0 → «хочу низко» → urge = уровень нужды), urgency
-растёт к критическому. Модуляторы — 6 глобальных ручек из урджей+эмоций+черт (arousal/valence/
-dominance/resolution/selection_threshold/securing). Это МЕХАНИЗМ СИСТЕМНОСТИ: одна ручка пронизывает
-все узлы, поэтому голод перекрашивает даже торговлю без правила «если голоден в торговле».
+Urge (Bach/PSI): urge_d = |set−cur| (for us set=0 → "want low" → urge = need level), urgency
+grows toward critical. Modulators — 6 global knobs from urges+emotions+traits (arousal/valence/
+dominance/resolution/selection_threshold/securing). This is SYSTEMNESS MECHANISM: one knob permeates
+all nodes, so hunger recolors even trading without a rule "if hungry while trading".
 
-НЕЙТРАЛЬНО при базовом состоянии (нужды≈0.2, эмоции 0, черты 0.5 → arousal≈valence≈…≈0.5), поэтому
-подключение к скору (brain.modulate) не сдвигает поведение в норме — только под давлением.
+NEUTRAL at baseline state (needs≈0.2, emotions 0, traits 0.5 → arousal≈valence≈…≈0.5), so
+connecting to score (brain.modulate) doesn't shift behavior normally — only under pressure.
 
 Key functions
 -------------
@@ -24,10 +24,10 @@ def _clamp(x, lo=0.0, hi=1.0):
 
 
 def urges(state) -> dict:
-    """На каждую нужду: urge (насколько не удовлетворена) + urgency (близость к критическому) + приоритет."""
+    """For each need: urge (how unsatisfied) + urgency (proximity to critical) + priority."""
     out = {}
     for nd, cur in state.needs.items():
-        urgency = _clamp(cur / (1.05 - cur), 0.0, 1.5)          # к cur→1 срочность взлетает
+        urgency = _clamp(cur / (1.05 - cur), 0.0, 1.5)          # as cur→1 urgency skyrockets
         w = state.config.traits.get(NEED_WEIGHT[nd], 0.5) + 0.5 if nd in NEED_WEIGHT else 1.0
         out[nd] = {"urge": cur, "urgency": urgency, "priority": cur * w}
     return out
@@ -38,7 +38,7 @@ def _lead(urg: dict) -> dict:
 
 
 def modulators(state) -> dict:
-    """6 глобальных модуляторов + служебные поля (ведущий мотив, max срочность)."""
+    """6 global modulators + service fields (leading motive, max urgency)."""
     t, e, urg = state.config.traits, state.emotion, urges(state)
     lead = _lead(urg)
     max_urgency = min(1.0, max((u["urgency"] for u in urg.values()), default=0.0))
@@ -62,7 +62,7 @@ def modulators(state) -> dict:
             "_lead": lead, "_max_urgency": max_urgency}
 
 
-# что толкнуло модулятор (для панели «стрелки влияния» в дебаге)
+# what drove the modulator (for the "influence arrows" panel in debug)
 DRIVERS = {
     "arousal": "нужды(срочность) + гнев/страх + вспыльчивость",
     "valence": "радость−подавленность − давление нужд",

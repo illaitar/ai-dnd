@@ -1,6 +1,6 @@
-"""SQLite-БД насыщенных миров: world_id + здания (фактшит). Дешёвое переиспользование: load, без LLM.
+"""SQLite database of rich worlds: world_id + buildings (fact sheet). Cheap reuse: load, no LLM.
 
-Файл по умолчанию <repo>/data/worlds.db (override через AIDND_WORLDS_DB). Коммитится — мир едет на прод.
+Default file <repo>/data/worlds.db (override via AIDND_WORLDS_DB). Committed — world ships to prod.
 
 Key functions
 -------------
@@ -32,36 +32,36 @@ class WorldStore:
                       "key_buildings INT, river INT, walls INT, segment REAL, created TEXT)")
             c.execute("CREATE TABLE IF NOT EXISTS buildings (world_id INT, building_id TEXT, is_key INT, "
                       "node INT, sign TEXT, data TEXT, PRIMARY KEY(world_id, building_id))")
-            # ПУЛ NPC — мир-агностичный банк готовых людей (персона+инвентарь+портреты-пути)
+            # NPC pool — world-agnostic bank of ready people (persona+inventory+portrait-paths)
             c.execute("CREATE TABLE IF NOT EXISTS people (id TEXT PRIMARY KEY, role TEXT, name TEXT, "
                       "charisma REAL, appearance REAL, mech TEXT, persona TEXT, portraits TEXT, "
                       "seed INT, created TEXT)")
-            # привязка людей к конкретному миру (кто где стоит) — стейт, персист
+            # binding people to specific world (who stands where) — state, persist
             c.execute("CREATE TABLE IF NOT EXISTS placements (world_id INT, npc_id TEXT, node INT, "
                       "home INT, work TEXT, PRIMARY KEY(world_id, npc_id))")
-            # выкованные предметы (фактшит) + инвентарь игрока (что держит + что вскрыто про предмет)
+            # forged items (fact sheet) + player inventory (what holds + what revealed about item)
             c.execute("CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, data TEXT)")
             c.execute("CREATE TABLE IF NOT EXISTS inventory (world_id INT, item_id TEXT, holder TEXT, "
                       "known TEXT, PRIMARY KEY(world_id, item_id))")
-            # состояние игрока-агента (память + отношения) — «игрок такой же агент, как NPC»
+            # player-agent state (memory + relations) — player is same agent as NPC
             c.execute("CREATE TABLE IF NOT EXISTS pc_state (world_id INT PRIMARY KEY, data TEXT)")
-            # кошельки держателей (монеты — счётчик, не предмет) и флаги мира (маркеры материализации)
+            # purses of holders (coins — counter, not object) and world flags (materialization markers)
             c.execute("CREATE TABLE IF NOT EXISTS purse (world_id INT, holder TEXT, coins INT, "
                       "PRIMARY KEY(world_id, holder))")
             c.execute("CREATE TABLE IF NOT EXISTS flags (world_id INT, key TEXT, val TEXT, "
                       "PRIMARY KEY(world_id, key))")
-            # контракты: делегированные вехи агенд NPC (want-предикат + реальная награда)
+            # contracts: delegated milestones of NPC agendas (want-predicate + real reward)
             c.execute("CREATE TABLE IF NOT EXISTS deeds (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                       "world_id INT, gt INT, actor TEXT, verb TEXT, obj TEXT, place TEXT, "
                       "witnesses TEXT, status TEXT, data TEXT)")
             c.execute("CREATE TABLE IF NOT EXISTS contracts (world_id INT, id TEXT, status TEXT, "
                       "data TEXT, PRIMARY KEY(world_id, id))")
-            # живое состояние placed NPC (память/отношения/нужды) — переживает рестарт
+            # live state of placed NPCs (memory/relations/needs) — survives restart
             c.execute("CREATE TABLE IF NOT EXISTS building_pool (id TEXT PRIMARY KEY, kind TEXT, "
                       "btype TEXT, data TEXT)")
             c.execute("CREATE TABLE IF NOT EXISTS user_worlds (user_id TEXT PRIMARY KEY, "
                       "world_id INTEGER, seed INTEGER)")
-            # пул предметов мира (весовой) + реестр выпавших уникальных (больше не спавнятся)
+            # world item pool (weighted) + registry of spawned uniques (no longer spawn)
             c.execute("CREATE TABLE IF NOT EXISTS item_pool (world_id INT, key TEXT, data TEXT, "
                       "weight INT, PRIMARY KEY(world_id, key))")
             c.execute("CREATE TABLE IF NOT EXISTS unique_spawned (world_id INT, key TEXT, "
@@ -120,7 +120,7 @@ class WorldStore:
         with self._conn() as c:
             c.execute("DELETE FROM buildings WHERE world_id=?", (world_id,))
 
-    # ------------------------------------------------------ пул NPC ------- #
+    # ------------------------------------------------------ NPC pool ------- #
     def flags_prefix(self, world_id: int, prefix: str) -> dict:
         with self._conn() as c:
             rows = c.execute("SELECT key, val FROM flags WHERE world_id=? AND key LIKE ?",
@@ -128,21 +128,21 @@ class WorldStore:
         return {r[0]: r[1] for r in rows}
 
     def user_world(self, user_id: str) -> tuple | None:
-        """(world_id, seed) пользователя или None."""
+        """(world_id, seed) of user or None."""
         with self._conn() as c:
             r = c.execute("SELECT world_id, seed FROM user_worlds WHERE user_id=?",
                           (str(user_id),)).fetchone()
         return (int(r[0]), int(r[1])) if r else None
 
     def user_world_create(self, user_id: str) -> tuple:
-        """Выделить пользователю НОВЫЙ мир. id/seed берём из МОНОТОННОГО счётчика (flags[0]),
-        а не MAX(world_id): после пермасмерти строка юзера удаляется, и MAX бы переиспользовал
-        тот же id/seed → тот же город. Счётчик только растёт — новый мир всегда другой."""
+        """Allocate new world to user. id/seed taken from MONOTONIC counter (flags[0]),
+        not MAX(world_id): after permadeath user row deleted, MAX would reuse
+        same id/seed → same city. Counter only grows — new world always different."""
         with self._conn() as c:
             r = c.execute("SELECT val FROM flags WHERE world_id=0 AND key='world_seq'").fetchone()
             cur = int(r[0]) if r else 0
             mx = c.execute("SELECT COALESCE(MAX(world_id), 0) FROM user_worlds").fetchone()[0]
-            seq = max(cur, int(mx)) + 1                   # переживает миграцию со старой MAX-логики
+            seq = max(cur, int(mx)) + 1                   # survives migration from old MAX-logic
             c.execute("INSERT OR REPLACE INTO flags (world_id, key, val) VALUES (0, 'world_seq', ?)",
                       (str(seq),))
             c.execute("INSERT OR REPLACE INTO user_worlds (user_id, world_id, seed) VALUES (?,?,?)",
@@ -150,20 +150,20 @@ class WorldStore:
         return seq, seq
 
     def destroy_world(self, world_id: int) -> None:
-        """Пермасмерть: стереть ВЕСЬ рантайм мира и освободить юзера (при заходе получит новый).
-        world_id=0 (глобальные флаги/счётчики) не трогаем — стираем только реальные миры (≥1)."""
+        """Permadeath: erase ALL world runtime and free user (on login gets new).
+        world_id=0 (global flags/counters) untouched — erase only real worlds (≥1)."""
         if int(world_id) < 1:
             return
         with self._conn() as c:
             for iid in [row[0] for row in
                         c.execute("SELECT item_id FROM inventory WHERE world_id=?", (world_id,))]:
-                c.execute("DELETE FROM items WHERE id=?", (iid,))   # предмет живёт в одном мире
+                c.execute("DELETE FROM items WHERE id=?", (iid,))   # item lives in one world
             for t in ("buildings", "placements", "inventory", "pc_state", "purse", "flags",
                       "contracts", "npc_state", "item_pool", "unique_spawned"):
                 c.execute(f"DELETE FROM {t} WHERE world_id=?", (world_id,))
             c.execute("DELETE FROM user_worlds WHERE world_id=?", (world_id,))
 
-    # ------------------------------------------------------ пул предметов мира --- #
+    # ------------------------------------------------------ world item pool --- #
     def pool_add_item(self, world_id: int, key: str, data: dict, weight: int) -> None:
         with self._conn() as c:
             c.execute("INSERT OR REPLACE INTO item_pool (world_id, key, data, weight) VALUES (?,?,?,?)",
@@ -206,7 +206,7 @@ class WorldStore:
             q = "SELECT COUNT(*) FROM building_pool" + (" WHERE kind=?" if kind else "")
             return c.execute(q, ((kind,) if kind else ())).fetchone()[0]
 
-    # ── ДЕЛА (deeds): append-only журнал мира — субстрат сплетен/стражи/хроники/обязательств ──
+    # ── DEEDS (deeds): append-only world log — substrate of gossip/witness/chronicle/contracts ──
     def deed_add(self, world_id: int, gt: int, actor: str, verb: str, obj: str = "",
                  place: str = "", witnesses: list | None = None, status: str = "",
                  data: dict | None = None) -> int:
@@ -271,7 +271,7 @@ class WorldStore:
             return [_person(r) for r in c.execute(q, args)]
 
     def free_people(self, world_id: int, role: str | None = None, limit: int = 32) -> list:
-        """Люди из банка, ещё НЕ привязанные к этому миру (для наполнения толпы). Опц. по роли."""
+        """People from bank, not yet bound to this world (for crowd filling). Opt. by role."""
         q = ("SELECT p.* FROM people p WHERE p.id NOT IN (SELECT npc_id FROM placements WHERE world_id=?)"
              + (" AND p.role=?" if role else "") + " LIMIT ?")
         args = ((world_id, role, limit) if role else (world_id, limit))
@@ -288,11 +288,11 @@ class WorldStore:
             return [dict(r) for r in c.execute("SELECT * FROM placements WHERE world_id=?", (world_id,))]
 
     def clear_placements(self, world_id: int) -> None:
-        """Сброс привязок мира (напр., граф города изменился и старые узлы протухли)."""
+        """Reset world bindings (e.g., city graph changed and old nodes stale)."""
         with self._conn() as c:
             c.execute("DELETE FROM placements WHERE world_id=?", (world_id,))
 
-    # ---------------------------------------------------- предметы -------- #
+    # ---------------------------------------------------- items -------- #
     def save_item(self, item: dict) -> None:
         with self._conn() as c:
             c.execute("INSERT OR REPLACE INTO items (id,data) VALUES (?,?)",
@@ -320,13 +320,13 @@ class WorldStore:
         return [{"item_id": r["item_id"], "known": json.loads(r["known"])} for r in rows]
 
     def inv_move(self, world_id: int, item_id: str, holder: str) -> None:
-        """Перенос предмета к другому держателю (лут/кража/покупка/дар — один механизм)."""
+        """Move item to another holder (loot/theft/purchase/gift — single mechanism)."""
         with self._conn() as c:
             c.execute("UPDATE inventory SET holder=? WHERE world_id=? AND item_id=?",
                       (holder, world_id, item_id))
 
     def inv_drop(self, world_id: int, item_id: str) -> None:
-        """Изъять предмет из мира совсем (конфискация/расход/уничтожение)."""
+        """Remove item from world entirely (confiscation/expenditure/destruction)."""
         with self._conn() as c:
             c.execute("DELETE FROM inventory WHERE world_id=? AND item_id=?", (world_id, item_id))
             c.execute("DELETE FROM items WHERE id=?", (item_id,))
@@ -357,7 +357,7 @@ class WorldStore:
         with self._conn() as c:
             c.execute("INSERT OR REPLACE INTO flags (world_id,key,val) VALUES (?,?,?)", (world_id, key, val))
 
-    # ---------------------------------------------------- контракты ------- #
+    # ---------------------------------------------------- contracts ------- #
     def save_contract(self, world_id: int, cid: str, status: str, data: dict) -> None:
         with self._conn() as c:
             c.execute("INSERT OR REPLACE INTO contracts (world_id,id,status,data) VALUES (?,?,?,?)",
@@ -380,7 +380,7 @@ class WorldStore:
                           (world_id, npc_id)).fetchone()
         return json.loads(r["data"]) if r else None
 
-    # ---------------------------------------------------- игрок-агент ----- #
+    # ---------------------------------------------------- player-agent ----- #
     def save_pc(self, world_id: int, data: dict) -> None:
         with self._conn() as c:
             c.execute("INSERT OR REPLACE INTO pc_state (world_id,data) VALUES (?,?)",

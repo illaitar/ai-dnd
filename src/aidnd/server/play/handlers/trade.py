@@ -1,4 +1,4 @@
-"""Домен ТОРГ (/offer /sell /wares /buy /askkey) — распил world.py. Цена глазом NPC, торг, аренда ключа.
+"""Trade domain (/offer /sell /wares /buy /askkey) — split from world.py. NPC's price appraisal, haggling, key rental.
 
 Key functions
 -------------
@@ -46,8 +46,7 @@ def _merchant(people, npc):
 
 @router.post("/api/play/askkey")
 async def askkey(request: Request):
-    """Попросить у NPC его ключ. Гейт механикой: симпатия+доверие против жадности/осторожности —
-    хозяйка кассы чужаку ключ не отдаст (честно; путь добычи — кража/торг, срез 2)."""
+    """Request an NPC's key. Gated by mechanics: affinity + trust vs. greed/caution — a cashier won't give a stranger their key (honest; path to obtain — theft/trade, phase 2)."""
     _city, people, _crof, _cr2b, _loc = _play()
     b = await request.json()
     npc = b.get("npc")
@@ -57,7 +56,7 @@ async def askkey(request: Request):
     if _spurns(p):
         return {"error": f"{p.name} не желает иметь с тобой дела"}
     _materialize_npc(npc, "visible")
-    want = str(b.get("key") or "").strip()  # какой именно ключ просим (имя с чипа)
+    want = str(b.get("key") or "").strip()  # which key exactly we're requesting (name from the chip)
     keys = [
         (_store().get_item(r["item_id"]), r["item_id"]) for r in _store().inventory(_wid(), npc)
     ]
@@ -96,7 +95,7 @@ async def askkey(request: Request):
 
 @router.post("/api/play/offer")
 async def offer(request: Request):
-    """Предложить предмет торговцу: он оценивает СВОИМ глазом (асимметрия знания) и называет цену."""
+    """Offer an item to the merchant: they appraise it with THEIR perspective (asymmetric knowledge) and name the price."""
     _city, people, _crof, _cr2b, _loc = _play()
     b = await request.json()
     npc, iid = b.get("npc"), b.get("item")
@@ -168,7 +167,7 @@ async def sell(request: Request):
 
 @router.get("/api/play/wares")
 def wares(npc: str):
-    """Что торговец продаст (его материализованный инвентарь, кроме ключей) + цены ЕГО глазом."""
+    """What the merchant will sell (their materialized inventory, excluding keys) + prices from their perspective."""
     _city, people, _crof, _cr2b, _loc = _play()
     p = _merchant(people, npc)
     if not p:
@@ -183,7 +182,7 @@ def wares(npc: str):
     for r in _store().inventory(_wid(), npc):
         it = _store().get_item(r["item_id"])
         if not it or it["kind"] in ("key", "valuable"):
-            continue  # ключи и ЛИЧНОЕ ценное не продаются (то — красть)
+            continue  # keys and PERSONAL valuables are not for sale (those — steal)
         seen = _npc_sees(it, _npc_cap(p), npc)
         price = max(
             1,

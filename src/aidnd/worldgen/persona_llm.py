@@ -1,10 +1,10 @@
-"""LLM-насыщение NPC — зеркало enrich_llm.py, но про людей. Один вызов на NPC → персона-фактшит:
-структурная ВНЕШНОСТЬ (визуальные поля → промпт Flux), манера/голос, био, секрет, связи, зацепки И
-полный ИНВЕНТАРЬ/ЭКИПИРОВКА (пока флейвор-теги). Не проза — теги/энумы/короткие фразы; речь соберёт
-нарратор в рантайме. Согласовано с МЕХАНИКОЙ (11 черт mind + обаяние + видимое богатство) через
-подсказки в промпте, но НИКОГДА не переписывает числа — персона это только флейвор поверх.
+"""LLM enrichment of NPC — mirror of enrich_llm.py, but for humans. One call per NPC → persona-factsheet:
+structural APPEARANCE (visual fields → Flux prompt), manner/voice, bio, secret, connections, hooks AND
+full INVENTORY/GEAR (for now flavor-tags). Not prose — tags/enums/short phrases; narration assembled
+at runtime by narrator. Aligned with MECHANICS (11 mind traits + charisma + visible wealth) via
+prompt hints, but NEVER rewrites numbers — persona is just flavor on top.
 
-LLMPersona — единственный рантайм-путь (роль character_writer); StubPersona — ТОЛЬКО тесты.
+LLMPersona — sole runtime path (role character_writer); StubPersona — tests only.
 
 Key functions
 -------------
@@ -37,10 +37,10 @@ class PersonaCtx:
     id: str
     name: str
     role: str
-    sex: str = "m"                     # задаётся механикой вместе с именем — персона/портрет ОБЯЗАНЫ соблюдать
+    sex: str = "m"                     # set by mechanics along with name — persona/portrait MUST comply
     traits: dict = field(default_factory=dict)
     charisma: float = 0.3
-    appearance: float = 0.3            # видимое богатство [0..1]
+    appearance: float = 0.3            # visible wealth [0..1]
     region: str = "фронтир тёмного фэнтези (D&D)"
 
 
@@ -106,7 +106,7 @@ def _item(v):
 
 
 def trait_hints(traits: dict, charisma: float, appearance: float) -> str:
-    """Черты + обаяние + богатство → русские подсказки-прилагательные для промпта (якорь согласованности)."""
+    """Traits + charisma + wealth → Russian adjective hints for prompt (consistency anchor)."""
     g, h = traits.get, []
     def hi(k, t=0.65): return g(k, 0.5) >= t
     def lo(k, t=0.35): return g(k, 0.5) <= t
@@ -142,9 +142,9 @@ def normalize(d: dict, ctx: PersonaCtx) -> dict:
         coins = max(0, int(carry.get("coins", 0)))
     except (TypeError, ValueError):
         coins = 0
-    portrait = [w for w in _list(d.get("portrait")) if re.search("[A-Za-z]", w)]  # только EN-теги
+    portrait = [w for w in _list(d.get("portrait")) if re.search("[A-Za-z]", w)]  # EN tags only
     return {
-        "sex": ctx.sex if ctx.sex in SEX else _enum(d.get("sex"), SEX, "m"),  # пол диктует механика
+        "sex": ctx.sex if ctx.sex in SEX else _enum(d.get("sex"), SEX, "m"),  # sex is set by mechanics
         "age": _enum(d.get("age"), AGE, "adult"),
         "build": _enum(d.get("build"), BUILD, "average"), "race": str(d.get("race") or "человек").strip(),
         "look": {"face": str(look.get("face", "") or "").strip(), "hair": str(look.get("hair", "") or "").strip(),
@@ -173,7 +173,7 @@ class PersonaEnricher:
 
 
 class StubPersona(PersonaEnricher):
-    """ТОЛЬКО для тестов (рантайм никогда не строит) — без выдумки, ровно по механике."""
+    """Tests only (runtime never builds) — deterministic, strictly by mechanics."""
 
     def describe(self, ctx: PersonaCtx) -> dict:
         rich = ctx.appearance >= 0.55
@@ -196,7 +196,7 @@ class StubPersona(PersonaEnricher):
 
 
 class LLMPersona(PersonaEnricher):
-    """Реальный путь: роль character_writer, JSON-фактшит (без прозы)."""
+    """Real runtime path: character_writer role, JSON factsheet (no prose)."""
 
     def __init__(self, manager):
         self.manager = manager

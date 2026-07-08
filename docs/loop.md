@@ -1,110 +1,110 @@
-# Игровой цикл
+# Game Loop
 
-Пошаговый мир: **действие игрока = ход мира**. Без модели цикл не работает
-([принцип 1](README.md)): `LLMUnavailable` → 503, `LLMBadOutput` → 502, игрок видит честную
-строку и повторяет действие.
+Turn-based world: **player action = world turn**. Without model, loop breaks
+([principle 1](README.md)): `LLMUnavailable` → 503, `LLMBadOutput` → 502, player sees honest
+error and retries action.
 
-## Дерево тика
+## Tick Tree
 
 ```
-session_step(input)                                         (целевое: engine/loop.py)
-│  durative (поход на N узлов / отдых до утра) → ЦИКЛ game_tick до прибытия|прерывания
-│  мгновенное (реплика / каст / сделка)        → один game_tick
+session_step(input)                                         (target: engine/loop.py)
+│  durative (journey N nodes / rest until morning) → LOOP game_tick until arrival|interrupt
+│  instant (dialogue / cast / deal)               → one game_tick
 │
 game_tick(action) → response
 ├── player_logic
 │   ├── input
-│   │   ├── UI-кнопки (ЕДИНСТВЕННЫЕ): инвентарь · map_journey(node, N) · войти/выйти ·
-│   │   │   заговорить (клик по портрету) · кнопки боя/каста
-│   │   └── freeform-текст → LLM-интент → роутинг в хендлер
-│   └── HANDLERS (по доменам, см. каталог ниже)
-├── npc_logic          кольца LOD:
-│   │                  A — сцена игрока: полный гибрид, LLM-решения (кэп 8 душ = LOD)
-│   │                  B — город: рутина из нужд, детерминированно (society)
-│   │                  C — актёры (агенды/зачистки): редкий LLM
-│   │                  D — толпа: чистая механика
-├── world_simulation   эконом (караван/restock) · монстры · гильдия · decay  [det; фаза/сутки]
-└── compose_response   сцена · лента (feed) + обращения (address) · нарратор · прерывания
+│   │   ├── UI buttons (ONLY): inventory · map_journey(node, N) · enter/exit ·
+│   │   │   talk (portrait click) · combat/cast buttons
+│   │   └── freeform-text → LLM-intent → routing to handler
+│   └── HANDLERS (by domains, see catalog below)
+├── npc_logic          LOD rings:
+│   │                  A — player scene: full hybrid, LLM-decisions (cap 8 souls = LOD)
+│   │                  B — city: routine from needs, deterministic (society)
+│   │                  C — actors (agendas/purges): rare LLM
+│   │                  D — crowd: pure mechanics
+├── world_simulation   economy (caravan/restock) · monsters · guild · decay  [det; phase/day]
+└── compose_response   scene · feed + addresses · narrator · interrupts
 ```
 
-## Поток одного действия (как в коде)
+## Single Action Flow (as in code)
 
-`/api/play/act` → `_play()` (мир в сессию) → `_scene_dict()` → `_intent(text)` [LLM] →
-`_attempt(intent)` — единый резолвер (примитив × манера × гейты: броски, перенос предметов,
-память, последствия) → `_gt_add(PB[...])` → `_world_tick()`:
-`_apply_routine()` (кольцо B) + `_live_tick()` (кольцо A: `decide_hybrid` параллельно на
-присутствующих, `apply_actions` исполняет — кража РЕАЛЬНО двигает предметы, речь пишется в
-память/hist, сплетни разносятся) → ответ `{narr, feed, address, gt, coins, hp, mana}`.
+`/api/play/act` → `_play()` (world into session) → `_scene_dict()` → `_intent(text)` [LLM] →
+`_attempt(intent)` — single resolver (primitive × manner × gates: rolls, item transfer,
+memory, consequences) → `_gt_add(PB[...])` → `_world_tick()`:
+`_apply_routine()` (ring B) + `_live_tick()` (ring A: `decide_hybrid` in parallel on
+present, `apply_actions` executes — theft ACTUALLY moves items, speech written to
+memory/hist, gossip spreads) → response `{narr, feed, address, gt, coins, hp, mana}`.
 
-Модули: `server/play/handlers/freeform.py` · `server/play/engine/world.py` (ядро-сцена) ·
-`server/play/engine/worldsim.py` (адаптер society) · `server/play/engine/core.py`
-(сессия `_S`, таблица `PB`, время, персист).
+Modules: `server/play/handlers/freeform.py` · `server/play/engine/world.py` (scene-core) ·
+`server/play/engine/worldsim.py` (society adapter) · `server/play/engine/core.py`
+(session `_S`, table `PB`, time, persist).
 
-## Каталог хендлеров
+## Handlers Catalog
 
-| хендлер | входы | LLM-роли | эффекты | модуль (handlers/) |
+| handler | inputs | LLM roles | effects | module (handlers/) |
 |---|---|---|---|---|
-| travel | map/move/enter/exit/room/sign_ack/live | — | локация/время; прерывания пути | travel.py |
-| dialogue | talk/say (тон двигает отношения) | voice | доверие/симпатия/страх/память | dialogue.py |
-| magic | cast/glyphs/learn/teachers/grimoire | spell_scribe, wild_magic | мана/усталость/урон/гримуар/табу | magic.py |
-| combat-UI | атака/защита/бегство/манёвр | — | hp/статусы/смерть/лут | mechanics/combat.py |
-| trade | offer/sell/wares/buy/askkey | voice | монеты/инвентарь | trade.py |
-| crime | steal | — | инвентарь/розыск/свидетели | crime.py |
-| inventory | loot/inspect/commission/repair/use/give | item_smith | инвентарь/знание/статы | inventory.py |
-| observe | look | narrator | туман/hidden/зацепки | observe.py |
-| board | board/guild_redeem/board_take/delve/surrender | — | контракты/касса/ранг | board.py |
-| freeform | act (всё вне каталога) | narrator (интент+DM) | по вердикту | freeform.py |
+| travel | map/move/enter/exit/room/sign_ack/live | — | location/time; path interrupts | travel.py |
+| dialogue | talk/say (tone shifts relations) | voice | trust/affection/fear/memory | dialogue.py |
+| magic | cast/glyphs/learn/teachers/grimoire | spell_scribe, wild_magic | mana/fatigue/damage/grimoire/taboo | magic.py |
+| combat-UI | attack/defend/flee/maneuver | — | hp/statuses/death/loot | mechanics/combat.py |
+| trade | offer/sell/wares/buy/askkey | voice | coins/inventory | trade.py |
+| crime | steal | — | inventory/investigation/witnesses | crime.py |
+| inventory | loot/inspect/commission/repair/use/give | item_smith | inventory/knowledge/stats | inventory.py |
+| observe | look | narrator | fog/hidden/clues | observe.py |
+| board | board/guild_redeem/board_take/delve/surrender | — | contracts/coffers/rank | board.py |
+| freeform | act (everything outside catalog) | narrator (intent+DM) | by verdict | freeform.py |
 
-**Сервисы** (хендлеры дёргают, не дублируют): интент · voice · world_lookup · нарратор.
-Сейчас размазаны по `world.py`/`freeform.py` — целевое: `engine/resolve.py`
+**Services** (handlers call, don't duplicate): intent · voice · world_lookup · narrator.
+Currently spread across `world.py`/`freeform.py` — target: `engine/resolve.py`
 ([structure.md](structure.md)).
 
-## Прерывания пути
+## Path Interrupts
 
-Поход по графу тикает мир на каждом шаге; прерывают: встреча (бой) / стража / вывеска
-(кнопка «занести на карту») / сюжетный удар → ПАУЗА с выбором. Амбиент — в ленту без паузы.
+Traveling the graph ticks the world at each step; interrupted by: encounter (combat) / guard / sign
+(button "map it") / story beat → PAUSE with choice. Ambient events → feed without pause.
 
-## Принятые решения
+## Design Decisions
 
-- Единая проверка: где нужен бросок — `d20 + мод-оси vs DC`. Магия — исключение (без броска,
-  срывы — противоречия рисунка, [magic.md](magic.md)).
-- Тик продвигается ТОЛЬКО тратой игрового времени игроком; кратности нет; бой — раунд 5 сек,
-  мир в масштабе минут стоит.
-- Freeform-последствия: LLM предлагает дельты из ОГРАНИЧЕННОГО меню
-  (hp±/предмет/отношение/флаг/перемещение/раскрытие), код валидирует.
+- Single check: where a roll is needed — `d20 + axis-mod vs DC`. Magic — exception (no roll,
+  failures — contradictions in the design, [magic.md](magic.md)).
+- Tick advances ONLY through player spending game time; no quantization; combat — 5 sec round,
+  world at minute scale is still.
+- Freeform consequences: LLM proposes deltas from LIMITED menu
+  (hp±/item/relation/flag/move/reveal), code validates.
 
-## Дальше
+## Next
 
-- ✔ (2026-07-06) **Единый `resolve(text)`** — `engine/resolve.py`: реестр PRIMITIVES
-  (глагол+цели+«когда») — единственная истина, промпт арбитра ГЕНЕРИТСЯ из реестра
-  (добавить примитив = одна запись; рукописный `_INTENT_SYS` умер); контекст-сборщик
-  отдаёт максимум фактов сцены (люди/ёмкости/сумка/зоны/предметы рядом/места/время);
-  вердикт do|narrate (не-действие → DM-нарратор со снимком). Исполнители остались в
-  `handlers/freeform._attempt` (примитив×манера×гейты). **ЦЕПОЧКИ v1** (2026-07-06): одна
-  фраза → ПЛАН из 1-3 звеньев (кап PB.plan_cap) — игрок как агент ходит теми же
-  инструментами, что NPC; исполнитель гонит звенья по порядку, провал/смена контура
-  (диалог/бой/лут/переход) РВЁТ цепь без отката сделанного («цепь рвётся там, где рвётся»);
-  в цепи звено без цели не уходит нарратору (не дарим несуществующее). Арбитр видит loose-
-  предметы ЧУЖИХ зон («подойди и возьми» планируется честно). ✔ DEAL-ГЕЙТ (2026-07-06,
-  mechanics/deals.py): звено say со ставкой → want×stake×DC-из-разума×бросок → НАСТОЯЩЕЕ
-  обязательство (контракт giver=pc + эскроу золота + агенда «hired» исполнителю + слово-deed
-  со сроком); отказы — три честных ветки: «своих не трону» (родня/тёплая связь с целью),
-  донос честного (_witness_crime, розыск crime_solicit), торг-отказ (память, deed solicit со
-  свидетелями ЗОНЫ — шёпот stealthily глушит). Утро: _deal_jobs исполняет кровь авторезолвом
-  (тот же движок, что зачистки) — flag dead, deed murder, выплата эскроу / возврат задатка;
-  прочие виды: просрочка = возврат. DC дышит нравом: стражница 22, горожанка 15. ✔ ПЕРЦЕПТИВНЫЕ ЗВЕНЬЯ
-  (2026-07-06): примитив listen (одна запись реестра!) — бросок Восприятия против
-  base+шум×k зоны-цели → ярус слуха куплен на listen_ticks тиков (чужие реплики целиком,
-  «(подслушано — …)», память weight 0.3); цель без имени — ближайший чужой разговор;
-  DM-снимок отдаёт нарратору ТОЛЬКО слышимое игроку (свой стол/участие/прослушка) — дыра
-  «нарратор дарит чужие разговоры» закрыта. ✔ ПРЕРЫВАНИЕ ЦЕПИ (2026-07-06):
-  исполнитель `_run_plan` (freeform.py) рвёт план на СВЕЖЕМ салиентном событии сцены —
-  «зал взрывается, не до задуманного» + stopped/remaining (паттерн городского маршрута);
-  громкий донос на грязное предложение (deal) сам ставит salient — зал вздрагивает в
-  следующий тик И рвёт остаток плана игрока. ДАЛЬШЕ по цепочкам: reach-автовставка move.
-- Выделить `engine/loop.py` (game_tick + durative-циклы); consequence-слой в
-  `engine/resolve.py` — карта в [structure.md](structure.md).
-- Deed-журнал как субстрат ленты/сплетен/стражи ([entities.md](entities.md)).
+- ✔ (2026-07-06) **Unified `resolve(text)`** — `engine/resolve.py`: PRIMITIVES registry
+  (verb+targets+«when») — single source of truth, arbiter prompt GENERATED from registry
+  (add primitive = one record; handwritten `_INTENT_SYS` dead); context collector
+  yields max scene facts (people/containers/bag/zones/nearby items/places/time);
+  verdict do|narrate (non-action → DM-narrator with snapshot). Executors stay in
+  `handlers/freeform._attempt` (primitive×manner×gates). **CHAINS v1** (2026-07-06): one
+  phrase → PLAN of 1-3 links (cap PB.plan_cap) — player as agent uses same
+  tools as NPC; executor runs links in order, failure/boundary change
+  (dialogue/combat/loot/move) BREAKS chain without rollback («chain breaks where it breaks»);
+  in chain a link without target doesn't go to narrator (we don't gift non-existent). Arbiter sees loose
+  items in OTHERS' zones («walk and take» is planned honestly). ✔ DEAL-GATE (2026-07-06,
+  mechanics/deals.py): say link with stake → want×stake×DC-from-mind×roll → REAL
+  obligation (contract giver=pc + gold escrow + agenda «hired» to executor + word-deed
+  with deadline); refusals — three honest branches: «won't touch my own» (kin/warm tie to target),
+  honest witness (_witness_crime, crime_solicit investigation), trade refusal (memory, deed solicit with
+  ZONE witnesses — stealthy whisper is muffled). Morning: _deal_jobs executes blood by auto-resolver
+  (same engine as purges) — flag dead, deed murder, escrow payout / deposit return;
+  other types: overdue = return. DC breathes character: guard 22, townswoman 15. ✔ PERCEPTIVE LINKS
+  (2026-07-06): listen primitive (one registry record!) — Perception roll vs
+  base+noise×k target zone → hearing tier bought for listen_ticks ticks (others' full dialogue,
+  «(overheard — …)», memory weight 0.3); unnamed target — nearest foreign dialogue;
+  DM-snapshot gives narrator ONLY what player hears (own table/participation/eavesdrop) — hole
+  «narrator gifts alien dialogue» closed. ✔ CHAIN BREAK (2026-07-06):
+  executor `_run_plan` (freeform.py) breaks plan on FRESH salient scene event —
+  «hall explodes, no time for planning» + stopped/remaining (city route pattern);
+  loud accusation of dirty deal breaks salient itself — hall jerks at
+  next tick AND breaks player's remaining plan. NEXT for chains: reach-auto-insert move.
+- Extract `engine/loop.py` (game_tick + durative-loops); consequence-layer in
+  `engine/resolve.py` — map in [structure.md](structure.md).
+- Deed-log as substrate of feed/gossip/guard ([entities.md](entities.md)).
 
-Связано: [mind.md](mind.md) (кольцо A изнутри) · [entities.md](entities.md) ·
-[service.md](service.md) (лимиты на LLM-вызовы тика)
+Related: [mind.md](mind.md) (ring A from inside) · [entities.md](entities.md) ·
+[service.md](service.md) (LLM-call limits per tick)

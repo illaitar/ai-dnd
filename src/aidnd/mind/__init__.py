@@ -1,5 +1,5 @@
-"""Ядро разума NPC (новое, отдельно от старого aidnd/npc): состояние, память+SOTA-ретрива,
-инструменты (READ/WRITE), ход мира. Граф города и LLM — внешние зависимости (citygraph, inference).
+"""NPC mind core (new, separate from old aidnd/npc): state, memory+SOTA-retrieval,
+tools (READ/WRITE), world loop. City graph and LLM are external dependencies (citygraph, inference).
 
 Key functions
 -------------
@@ -44,12 +44,12 @@ __all__ = ["NpcConfig", "NpcState", "Plan", "Scene", "MemoryStore", "Memory", "R
            "LLMReranker", "TOOLS", "run_tool", "advance", "appraise",
            "fsm_step", "urgency", "hold", "dominant_need", "MODES",
            "TRAITS", "ABILITIES", "NEEDS", "EMOTIONS",
-           # эмерджентное ядро решений
+           # emergent decision core
            "World", "Body", "Item", "Goal", "propose_goals", "standing_needs",
            "Action", "enumerate_actions", "score", "decide", "utility", "BAL",
            "Percept", "perceive", "apply", "tick",
-           # долгосрочные цели (агенды)
+           # long-term goals (agendas)
            "Agenda", "Milestone", "advance_agendas", "StubPlanner",
            "wealth_agenda", "courtship_agenda", "revenge_agenda", "predation_agenda",
-           # граф-мозг: урджи + шина модуляторов + трассировка
+           # graph-brain: urges + modulator bus + tracing
            "urges", "modulators", "think", "modulate_ranked"]

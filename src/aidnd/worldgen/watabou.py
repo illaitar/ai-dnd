@@ -1,21 +1,21 @@
-"""Порт геометрии Watabou One Page Dungeon — 1-в-1 по декомпиляции бандла
-(com.watabou.dungeon.*: Room/Planner/grow/createLoop/cleanUp/shapeRooms/Flood) и цитате
-автора: «аккреция дерева комнат с частичной зеркальной симметрией, потом циклы».
+"""Port of Watabou One Page Dungeon geometry — 1-to-1 from decompiled bundle
+(com.watabou.dungeon.*: Room/Planner/grow/createLoop/cleanUp/shapeRooms/Flood) and author's
+quote: "tree accretion of rooms with partial mirror symmetry, then loops".
 
-Ключевые механизмы оригинала (docs/dungeons.md §2):
-- комната = прямоугольник с ОСЬЮ и входом на оси; ширины НЕЧЁТНЫЕ; коридор = та же
-  комната (узкий класс размера);
-- очередь спавна {seed, parent, door, axis, size, mirror}; зеркальные близнецы получают
-  ОДИН seed → поддеревья разворачиваются идентично-зеркально (частичная симметрия);
-- grow(): группы близнецов синхронно распухают вдоль оси до соприкосновения с соседями —
-  секрет плотности и общих стен;
-- createLoop(): пары несвязанных комнат с общей стеной ≥3 клеток и графовым расстоянием
-  >5 получают дверь в середину стены (машинный jaquaysing);
-- cleanUp(): тупиковые коридоры с одной дверью умирают, хвосты подрезаются до двери;
-- shapeRooms(): симметричные группы становятся ротондами; Flood(): вода = шум + порог,
-  только внутри комнат; колоннады в длинных залах.
-Выход — нейтральный формат (rooms/edges/water/columns), драматургию (цель/ключи/секретные
-крылья/backdoor) поверх наводит Planner в dungeongen.
+Key mechanisms of the original (docs/dungeons.md §2):
+- room = rectangle with AXIS and door on axis; widths are ODD; corridor = same
+  room (narrow size class);
+- spawn queue {seed, parent, door, axis, size, mirror}; mirror twins get
+  ONE seed → subtrees expand identically-mirrored (partial symmetry);
+- grow(): twin groups sync-grow along axis until touching neighbors —
+  secret to density and shared walls;
+- createLoop(): pairs of unlinked rooms with shared wall ≥3 cells and graph distance
+  >5 get door in wall center (machine jaquaysing);
+- cleanUp(): dead-end corridors with one door die, tails trim back to door;
+- shapeRooms(): symmetric groups become rotundas; Flood(): water = noise + threshold,
+  only inside rooms; colonnades in long halls.
+Result — neutral format (rooms/edges/water/columns), drama (goal/keys/secret
+wings/backdoor) is layered on top by Planner in dungeongen.
 
 Key functions
 -------------
@@ -30,11 +30,11 @@ from __future__ import annotations
 
 import random
 
-# классы размеров из getRoomSize оригинала: (варианты ширины, (мин, макс) глубины)
-SIZES = {0: ((5, 7), (4, 6)),        # комната
-         1: ((5, 7, 9), (7, 9)),     # зал
-         2: ((3,), (4, 5)),          # короткий коридор
-         3: ((3,), (3, 3))}          # клетка-сочленение
+# size classes from getRoomSize of original: (width options, (min, max) depth)
+SIZES = {0: ((5, 7), (4, 6)),        # room
+         1: ((5, 7, 9), (7, 9)),     # hall
+         2: ((3,), (4, 5)),          # short corridor
+         3: ((3,), (3, 3))}          # junction cell
 GROW_CAP = 10
 
 
@@ -49,12 +49,12 @@ class Room:
 
     def __init__(self, rid, door, axis, w, d, size, group, mirror, parent):
         self.id = rid
-        self.door = door                              # клетка входа (внутри комнаты, на оси)
+        self.door = door                              # door cell (inside room, on axis)
         self.axis = axis
         self.w = w
         self.d = d
         self.size = size
-        self.group = group                            # группа зеркальных близнецов
+        self.group = group                            # mirror twin group
         self.mirror = mirror
         self.parent = parent
         self.round = False
@@ -82,20 +82,20 @@ class Layout:
                  rotunda_p: float = 0.45, water_p: float = 0.45):
         self.rng = random.Random(f"wtb|{seed}")
         self.rooms: list[Room] = []
-        self.occ: dict = {}                           # клетка → id комнаты
-        self.blocked: set = set()                     # зона у дверей — не застраивать
+        self.occ: dict = {}                           # cell → room id
+        self.blocked: set = set()                     # zone near doors — don't build
         self.doors: list = []                         # {a, b, cells:(ca, cb), kind}
         self.target = rooms_target
-        self.order_p = order_p                        # доля симметричных спавнов
+        self.order_p = order_p                        # fraction of symmetric spawns
         self.corridor_p = corridor_p
-        self.string = string                          # цепочка без ветвления
+        self.string = string                          # chain without branching
         self.hall_p = hall_p
         self.rotunda_p = rotunda_p
         self.water_p = water_p
         self.groups: dict = {}                        # group → [room ids]
 
-    # ── аккреция: очередь близнецов + ДОБОР случайной комнатой (как у автора:
-    # «until end condition we pick one of the rooms and add children») ─────────
+    # ── accretion: twin queue + FILL with random room (as author:
+    # "until end condition we pick one of the rooms and add children") ─────────
     def build(self, origin=(0, 0)) -> bool:
         q = [{"seed": self.rng.random(), "parent": None, "door": tuple(origin),
               "axis": (0, 1), "size": 0, "mirror": False, "group": 0}]
@@ -103,7 +103,7 @@ class Layout:
         guard = 0
         while len(self.rooms) < self.target and guard < self.target * 40:
             guard += 1
-            if not q:                                 # дерево заглохло — добираем К ЦЕНТРУ
+            if not q:                                 # tree starved — fill TOWARD CENTER
                 cx = sum(c[0] for c in self.occ) / max(1, len(self.occ))
                 cy = sum(c[1] for c in self.occ) / max(1, len(self.occ))
                 pool = sorted(self.rooms, key=lambda rr: abs(rr.door[0] - cx)
@@ -120,8 +120,8 @@ class Layout:
             r = self._place(task)
             if r is None:
                 continue
-            rng = random.Random(task["seed"])         # ДЕТИ из seed задачи: близнецы
-            rng.random()                              # (сдвиг после размерных бросков)
+            rng = random.Random(task["seed"])         # CHILDREN from task seed: twins
+            rng.random()                              # (shift after size rolls)
             kids = self._plan_children(rng, r, self.target - len(self.rooms))
             for k in kids:
                 if k.get("group") is None or "group" not in k:
@@ -133,9 +133,9 @@ class Layout:
         self._grow()
         self._create_loops()
         self._clean_up()
-        self._create_loops(min_run=2, min_dist=5)     # добрать петли на выжившей укладке
+        self._create_loops(min_run=2, min_dist=5)     # fill loops on surviving layout
         self._shape_rooms()
-        self.backdoor = None                          # addBackdoor: запасной вход с края
+        self.backdoor = None                          # addBackdoor: backup entrance from edge
         if self.rng.random() < 0.6 and len(self.rooms) > 6:
             per = [r for r in self.rooms if r.size < 2 and r.id != self.rooms[0].id]
             if per:
@@ -152,7 +152,7 @@ class Layout:
                  t["group"], t["mirror"], t["parent"])
         cells = r.cells()
         if any(c in self.occ or c in self.blocked for c in cells):
-            for dd in range(d - 1, max(dlo - 2, 1), -1):  # ужаться, но встать
+            for dd in range(d - 1, max(dlo - 2, 1), -1):  # shrink but place
                 cells = r.cells(dd)
                 if not any(c in self.occ or c in self.blocked for c in cells):
                     r.d = dd
@@ -163,7 +163,7 @@ class Layout:
         self.groups.setdefault(r.group, []).append(r.id)
         for c in r.cells():
             self.occ[c] = r.id
-        if t["parent"] is not None:                   # дверь к родителю + блок вокруг неё
+        if t["parent"] is not None:                   # door to parent + block around it
             back = (t["door"][0] - t["axis"][0], t["door"][1] - t["axis"][1])
             self.doors.append({"a": t["parent"], "b": r.id,
                                "cells": (back, t["door"]), "kind": "door"})
@@ -173,8 +173,8 @@ class Layout:
         return r
 
     def _plan_children(self, rng, r: Room, budget: int, force: bool = False) -> list:
-        """Спавн-паттерны оригинала: симметричная пара по бокам / ребёнок по оси в дальнем
-        торце / всё сразу; изредка асимметрия со свежими seed; string — один ребёнок."""
+        """Spawn patterns of original: symmetric pair on sides / child along axis at far end /
+        all at once; occasionally asymmetry with fresh seeds; string mode — one child."""
         if budget <= 0:
             return []
         px, py = _perp(r.axis, r.mirror)
@@ -193,7 +193,7 @@ class Layout:
                     "size": size, "mirror": r.mirror}
 
         def child_size():
-            if r.size >= 2:                           # из коридора чаще комната/зал
+            if r.size >= 2:                           # from corridor, often room/hall
                 return 0 if rng.random() > 0.25 else 1
             roll = rng.random()
             if roll < self.corridor_p:
@@ -203,13 +203,13 @@ class Layout:
         if self.string:
             return [fwd_task(rng.random(), child_size())]
         out = []
-        pattern = rng.random() * (0.85 if force else 1.0)  # добор не имеет права на «лист»
+        pattern = rng.random() * (0.85 if force else 1.0)  # fill has no "leaf" right
         symmetric = rng.random() < self.order_p
         t_row = rng.randint(1, max(1, r.d - 2))
-        if pattern < 0.45:                            # пара по бокам
+        if pattern < 0.45:                            # pair on sides
             size = child_size()
             if symmetric:
-                seed = rng.random()                   # ОДИН seed на близнецов
+                seed = rng.random()                   # ONE seed for twins
                 out = [side_task(+1, seed, r.mirror, size, t_row),
                        side_task(-1, seed, not r.mirror, size, t_row)]
                 out[0]["group"] = out[1]["group"] = None
@@ -217,22 +217,22 @@ class Layout:
                 out = [side_task(s, rng.random(), r.mirror if s > 0 else not r.mirror,
                                  child_size(), rng.randint(1, max(1, r.d - 2)))
                        for s in (+1, -1) if rng.random() < 0.75]
-        elif pattern < 0.7:                           # вперёд по оси
+        elif pattern < 0.7:                           # forward along axis
             out = [fwd_task(rng.random(), child_size())]
-        elif pattern < 0.85:                          # тройня: пара + вперёд
+        elif pattern < 0.85:                          # triplets: pair + forward
             size = child_size()
             seed = rng.random()
             out = [side_task(+1, seed, r.mirror, size, t_row),
                    side_task(-1, seed, not r.mirror, size, t_row),
                    fwd_task(rng.random(), child_size())]
             out[0]["group"] = out[1]["group"] = None
-        # else: лист (без детей)
-        for _i, k in enumerate(out):                   # общая группа для близнецов с 1 seed
+        # else: leaf (no children)
+        for _i, k in enumerate(out):                   # shared group for twins with 1 seed
             if k.get("group", "x") is None:
                 k["group"] = ("twin", k["seed"])
         return out
 
-    # ── grow: близнецы синхронно распухают вдоль оси до соприкосновения ─────
+    # ── grow: twins sync-swell along axis until touching ─────
     def _grow(self):
         alive = {g: list(ids) for g, ids in self.groups.items()}
         guard = 0
@@ -259,7 +259,7 @@ class Layout:
             if not alive:
                 break
 
-    # ── петли: общая стена ≥3 клеток + графовое расстояние >5 → дверь ───────
+    # ── loops: shared wall ≥3 cells + graph distance >5 → door ───────
     def _linked(self) -> set:
         return {frozenset((d["a"], d["b"])) for d in self.doors}
 
@@ -280,7 +280,7 @@ class Layout:
         return dist
 
     def _shared_runs(self, a: Room, b: Room) -> list:
-        """Отрезки общей стены: последовательные пары соседних клеток A|B."""
+        """Shared wall segments: sequential pairs of adjacent cells A|B."""
         ac, bc = a.cells(), b.cells()
         pairs = []
         for (x, y) in ac:
@@ -325,7 +325,7 @@ class Layout:
             self.doors.append({"a": a, "b": b, "cells": mid,
                                "kind": "portcullis" if self.string else "door"})
 
-    # ── cleanup: тупиковые коридоры умирают, хвосты подрезаются ─────────────
+    # ── cleanup: dead-end corridors die, tails trim ─────────────
     def _clean_up(self):
         changed = True
         while changed:
@@ -338,7 +338,7 @@ class Layout:
                 if r.size >= 2 and deg.get(r.id, 0) == 1 and r.parent is not None:
                     self._remove(r)
                     changed = True
-        for r in self.rooms:                          # подрезать хвост коридора до двери
+        for r in self.rooms:                          # trim corridor tail to door
             if r.size < 2:
                 continue
             rows_with_door = [0]
@@ -360,7 +360,7 @@ class Layout:
         self.rooms = [x for x in self.rooms if x.id != r.id]
         self.doors = [d for d in self.doors if r.id not in (d["a"], d["b"])]
 
-    # ── формы: ротонды у симметричных групп ─────────────────────────────────
+    # ── shapes: rotundas for symmetric groups ─────────────────────────────────
     def _shape_rooms(self):
         deg: dict = {}
         for dr in self.doors:
@@ -376,13 +376,13 @@ class Layout:
                 for r in rs:
                     r.round = True
 
-    # ── экспорт ──────────────────────────────────────────────────────────────
+    # ── export ──────────────────────────────────────────────────────────────
     def export(self) -> dict:
         id_map = {r.id: i for i, r in enumerate(self.rooms)}
         rooms = []
         for r in self.rooms:
             cells = r.cells()
-            if r.round:                               # ротонда: круг из клеток
+            if r.round:                               # rotunda: circle from cells
                 cx = sum(c[0] for c in cells) / len(cells) + 0.0
                 cy = sum(c[1] for c in cells) / len(cells) + 0.0
                 rad = min(r.w, r.d) / 2
@@ -395,7 +395,7 @@ class Layout:
                   "door": [*d["cells"][0], *d["cells"][1]], "kind": d["kind"],
                   "lock": None, "path": []}
                  for d in self.doors if d["a"] in id_map and d["b"] in id_map]
-        # вода: value-шум + порог, только внутри комнат
+        # water: value-noise + threshold, only inside rooms
         water = []
         wseed = self.rng.random()
         if self.rng.random() < self.water_p:
@@ -406,7 +406,7 @@ class Layout:
                          * 0.6 + random.Random(f"{x}|{y}|{wseed}").random() * 0.4)
                     if n > level:
                         water.append([x, y])
-        # колонны: колоннады вдоль длинных залов, кольцо в ротондах
+        # columns: colonnades along long halls, ring in rotundas
         columns = []
         for r, src in zip(rooms, self.rooms):
             xs = [t[0] for t in r["tiles"]]

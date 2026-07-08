@@ -1,71 +1,71 @@
-# Разум NPC и общество
+# NPC Mind and Society
 
-`src/aidnd/mind` (чистый пакет: не знает о сервере/БД/графе города) + `src/aidnd/society`
-(нужды→места→рутина). Поведение **эмерджентно**: никаких веток-ролей и скриптов — только
-цели × утилити × характер ([принцип 3](README.md)).
+`src/aidnd/mind` (pure package: does not know about server/DB/city graph) + `src/aidnd/society`
+(needs→places→routine). Behavior is **emergent**: no role branches or scripts—only
+goals × utility × personality ([principle 3](README.md)).
 
-## Конвейер решения (механическое ядро)
+## Decision Pipeline (Mechanical Core)
 
 ```
-perceive(state, world) → Percept(здесь, выходы, присутствующие, поблизости, я)
-  → urges (нужда × вес-черты → срочность)         modulators.py
-  → модуляторы ×6: arousal/valence/dominance/resolution/selection_threshold/securing
-  → propose_goals: 9 типов целей                   goals.py
+perceive(state, world) → Percept(here, exits, present, nearby, me)
+  → urges (need × trait-weight → urgency)         modulators.py
+  → modulators ×6: arousal/valence/dominance/resolution/selection_threshold/securing
+  → propose_goals: 9 goal types                   goals.py
       need · acquire · harm · safe · trade · affiliate · protect · inform · converse
-      (из стоящих нужд + угроз + хищных возможностей + социальных тяг + агенд)
-  → utility(action|goal): диспетчер по типу цели   value.py  (единый конфиг BAL, 27 коэфф.)
-  → softmax top-k (ВЕРОЯТНОСТНЫЙ выбор, не argmax) act.py
-  → apply → событие мира                           llm_agent.apply_actions / mind.apply
-  → appraise (оценка события → дельты эмоций) → decay (нужды растут, эмоции гаснут)
+      (from standing needs + threats + predatory opportunities + social pulls + agendas)
+  → utility(action|goal): goal-type dispatcher    value.py  (unified BAL config, 27 coeffs.)
+  → softmax top-k (PROBABILISTIC choice, not argmax) act.py
+  → apply → world event                           llm_agent.apply_actions / mind.apply
+  → appraise (event appraisal → emotion deltas) → decay (needs grow, emotions fade)
 ```
 
-**7 примитивов** — весь словарь действий: `move · attack · take · give · say · use · wait`
-(`say` — речевые акты: chat/threat/flatter/ask/counter/accept). Бегство, вымогательство,
-засада, кража-без-свидетелей, защита союзника — это *какой примитив победил под какой целью*,
-не спецкод. Покрыто тестами эмерджентности (`tests/mind/test_emergent.py`, 10 сценариев).
+**7 primitives**—the entire action vocabulary: `move · attack · take · give · say · use · wait`
+(`say` is speech acts: chat/threat/flatter/ask/counter/accept). Flight, extortion,
+ambush, theft-without-witnesses, ally defense—these are *which primitive wins under which goal*,
+not special code. Covered by emergence tests (`tests/mind/test_emergent.py`, 10 scenarios).
 
-**FSM режимов** (fsm.py): `routine ↔ leisure ↔ converse ↔ threat` — переход по ставкам
-срочности с гистерезисом; режим окрашивает план, не подменяет утилити.
+**Mode FSM** (fsm.py): `routine ↔ leisure ↔ converse ↔ threat`—transition on urgency stakes
+with hysteresis; mode colors the plan, does not replace utility.
 
-## Гибрид с LLM (кольцо A сцены игрока)
+## LLM Hybrid (Player Scene Ring A)
 
-`decide_hybrid` (llm_agent.py): механика даёт top-5 ранжированных ПОБУЖДЕНИЙ → LLM выбирает
-В ХАРАКТЕРЕ (персона из пула, отношения, память, история ходов, время), добавляет реплику и
-описание «что делаю». Кривой ответ → повтор → `LLMBadOutput` (деградации в механику НЕТ).
-`apply_actions` исполняет инструменты: движение, атака, РЕАЛЬНАЯ кража (двигает лут тел),
-речь (в память и hist обеих сторон), заметка, само-регуляция эмоций/нужд.
+`decide_hybrid` (llm_agent.py): mechanics give top-5 ranked URGES → LLM chooses
+IN CHARACTER (persona from pool, relations, memory, action history, time), adds a line and
+description of "what I do". Bad response → retry → `LLMBadOutput` (no fallback to mechanics).
+`apply_actions` executes tools: movement, attack, REAL theft (moves corpse loot),
+speech (into memory and hist of both sides), note, self-regulation of emotions/needs.
 
-## Память
+## Memory
 
-`MemoryStore` (memory.py): воспоминания с важностью/типом (observation/heard/note/…);
-ретрива = recency (полураспад ~сутки) · importance · lexical relevance → shortlist →
-опциональный LLM-rerank (роль cognition). Без реранкера — механический порядок (это
-ранжирование, не контент — санкционировано). Обращение освежает память. Сплетни (`_gossip`
-в world.py) разносят яркие факты между присутствующими.
+`MemoryStore` (memory.py): memories with importance/type (observation/heard/note/…);
+retrieval = recency (half-life ~1 day) · importance · lexical relevance → shortlist →
+optional LLM-rerank (cognition role). Without reranker—mechanical order (this is
+ranking, not content—authorized). Recall refreshes memory. Gossip (`_gossip`
+in world.py) spreads vivid facts among present NPCs.
 
-## Агенды (долгие цели)
+## Agendas (Long-term Goals)
 
-`plan_agenda` [LLM, редкий вызов]: натура+память+окружение → одна жизненная агенда
-(wealth/courtship/ambition/revenge/predation) с вехами; каждая веха — МЕХАНИЧЕСКАЯ цель
-(goal need/affiliate/trade/acquire/harm) с предикатом завершения (wealth N / dead X /
-affinity X / have item / at place). Ядро тянет текущую веху реактивно; `advance_agendas`
-двигает курсор по фактам мира. Агенды — источник контрактов ([quests.md](quests.md)).
+`plan_agenda` [LLM, rare call]: nature+memory+environment → one life agenda
+(wealth/courtship/ambition/revenge/predation) with milestones; each milestone is a MECHANICAL goal
+(need/affiliate/trade/acquire/harm) with completion predicate (wealth N / dead X /
+affinity X / have item / at place). Core pulls current milestone reactively; `advance_agendas`
+moves cursor by world facts. Agendas are the source of contracts ([quests.md](quests.md)).
 
-## Общество: рутина из нужд (кольцо B)
+## Society: Routine from Needs (Ring B)
 
-`society/` — декларативные каталоги: 7 нужд (скорость роста × масштаб от черт) и виды мест
-(что закрывает, окно фазы дня, симпатии черт, гейт any/job/guard/rogue).
-`routine.step`: подрасти нужды за минуты → скоринг кандидатов
-`окно(фаза) × симпатия(черты) × Σ(закрытие·давление)` → узел. Работяга днём у станка,
-ночью дома; общительный — в таверне; вор с malice — на промысле ночью. Ноль хардкода ролей.
-Адаптер к городу — `server/play/engine/worldsim.py`. Внутри помещения тот же скоринг
-рекурсирует на ЗОНЫ локации через afford-объекты — [locations.md](locations.md).
+`society/`—declarative catalogs: 7 needs (growth rate × scale from traits) and place types
+(what closes need, day-phase window, trait sympathies, gate any/job/guard/rogue).
+`routine.step`: grow needs over minutes → score candidates
+`window(phase) × sympathy(traits) × Σ(closure·pressure)` → node. Laborer at lathe by day,
+home by night; sociable one in tavern; rogue with malice on prowl at night. Zero hardcoded roles.
+City adapter—`server/play/engine/worldsim.py`. Inside a building the same scoring
+recurses on ZONES of location via afford-objects—[locations.md](locations.md).
 
-## Проверка качества
+## Quality Assurance
 
-`tests/mind` + `tests/society` (нейтральность модуляторов, системность сдвигов, эмерджентность,
-согласованность каталогов) · бенчи `scripts/bench_archetypes.py`, `mind_sim*.py` (15 архетипов,
-живой LLM). Правило из практики: поведение NPC проверяем ЖИВОЙ моделью, не только юнитами.
+`tests/mind` + `tests/society` (modulator neutrality, shift systemicity, emergence,
+catalog consistency) · benches `scripts/bench_archetypes.py`, `mind_sim*.py` (15 archetypes,
+live LLM). Practice rule: NPC behavior tested with LIVE model, not just units.
 
-Связано: [loop.md](loop.md) · [entities.md](entities.md) (NpcState) ·
-[quests.md](quests.md) (агенды → контракты)
+Related: [loop.md](loop.md) · [entities.md](entities.md) (NpcState) ·
+[quests.md](quests.md) (agendas → contracts)

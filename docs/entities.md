@@ -1,88 +1,86 @@
-# Сущности данных
+# Data Entities
 
-Что СУЩЕСТВУЕТ в мире и где живёт. Два слоя хранения — жёсткое правило
-([принцип 8](README.md)): **контент** (пулы, куются офлайн, в гите) и **состояние**
-(рантайм миров, никогда не коммитится).
+What EXISTS in the world and where it lives. Two storage layers — a hard rule
+([principle 8](README.md)): **content** (pools, forged offline, in git) and **state**
+(runtime worlds, never committed).
 
-## Базы
+## Databases
 
-**`data/worlds.db`** — ПУЛЫ (гит, ~7 МБ). Рантайм-таблицы в ней пустые и должны оставаться пустыми.
+**`data/worlds.db`** — POOLS (git, ~7 MB). Runtime tables in it are empty and must remain empty.
 
-| таблица | что | объём |
+| table | what | volume |
 |---|---|---|
-| `people` | банк NPC: `mech` (черты/способности/hp) + `persona` (происхождение/голос/причуды/тайна/ценности) + `portraits` (4 эмоции) | ~900 (портреты ~500) |
-| `building_pool` | фактшиты зданий: kind `key` (значимые, по типу-хинту) / `res` (жилые) / `city_name` | 599 + 100 имён |
-| `item_pool` | сид-шаблоны предметов мира (веса редкости) | данные |
+| `people` | NPC bank: `mech` (traits/abilities/hp) + `persona` (origin/voice/quirks/secret/values) + `portraits` (4 emotions) | ~900 (portraits ~500) |
+| `building_pool` | building factsheets: kind `key` (significant, by type-hint) / `res` (residential) / `city_name` | 599 + 100 names |
+| `item_pool` | seed-templates for world items (rarity weights) | data |
 
-**`data/live.db`** — РАНТАЙМ (gitignored). `user_worlds` (user→world_id, seed) ·
-`buildings` (розданные ключевые) · `placements` (npc→узел/дом/работа) · `items` + `inventory`
-(держатели `pc` / `<npc>` / `cont:<id>`) · `purse` (кошельки) · `pc_state` / `npc_state`
-(блобы состояния) · `contracts` · `flags` (универсальный ключ-значение мира: `grim|<hash>`,
-`crimes|pc`, `dead|<pid>`, `cleared|<lair>`, `seen|<bid>`, `coffer|<npc>`, счётчики LLM…).
+**`data/live.db`** — RUNTIME (gitignored). `user_worlds` (user→world_id, seed) ·
+`buildings` (dealt key buildings) · `placements` (npc→node/house/job) · `items` + `inventory`
+(holders `pc` / `<npc>` / `cont:<id>`) · `purse` (purses) · `pc_state` / `npc_state`
+(state blobs) · `contracts` · `flags` (universal world key-value: `grim|<hash>`,
+`crimes|pc`, `dead|<pid>`, `cleared|<lair>`, `seen|<bid>`, `coffer|<npc>`, LLM counters…).
 
-Сервисная БД (Postgres, [service.md](service.md)): пользователи, сессии, инвайт-коды.
-Она про аккаунты, не про мир.
+Service DB (Postgres, [service.md](service.md)): users, sessions, invite codes.
+It's about accounts, not the world.
 
-## Мир
+## World
 
-`world_id` + `seed` на пользователя. Из seed детерминированно растёт граф города
-([worldgen.md](worldgen.md)); ключевые здания и жители раздаются из пулов; имя города — из
-пула имён. Гибель героя = **уничтожение мира** (пермасмерть: запись стирается, следующий
-заход — новый город). Игровое время `gt` (минуты) двигается только действиями игрока
-по ценам из `PB`; бой живёт в своём масштабе (раунд = 5 сек).
+`world_id` + `seed` per user. From seed, the city graph grows deterministically
+([worldgen.md](worldgen.md)); key buildings and residents are dealt from pools; city name is from a name pool.
+Hero death = **world destruction** (permadeath: record is wiped, next visit — new city). Game time `gt`
+(minutes) moves only by player actions at costs from `PB`; combat lives on its own scale (round = 5 sec).
 
-## Человек (NPC и игрок — одна сущность)
+## Person (NPC and player — one entity)
 
-Ядро — `mind.NpcState` ([mind.md](mind.md)): `config` (неизменное: черты ×11, способности ×6,
-роль, hp) + позиция + режим FSM + нужды ×7 + эмоции ×4 (с адресатом) + отношения
-(trust/affinity/fear на человека) + память (`MemoryStore`) + план-рутина + агенды.
-Поверх — `persona` из пула (голос/причуды/стремления/тайна) и портреты.
-Игрок — тот же `NpcState` + кошелёк/сумка/мана/усталость/глифы; особые ветки — только в UI.
-Знакомство — граф «кто кого знает»: незнакомец обезличен («силуэт»), пока не представился.
+Core — `mind.NpcState` ([mind.md](mind.md)): `config` (immutable: traits ×11, abilities ×6,
+role, hp) + position + FSM mode + needs ×7 + emotions ×4 (with addressee) + relationships
+(trust/affinity/fear per person) + memory (`MemoryStore`) + routine-plan + agendas.
+On top — `persona` from pool (voice/quirks/aspirations/secret) and portraits.
+Player — same `NpcState` + purse/bag/mana/exhaustion/glyphs; special branches — UI only.
+Acquaintance — graph of 'who knows whom': stranger is depersonalized ('silhouette') until introduced.
 
-## Здание
+## Building
 
-Фактшит из пула: тип/ярус/возраст/состояние/фичи/услуги + `sub_rooms` (мини-граф комнат —
-пока одно помещение) + `containers` (ёмкости с содержимым; ключ — у владельца). Вход/выход —
-состояние `inside`; туман войны — «пришёл или узнал от людей». Зоны помещений и улицы,
-объекты-предметы в них, рантайм сцены — [locations.md](locations.md).
+Factsheet from pool: type/floor/age/condition/features/services + `sub_rooms` (mini-graph of rooms —
+for now one space) + `containers` (containers with contents; key — with owner). Entry/exit —
+`inside` state; fog of war — 'arrived or learned from people'. Room zones and streets,
+item-objects in them, runtime scenes — [locations.md](locations.md).
 
-## Предмет
+## Item
 
-Фактшит: `surface` (что видно — МОЖЕТ ВРАТЬ) + `hidden` (истина под гейтом осмотра) +
-знание наблюдателя (`known`). Качество выделки ≠ редкость (две оси); `unique` из пула не
-респавнится. Материалы — сами предметы, крафт — путь по графу переходов. Монеты и ключи —
-реальные предметы. Подробно: [items.md](items.md).
+Factsheet: `surface` (what's visible — MAY LIE) + `hidden` (truth behind inspection gate) +
+observer knowledge (`known`). Craftsmanship quality ≠ rarity (two axes); `unique` from pool
+doesn't respawn. Materials — items themselves, craft — path through transition graph. Coins and keys —
+real items. Details: [items.md](items.md).
 
-## Контракт
+## Contract
 
-Делегированная нужда NPC: цепочка шагов-**предикатов над реальным миром**
-(`bring/deliver/visit/befriend/dead` + гильдейский `clear`), рождается из агенды, награда
-настоящая (монеты кошелька или вещь бедняка), завершение — фактом мира. [quests.md](quests.md).
+Delegated NPC need: a chain of steps-**predicates over the real world**
+(`bring/deliver/visit/befriend/dead` + guild `clear`), born from an agenda, reward is real
+(purse coins or poor man's item), completion — fact of the world. [quests.md](quests.md).
 
-## Закон круга (магия)
+## Circle Law (magic)
 
-Закон, проявленный LLM из рисунка круга и заклампленный бюджетом; кэш — гримуар-на-мир
-(`flags: grim|<канонический хэш рисунка>`). [magic.md](magic.md).
+Law manifested by LLM from circle drawing and clamped by budget; cache — grimoire-per-world
+(`flags: grim|<canonical hash of drawing>`). [magic.md](magic.md).
 
-## Знание и память
+## Knowledge and Memory
 
-Память человека — список воспоминаний (важность/свежесть/тип: observation/heard/note/…),
-ретрива recency·importance·relevance (+опц. LLM-rerank). Сплетни разносят факты между NPC.
-Туман карты и `known` предметов — знание игрока. Правда сюжета скрыта и от игрока
+Person's memory — list of memories (importance/freshness/type: observation/heard/note/…),
+retrieval recency·importance·relevance (+optional LLM-rerank). Gossip spreads facts between NPCs.
+Map fog and item `known` — player knowledge. Plot truth is hidden from the player
 ([plot.md](plot.md)).
 
-## Дальше (принято, не реализовано)
+## Further (approved, not implemented)
 
-- ✔ **Дело (deed)** v1 (2026-07-06): append-only журнал `deeds(gt, актор, глагол, объект,
-  место, свидетели, status, data)` в live.db (`engine/deeds.py`). Пишутся: кражи сцены (со
-  свидетелями), ОБЕЩАНИЯ (promise-инструмент разума: «дать слово» с что/когда/где, кламп
-  срока по фазам, место матчится к реальным точкам города). Потребители: сплетни сцены
-  (town_talk в «о чём судачит город»), напоминание «ТЫ ДАЛ СЛОВО» в промпте должника,
-  рутина ведёт ОБЕ стороны на место встречи в срок (society-место «appointment»), резолв
-  done/broken двигает доверие и память обеих сторон. ДАЛЬШЕ: стража-дознаватели по deeds,
-  предикаты контрактов, хроника-UI, салиентность улицы.
-- **Типизированная Session** вместо dict-блоба `_S` ([structure.md](structure.md)).
-- Пергамент-маска неисследованных районов в geom; рост характеристик героя.
+- ✔ **Deed** v1 (2026-07-06): append-only journal `deeds(gt, actor, verb, object,
+  place, witnesses, status, data)` in live.db (`engine/deeds.py`). Written: scene thefts (with
+  witnesses), PROMISES (promise-tool of mind: 'give word' with what/when/where, deadline clamp
+  by phases, place matches real city points). Consumers: scene gossip (town_talk in 'what the town
+  talks about'), reminder 'YOU GAVE YOUR WORD' in debtor's prompt, routine leads BOTH sides to
+  meeting place in time (society-place 'appointment'), resolve done/broken moves trust and memory
+  of both sides. FURTHER: guard-investigators by deeds, contract predicates, chronicle-UI, street salience.
+- **Typed Session** instead of dict-blob `_S` ([structure.md](structure.md)).
+- Parchment-mask of unexplored areas in geom; hero stat growth.
 
-Связано: [loop.md](loop.md) · [mind.md](mind.md) · [worldgen.md](worldgen.md)
+Related: [loop.md](loop.md) · [mind.md](mind.md) · [worldgen.md](worldgen.md)

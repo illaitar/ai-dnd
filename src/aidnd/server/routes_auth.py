@@ -1,7 +1,7 @@
-"""HTTP-эндпоинты auth: /auth/register, /auth/login, /auth/google, /auth/logout, /auth/me.
+"""HTTP auth endpoints: /auth/register, /auth/login, /auth/google, /auth/logout, /auth/me.
 
-Email+пароль (argon2) и Google (id_token от клиентской кнопки Sign-In) — оба способа
-возвращают непрозрачный токен сессии. Защищённые ручки требуют Bearer-токен (current_user).
+Email+password (argon2) and Google (id_token from client-side Sign-In button) — both methods
+return an opaque session token. Protected routes require Bearer token (current_user).
 
 Key functions
 -------------

@@ -1,9 +1,9 @@
-"""Надёжный structured output (main §6.3).
+"""Reliable structured output (main §6.3).
 
-Все структурные выходы агентов идят через constrained decoding по JSON Schema. На
-сервере это XGrammar в vLLM (guided_json). Для Ollama-фоллбэка извлекаем первый
-JSON-объект из текста или из нативных tool_calls и приводим к схеме. Если ничего
-валидного — возвращаем None, и вызывающий код берёт детерминированный фоллбэк.
+All agent structured outputs go through constrained decoding by JSON Schema. On the
+server this is XGrammar in vLLM (guided_json). For Ollama fallback we extract the first
+JSON object from text or from native tool_calls and conform it to the schema. If nothing
+valid is found, return None and the calling code takes a deterministic fallback.
 
 Key functions
 --------------
@@ -19,7 +19,7 @@ import json
 
 
 def _find_json(text: str) -> dict | None:
-    """Находит первый сбалансированный {...} в тексте."""
+    """Find the first balanced {...} in text."""
     start = text.find("{")
     while start != -1:
         depth = 0
@@ -39,11 +39,11 @@ def _find_json(text: str) -> dict | None:
 
 
 def extract(response: dict, tool_name: str | None = None) -> dict | None:
-    """Извлекает структурированный результат из ответа модели.
+    """Extract structured result from model response.
 
-    response — то, что вернул OllamaClient.chat ({"content", "tool_calls"}).
+    response — what OllamaClient.chat returned ({"content", "tool_calls"}).
     """
-    # 1) нативные tool_calls
+    # 1) native tool_calls
     for tc in response.get("tool_calls", []):
         fn = tc.get("function", {})
         if tool_name and fn.get("name") not in (tool_name, None):
@@ -56,11 +56,11 @@ def extract(response: dict, tool_name: str | None = None) -> dict | None:
                 return json.loads(args)
             except json.JSONDecodeError:
                 pass
-    # 2) JSON в тексте
+    # 2) JSON in text
     content = response.get("content", "") or ""
     obj = _find_json(content)
     if obj is not None:
-        # развернуть {"name":..., "parameters":{...}} либо {"arguments":{...}}
+        # unwrap {"name":..., "parameters":{...}} or {"arguments":{...}}
         if "parameters" in obj and isinstance(obj["parameters"], dict):
             return obj["parameters"]
         if "arguments" in obj and isinstance(obj["arguments"], dict):
@@ -70,7 +70,7 @@ def extract(response: dict, tool_name: str | None = None) -> dict | None:
 
 
 def coerce(obj: dict | None, required: list[str]) -> dict | None:
-    """Минимальная проверка наличия обязательных полей схемы."""
+    """Minimal check that required schema fields are present."""
     if obj is None:
         return None
     if all(k in obj for k in required):
@@ -89,7 +89,7 @@ _ACTION_SYNONYMS = {
 
 
 def _snap_enum(val, enum: list):
-    """Снаппинг значения к ближайшему члену enum (downstream-валидация, main §6.3)."""
+    """Snap value to nearest enum member (downstream validation, main §6.3)."""
     s = str(val).lower()
     for e in enum:
         if e == s or e in s or s in e:
@@ -113,7 +113,7 @@ def _stringify(val) -> str:
     return str(val)
 
 
-# синонимы полей: малые модели часто переименовывают ключи под собственный «вкус»
+# field synonyms: small models often rename keys to their own preference
 _FIELD_SYNONYMS = {
     "verb": ["action", "command", "intent", "intent_verb"],
     "target": ["target_entity", "target_id", "object", "entity", "who", "npc"],
@@ -124,20 +124,20 @@ _FIELD_SYNONYMS = {
 
 
 def _unwrap_payload(obj: dict, params: dict) -> dict:
-    """Достаёт полезную нагрузку из «обёрток» малых моделей: разворачивает вложенный
-    словарь (напр. {"intent": {...}}) и подтягивает синонимичные имена полей к схеме.
-    Грамматика Ollama нестрога, поэтому нормализуем форму у себя (main §6.3)."""
+    """Extract payload from small model wrappers: unwrap nested dict
+    (e.g. {"intent": {...}}) and pull synonym field names toward schema.
+    Ollama grammar is loose, so we normalize the shape on our side (main §6.3)."""
     if not isinstance(obj, dict):
         return obj
     props = set(params.get("properties", {}))
-    # 1) если на верхнем уровне нет ни одного поля схемы — нырнуть в первый вложенный
-    #    словарь, который содержит схему (обёртки вида {"intent": {...}}/{"result": {...}})
+    # 1) if top level has no schema fields, dive into the first nested dict
+    #    that contains the schema (wrappers like {"intent": {...}}/{"result": {...}})
     if props and not (props & set(obj)):
         for v in obj.values():
             if isinstance(v, dict) and (props & set(v)):
                 obj = dict(v)
                 break
-    # 2) подтянуть синонимичные ключи к каноническим именам схемы
+    # 2) pull synonym keys to canonical schema names
     for canon, alts in _FIELD_SYNONYMS.items():
         if canon in props and canon not in obj:
             for a in alts:
@@ -148,11 +148,11 @@ def _unwrap_payload(obj: dict, params: dict) -> dict:
 
 
 def conform_to_schema(obj: dict | None, params: dict) -> dict | None:
-    """Приводит выход модели к схеме (разворот обёрток + синонимы + enum-снаппинг + типы).
+    """Conform model output to schema (unwrap wrappers + synonyms + enum snapping + types).
 
-    Constrained decoding на vLLM+XGrammar гарантировало бы формат на уровне токенов;
-    `format` Ollama делает это нестрого, поэтому конформируем на нашей стороне
-    (main §6.3: семантику и валидность обеспечивает downstream).
+    Constrained decoding on vLLM+XGrammar would guarantee format at token level;
+    Ollama's `format` does this loosely, so we conform on our side
+    (main §6.3: downstream provides semantics and validity).
     """
     if obj is None:
         return None
@@ -173,11 +173,11 @@ def conform_to_schema(obj: dict | None, params: dict) -> dict | None:
 
 
 def sanitize_for_ollama(schema):
-    """Готовит JSON Schema к structured output Ollama.
+    """Prepare JSON Schema for Ollama structured output.
 
-    Union-типы (`["string","null"]`) ломают грамматику Ollama → format
-    игнорируется и enum не соблюдается. Сводим union к первому не-null типу
-    (nullable выражается необязательностью поля). Рекурсивно по properties/items.
+    Union types (`["string","null"]`) break Ollama grammar → format
+    is ignored and enum is not respected. Reduce union to first non-null type
+    (nullable expressed via field optionality). Recurse over properties/items.
     """
     if isinstance(schema, dict):
         out = {}

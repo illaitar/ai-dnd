@@ -1,18 +1,18 @@
-"""Слой ЦЕННОСТИ — сердце эмерджентного решения.
+"""VALUE LAYER — heart of emergent decision-making.
 
-Поведение НЕ скриптуется. Есть ~5 ОБЩИХ членов utility и карта «черта→на что влияет»; любое
-действие (move/attack/take/give/say/use/wait) скорится по этим членам относительно ЦЕЛИ
-(желаемого исхода), а наблюдаемое поведение (бегство, преследование, засада, кража, запугивание,
-торг, подкуп, защита, обход, расспрос, смена цели) — это какой примитив выиграл сейчас.
+Behavior is NOT scripted. There are ~5 COMMON utility terms and a map "trait → what it affects"; any
+action (move/attack/take/give/say/use/wait) is scored by these terms relative to the GOAL
+(desired outcome), and observed behavior (flight, pursuit, ambush, theft, intimidation,
+haggling, bribery, protection, evasion, interrogation, goal-switching) — this is which primitive won right now.
 
-Общие члены:
-  payoff(g)         — ценность достижения цели (× релевантная черта/эмоция)
-  realize           — ps_now·payoff − p_caught·cost − moral        (действие РЕАЛИЗУЕТ цель сейчас)
-  opportunity       — γ·payoff·proximity_after·ps_after − caught − moral − risk   (ПОЗИЦИОНИРУЕТ)
-  p_caught          — ∝ числу свидетелей (третьих лиц)
-  cost/moral        — наказание (×lawful) + внутренний моральный тормоз (×honesty)
-Терпение γ и риск-толерантность выводятся из черт. Все коэффициенты — в BAL (это и есть то,
-что калибруется к спеке-бенчу, а не 50 скриптов).
+Common terms:
+  payoff(g)         — value of achieving the goal (× relevant trait/emotion)
+  realize           — ps_now·payoff − p_caught·cost − moral        (action REALIZES the goal now)
+  opportunity       — γ·payoff·proximity_after·ps_after − caught − moral − risk   (POSITIONS)
+  p_caught          — ∝ number of witnesses (third parties)
+  cost/moral        — punishment (×lawful) + internal moral brake (×honesty)
+Patience γ and risk tolerance are derived from traits. All coefficients are in BAL (this is what
+is calibrated to the spec-bench, not 50 scripts).
 
 Key functions
 -------------
@@ -29,19 +29,19 @@ from __future__ import annotations
 
 from .world import ENEMY_FACTIONS
 
-# ── единственный конфиг коэффициентов (то, что подбирается оптимизатором к спеке) ──
+# the only config for coefficients (what is tuned by the optimizer to spec)
 BAL = {
-    "gamma_base": 0.55, "gamma_focus": 0.40,          # терпение γ = base + focus·(1−irritability)
+    "gamma_base": 0.55, "gamma_focus": 0.40,          # patience γ = base + focus·(1−irritability)
     "eff_move": 0.04, "eff_say": 0.01,
-    "caught_per_witness": 0.5, "caught_cap": 0.95,    # p_caught растёт со свидетелями
+    "caught_per_witness": 0.5, "caught_cap": 0.95,    # p_caught grows with witnesses
     "transgress": {"attack": 1.0, "take": 0.55, "threat": 0.45},
-    "cost_lawbase": 0.4, "cost_lawful": 1.5,          # наказание = transgress·(lawbase + lawful·lawful)
-    "moral": 1.0,                                     # внутр. тормоз = transgress·honesty·moral
-    "selfrisk": 0.6,                                  # цена проигрыша драки
-    "take_alert": 0.15, "take_distracted": 0.78, "take_down": 0.92,  # ps кражи по состоянию цели
+    "cost_lawbase": 0.4, "cost_lawful": 1.5,          # punishment = transgress·(lawbase + lawful·lawful)
+    "moral": 1.0,                                     # internal brake = transgress·honesty·moral
+    "selfrisk": 0.6,                                  # cost of losing a fight
+    "take_alert": 0.15, "take_distracted": 0.78, "take_down": 0.92,  # ps of theft by target state
     "flee_base": 0.5, "flee_gain": 2.2,
     "idle": 0.05,
-    "need_urgency_coin": 0.5,                         # «синица в руках» — бедность ускоряет сделку
+    "need_urgency_coin": 0.5,                         # bird in hand — poverty accelerates the deal
     "info_value": 0.6,
 }
 
@@ -55,7 +55,7 @@ def T(state, name: str) -> float:
 
 
 def proximity(d: int) -> float:
-    return 1.0 / (1.0 + d)                 # 1.0 со-локация, 0.5 рядом, 0.33 через одно
+    return 1.0 / (1.0 + d)                 # 1.0 co-located, 0.5 next to, 0.33 one away
 
 
 def gamma(state) -> float:
@@ -67,8 +67,8 @@ def pwin(att, deff) -> float:
 
 
 def hostility(state, me, b) -> float:
-    """Насколько b опасен ДЛЯ МЕНЯ [0..1]: явная атака / враждебная фракция / запомненный страх.
-    Если b занят атакой ДРУГОГО — прямая угроза мне ниже (он связан)."""
+    """How dangerous b is TO ME [0..1]: explicit attack / enemy faction / remembered fear.
+    If b is attacking ANOTHER — direct threat to me is lower (occupied)."""
     if b.attacking == me.id:
         return pwin(b, me)
     rel = state.relationships.get(b.id) or {}
@@ -76,7 +76,7 @@ def hostility(state, me, b) -> float:
     if b.faction in ENEMY_FACTIONS and b.faction != me.faction:
         h = max(h, pwin(b, me))
     if b.attacking and b.attacking != me.id:
-        h *= 0.2                                  # враг занят другим — прямая угроза мне мала (даёт защиту, не бегство)
+        h *= 0.2                                  # enemy occupied with other — direct threat to me is low (gives protection, not flight)
     return _clamp(h)
 
 
@@ -86,7 +86,7 @@ def _is_ally(state, b) -> bool:
 
 
 def witnesses(percept, state, target_id: str) -> int:
-    """Третьи лица рядом (не я, не цель, не союзник) — кто может донести/помешать."""
+    """Third parties nearby (not me, not target, not ally) — who can report/interfere."""
     return sum(1 for b in percept.present
                if b.id != target_id and not _is_ally(state, b))
 
@@ -116,7 +116,7 @@ def _eff(a) -> float:
 
 
 def _risk(a, world, state) -> float:
-    """Риск ВОЙТИ в место: базовый + враги/страж там + дурная память. Даёт обход без правила «avoid»."""
+    """Risk of ENTERING a place: base + enemies/guards there + bad memory. Gives evasion without 'avoid' rule."""
     if a.kind != "move":
         return 0.0
     r = world.risk.get(a.to, 0.0)
@@ -131,7 +131,7 @@ def idle_floor(a) -> float:
 
 
 def _approach(a, target_place, me, world):
-    """proximity(after) для move/wait; None если действие не пространственное приближение."""
+    """proximity(after) for move/wait; None if action is not spatial approach."""
     if a.kind == "move":
         return proximity(world.dist(a.to, target_place))
     if a.kind == "wait":
@@ -139,7 +139,7 @@ def _approach(a, target_place, me, world):
     return None
 
 
-# ── utility(action | goal): один диспетчер по ТИПУ цели (не по сценарию) ──
+# utility(action | goal): single dispatcher by goal TYPE (not by script)
 def utility(a, g, state, world, percept) -> float:
     me = percept.me
     fn = _GOAL.get(g.kind)
@@ -151,9 +151,9 @@ def _acq_pay(g, state) -> float:
 
 
 def clean_acquire(g, state, world, me) -> float:
-    """Ценность «чистого удара» — лучший РЕАЛИЗ при со-локации и БЕЗ свидетелей. К ней приводит
-    позиционирование (сблизиться/выждать), дисконтируясь γ. Это убирает «вечное ожидание»:
-    выждать = γ·(то, что сделаю в удобный миг) < сделать сейчас, когда миг настал."""
+    """Value of "clean strike" — best REALIZE at co-location and WITHOUT witnesses. It leads to
+    positioning (close/wait), discounted by γ. This removes "eternal waiting":
+    wait = γ·(what I'll do at convenient moment) < do now, when the moment came."""
     tb = world.bodies.get(g.target)
     if not tb:
         return 0.0
@@ -168,9 +168,9 @@ def clean_acquire(g, state, world, me) -> float:
 
 
 def _u_acquire(a, g, state, world, percept, me) -> float:
-    """Завладеть богатством цели. РЕАЛИЗУЮТ (сейчас, с текущими свидетелями): say(threat)=вымогательство,
-    take=кража, attack=сбить с ног→добить. ПОЗИЦИОНИРУЮТ (move/wait): γ·clean·reach — приблизиться/выждать
-    удобный миг. Бегство/преследование/засада/кража/мугинг — это какой примитив выиграл."""
+    """Seize target's wealth. REALIZE (now, with current witnesses): say(threat)=extortion,
+    take=theft, attack=knock down→finish. POSITION (move/wait): γ·clean·reach — close/wait
+    for the right moment. Flight/pursuit/ambush/theft/mugging — this is which primitive won."""
     tb = world.bodies.get(g.target)
     if not tb or tb.id == me.id:
         return -_eff(a)
@@ -191,20 +191,20 @@ def _u_acquire(a, g, state, world, percept, me) -> float:
         return pw * 0.9 * pay - _caught("attack", wit) * _cost_caught("attack", state) \
             - _cost_moral("attack", state) - (1 - pw) * BAL["selfrisk"]
 
-    reach = _approach(a, tb.place, me, world)        # move/wait → позиционирование
+    reach = _approach(a, tb.place, me, world)        # move/wait → positioning
     if reach is not None:
         return gamma(state) * clean_acquire(g, state, world, me) * reach - _eff(a) - _risk(a, world, state)
     return -_eff(a)
 
 
 def _u_harm(a, g, state, world, percept, me) -> float:
-    """Лишить жизни цель (хищный импульс из malice, НЕ из жадности). Реализует: attack;
-    позиционирует: move/wait (γ·clean·reach) — выследить и ударить в безлюдье. Свидетели гасят
-    удар (p_caught), поэтому злонравный, как и грабитель, ждёт уединения — но хочет крови, не сделки."""
+    """Deprive target of life (predatory impulse from malice, NOT greed). Realizes: attack;
+    positions: move/wait (γ·clean·reach) — stalk and strike in solitude. Witnesses dampen
+    blow (p_caught), so malicious one, like thief, waits for privacy — but wants blood, not a deal."""
     tb = world.bodies.get(g.target)
     if not tb or tb.id == me.id:
         return -_eff(a)
-    # оппортунистическая ненависть питается злонравием; ПЛАНОВАЯ (месть) — важностью цели, натура лишь модулирует
+    # opportunistic hatred feeds on malice; PLANNED (vengeance) — on goal importance, nature only modulates
     pay = (0.5 + 0.5 * T(state, "malice") + 0.7 * g.value) if g.meta.get("agenda") else (0.8 + T(state, "malice"))
     same = me.place == tb.place
     wit = witnesses(percept, state, g.target)
@@ -221,26 +221,26 @@ def _u_harm(a, g, state, world, percept, me) -> float:
 
 
 def _u_safe(a, g, state, world, percept, me) -> float:
-    """Быть невредимым. Реализует: move ПРОЧЬ (рост дистанции) или attack угрозы, если силён."""
+    """Be unharmed. Realizes: move AWAY (growing distance) or attack the threat, if strong."""
     tb = world.bodies.get(g.target)
     pay = g.value
     if not tb:
         return -_eff(a)
     if a.kind == "move":
         d0, d1 = world.dist(me.place, tb.place), world.dist(a.to, tb.place)
-        gain = proximity(d0) - proximity(d1)            # >0 если отдаляюсь
+        gain = proximity(d0) - proximity(d1)            # >0 if I'm fleeing
         return pay * (BAL["flee_base"] + BAL["flee_gain"] * gain) - _eff(a) - _risk(a, world, state)
     if a.kind == "attack" and a.target == g.target and me.place == tb.place:
         pw = pwin(me, tb)
-        return pw * pay - (1 - pw) * pay * 1.2          # победа снимает угрозу; проигрыш — вред
+        return pw * pay - (1 - pw) * pay * 1.2          # victory removes threat; defeat — harm
     if a.kind == "wait":
         return -pay * proximity(world.dist(me.place, tb.place)) * 0.3
     return -_eff(a)
 
 
 def _u_trade(a, g, state, world, percept, me) -> float:
-    """Сделка на лучших условиях. accept=взять текущее; counter=держать цену ради уступки.
-    Бедность (нужда wealth) поднимает ценность «синицы в руках» → быстрее соглашаемся."""
+    """Deal at better terms. accept=take current; counter=hold price for concession.
+    Poverty (wealth need) raises "bird in hand" value → faster agreement."""
     if a.target != g.target:
         return -_eff(a)
     surplus = g.value * (0.3 + T(state, "greed"))
@@ -250,28 +250,28 @@ def _u_trade(a, g, state, world, percept, me) -> float:
     if a.kind == "say" and a.say == "counter":
         concede = g.meta.get("concession", 0.25)
         prob = g.meta.get("prob_concede", 0.6)
-        # стойкость держать цену = ЖАДНОСТЬ (хочу больше), гасится вспыльчивостью (нетерпёж)
+        # firmness to hold price = GREED (want more), dampened by irritability (impatience)
         hold = _clamp(0.35 + 0.7 * T(state, "greed") - 0.2 * T(state, "irritability"), 0.2, 0.97)
         return hold * (surplus + prob * concede * (0.3 + T(state, "greed"))) - _eff(a)
     return -_eff(a)
 
 
 def _u_affiliate(a, g, state, world, percept, me) -> float:
-    """Нужна кооперация лица (ценность super-цели g.value). Подкуп give / лесть say(flatter)
-    поднимают его расположение → разблокируют g.value. Скупость (greed) удорожает дар."""
+    """Need cooperation from target (value of super-goal g.value). Bribe give / flattery say(flatter)
+    raise affinity → unlock g.value. Avarice (greed) makes gift costly."""
     tb = world.bodies.get(g.target)
     if not tb or tb.id == me.id:
         return -_eff(a)
-    recept = g.meta.get("flatter_recept", 1.0)               # дотошный страж глух к лести → нужно золото
+    recept = g.meta.get("flatter_recept", 1.0)               # meticulous guard deaf to flattery → need gold
     eff_flatter = (0.2 + 0.4 * T(state, "sociability")) * recept
     same = me.place == tb.place
-    # РЕАЛИЗ (со-локально): подкуп/дар или лесть поднимают расположение
+    # REALIZE (co-located): bribe/gift or flattery raise affinity
     if same and a.kind == "give" and a.target == g.target and a.item is not None:
         eff = _clamp(0.3 + 0.7 * a.item.value)
         return g.value * eff - a.item.value * (0.3 + T(state, "greed"))
     if same and a.kind == "say" and a.say == "flatter" and a.target == g.target:
         return g.value * eff_flatter - _eff(a)
-    # ПОЗИЦИОНИРОВАНИЕ: подойти к нужному лицу (ухаживание — многотиково)
+    # POSITIONING: approach needed target (courtship — multi-tick)
     reach = _approach(a, tb.place, me, world)
     if reach is not None:
         return gamma(state) * g.value * eff_flatter * reach - _eff(a) - _risk(a, world, state)
@@ -279,25 +279,25 @@ def _u_affiliate(a, g, state, world, percept, me) -> float:
 
 
 def _u_protect(a, g, state, world, percept, me) -> float:
-    """Защитить союзника. Реализует: attack нападающего / move-перехват. Цена риска ↓ храбростью."""
+    """Protect ally. Realizes: attack attacker / move-intercept. Cost of risk ↓ by bravery."""
     pay = g.value * (0.4 + T(state, "loyalty"))
     attacker = g.meta.get("attacker")
     ab = world.bodies.get(attacker)
     if not ab:
         return -_eff(a)
     pw = pwin(me, ab)
-    clean = pw * pay - (1 - pw) * BAL["selfrisk"] * (1.3 - T(state, "bravery"))   # ценность вмешательства
+    clean = pw * pay - (1 - pw) * BAL["selfrisk"] * (1.3 - T(state, "bravery"))   # value of intervention
     if a.kind == "attack" and a.target == attacker and me.place == ab.place:
-        return clean                                  # реализация — сейчас, не дисконт
-    reach = _approach(a, ab.place, me, world)          # позиционирование — γ·clean·reach (не «ждать вечно»)
+        return clean                                  # realization — now, not discounted
+    reach = _approach(a, ab.place, me, world)          # positioning — γ·clean·reach (not 'wait forever')
     if reach is not None:
         return gamma(state) * max(0.0, clean) * reach - _eff(a) - _risk(a, world, state)
     return -_eff(a)
 
 
 def _u_inform(a, g, state, world, percept, me) -> float:
-    """Снять неопределённость о ценном. Реализует: say(ask) знающему; позиционирует: move к источнику.
-    Действовать вслепую дорого (дисперсия) → расспрос/подход обгоняют, когда любопытство велико."""
+    """Remove uncertainty about something valuable. Realizes: say(ask) to knower; positions: move to source.
+    Acting blind is costly (variance) → interrogation/approach beat it, when curiosity is high."""
     pay = g.value * (0.2 + T(state, "curiosity")) * BAL["info_value"]
     src = g.meta.get("source")
     if a.kind == "say" and a.say == "ask" and a.target == g.target \
@@ -311,8 +311,8 @@ def _u_inform(a, g, state, world, percept, me) -> float:
 
 
 def _u_converse(a, g, state, world, percept, me) -> float:
-    """Поговорить с человеком (закрыть соц-нужду). Реализует: say(chat/flatter/ask) со-локально;
-    позиционирует: move к нему. Так NPC ОСТАЁТСЯ и заговаривает, а не уходит к ресурсу-застолью."""
+    """Talk to a person (close social need). Realizes: say(chat/flatter/ask) co-locally;
+    positions: move to them. Thus NPC STAYS and converses, not leaves to a resource/feast."""
     tb = world.bodies.get(g.target)
     if not tb or tb.id == me.id:
         return -_eff(a)
@@ -326,13 +326,13 @@ def _u_converse(a, g, state, world, percept, me) -> float:
 
 
 def _u_need(a, g, state, world, percept, me) -> float:
-    """Удовлетворить нужду (g.target=имя нужды, g.meta.source=место). РЕАЛИЗУЕТ: use ресурса,
-    помеченного этой нуждой (очаг→comfort, горн→purpose, похлёбка→hunger); ПОЗИЦИОНИРУЕТ: move к месту.
-    Так обычный горожанин ЖИВЁТ: голоден→в трактир→поел; устал→домой→лёг; дело→в мастерскую→работал."""
+    """Satisfy a need (g.target=need name, g.meta.source=place). REALIZES: use resource,
+    marked with this need (hearth→comfort, forge→purpose, soup→hunger); POSITIONS: move to place.
+    Thus a normal townsperson LIVES: hungry→tavern→ate; tired→home→slept; job→workshop→worked."""
     pay = g.value
     src = g.meta.get("source")
     if a.kind == "use" and getattr(a.item, "satisfies", None) == g.target:
-        return pay                                          # ресурс на месте (use есть только со-локально)
+        return pay                                          # resource in place (use only co-locally)
     if src is not None and a.kind == "move":
         return gamma(state) * pay * proximity(world.dist(a.to, src)) - _eff(a) - _risk(a, world, state)
     if src is not None and a.kind == "wait" and me.place == src:

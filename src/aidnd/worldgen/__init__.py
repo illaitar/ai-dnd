@@ -1,8 +1,8 @@
-"""Начальная генерация мира: насыщение локаций (слой поверх графа города) + БД миров.
+"""Initial world generation: location enrichment (layer over city graph) + world DB.
 
-Граф (aidnd.citygraph) — скелет; этот пакет — СЛОЙ НАСЫЩЕНИЯ (фактшит-характеристики через LLM),
-отдельный от графа и от скрипта. Результат складывается в БД (WorldStore) под world_id для дешёвого
-переиспользования. Хук генерации изображений — imagegen (на будущее).
+Graph (aidnd.citygraph) — skeleton; this package — ENRICHMENT LAYER (fact-sheet characteristics via LLM),
+separate from graph and from script. Result is stored in DB (WorldStore) under world_id for cheap
+reuse. Image generation hook — imagegen (for future).
 
 Key functions
 -------------

@@ -1,4 +1,4 @@
-"""Домен ДОСКА/ГИЛЬДИЯ/ВЫЛАЗКА (/board /guild_redeem /board_take /delve /surrender /watch_flee) — распил world.py.
+"""BOARD/GUILD/DELVE domain (/board /guild_redeem /board_take /delve /surrender /watch_flee) — split from world.py.
 
 Key functions
 -------------
@@ -54,7 +54,7 @@ def board():
     gb = _guild_bid()
     joined = None
     if not _pc_badge() and not _store().flag_get(_wid(), "guild_mark|pc"):
-        _mint_badge(0)  # первое обращение — приняли, вот Медь
+        _mint_badge(0)  # first call — accepted, here's Bronze
         joined = "Тебя приняли в гильдию. Вот жетон приключенца (Медь)."
     return {
         "guild": (_binfo(gb)["name"] if gb else None),
@@ -67,7 +67,7 @@ def board():
 
 @router.post("/api/play/guild_redeem")
 async def guild_redeem(request: Request):
-    """Искупить чёрную метку гильдии штрафом (и вернуть себе Медь-жетон, если его нет)."""
+    """Redeem black guild mark with a fine (and get Bronze badge back if missing)."""
     _play()
     if not _store().flag_get(_wid(), "guild_mark|pc"):
         return {"error": "метки нет"}
@@ -76,7 +76,7 @@ async def guild_redeem(request: Request):
         return {"error": f"нужно {fine} зм, чтобы загладить вину"}
     _store().purse_add(_wid(), "pc", -fine)
     _store().purse_add(_wid(), "guild", fine)
-    _store().flag_set(_wid(), "guild_mark|pc", "")  # снять метку
+    _store().flag_set(_wid(), "guild_mark|pc", "")  # remove mark
     if not _pc_badge():
         _mint_badge(0)
     _pc_remember("загладил вину перед гильдией штрафом", 0.4)
@@ -95,7 +95,7 @@ async def board_take(request: Request):
     job = next((j for j in _guild_board() if j["id"] == jid), None)
     if not job:
         return {"error": "этого заказа уже нет"}
-    gate = _guild_gate(job["cr"])  # жетон · ранг по чину · проверка лжи
+    gate = _guild_gate(job["cr"])  # badge · rank by rank · lie check
     if gate and gate.get("error"):
         return {"error": gate["error"], "dice": gate.get("dice"), "status": _guild_status()}
     gb = _guild_bid()
@@ -121,7 +121,7 @@ async def board_take(request: Request):
     _pc_remember(
         f"взял с доски гильдии заказ: {job['name']} (CR {job['cr']}) за {job['reward']} зм", 0.5
     )
-    stolen = bool(gate and gate.get("ok_stolen"))  # прошёл по чужому жетону — заслуга не в счёт
+    stolen = bool(gate and gate.get("ok_stolen"))  # passed with someone else's badge — credit doesn't count
     return {
         "taken": True,
         "dice": (gate.get("dice") if gate else None),
@@ -131,10 +131,10 @@ async def board_take(request: Request):
 
 @router.post("/api/play/delve")
 async def delve(request: Request):
-    """Отправиться к логову и вступить в бой (время на дорогу честное)."""
+    """Go to lair and enter combat (travel time is real)."""
     _play()
     lid = (await request.json()).get("lair")
-    if str(lid).startswith("inc|"):                   # городское происшествие — свой вход
+    if str(lid).startswith("inc|"):                   # city incident — own entry
         from aidnd.server.play.engine.incidents import incidents_active
         from aidnd.server.play.handlers.dungeon import incident_delve
 
@@ -152,18 +152,18 @@ async def delve(request: Request):
     if _pc_hp() <= 1:
         return {"error": "ты еле стоишь — сперва отлежись"}
     taken = any(c.get("target") == lid for c in _store().contracts(_wid(), "active"))
-    if not taken:  # не по заказу — гильдия гейтит на месте
+    if not taken:  # not on contract — guild gates on site
         gate = _guild_gate(l["cr"])
         if gate and gate.get("error"):
             return {"error": gate["error"], "dice": gate.get("dice")}
     from aidnd.server.play.handlers.dungeon import delve_enter
 
-    return delve_enter(l)  # логово = НАСТОЯЩИЙ данж (docs/dungeons.md, этап C)
+    return delve_enter(l)  # lair = REAL dungeon (docs/dungeons.md, stage C)
 
 
 @router.post("/api/play/surrender")
 async def surrender(request: Request):
-    """Сдаться страже: заплатить виру (розыск×тариф) → чист; нечем — ночь в холодной + всё серебро."""
+    """Surrender to watch: pay fine (wanted×rate) → clear; can't pay — night in cold + all coins."""
     city, people, crof, cr2b, loc = _play()
     wc = _watch_check(people, crof, loc)
     if not wc:
@@ -176,7 +176,7 @@ async def surrender(request: Request):
         got = _pc_coins()
         _store().purse_add(_wid(), "pc", -got)
         cur = _gt()
-        target = ((cur // 1440) + 1) * 1440 + PB["watch_jail_h"] * 60  # до утра следующего дня
+        target = ((cur // 1440) + 1) * 1440 + PB["watch_jail_h"] * 60  # until next morning
         _gt_add(max(PB["step_min"], target - cur))
         narr = [f"Платить нечем. Ночь в холодной, из кошеля выгребают {got} зм. Утром выпускают."]
     _wanted_clear()
@@ -192,8 +192,8 @@ async def surrender(request: Request):
 
 @router.post("/api/play/watch_flee")
 async def watch_flee(request: Request):
-    """Бежать от стражи: Dex против ловкости стражника. Ушёл — розыск ↑, ты в другом конце города;
-    попался — страж вяжет (бой)."""
+    """Flee from watch: Dex vs guard's dexterity. Escaped — wanted ↑, you're across town;
+    caught — guard engages (combat)."""
     city, people, crof, cr2b, loc = _play()
     wc = _watch_check(people, crof, loc)
     if not wc:
@@ -212,7 +212,7 @@ async def watch_flee(request: Request):
         "label": "Побег (Dex) от стражи",
     }
     if total >= dc:
-        _wanted_add(1, "сбежал от стражи")  # погоня усердствует
+        _wanted_add(1, "сбежал от стражи")  # pursuit intensifies
         nb = random.Random(f"wfleeto|{loc}|{_gt()}").choice(_S["kps"])
         _S["loc"], _S["inside"], _S["room"] = nb, None, None
         _gt_add(PB["step_min"] * 2)

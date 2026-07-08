@@ -1,7 +1,7 @@
-"""Дебаг-экран NPC: настройки слева, карта по центру (разместить NPC), таймлайн (тик),
-панель мыслей справа (ручной запуск инструментов/апрейзала). Доступ только владельцу.
+"""NPC debug screen: settings on left, map in center (place NPC), timeline (tick),
+thoughts panel on right (manual tool/appraisal run). Owner-only access.
 
-Состояние сцены процессное (один владелец) — это дебаг-стенд, не прод-механика.
+Scene state is procedural (single owner) — this is a debug stand, not prod mechanics.
 
 Key functions
 -------------
@@ -120,7 +120,7 @@ async def npcdebug_place(_: Owner, request: Request):
     if not npc:
         return _err("сначала создай сцену")
     node = int((await request.json()).get("node"))
-    if node not in scene.city._xy:                       # noqa: SLF001 — дебаг-стенд
+    if node not in scene.city._xy:                       # noqa: SLF001 — debug stand
         return _err("нет такого узла")
     npc.node = node
     return {"npc": npc.view()}

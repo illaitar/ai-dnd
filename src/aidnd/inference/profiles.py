@@ -1,7 +1,7 @@
-"""Профили запуска: role → (backend, model). Выбор — config.LLM_PROFILE (env AIDND_PROFILE).
+"""Profiles: role → (backend, model). Selection via config.LLM_PROFILE (env AIDND_PROFILE).
 
-«local» генерится из ModelManager.ROLE_MODELS (текущее поведение, тюненое в Ollama). Здесь —
-облачные/гибридные варианты. «default» применяется к ролям без явного маппинга.
+«local» is generated from ModelManager.ROLE_MODELS (current behavior, tuned in Ollama). Here —
+cloud/hybrid options. «default» applies to roles without explicit mapping.
 
 Key functions
 -------------
@@ -14,9 +14,9 @@ from __future__ import annotations
 from .. import config
 from .backends import OllamaBackend, OpenAICompatBackend
 
-_DS = ("deepseek", config.DEEPSEEK_MODEL)            # ярлык: роль → DeepSeek
+_DS = ("deepseek", config.DEEPSEEK_MODEL)            # tag: role → DeepSeek
 
-# роли, что остаются ЛОКАЛЬНЫМИ в hybrid (есть дообученный адаптер / латентность-критичны)
+# roles that remain LOCAL in hybrid (have fine-tuned adapter / latency-critical)
 _LOCAL_TUNED = {
     "narrator": config.NARRATOR_MODEL, "location_writer": config.LOCATION_MODEL,
     "router": config.ROUTER_MODEL, "arbiter": config.ARBITER_MODEL,
@@ -24,7 +24,7 @@ _LOCAL_TUNED = {
     "intent": config.INTENT_MODEL,
 }
 
-# мозги/лор/режиссура — в DeepSeek (недообученные, латентность-терпимые)
+# minds/lore/direction — to DeepSeek (not fine-tuned, latency-tolerant)
 _DS_ROLES = ("cognition", "character_gen", "persona_gen", "faction_gen", "lore_keeper",
              "loremaster", "campaign_architect", "campaign_director", "event_director",
              "plausibility", "reflection", "director", "tactician", "merchant", "street_event",
@@ -40,8 +40,8 @@ PROFILES: dict[str, dict] = {
 
 
 def routing_for(profile_name: str, role_models: dict) -> dict:
-    """role → (backend, model) для активного профиля. local строим из ROLE_MODELS."""
-    if profile_name not in PROFILES:                 # local (или неизвестный → local)
+    """role → (backend, model) for the active profile. local built from ROLE_MODELS."""
+    if profile_name not in PROFILES:                 # local (or unknown → local)
         out = {"default": ("ollama", config.BASE_MODEL)}
         out.update({role: ("ollama", spec[0]) for role, spec in role_models.items()})
         return out
@@ -49,7 +49,7 @@ def routing_for(profile_name: str, role_models: dict) -> dict:
 
 
 def make_backends(routing: dict, ollama_client=None) -> dict:
-    """Поднять только бэкенды, которые реально использует профиль (по их именам в routing)."""
+    """Instantiate only backends actually used by the profile (by their names in routing)."""
     used = {bk for bk, _ in routing.values()}
     out: dict = {}
     if "ollama" in used:

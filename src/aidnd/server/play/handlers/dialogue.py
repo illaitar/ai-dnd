@@ -1,5 +1,5 @@
-"""Домен ДИАЛОГ (хендлеры /talk /say) — распил world.py (docs/loop.md). Знакомство, реплики; тон
-слов игрока → отношения/доверие/страх/эмоции. Голос NPC — сервис world._voice.
+"""Dialogue domain (handlers /talk /say) — split from world.py (docs/loop.md). Introductions, lines; tone
+of player's words → relationships/trust/fear/emotions. NPC voice — service world._voice.
 
 Key functions
 -------------
@@ -53,10 +53,10 @@ async def talk(request: Request):
         return {"error": "его здесь нет — говорить можно с тем, кто рядом"}
     p = people[npc]
     first = npc not in _met()
-    _pc().rel(npc)  # заговорил = познакомился (имя открыто)
-    _S["dlg"] = npc  # мир знает: чужак занят ЭТИМ разговором
+    _pc().rel(npc)  # spoke = met (name revealed)
+    _S["dlg"] = npc  # world knows: stranger is busy IN THIS conversation
     lv = _S.get("live")
-    if lv:  # сцена видит действие игрока
+    if lv:  # scene sees the player's action
         lv["last"][PLAYER] = f"подошёл и заговорил с {p.name}"
         lv["pc_spoke"] = True
         from aidnd.server.play.engine.convo import conv_note_say
@@ -65,11 +65,11 @@ async def talk(request: Request):
     _gt_add(PB["talk_min"])
     st = p.state
     st.needs["social"] = max(st.needs.get("social", 0.0), 0.4)
-    if first:  # знакомство ложится в память ОБОИМ
+    if first:  # introduction goes into memory OF BOTH
         st.memory.add("незнакомец (игрок) подошёл и заговорил со мной", _mt(), 0.4, about=[PLAYER])
         _pc_remember(f"я познакомился с {p.name} ({p.role})", 0.45, about=[npc])
         _npc_save(npc)
-    _materialize_npc(npc, "visible")  # видимое (экипировка+ключи) — настоящие предметы
+    _materialize_npc(npc, "visible")  # visible (gear+keys) — real items
     rel = st.relationships.get(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     per = p.persona or {}
     emo = _emo(st)
@@ -82,12 +82,12 @@ async def talk(request: Request):
         m.text
         for m in _pc().memory.recall(f"{p.name} {p.role}", now=_mt(), k=3)
         if npc in (m.about or [])
-    ]  # что игрок ЗНАЕТ об этом человеке
+    ]  # what the player KNOWS about this person
     try:
-        contract = _contract_offer(npc)  # у него может быть к тебе дело (из агенды)
-    except (LLMUnavailable, LLMBadOutput):  # без модели не притворяемся (принцип 1)
+        contract = _contract_offer(npc)  # he might have business with you (from agenda)
+    except (LLMUnavailable, LLMBadOutput):  # without the model, we don't pretend (principle 1)
         raise
-    except Exception:  # noqa: BLE001 — прочие сбои просьбы не ломают диалог
+    except Exception:  # noqa: BLE001 — other request failures don't break dialogue
         contract = None
     return {
         "name": p.name,
@@ -127,9 +127,9 @@ async def say(request: Request):
     p = people[npc]
     rel = p.state.relationships.setdefault(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     text = str(b.get("text", ""))
-    _S["dlg"] = npc  # разговор продолжается
+    _S["dlg"] = npc  # conversation continues
     lv = _S.get("live")
-    if lv:  # сцена видит: чужак беседует (реплика — в разговор-объект)
+    if lv:  # scene sees: stranger talks (line — in conversation-object)
         lv["last"][PLAYER] = f"беседует с {p.name}: «{text[:50]}»"
         lv["pc_spoke"] = True
         from aidnd.server.play.engine.convo import conv_note_say
@@ -137,7 +137,7 @@ async def say(request: Request):
         conv_note_say(lv, PLAYER, npc, text[:100], zplace)
     _gt_add(PB["talk_min"])
     line = _voice(p, rel, "reply", text)
-    tone = _S.get("last_tone", "neutral")  # тон слов игрока — из уст самого NPC
+    tone = _S.get("last_tone", "neutral")  # tone of player's words — from NPC's own lips
     if tone == "friendly":
         rel["affinity"] = min(1.0, rel["affinity"] + PB["tone_friendly_aff"])
     elif tone == "rude":
@@ -155,12 +155,12 @@ async def say(request: Request):
         _mt(),
         0.4,
         about=[PLAYER],
-    )  # диалог остаётся в памяти NPC
+    )  # dialogue remains in NPC's memory
     _pc_remember(f"{p.name} на «{text[:60]}» ответил(а): «{line[:90]}»", 0.35, about=[npc])
     _npc_save(npc)
     emo = _emo(p.state)
-    ct_done = _contract_on_talk(npc)  # befriend-уговор: цель прониклась
-    t = _world_tick()  # реплика = ход мира (пошаговость)
+    ct_done = _contract_on_talk(npc)  # befriend-contract: target bought in
+    t = _world_tick()  # line = world turn (turn-based)
     return {
         **t,
         "line": line,

@@ -1,6 +1,6 @@
-"""Кастинг: нанизать актёров библии на СУЩЕСТВУЮЩИХ placed NPC (решение С3: ~80%).
-Матч по роли/персоне: архетип → предпочтительные городские роли; жадный скоринг.
-Не нашли — актёр остаётся NEW (значимого NPC заведёт след. срез).
+"""Casting: string cast members onto EXISTING placed NPCs (solution C3: ~80%).
+Match by role/persona: archetype → preferred city roles; greedy scoring.
+Not found — actor remains NEW (significant NPC will be added in next slice).
 
 Key functions
 -------------
@@ -10,7 +10,7 @@ match_cast(cast: list, people: dict) -> dict : Greedily match cast members to
 
 from __future__ import annotations
 
-# архетип → предпочтительные роли горожан (порядок = приоритет)
+# archetype → preferred city citizen roles (order = priority)
 _PREF = {
     "антагонист-в-тени": ("знахарка", "жрец", "маг", "писец"),
     "фасадный лидер": ("жрец", "трактирщик", "лавочник"),
@@ -29,8 +29,8 @@ _PREF = {
 
 
 def match_cast(cast: list, people: dict) -> dict:
-    """Актёр → pid. Жадно: важные первыми, роль из предпочтений, каждый NPC — один раз.
-    Возвращает {cast_id: pid|None}; мутирует cast (поле «актёр»)."""
+    """Actor → pid. Greedily: important first, role from preferences, each NPC — once.
+    Returns {cast_id: pid|None}; mutates cast (field 'actor')."""
     used: set = set()
     by_role: dict = {}
     for pid, p in people.items():
@@ -41,7 +41,7 @@ def match_cast(cast: list, people: dict) -> dict:
         for role in _PREF.get(a.get("роль"), ()) + ("горожанин",):
             pool = [i for i in by_role.get(role, []) if i not in used]
             if pool:
-                pid = sorted(pool)[0]                       # детерминизм
+                pid = sorted(pool)[0]                       # determinism
                 break
         if pid:
             used.add(pid)

@@ -1,4 +1,4 @@
-"""Домен ПРОЧЕЕ (/hero /debuglog) — распил world.py. Имя героя, скачиваемый лог сессии.
+"""MISC domain (/hero /debuglog) — split from world.py. Hero name, downloadable session log.
 
 Key functions
 -------------
@@ -22,7 +22,7 @@ from aidnd.server.play.engine.world import _play
 
 @router.post("/api/play/hero")
 async def set_hero(request: Request):
-    """Задать имя героя (с лендинга) — один раз для нового мира; не перетирать уже названного."""
+    """Set hero name (from landing page) — once per new world; do not overwrite existing name."""
     _play()
     name = (await request.json()).get("name")
     if name and _pc_name() == "Странник":
@@ -33,8 +33,8 @@ async def set_hero(request: Request):
 
 @router.get("/api/play/debuglog")
 def debug_log(download: int = 0, tail: int = 0):
-    """Подробный лог текущей сессии (все записи + полные трейсбеки). tail=КБ — только хвост;
-    download=1 — как файл-вложение. Для отладки из интерфейса."""
+    """Detailed session log (all records + full tracebacks). tail=KB — tail only;
+    download=1 — as attachment. For debugging from UI."""
     from fastapi.responses import PlainTextResponse
 
     from aidnd.server.debuglog import read_log
@@ -47,7 +47,7 @@ def debug_log(download: int = 0, tail: int = 0):
 
 @router.post("/api/play/debuglog/clear")
 def debug_log_clear():
-    """Очистить лог сессии (кнопка «очистить» в интерфейсе)."""
+    """Clear session log (clear button in UI)."""
     from aidnd.server.debuglog import clear_log
 
     _play()
@@ -57,8 +57,8 @@ def debug_log_clear():
 
 @router.get("/api/play/schedule")
 def npc_schedule(npc: str = ""):
-    """Распорядок дня NPC (карточка Bombers' Notebook): где он в какую фазу — из predict().
-    Виден лишь для ЗНАКОМОГО (talk); незнакомца читать нельзя (туман личности)."""
+    """NPC daily schedule (Bombers' Notebook card): where at each phase — from predict().
+    Visible only for familiar (talk); unfamiliar cannot be read (fog of identity)."""
     from aidnd.server.play.engine.core import _S, _met
     from aidnd.server.play.engine.worldsim import forecast, predict
     people = _S.get("people") or {}
@@ -78,15 +78,15 @@ def npc_schedule(npc: str = ""):
 
 @router.get("/api/play/economy")
 def economy_board():
-    """Приборка экономики (стенд/наблюдаемость): именованные цепочки — товар/цена/запас/
-    производители/дефицит + монета города M."""
+    """Economy dashboard (board/observability): named chains — good/price/stock/
+    producers/deficit + city coin M."""
     _play()
     from aidnd.server.play.engine.economy import chains_view, money_supply
     return {"money": money_supply(), "chains": chains_view()}
 
 
 def _closed_note(bid):
-    """Если venue закрыт по часам — вернуть {error: «закрыто до N»}, иначе None (открыто/жильё)."""
+    """If venue closed by hours — return {error: "closed until N"}, else None (open/residence)."""
     from aidnd.server.play.engine.core import _binfo, _gt
     from aidnd.server.play.engine.open_hours import is_open, opens_at
     if not bid:
@@ -100,8 +100,8 @@ def _closed_note(bid):
 
 @router.get("/api/play/market")
 def market_board():
-    """Товарный прилавок ЗДЕСЬ (B2): цепочки, чей venue = здание игрока, — товар/цена/запас/
-    сколько у игрока в котомке. Пусто, если игрок не внутри торгового venue."""
+    """Goods counter HERE (B2): chains whose venue = player building — good/price/stock/
+    player inventory qty. Empty if player not in trading venue."""
     _play()
     from aidnd.server.play.engine.core import _S, _binfo, _gt, _store, _wid
     from aidnd.server.play.engine.economy import ensure, market_here
@@ -115,7 +115,7 @@ def market_board():
 
 @router.post("/api/play/market/buy")
 async def market_buy(request: Request):
-    """Купить товар цепочки по живой цене: запас−, цена↑, монета pc→производителям (M+)."""
+    """Buy goods from chain at live price: stock−, price↑, coin pc→producers (M+)."""
     _play()
     from aidnd.server.play.engine.core import _S, _gt, _gt_add
     from aidnd.server.play.engine.economy import player_buy
@@ -129,7 +129,7 @@ async def market_buy(request: Request):
 
 @router.post("/api/play/market/sell")
 async def market_sell(request: Request):
-    """Сбыть товар из котомки в цепочку: запас+, цена↓, монета производителей→pc (M−)."""
+    """Sell goods from inventory to chain: stock+, price↓, coin producers→pc (M−)."""
     _play()
     from aidnd.server.play.engine.core import _S, _gt, _gt_add
     from aidnd.server.play.engine.economy import player_sell
@@ -143,7 +143,7 @@ async def market_sell(request: Request):
 
 @router.get("/api/play/deeds")
 def deeds_list(limit: int = 12):
-    """Хроника мира: последние ДЕЛА (журнал deeds) — сырьё для UI-хроники и дебага."""
+    """World chronicle: latest DEEDS (deeds journal) — raw material for UI chronicle and debug."""
     _play()
     from aidnd.server.play.engine.core import _store, _wid
     return {"deeds": _store().deeds(_wid(), limit=min(int(limit), 50))}

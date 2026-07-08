@@ -1,9 +1,9 @@
-"""Интерактивный стенд разума ОДНОГО NPC: выбор архетипа + ручная настройка черт/нужд/эмоций,
-ввод ситуации (текстом → LLM разбирает в сцену, либо пресеты/сущности вручную) и ПОЛНЫЙ ГРАФ решения
-(восприятие → цели → utility по примитивам → выбор). Доступ только владельцу.
+"""Interactive workbench for ONE NPC mind: archetype selection + manual trait/need/emotion setup,
+situation input (free text → LLM parses into scene, or presets/entities manually) and FULL DECISION GRAPH
+(perception → goals → utility over primitives → choice). Owner access only.
 
-Всё считает механическое ядро aidnd.mind (score/propose_goals); LLM — только чтобы разобрать
-свободный текст ситуации в структурированную сцену.
+All mechanical computation by aidnd.mind core (score/propose_goals); LLM only to parse
+free-text situation into structured scene.
 
 Key functions
 -------------
@@ -41,7 +41,7 @@ router = APIRouter(tags=["minddebug"])
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 _MODEL = None
 
-# 15 архетипов (черты + сила + видимое богатство) — как в scripts/archetypes.py
+# 15 archetypes (traits + power + visible wealth) — as in scripts/archetypes.py
 ARCHETYPES = {
     "Крестьянин": ({}, 1, .2),
     "Стражник": ({"lawful": .9, "loyalty": .85, "bravery": .8, "honesty": .8, "malice": .05}, 3, .3),
@@ -76,7 +76,7 @@ def _item(d: dict) -> Item:
 
 
 def _build(b: dict):
-    """Собрать NPC + мир из запроса {traits, needs, emotion, self, scene}."""
+    """Build NPC + world from request {traits, needs, emotion, self, scene}."""
     cfg = NpcConfig(id="я", name=b.get("name", "NPC"),
                     traits={**dict.fromkeys(TRAITS, 0.5), **(b.get("traits") or {})})
     st = NpcState.from_config(cfg)
@@ -125,7 +125,7 @@ def _build(b: dict):
 def _decide(b: dict) -> dict:
     st, w, here = _build(b)
     p = perceive(st, w)
-    brain = think(st, w, p, modulate=bool(b.get("modulate", True)))     # граф-мозг: трасса+модуляторы
+    brain = think(st, w, p, modulate=bool(b.get("modulate", True)))     # brain graph: trace + modulators
     brain["perceived"] = {
         "here": [{"id": bd.id, "power": bd.power, "appearance": round(bd.appearance, 2),
                   "attention": round(bd.attention, 2), "faction": bd.faction,
@@ -179,7 +179,7 @@ def minddebug_schema(_: Owner) -> dict:
 async def minddebug_decide(_: Owner, request: Request):
     try:
         return _decide(await request.json())
-    except Exception as exc:                              # дебаг-стенд: возвращаем ошибку, не 500
+    except Exception as exc:                              # debug workbench: return error, not 500
         return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=400)
 
 

@@ -1,9 +1,9 @@
-"""РАЗГОВОР-ОБЪЕКТ живой сцены (docs/locations.md): {зона, участники, последние реплики,
-долг ответа}. Заменяет «нуджи в память»: участники видят беседу СТРУКТУРНО в промпте,
-долг ответа — верхний импульс дирижёра, «я уже здоровался» — факт разговора, не кулдаун.
+"""Conversation object of a live scene (docs/locations.md): {zone, participants, recent lines,
+answer debt}. Replaces "nudge to memory": participants see conversation STRUCTURALLY in the prompt,
+answer debt — the top impulse of the conductor, "I already greeted" — fact of conversation, not cooldown.
 
-Чистая логика над lv-словарём (тестируется без LLM/сервера). Разговор живёт в зоне:
-ушёл из зоны — вышел из беседы; тишина N тиков — беседа распалась.
+Pure logic over lv-dict (tested without LLM/server). Conversation lives in a zone:
+left the zone — left the conversation; silence of N ticks — conversation broke apart.
 
 Key functions
 -------------
@@ -16,9 +16,9 @@ conv_block(lv, pid, names) -> str | None : Build current conversation prompt blo
 
 from __future__ import annotations
 
-QUIET_DIE = 3          # тиков тишины → разговор распался
-LOG_KEEP = 6           # сколько последних реплик держим
-DEBT_STALE = 3         # тиков без ответа → долг «прогорел» (адресат явно ушёл от ответа)
+QUIET_DIE = 3          # ticks of silence → conversation broke apart
+LOG_KEEP = 6           # how many recent lines we keep
+DEBT_STALE = 3         # ticks without answer → debt "burned out" (addressee clearly avoided answer)
 
 
 def _convs(lv: dict) -> list:
@@ -26,15 +26,15 @@ def _convs(lv: dict) -> list:
 
 
 def conv_of(lv: dict, pid: str):
-    """Разговор, в котором состоит pid (участник может быть только в одном)."""
+    """Conversation in which pid participates (participant can only be in one)."""
     return next((c for c in _convs(lv) if pid in c["members"]), None)
 
 
 def conv_note_say(lv: dict, frm: str, to: str, text: str, zone: str | None) -> dict:
-    """Реплика frm→to: попадает в их разговор (создаём/присоединяем/сливаем).
-    Вопрос или прямое обращение вешает ДОЛГ ОТВЕТА на адресата."""
+    """Line from frm→to: goes into their conversation (create/join/merge).
+    Question or direct address sets ANSWER DEBT on the addressee."""
     ca, cb = conv_of(lv, frm), conv_of(lv, to)
-    if ca and cb and ca is not cb:                      # два кружка слились репликой
+    if ca and cb and ca is not cb:                      # two circles merged by a line
         ca["members"] = list(dict.fromkeys(ca["members"] + cb["members"]))
         ca["log"] = (cb["log"] + ca["log"])[-LOG_KEEP:]
         _convs(lv).remove(cb)
@@ -51,14 +51,14 @@ def conv_note_say(lv: dict, frm: str, to: str, text: str, zone: str | None) -> d
     c["zone"] = zone or c.get("zone")
     c["log"] = (c["log"] + [(frm, text[:120])])[-LOG_KEEP:]
     c["quiet"] = 0
-    if c.get("debt") and c["debt"].get("to") == frm:    # ответил — долг гасится
+    if c.get("debt") and c["debt"].get("to") == frm:    # answered — debt extinguished
         c["debt"] = None
     c["debt"] = {"to": to, "frm": frm, "text": text[:100], "ticks": 0}
     return c
 
 
 def conv_debt_to(lv: dict, pid: str):
-    """Висит ли на pid долг ответа (ему задали вопрос/обратились)."""
+    """Does pid have an outstanding answer debt (they were asked a question/addressed)."""
     c = conv_of(lv, pid)
     if c and c.get("debt") and c["debt"]["to"] == pid and c["debt"]["ticks"] <= DEBT_STALE:
         return c["debt"]
@@ -66,14 +66,14 @@ def conv_debt_to(lv: dict, pid: str):
 
 
 def conv_tick(lv: dict, place_of) -> None:
-    """Старение разговоров: тишина копится, ушедшие из зоны выходят, пустые распадаются.
-    place_of(pid) → текущее место тела (зона) или None."""
+    """Aging conversations: silence accumulates, those who left the zone exit, empty ones break apart.
+    place_of(pid) → current body location (zone) or None."""
     for c in list(_convs(lv)):
         c["quiet"] += 1
         if c.get("debt"):
             c["debt"]["ticks"] += 1
             if c["debt"]["ticks"] > DEBT_STALE:
-                c["debt"] = None                        # вопрос повис и прогорел — факт беседы
+                c["debt"] = None                        # question lingered and burned out — fact of conversation
         if c.get("zone"):
             c["members"] = [m for m in c["members"]
                             if place_of(m) in (c["zone"], None)]
@@ -82,7 +82,7 @@ def conv_tick(lv: dict, place_of) -> None:
 
 
 def conv_block(lv: dict, pid: str, names: dict) -> str | None:
-    """Структурный блок «ТЕКУЩИЙ РАЗГОВОР» для промпта участника."""
+    """Structural block "CURRENT CONVERSATION" for participant's prompt."""
     c = conv_of(lv, pid)
     if not c or not c["log"]:
         return None

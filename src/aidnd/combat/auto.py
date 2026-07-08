@@ -1,5 +1,5 @@
-"""Авторезолв боя целиком (обе стороны на ИИ): NPC-партии зачищают подземелья ОФСКРИН тем же
-движком, что и игрок, — один набор правил на весь мир.
+"""Auto-resolve full combat (both sides on AI): NPC parties clear dungeons OFF-SCREEN using the same
+engine as the player — one set of rules for the whole world.
 
 Key functions
 -------------
@@ -15,7 +15,7 @@ def resolve(party: list, foes: list, seed: str, obstacles=None, waves=None) -> d
     enc = Encounter(party, foes, seed, obstacles=obstacles, waves=waves)
     guard = 0
     while enc.status() == "active" and guard < 600:
-        if enc.foes_cleared() and enc.next_wave():         # текущий накат зачищен — следующий
+        if enc.foes_cleared() and enc.next_wave():         # current wave cleared — next one
             continue
         c = enc.current()
         if c is None:

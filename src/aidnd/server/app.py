@@ -1,8 +1,8 @@
-"""FastAPI-оболочка НОВОГО контура. Старый игровой движок (runtime/orchestrator/content/gen/world/
-npc/combat/rules) снесён — интерфейс игрока строится на mind+citygraph+worldgen.
+"""FastAPI wrapper for the NEW game loop. The old game engine (runtime/orchestrator/content/gen/world/
+npc/combat/rules) has been removed — the player interface is built on mind+citygraph+worldgen.
 
-Здесь: авторизация, лимиты, дебаг-стенды (/citydebug, /minddebug, /npcdebug) и роутеры игрового
-контура (server/play/*): сцена, действие, бой, магия, торговля, подземелья, экономика.
+Here: authentication, rate limits, debug stands (/citydebug, /minddebug, /npcdebug) and routers for the game
+loop (server/play/*): scene, action, combat, magic, trading, dungeons, economy.
 
 Key functions
 -------------
@@ -32,7 +32,7 @@ from .routes_usage import router as _usage_router
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 app = FastAPI(title="AI-DnD Engine")
 
-# подробный файловый лог сессии (для отладки, скачивается из /api/play/debuglog)
+# Detailed session file log (for debugging, downloaded from /api/play/debuglog)
 from . import debuglog  # noqa: E402
 from .play.engine.core import current_world_id  # noqa: E402
 
@@ -41,7 +41,7 @@ debuglog.setup(current_world_id)
 
 @app.exception_handler(LLMUnavailable)
 async def _llm_unavailable(request: Request, exc: LLMUnavailable) -> JSONResponse:
-    """Правило проекта: без LLM не подменяем контент — честная ошибка игроку."""
+    """Project rule: without LLM we don't substitute content — give honest error to player."""
     return JSONResponse(status_code=503, content={
         "error": "llm_unavailable", "detail": str(exc),
         "narr": ["Рассказчик недоступен — мир замер. Повтори действие чуть позже."]})
@@ -56,14 +56,14 @@ async def _llm_bad_output(request: Request, exc: LLMBadOutput) -> JSONResponse:
 
 @app.middleware("http")
 async def _log_requests(request: Request, call_next):
-    """Трасса запроса + ПОЛНЫЙ трейсбек любого необработанного исключения в файловый лог."""
+    """Request trace + FULL traceback of any unhandled exception to file log."""
     import logging
     import time
     log = logging.getLogger("aidnd.req")
     t0 = time.perf_counter()
     try:
         resp = await call_next(request)
-    except Exception:                                      # noqa: BLE001 — залогировать и пробросить
+    except Exception:                                      # noqa: BLE001 — log and re-raise
         log.exception("НЕОБРАБОТАННОЕ исключение: %s %s", request.method, request.url.path)
         raise
     dt = (time.perf_counter() - t0) * 1000
@@ -82,7 +82,7 @@ app.include_router(_play_router)
 
 @app.on_event("startup")
 async def _init_service_db() -> None:
-    """Создать таблицы сервиса. БД недоступна → анонимный демо-режим всё равно работает."""
+    """Create service tables. DB unavailable → anonymous demo mode still works."""
     try:
         from .db import init_db
         await init_db()
@@ -107,7 +107,7 @@ def index() -> HTMLResponse:
 
 @app.get("/play")
 async def play_page(request: Request) -> HTMLResponse:
-    """Игра — только под сессией (полная авторизация по email)."""
+    """Game — only under session (full email-based authentication)."""
     from fastapi.responses import RedirectResponse
 
     from .auth import user_for_token
@@ -118,7 +118,7 @@ async def play_page(request: Request) -> HTMLResponse:
         async with SessionLocal() as db:
             if token:
                 user = await user_for_token(db, token)
-    except Exception:                                      # noqa: BLE001 — БД лежит → демо-режим
+    except Exception:                                      # noqa: BLE001 — DB down → demo mode
         db_ok = False
     if not user and db_ok and not os.environ.get("AIDND_OPEN_PLAY"):
         return RedirectResponse("/login?next=/play", status_code=303)
@@ -135,7 +135,7 @@ def login_page() -> HTMLResponse:
 if os.path.isdir(WEB_DIR):
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
-# портреты NPC из пула (worldgen) — файлы в data/portraits (в гит не идут, на прод rsync)
+# NPC portraits from pool (worldgen) — files in data/portraits (not in git, rsync to prod)
 _PORTRAITS = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "portraits")
 if os.path.isdir(_PORTRAITS):
     app.mount("/portraits", StaticFiles(directory=_PORTRAITS), name="portraits")
@@ -143,6 +143,6 @@ if os.path.isdir(_PORTRAITS):
 
 def run(host: str = "127.0.0.1", port: int | None = None) -> None:
     import uvicorn
-    port = port or int(os.environ.get("PORT", "8000"))   # PORT env → удобно для preview/прокси
+    port = port or int(os.environ.get("PORT", "8000"))   # PORT env → convenient for preview/proxy
     print(f"AI-DnD веб-сервер: http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")

@@ -1,200 +1,199 @@
-# Локации: пространство, зоны, предметы
+# Locations: space, zones, objects
 
-Пространство — собственность МИРА, не разума: mind только воспринимает (`perceive`) и хочет
-(`goals`). Локация — единая сущность для интерьеров И улицы. Решения зафиксированы
+Space belongs to the WORLD, not the mind: mind only perceives (`perceive`) and has desires
+(`goals`). A location is a single entity for both interiors AND streets. Decisions finalized
 2026-07-04.
 
-## Сущность
+## Entity
 
 ```
-ЛОКАЦИЯ = интерьер помещения ЗДАНИЯ  |  уличное место (узел графа: площадь·улица·двор·берег)
-  здание → помещения (sub_rooms, мини-граф) → ЗОНЫ → ОБЪЕКТЫ
-  улица  → зоны узла (площадь: столб·колодец·лотки; улица: обочина·подворотня; двор: сад/сарай)
+LOCATION = interior of a BUILDING  |  street place (graph node: plaza·street·yard·shore)
+  building → rooms (sub_rooms, mini-graph) → ZONES → OBJECTS
+  street  → node zones (plaza: post·well·stalls; street: shoulder·alley; yard: garden/shed)
 
-ЗОНА:    kind (bar·tables·hearth·counter·shelves·storage·workshop·altar·pews·beds·private·
-         bath·games·door·well·post·stalls·yard) · имя · шум · приватность · вместимость ·
-         пост роли (трактирщик привязан к стойке ПО РАБОТЕ)
-         ГРУППОВЫЕ ЯКОРЯ разворачиваются в ИНСТАНСЫ — везде, где место живёт СВОЕЙ группой:
-         столы таверны (5-9 по размеру здания) · игровые столы · комнаты постоя (lockable) ·
-         лежанки целебницы · стойла конюшни · секции склада · столы отрядов гильдии · лотки
-         площади · камеры острога (kind cell, шаблон впрок). Инстанс = СВОЯ зона: атом
-         разговора и приватности; положение-spot (у окна · в тёмном углу · под лестницей ·
-         за ширмой…) двигает шум/приватность из данных. Общими остаются пространства, где
-         люди реально вперемешку: стойка (там подслушивают — это правда жизни), скамьи
-         храма, очаг.
-ОБЪЕКТ:  ПОЛНОЦЕННЫЙ предмет мира (фактшит surface/hidden, [items.md](items.md)) + роли зоны:
-         afford {нужда: закрытие/час}   — очаг→comfort, котёл→hunger, лежанка→fatigue
-         fixed | loose                  — стойку не унести; кружку можно (и можно ей драться)
-         container (+ключ)              — ёмкости получают адрес-зону
+ZONE:    kind (bar·tables·hearth·counter·shelves·storage·workshop·altar·pews·beds·private·
+         bath·games·door·well·post·stalls·yard) · name · noise · privacy · capacity ·
+         role post (bartender tied to counter BY WORK)
+         GROUP ANCHORS expand into INSTANCES — everywhere a place lives through its own group:
+         tavern tables (5-9 by building size) · gaming tables · lodge rooms (lockable) ·
+         healer's cots · stable stalls · storage sections · guild squad tables · plaza stalls ·
+         jail cells (kind cell, template in reserve). Instance = OWN zone: atom
+         of conversation and privacy; position-spot (by window · in dark corner · under stairs ·
+         behind screen…) drives noise/privacy from data. Shared remain spaces where
+         people truly mingle: counter (they eavesdrop there — that's life), temple benches, hearth.
+OBJECT:  FULL-FLEDGED world item (factsheet surface/hidden, [items.md](items.md)) + zone roles:
+         afford {need: closure/hour}    — hearth→comfort, cauldron→hunger, cot→fatigue
+         fixed | loose                  — counter cannot be carried; cup can (and can be used as weapon)
+         container (+key)               — containers get zone address
 ```
 
-**Никаких стопок**: шесть кружек = шесть записей с живыми различиями (щербатая, треснувшая…).
-Тысячи записей — норма; куются ОДИН РАЗ в пул, миры материализуют без LLM ([принцип 7](README.md)).
+**No stacks**: six cups = six records with living differences (chipped, cracked…).
+Thousands of records — the norm; forged ONCE into the pool, worlds materialize without LLM ([principle 7](README.md)).
 
-## Рекурсия модели потребностей
+## Needs model recursion
 
-Снаружи (кольцо B): выбор ЗДАНИЯ = `окно(фаза) × симпатия(черты) × Σ(закрытие·давление)`
-([mind.md](mind.md), society). Внутри — **тот же скоринг на уровень ниже**: выбор ЗОНЫ через
-afford её объектов. Занятие = `use` afford-объекта (отдельной системы занятий нет). Голодный
-садится к столу, уставший к лежанке, нелюдим в тихий угол, мастер держится поста. Тайник в
-стойке — `hidden` с гейтом `via: context/tool`.
+Outside (ring B): BUILDING choice = `window(phase) × affinity(traits) × Σ(closure·pressure)`
+([mind.md](mind.md), society). Inside — **the same scoring one level deeper**: ZONE choice via
+its objects' affordances. Occupation = `use` of afford-object (no separate occupation system). 
+Hungry sits at table, tired at cot, antisocial in quiet corner, craftsman stays at post. 
+Hidden cache in counter — `hidden` with gate `via: context/tool`.
 
-## Данные и конвейер наполнения
+## Data and filling pipeline
 
-1. **Шаблоны зон** по типу здания/улицы — `content/zones.json` (данные, не LLM): состав зон,
-   kind-дефолты шума/приватности/вместимости, посты ролей.
-2. **Наполнение** — роль `furnisher` [LLM], один вызов на ЗОНУ: фактшит здания + зона →
-   каждый предмет отдельной записью (4–10 на зону), afford/fixed, ≤1 тайника на зону,
-   достаток обстановки честен tier/prosperity здания.
-3. **Пул**: `building_pool.data.zones` (офлайн `scripts/furnish.py`, resume); ёмкости
-   фактшита приписываются к зонам.
-4. **Материализация в мир** (при создании, без LLM): объекты зон → реальные `items` в
-   live.db, holder = `zone:<bid>/<zid>` — лутабельны, юзабельны, переносимы (loose).
+1. **Zone templates** by building/street type — `content/zones.json` (data, not LLM): zone composition,
+   kind-defaults for noise/privacy/capacity, role posts.
+2. **Filling** — `furnisher` role [LLM], one call per ZONE: building factsheet + zone →
+   each object as separate record (4–10 per zone), afford/fixed, ≤1 cache per zone,
+   furnishing abundance honest to building tier/prosperity.
+3. **Pool**: `building_pool.data.zones` (offline `scripts/furnish.py`, resume); factsheet
+   containers assigned to zones.
+4. **Materialization to world** (on creation, no LLM): zone objects → real `items` in
+   live.db, holder = `zone:<bid>/<zid>` — lootable, usable, portable (loose).
 
-## План локации (визуал)
+## Location plan (visual)
 
-`worldgen/floorplan.py` — разделение по [принципу 2](README.md): **LLM решает вкус, код —
-геометрию с гарантиями.**
+`worldgen/floorplan.py` — division by [principle 2](README.md): **LLM decides taste, code —
+geometry with guarantees.**
 
-- **LLM** (роль `layout_architect`, 1 вызов на здание, кэш в пуле `data.layout`,
-  кламп enum'ами): `windows left|right|both|none · bar_wall left|right ·
-  tables rows|perimeter|mixed · density airy|normal|packed` — мрачная кузница получается
-  без окон и packed, светлая мастерская — rows с окнами.
-- **Код-раскладчик v3** (по ресёрчу Make It Home / LayoutVLM):
-  - **футпринт**: детерминированный архетип по сиду здания — прямоугольный зал или L
-    (зал + крыло-альков), контур-полигон рисуется стенами; крюк: миры смогут подставлять
-    растеризованный полигон реального дома с карты города;
-  - **якоря** (стойка/очаг/верстак/алтарь/лестница) — правилами, замораживаются;
-  - **группы** (столы/лежанки) — на РЕШЁТКЕ-латтисе (ряды гарантированы конструкцией;
-    тесно → решётка прогрессивно уплотняется — лавки впритык), раскладку ищет
-    **simulated annealing** (Metropolis, сид = id здания, ~50 мс/здание) с термами:
-    предпочтение спота (непрерывная цена: «у окна» = дистанция до оконной стены) ·
-    **privacy зоны ↔ дистанция от прохода** (наш уникальный терм) · разрежённость ·
+- **LLM** (`layout_architect` role, 1 call per building, cache in pool `data.layout`,
+  clamped by enums): `windows left|right|both|none · bar_wall left|right ·
+  tables rows|perimeter|mixed · density airy|normal|packed` — grim forge has
+  no windows and packed, bright workshop — rows with windows.
+- **Layout v3** (based on Make It Home / LayoutVLM research):
+  - **footprint**: deterministic archetype by building seed — rectangular hall or L
+    (hall + wing-alcove), outline-polygon drawn by walls; hook: worlds can substitute
+    rasterized polygon of a real house from city map;
+  - **anchors** (counter/hearth/workbench/altar/stairs) — by rules, frozen;
+  - **groups** (tables/cots) — on LATTICE grid (rows guaranteed by construction;
+    tight → lattice progressively densifies — benches edge-to-edge), layout found by
+    **simulated annealing** (Metropolis, seed = building id, ~50 ms/building) with terms:
+    spot preference (continuous cost: "by window" = distance to window wall) ·
+    **zone privacy ↔ distance from passage** (our unique term) · sparseness ·
     clearance;
-  - **гарантии**: главный проход свят, клетка перед КАЖДОЙ дверью и подход к лестнице
-    зарезервированы, `reachable()` — финальный BFS (тест на 5 типах × 3 пресетах).
-  Задние комнаты (private/storage/**cell**) — полосой позади зала с дверями-проёмами;
-  запираемые комнаты постоя — блок «2-й этаж» 🔒.
-- **Рендер, два слоя**: структурный SVG (дебаг, карточка пула) и **бумажный**
-  (`worldgen/floorart.py`, эстетика one-page-dungeon): пергамент feTurbulence (зерно+пятна),
-  дрожащий чернильный штрих (сидированный — дом всегда нарисован одинаково), Dyson-хэтчинг
-  наружу, ~18 глифов мебели по kind (стол со стульями, очаг с пламенем, наковальня, бочки,
-  решётка камеры…), двери с дугами, окна-засечки, филлеры обжитости (коврик у входа, дрова
-  у очага, пятна/трещины пола), номера зон + легенда (группы схлопнуты: «стол ×8»).
-  Галерея всех планов: `/citydebug/plans`.
-- **План = игровой UI входа** (на проде): при входе в здание панель-карты сменяется этим
-  бумажным листом (`/api/play/plan`); `paper_svg(..., game=...)` добавляет метки людей по
-  зонам (клик = заговорить), туман 🔒 на запертых комнатах, интерактивные зоны; клик по зоне
-  = «подойти» (`/api/play/zone` — позиция игрока в здании, время из PB). Тот же лист дальше
-  станет боевым гридом ([combat.md](combat.md)).
+  - **guarantees**: main passage sacred, cell before EVERY door and approach to stairs
+    reserved, `reachable()` — final BFS (test on 5 types × 3 presets).
+  Back rooms (private/storage/**cell**) — strip behind hall with door-openings;
+  lockable lodge rooms — "2nd floor" block 🔒.
+- **Render, two layers**: structural SVG (debug, pool card) and **paper**
+  (`worldgen/floorart.py`, one-page-dungeon aesthetic): parchment feTurbulence (grain+stains),
+  trembling ink stroke (seeded — house always drawn same), Dyson hatching
+  outward, ~18 furniture glyphs by kind (table with chairs, hearth with flame, anvil, barrels,
+  cell grate…), doors with arcs, window ticks, lived-in fillers (rug at entrance, wood
+  by hearth, floor spots/cracks), zone numbers + legend (groups collapsed: "table ×8").
+  Gallery of all plans: `/citydebug/plans`.
+- **Plan = game UI on entry** (on prod): entering a building, map panel replaced with
+  this paper sheet (`/api/play/plan`); `paper_svg(..., game=...)` adds people markers by
+  zones (click = talk), fog 🔒 on locked rooms, interactive zones; click on zone
+  = "approach" (`/api/play/zone` — player position in building, time from PB). Same sheet later
+  becomes combat grid ([combat.md](combat.md)).
 
-## Рантайм сцены (состояние мира, персист)
+## Scene runtime (world state, persistence)
 
 ```
-позиции тел    zonemap в _S["live"] (pid→zone); выбор зоны НУЖДАМИ — engine/zones.py  ✔ на проде
-занятия        кто какой afford-объект использует (прерываемо)                       (дальше)
-разговоры      объект {участники, зона, стек тем (поднята→развита→исчерпана), floor,
-               долги-ответов} — привязан к зоне                                        (дальше)
-события        салиентность × зона × черты → кто заметил (чужак=0.3, ссора=0.7, сталь=0.9) (дальше)
+body positions    zonemap in _S["live"] (pid→zone); zone choice BY NEEDS — engine/zones.py  ✔ on prod
+occupations       who uses which afford-object (interruptible)                           (coming)
+conversations     object {participants, zone, topic stack (raised→developed→exhausted), floor,
+                  answer debts} — tied to zone                                            (coming)
+events            saliency × zone × traits → who noticed (stranger=0.3, quarrel=0.7, steel=0.9) (coming)
 ```
 
-**Выбор зоны нуждами** (`engine/zones.py`, ✔ на проде): `zone_score` = Σ afford-предметов ×
-давление нужд + приватность-по-нраву (нелюдим в тень) − толчея; посты держат работников,
-гистерезис против дёрганья. Позиции — состояние живой сцены; между тиками NPC пересаживаются
-(«перебирается — к очагу» в ленту+память). Тот же zonemap кормит план в игре.
+**Zone choice by needs** (`engine/zones.py`, ✔ on prod): `zone_score` = Σ afford-objects ×
+need pressure + privacy-by-preference (antisocial to shade) − crowding; posts keep workers,
+hysteresis against jitter. Positions — live scene state; between ticks NPCs reseat
+("moves — to hearth" in log+memory). Same zonemap feeds game plan.
 
-**Ёмкость зданий vs LOD-кольцо** (2026-07-07, ✔ на проде): два разных ограничителя.
-СИМУЛЯЦИЯ ГОРОДА (`worldsim.routine_step`) уважает ЁМКОСТЬ = Σ cap социальных зон
-(`_building_cap` через `building_zones`, без private/storage/cell/beds): полное здание
-выпадает из кандидатов tavern/temple/market → толпа перетекает (работники расселяются
-первыми, всегда влезают в своё заведение). Так «здесь» реалистично САМО (таверна ~30-42,
-не 200) — механический кэп присутствия не нужен (принцип 6). LLM-СЦЕНА: кэпа присутствия
-ВНУТРИ здания НЕТ, сцена = все реально там (фоновые живут нуждами без LLM); `PB.live_llm_cap`
-= потолок LLM-ходов дирижёра (латентность), не присутствия. УЛИЦА — LOD-кольцо
-`PB.street_lod_cap`. Пруф: таверна 200→31, LLM-актёров=8 при душ=31.
+**Building capacity vs LOD-ring** (2026-07-07, ✔ on prod): two different limiters.
+CITY SIMULATION (`worldsim.routine_step`) respects CAPACITY = Σ social zone caps
+(`_building_cap` via `building_zones`, excluding private/storage/cell/beds): full building
+drops from tavern/temple/market candidates → crowd flows elsewhere (workers settle
+first, always fit in their workplace). So "here" stays realistic BY ITSELF (tavern ~30-42,
+not 200) — mechanical presence cap not needed (principle 6). LLM-SCENE: no presence cap
+INSIDE building, scene = all really there (background live by needs without LLM); `PB.live_llm_cap`
+= ceiling on conductor LLM turns (latency), not presence. STREET — LOD-ring
+`PB.street_lod_cap`. Proof: tavern 200→31, LLM-actors=8 at population=31.
 
-**Слышимость** (три яруса; v1 ✔ на проде): шёпот = только своя зона · обычная речь = своя
-зона полностью, остальные зоны помещения — ОБРЫВКАМИ (память «краем уха: …», без деталей) ·
-крик / салиентное = всё помещение. Промпт NPC = его память + сказанное в его слышимости —
-асимметрия знания становится пространственной (секрет, шепнутый за столом в тёмном углу,
-физически не может всплыть у стойки). Сделано: реплика чужой зоны игроку — «(…, краем уха)
-…обрывок…», сплетни NPC↔NPC только в своей зоне, обращения к игроку доходят через зал; зоны
-в промпте NPC. Дальше: yard шёпота (say-act «шёпот») и крик как отдельные ярусы.
+**Hearing** (three tiers; v1 ✔ on prod): whisper = own zone only · normal speech = full own
+zone, other building zones — IN FRAGMENTS (memory "from corner of ear: …", no details) ·
+shout / salient = whole building. NPC prompt = his memory + what he heard in earshot —
+knowledge asymmetry becomes spatial (secret whispered at table in dark corner
+cannot physically surface at counter). Done: other-zone reply to player — "(…, from corner of ear)
+…fragment…", NPC↔NPC gossip only in own zone, addresses to player carry through hall; zones
+in NPC prompt. Next: whisper yard (say-act "whisper") and shout as separate tiers.
 
-**Различимость и нарратор — свойства СЦЕНЫ** (2026-07-06): `_scene_descriptors` выдаёт
-каждому незнакомцу примету КАТЕГОРИИ, не занятой соседями по сцене (метка→волосы→лицо→
-одежда→сложение; пул штампует «шрам» половине города — в зале он один); DM-нарратор
-не-действий получает СНИМОК живой сцены (`_dm_snapshot`: место/время/погода, люди с зонами
-и занятиями, последние реплики, предметы у игрока) — «снимок — единственная правда»;
-матч зоны из фриформа — ЧЕРЕЗ LLM (поле zone арбитра), не токены.
+**Distinguishability and narrator — SCENE properties** (2026-07-06): `_scene_descriptors` gives
+each stranger a CATEGORY feature not taken by scene mates (scar→hair→face→
+clothes→build; pool stamps "scar" on half the city — in the hall he's one); DM-narrator
+of non-actions gets SNAPSHOT of live scene (`_dm_snapshot`: place/time/weather, people with zones
+and occupations, recent replies, player's items) — "snapshot — sole truth";
+zone match from freeform — VIA LLM (arbiter's zone field), not tokens.
 
-**Дирижёр тика** (детерминированный, НЕ пишет реплик и не выбирает исходов): собирает
-импульсы всех тел — `долг ответа > реакция на событие > горячая нужда/агенда > фон` —
-LLM-ход получают тела с импульсом выше порога (обычно 0–2); остальные — фон занятия (det,
-в ленту через LOD). Кэп реплик остаётся аварийным LOD-предохранителем, не правилом.
-Кулдаун обращений умирает: «я уже здоровался» — факт разговора-объекта ([принцип 6](README.md)).
+**Tick conductor** (deterministic, does NOT write replies or choose outcomes): collects
+all bodies' impulses — `answer debt > event reaction > hot need/agenda > background` —
+LLM turn goes to bodies above impulse threshold (usually 0–2); rest — background occupation (det,
+in log via LOD). Reply cap stays emergency LOD safeguard, not rule.
+Address cooldown dies: "I already greeted" — fact of conversation-object ([principle 6](README.md)).
 
-## Кейсы проверки (сценарный бенч, живой LLM + LLM-судья)
+## Verification cases (scenario bench, live LLM + LLM-judge)
 
-| # | кейс | ассерт |
+| # | case | assert |
 |---|---|---|
-| 1 | чужак входит в таверну | непричастные не заговаривают; трактирщик приветствует по роли ≤3 тика; чужие разговоры не прерваны |
-| 2 | молчание игрока | вопрос → 2 тика тишины → одна реакция адресанта, без дословного повтора |
-| 3 | пара за столом | 6+ реплик: 0 эха, ≥2 смены темы, темы трассируются к памяти/отношениям/делам |
-| 4 | вопрос→ответ | долг гасится первым; отвечает адресат, не сосед |
-| 5 | зоны и слух | ✔ v1: реплика чужой зоны — обрывок; сплетня только слышавшим (крик — дальше) |
-| 6 | салиентное событие | занятия прерваны у заметивших; реакции по чертам; возврат к занятиям; событие стало темой |
-| 7 | хищник и свидетели | кража только когда цель одна в зоне |
-| 8 | пиннинг персоны | 20 тиков: голос/причуды стабильны (судья); стоп-факты не утекли |
-| 9 | приток/отток по рутине | вечером прибывают, ночью расходятся; вошедший здоровается только со знакомыми |
-| 10 | повторный визит | узнавание + отсылка к прошлому делу в первой реплике |
-| 11 | вход в торговлю | «что почём?» → сделка ≤2 тика |
-| 12 | занятый мастер | низкая social: короткие ответы, работу не бросает |
-| 13 | нужда→зона | ✔ голодный к столу, уставший к лежанке, нелюдим в угол (механика, tests/play) |
-| 14 | предмет реален | украденная кружка исчезла из зоны, появилась в сумке; годится как оружие |
-| 15 | приватность | заговорщики при чужаке смолкают/уходят в тихую зону |
-| 16 | пост роли | бармен не покидает стойку в рабочую фазу без салиентного события |
-| 17 | тайник | hidden мебели не всплывает без гейта; вор с craft_eye/tool находит |
-| 18 | выбор стола | ✔ частично: свободный стол по вместимости, приватность по нраву (engine/zones.py); мотив «заговорщики в угол» — с разговором-объектом (шаг 4) |
+| 1 | stranger enters tavern | uninvolved don't start talking; bartender greets by role ≤3 ticks; other conversations not interrupted |
+| 2 | player silence | question → 2 ticks silence → one addresser reaction, no verbatim repeat |
+| 3 | pair at table | 6+ replies: 0 echoes, ≥2 topic shifts, topics trace to memory/relationships/tasks |
+| 4 | question→answer | debt paid first; addressee answers, not neighbor |
+| 5 | zones and hearing | ✔ v1: other-zone reply — fragment; gossip only to those who heard (shout — later) |
+| 6 | salient event | occupations interrupted for those who noticed; reactions by traits; return to occupations; event became topic |
+| 7 | predator and witnesses | theft only when target alone in zone |
+| 8 | persona pinning | 20 ticks: voice/quirks stable (judge); stop-facts don't leak |
+| 9 | inflow/outflow by routine | arrive evening, leave night; newcomer greets only familiar ones |
+| 10 | repeat visit | recognition + reference to past task in first reply |
+| 11 | entering commerce | "how much?" → deal ≤2 ticks |
+| 12 | busy craftsman | low social: short answers, doesn't drop work |
+| 13 | need→zone | ✔ hungry to table, tired to cot, antisocial to corner (mechanic, tests/play) |
+| 14 | object is real | stolen cup vanished from zone, appeared in bag; works as weapon |
+| 15 | privacy | conspirators silent/leave to quiet zone when stranger present |
+| 16 | role post | bartender doesn't leave counter in work phase without salient event |
+| 17 | cache | hidden furniture doesn't surface without gate; thief with craft_eye/tool finds it |
+| 18 | table choice | ✔ partial: free table by capacity, privacy by preference (engine/zones.py); "conspirators in corner" motive — with conversation-object (step 4) |
 
-## Порядок внедрения
+## Implementation order
 
-1. ✔ **Зоны в пуле + furnisher + дебаг-браузер** `/citydebug` — обставлен ВЕСЬ пул
-   600/600 (2026-07-06): key 181 (~5900 предметов) + res 419 (~13000).
-2. ✔ **Планы локаций** (этапы A/B/C, на проде): футпринт+annealing (`floorplan.py`) →
-   бумажный рендер (`floorart.py`, галерея `/citydebug/plans`) → план как игровой UI входа
-   (`/api/play/plan` + `/zone`, метки NPC/туман/клики). Раздел «План локации» выше.
-3. ✔ ЧАСТИЧНО (2026-07-05): позиции по зонам = состояние живой сцены (`engine/zones.py`:
-   нужды×afford×приватность-по-нраву×толчея, посты держат работников, гистерезис переездов,
-   «перебирается — к очагу» в ленту; кейс 13 покрыт тестами). Слышимость v1 (см. выше).
-   Персист зоны игрока ✔ (pc-блоб). ✔ (2026-07-06) МАТЕРИАЛИЗАЦИЯ: обстановка здания →
-   НАСТОЯЩИЕ предметы live.db (holder=zone:<bid>/<zid>, лениво при первом входе,
-   идемпотентно — взятое не возвращается); сцена читает живой сток зоны; игрок берёт
-   loose из своей зоны (свидетели/бросок при работнике), fixed не унести; NPC-подбор из
-   ground зоны — настоящий inv_move. ШАГ 3 ЗАКРЫТ ЦЕЛИКОМ.
-4a. ✔ (2026-07-06) АНТИ-ХОР: решения актёров — ВОЛНАМИ (лидер-по-импульсу первым, свита
-   решает параллельно, но видит его заявку: «⏱ В ЭТУ САМУЮ МИНУТУ уже…» + запрет повторять
-   чужой жест/предмет/тему слово-в-слово) + ФИЗИКА предметов на применении: один предмет —
-   одни руки за тик (занято → соседний той же нужды → ждёт очереди); фоновые давно так
-   (busy-набор). Метрика: дубли use-предметов за тик 2-3 → 0; реплики тика — одна тема
-   с РАЗНЫХ углов к разным адресатам. Латентность тика не выросла (~5-11с).
-4. ✔ (2026-07-06) РАЗГОВОР-ОБЪЕКТ (`engine/convo.py`: зона+участники+лог реплик+ДОЛГ ответа;
-   слияние кружков, распад по тишине/уходу из зоны; блок «ТЕКУЩИЙ РАЗГОВОР» в промпте;
-   реплики игрока входят через /talk /say) + ДИРИЖЁР ИМПУЛЬСОВ (долг 4.0 > эмоция 3.0 >
-   нужда 1.2+hot > беседа 1.6 > агенда > фон; порог PB.impulse_llm; LLM-актёров 3-7 из 8,
-   фоновые живут занятиями зоны БЕЗ LLM) + СЦЕНАРНЫЙ БЕНЧ `scripts/scene_bench.py`
-   (Д1/Д2/К1/К4/К5/К12/Р по структурному логу aidnd.scene; 6/7 зелёные).
-5. ✔ ЧАСТИЧНО: салиентность v1 — attack в сцене будит зал (импульс 3.5 всем, «⚡ ТОЛЬКО
-   ЧТО…» в промпте); deed-журнал v1 ЖИВ ([entities.md](entities.md)): кражи+обещания,
-   сплетни из дел, слово ведёт на встречу рутиной. Дальше: салиентность улицы/крик.
-6. ✔ (2026-07-06) **Улица-зоны** тем же контуром: уличные шаблоны несут объекты прямо в
-   данных (`zones.json`: столб/колодец/лотки/скамья/подворотня с afford, рантайм без LLM);
-   узел без здания → «площадь» (geom.plaza) или «улица», вход «обочина»; `_scene_zones()` —
-   единый источник зон для интента (сцена → здание → уличный шаблон), «к столбу» на площади
-   = тот же move+zone, что «к очагу» в таверне. Узел СО зданием живёт зданием (cr2b).
-7. ИЗВЕСТНЫЙ БАГ МИРА (светит бенч К12): рутина society не держит РАБОТНИКА заведения на
-   посту в рабочую фазу (владелец таверны уходит вечером) — чинить в society/worldsim
-   (окно работы = окно места-работы).
+1. ✔ **Zones in pool + furnisher + debug-browser** `/citydebug` — entire pool
+   furnished 600/600 (2026-07-06): key 181 (~5900 objects) + res 419 (~13000).
+2. ✔ **Location plans** (stages A/B/C, on prod): footprint+annealing (`floorplan.py`) →
+   paper render (`floorart.py`, gallery `/citydebug/plans`) → plan as game UI on entry
+   (`/api/play/plan` + `/zone`, NPC markers/fog/clicks). See "Location plan" section above.
+3. ✔ PARTIAL (2026-07-05): zone positions = live scene state (`engine/zones.py`:
+   needs×afford×privacy-by-preference×crowding, posts keep workers, reseat hysteresis,
+   "moves — to hearth" in log; case 13 covered by tests). Hearing v1 (see above).
+   Player zone persist ✔ (pc-blob). ✔ (2026-07-06) MATERIALIZATION: building furnishings →
+   REAL items in live.db (holder=zone:<bid>/<zid>, lazy on first entry,
+   idempotent — taken doesn't return); scene reads live zone flow; player takes
+   loose from own zone (witnesses/roll when worker), fixed cannot carry; NPC pickup from
+   zone ground — real inv_move. STEP 3 FULLY CLOSED.
+4a. ✔ (2026-07-06) ANTI-CHORUS: actor decisions — IN WAVES (impulse-leader first, entourage
+   decides in parallel but sees his bid: "⏱ RIGHT NOW already…" + ban repeat
+   others' gesture/object/topic word-for-word) + PHYSICS of object use: one object —
+   one pair of hands per tick (taken → next same-need → queues); background long so
+   (busy-set). Metric: use-object dupes per tick 2-3 → 0; tick replies — one topic
+   from DIFFERENT angles to different addressees. Tick latency not grew (~5-11s).
+4. ✔ (2026-07-06) CONVERSATION-OBJECT (`engine/convo.py`: zone+participants+reply log+ANSWER DEBT;
+   circle merge, dissolve by silence/zone exit; "CURRENT CONVERSATION" block in prompt;
+   player replies enter via /talk /say) + IMPULSE CONDUCTOR (debt 4.0 > emotion 3.0 >
+   need 1.2+hot > chat 1.6 > agenda > background; threshold PB.impulse_llm; LLM-actors 3-7 of 8,
+   background live by zone occupations WITHOUT LLM) + SCENARIO BENCH `scripts/scene_bench.py`
+   (D1/D2/K1/K4/K5/K12/P via aidnd.scene struct log; 6/7 green).
+5. ✔ PARTIAL: saliency v1 — attack in scene wakes hall (impulse 3.5 all, "⚡ JUST
+   NOW…" in prompt); deed-log v1 ALIVE ([entities.md](entities.md)): thefts+promises,
+   gossip from deeds, word leads to meeting by routine. Next: street saliency/shout.
+6. ✔ (2026-07-06) **Street-zones** same outline: street templates carry objects directly in
+   data (`zones.json`: post/well/stalls/bench/alley with afford, runtime no LLM);
+   node without building → "plaza" (geom.plaza) or "street", entry "shoulder"; `_scene_zones()` —
+   single zone source for intent (scene → building → street template), "to post" on plaza
+   = same move+zone as "to hearth" in tavern. Node WITH building lives by building (cr2b).
+7. KNOWN WORLD BUG (shines on bench K12): society routine doesn't keep WORKER at
+   post in work phase (tavern owner leaves evening) — fix in society/worldsim
+   (work window = workplace window).
 
-Связано: [entities.md](entities.md) · [items.md](items.md) · [mind.md](mind.md) ·
+Related: [entities.md](entities.md) · [items.md](items.md) · [mind.md](mind.md) ·
 [worldgen.md](worldgen.md) · [loop.md](loop.md)

@@ -1,15 +1,14 @@
-"""Генератор подземелий — этап A: СКЕЛЕТ (docs/dungeons.md).
+"""Dungeon generator — stage A: SKELETON (docs/dungeons.md).
 
-Мини-циклическая генерация (Дорманс/Unexplored): данж начинается не с комнаты, а с ПЕТЛИ —
-вход и цель делят кольцо на две дуги-маршрута. Словарь циклов (content/cycles.json, данные)
-назначает дугам РОЛИ геймплея: короткая опасная против длинной безопасной, ключ на дальней
-дуге, скрытый шорткат, окно-предвестие цели. Подциклы и отростки-награды вкладываются в
-узлы кольца («jaquaysing» машиной). Lock/key корректны ПО ПОСТРОЕНИЮ (ключ всегда на дуге,
-достижимой без замка; ключ вложенного замка — на главном кольце) + BFS-assert
-«позиция × ключи». Секретка НИКОГДА не на критпути (цель достижима и без secret-рёбер).
-Фильтр качества — метрики Жаке (цикломатика ≥ 2, тупики только с наградой), не прошёл —
-следующий под-сид. Детерминизм: всё от seed, ~десятки мс. LLM здесь НЕТ — вкус (история,
-палитра, наполнение) придёт брифом в этапе B.
+Mini-cyclic generation (Dormans/Unexplored): a dungeon doesn't start with a room, but with a
+LOOP — entrance and goal divide a ring into two arc-paths. A cycle dictionary (content/cycles.json,
+data) assigns gameplay ROLES to arcs: short-dangerous vs long-safe, key on the far arc, hidden
+shortcut, window-glimpse of goal. Subcycles and reward-branches nest at ring nodes ("jaquaysing"
+by machine). Lock/key are correct BY CONSTRUCTION (key always on an arc reachable without the
+lock; nested lock's key — on the main ring) + BFS-assert "position × keys". Secret NEVER on
+critical path (goal reachable without secret-edges). Quality filter — Jacque metrics (cyclomatic ≥
+2, deadends only with reward), didn't pass — next sub-seed. Determinism: everything from seed,
+~tens of ms. NO LLM here — flavor (lore, palette, furnishing) comes via brief at stage B.
 
 Key functions
 -------------
@@ -28,10 +27,10 @@ import math
 import os
 import random
 
-COARSE_W, COARSE_H = 9, 7          # курс-грид узлов
-CELL = 7                           # клетка курс-грида = 7×7 тайлов
-NEST_MIN, NEST_MAX = 2, 4          # вложений на данж
-RETRY = 24                         # под-сидов до сдачи (аккреция капризнее)
+COARSE_W, COARSE_H = 9, 7          # coarse grid nodes
+CELL = 7                           # coarse grid cell = 7×7 tiles
+NEST_MIN, NEST_MAX = 2, 4          # nesting depth per dungeon
+RETRY = 24                         # sub-seeds before giving up (accretion is pickier)
 _CAVE_ENV = ("cave", "underdark", "swamp", "forest", "пещер", "лес", "болот", "caverns")
 
 _CAT: dict | None = None
@@ -50,14 +49,14 @@ def _pick(rng: random.Random, rows: list) -> dict:
     return rng.choices(rows, weights=[r["w"] for r in rows])[0]
 
 
-# ── геометрия: порт Watabou (worldgen/watabou.py) + Planner-драматургия ─────
+# ── geometry: Watabou port (worldgen/watabou.py) + Planner dramaturgy ─────
 
 
 def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
-    """Watabou-укладка ПО ЭТАЖАМ (корень этажа N+1 = клетка лестницы этажа N — честное
-    XY-совмещение) → единый граф комнат (floor — поле комнаты, межэтажные связи — рёбра
-    stairs/chute/collapse; chute односторонний) → Planner: цель на НИЖНЕМ этаже,
-    секретные крылья, замки, ступени. Гарантии: solvable туда И ОБРАТНО."""
+    """Watabou layout PER FLOOR (root of floor N+1 = staircase cell of floor N — honest
+    XY-alignment) → single room graph (floor — room tiles, inter-floor links — edges
+    stairs/chute/collapse; chute one-way) → Planner: goal on BOTTOM floor,
+    secret wings, locks, steps. Guarantees: solvable forward AND backward."""
     from .watabou import layout
 
     rng = random.Random(f"dgen|{seed}")
@@ -78,7 +77,7 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
         if lay is None:
             return None
         floors.append(lay)
-        if fi < n_floors - 1:                         # лестница вниз — в дальней комнате
+        if fi < n_floors - 1:                         # stairs down — in farthest room
             adjf: dict = {}
             for e in lay["edges"]:
                 adjf.setdefault(e["a"], []).append(e["b"])
@@ -97,9 +96,9 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
             cx = sorted(t[0] for t in ts)[len(ts) // 2]
             cy = sorted(t[1] for t in ts)[len(ts) // 2]
             stairs_pts.append((sr["id"], (cx, cy)))
-            origin = (cx, cy)                         # корень следующего этажа — здесь
+            origin = (cx, cy)                         # root of next floor — here
 
-    # ── склейка этажей в единый граф ──
+    # ── floor gluing into single graph ──
     rooms: list = []
     edges: list = []
     offs = []
@@ -115,11 +114,11 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
             rooms.append(r2)
         for e in lay["edges"]:
             edges.append({**e, "a": e["a"] + off, "b": e["b"] + off})
-    for fi, (srid, cell) in enumerate(stairs_pts):    # лестницы: XY совпадает на этажах
+    for fi, (srid, cell) in enumerate(stairs_pts):    # stairs: XY aligned across floors
         edges.append({"a": srid + offs[fi], "b": 0 + offs[fi + 1], "kind": "stairs",
                       "lock": None, "door": [cell[0], cell[1], cell[0], cell[1]],
                       "path": []})
-    # вторая разнотипная связь (Jaquays): пересечение этажей по XY → жёлоб/шахта/пролом
+    # second heterogeneous link (Jaquays): floor crossing by XY → chute/shaft/collapse
     for fi in range(n_floors - 1):
         conns = dt.get("connectors") or []
         if not conns or rng.random() < 0.25:
@@ -144,7 +143,7 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
                           "door": [best[2][0], best[2][1], best[2][0], best[2][1]],
                           "path": [], "one_way": kind == "chute"})
 
-    # нормировка ОДНИМ сдвигом (XY этажей физически совмещены)
+    # normalize with ONE shift (floor XYs physically aligned)
     all_t = [t for r in rooms for t in r["tiles"]]
     mx = min(t[0] for t in all_t) - 1
     my = min(t[1] for t in all_t) - 1
@@ -158,7 +157,7 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
         water += [[x - mx, y - my] for x, y in lay["water"]]
         columns += [[x - mx, y - my] for x, y in lay["columns"]]
 
-    # ── виды, цель (на нижнем этаже), драматургия ──
+    # ── kinds, goal (on bottom floor), dramaturgy ──
     for r in rooms:
         r["kind"] = ("corridor" if r["size"] >= 2 else
                      "hall" if r["size"] == 1 else "room")
@@ -292,7 +291,7 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
         return None
     if not _solvable(rooms, edges, keys, 0, goal, use_secret=True):
         return None
-    if not _solvable_back(rooms, edges, goal):        # односторонние жёлобы не запирают
+    if not _solvable_back(rooms, edges, goal):        # one-way chutes don't lock
         return None
     met = _metrics(rooms, edges)
     if met["cyclomatic"] < 1 or met["bad_deadends"]:
@@ -306,7 +305,7 @@ def _attempt(seed: str, env: str, small: bool = False) -> dict | None:
 
 
 def _solvable_back(rooms, edges, goal) -> bool:
-    """С цели можно ВЕРНУТЬСЯ ко входу (жёлобы односторонние — лестницы выводят)."""
+    """Goal can RETURN to entrance (chutes one-way — stairs lead out)."""
     adj: dict = {}
     for e in edges:
         if e["kind"] in ("window", "portcullis"):
@@ -315,8 +314,8 @@ def _solvable_back(rooms, edges, goal) -> bool:
         if not e.get("one_way"):
             adj.setdefault(e["b"], []).append(e["a"])
         else:
-            adj.setdefault(e["b"], [])                # вверх по жёлобу нельзя
-    # обратный обход: из goal по рёбрам, где переход b→a разрешён
+            adj.setdefault(e["b"], [])                # can't go up through chute
+    # reverse traversal: from goal along edges where transition b→a allowed
     radj: dict = {}
     for e in edges:
         if e["kind"] in ("window", "portcullis"):
@@ -349,7 +348,7 @@ def _dtypes() -> list:
 
 
 def _reachable_without(rooms, edges, cut) -> set:
-    """Достижимо от входа БЕЗ прохода НИ ОДНОЙ запертой двери (Watabou spawnKeys)."""
+    """Reachable from entrance WITHOUT passing ANY locked door (Watabou spawnKeys)."""
     adj: dict = {}
     for e in edges:
         if e is cut or e["kind"] in ("window", "portcullis", "locked"):
@@ -390,7 +389,7 @@ def _bfs_dist(rooms, edges, src) -> dict:
 
 
 def _solvable(rooms, edges, keys, ent, goal, use_secret: bool) -> bool:
-    """BFS «комната × набор ключей»: цель достижима; без секреток — тоже (критпуть чист)."""
+    """BFS "room × key set": goal reachable; without secrets — also (critical path clean)."""
     key_at: dict = {}
     for k in keys:
         key_at.setdefault(k["room"], set()).add(k["id"])
@@ -435,9 +434,9 @@ def _metrics(rooms, edges) -> dict:
 
 def generate(seed: str, env: str = "Ruin", cr: float = 1.0, brief: dict | None = None,
              small: bool = False) -> dict:
-    """Данж по сиду: под-сиды до прохождения фильтра качества (детерминированная цепочка);
-    скелет сразу НАПОЛНЯЕТСЯ (stock — квоты B/X + машины + фракция), бриф из пула (если
-    дан) раздаёт комнатам имена/описания/улики истории (apply_brief, детерминированно)."""
+    """Dungeon from seed: sub-seeds until quality filter passes (deterministic chain);
+    skeleton FILLED immediately (stock — B/X quotas + machines + faction), brief from pool (if
+    given) assigns names/descriptions/lore clues to rooms (apply_brief, deterministically)."""
     for i in range(RETRY):
         d = _attempt(f"{seed}|{i}", env, small)
         if d is not None:
@@ -446,7 +445,7 @@ def generate(seed: str, env: str = "Ruin", cr: float = 1.0, brief: dict | None =
                 from .dungeonlore import apply_brief
                 apply_brief(d, brief, random.Random(f"brief|{seed}"))
             return d
-    raise ValueError(f"данж не собрался за {RETRY} под-сидов: {seed}")  # практически недостижимо
+    raise ValueError(f"данж не собрался за {RETRY} под-сидов: {seed}")  # practically unreachable
 
 
 _MCAT: dict | None = None
@@ -461,16 +460,16 @@ def _machines() -> dict:
     return _MCAT
 
 
-# Квоты наполнения B/X (Молдвей 1981): треть монстры, шестая ловушки, шестая особенности,
-# треть пусто; шанс клада при каждом виде — классика (см. docs/dungeons.md).
+# B/X stocking quotas (Moldvay 1981): third monsters, sixth traps, sixth specials,
+# third empty; treasure chance per type — classic (see docs/dungeons.md).
 _STOCK_Q = (("monster", 0.33), ("trap", 0.17), ("special", 0.17), ("empty", 0.33))
 _TREASURE_P = {"monster": 0.5, "trap": 0.33, "special": 0.17, "empty": 0.17}
 
 
 def stock(d: dict, cr: float = 1.0) -> None:
-    """Наполнение скелета: КВОТЫ — таблица, содержимое — из данных (машины/ловушки/бестиарий).
-    Теги дуг двигают вероятности (danger → монстры), тупики-награды всегда с кладом,
-    зал цели — вождь на полном CR. Фракционные роли комнат — пост/склад/логово вождя."""
+    """Skeleton stocking: QUOTAS — table, contents — from data (machines/traps/bestiary).
+    Edge tags shift probabilities (danger → monsters), deadend-rewards always treasured,
+    goal hall — boss at full CR. Faction room roles — outpost/stash/boss-lair."""
     from aidnd.combat.encounters import pick_encounter
 
     rng = random.Random(f"stock|{d['seed']}")
@@ -483,14 +482,14 @@ def stock(d: dict, cr: float = 1.0) -> None:
             deg[e["b"]] = deg.get(e["b"], 0) + 1
     post_done = False
     for r in d["rooms"]:
-        if r.get("size", 0) >= 2:                     # коридор — пусто (изредка ловушка)
+        if r.get("size", 0) >= 2:                     # corridor — empty (rarely trap)
             r["content"] = ({"kind": "trap", "trap": dict(rng.choice(cat["traps"]))}
                             if rng.random() < 0.06 else {"kind": "empty"})
             continue
         if r["kind"] == "entrance":
             r["content"] = {"kind": "empty", "flavor": dict(rng.choice(cat["flavors"]))}
             continue
-        if r["kind"] == "goal":                       # логово вождя: полный CR + клад логова
+        if r["kind"] == "goal":                       # boss lair: full CR + lair treasure
             units = pick_encounter(cr, env, seed=f"boss|{d['seed']}")
             r["content"] = {"kind": "monster", "boss": True, "units": _unit_names(units),
                             "cr": cr, "treasure": _treasure(rng, cr, guarded=True)}
@@ -508,21 +507,21 @@ def stock(d: dict, cr: float = 1.0) -> None:
                 kind = k
                 break
         if "danger" in r["tags"] and kind == "empty":
-            kind = "monster"                          # опасная дуга не пустует
+            kind = "monster"                          # danger edge never empty
         if "treasure" in r["tags"]:
-            kind = "treasure"                         # тупик-награда осмыслен по построению
+            kind = "treasure"                         # deadend-reward made meaningful by construction
         c: dict = {"kind": kind}
         if kind == "monster":
-            fmul = 1 + 0.25 * r.get("floor", 0)       # глубже — злее (ярусы напряжения)
+            fmul = 1 + 0.25 * r.get("floor", 0)       # deeper — nastier (tension layers)
             units = pick_encounter(cr * rng.uniform(0.25, 0.5) * fmul, env,
                                    seed=f"mob|{d['seed']}|{r['id']}")
             c["units"] = _unit_names(units)
             if not post_done and deg.get(r["id"], 0) >= 2:
-                r["frole"] = "пост"                   # первый обитаемый узел — сторожевой
+                r["frole"] = "пост"                   # first inhabited node — guardian
                 post_done = True
         elif kind == "trap":
             t = dict(rng.choice(cat["traps"]))
-            c["trap"] = t                             # телеграф в САМОЙ комнате — честно
+            c["trap"] = t                             # telegraph IN THE ROOM itself — fair
         elif kind == "special":
             c["machine"] = dict(_pick(rng, cat["machines"]))
         elif kind == "empty":
@@ -536,14 +535,14 @@ def stock(d: dict, cr: float = 1.0) -> None:
 
 def _unit_names(units) -> list:
     out: dict = {}
-    for u in units:                                   # pick_encounter отдаёт Combatant-ов
+    for u in units:                                   # pick_encounter returns Combatants
         nm = getattr(u, "name", None) or "тварь"
         out[nm] = out.get(nm, 0) + 1
     return [f"{nm} ×{n}" if n > 1 else nm for nm, n in out.items()]
 
 
 def _treasure(rng, cr: float, guarded: bool) -> dict:
-    """Клад по классике: контейнер × сокрытие; ценность от CR (материализация — этап C)."""
+    """Treasure classic-style: container × concealment; value from CR (materialization — stage C)."""
     return {"worth": max(2, int(cr * rng.uniform(6, 14))),
             "container": rng.choice(("сундук", "урна", "мешок", "россыпь", "ларец")),
             "concealment": rng.choice(("на виду", "под плитой", "двойное дно",
@@ -551,11 +550,11 @@ def _treasure(rng, cr: float, guarded: bool) -> dict:
             "guarded": guarded}
 
 
-# ── бумажный черновик (полный Dyson-рендер — этап C) ─────────────────────────
+# ── paper sketch (full Dyson render — stage C) ─────────────────────────
 
 
 def _glyph(out, kind, cx, cy, S, rng, ink):
-    """Чернильные глифы реквизита (drawings.* оригинала), вид сверху."""
+    """Ink glyphs for props (drawings.* of original), top-down view."""
     if kind == "sarcophagus":
         w, h = S * 1.7, S * 0.95
         out.append(f'<rect x="{cx - w / 2:.1f}" y="{cy - h / 2:.1f}" width="{w:.1f}" '
@@ -627,10 +626,10 @@ def _glyph(out, kind, cx, cy, S, rng, ink):
 
 def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
                 floor: int | None = None) -> str:
-    """Watabou-одностраничник на пергаменте: плотный комплекс, сетка пола, ТОЛСТЫЕ стены,
-    двери-коробки, хэтч по силуэту. ЭТАЖ = представление (лист-на-этаж): рисуются комнаты
-    одного яруса, межэтажные связи — знаками (веер лестницы / зев жёлоба / пролом).
-    game: туман (seen), призраки у дверей (межэтажные — стрелкой), маркер, зум."""
+    """Watabou single-pager on parchment: dense complex, floor grid, THICK walls,
+    door-frames, hatching by silhouette. FLOOR = view (one-sheet-per-floor): rooms of one tier
+    drawn, inter-floor links — by symbols (stair-fan / chute-maw / collapse).
+    game: fog (seen), door-ghosts (inter-floor — arrow), marker, zoom."""
     from .floorart import INK, _defs
 
     rng = random.Random(f"dart|{d['seed']}")
@@ -649,7 +648,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
             return e["a"] in seen and e["b"] in seen
         return e["a"] in seen or e["b"] in seen
 
-    # ── пол и владельцы клеток ──
+    # ── floor and cell owners ──
     owner: dict = {}
     room_tiles: dict = {}
     for r in d["rooms"]:
@@ -658,11 +657,11 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
             room_tiles[r["id"]] = t
             for c in t:
                 owner[c] = r["id"]
-    openings: set = set()                             # пары клеток, где стены НЕТ (проём)
+    openings: set = set()                             # cell pairs where wall absent (opening)
     door_marks: list = []                             # (cellA, cellB, kind)
-    ghost_at: dict = {}                               # rid → якорь призрака
+    ghost_at: dict = {}                               # rid → ghost anchor
     corr_cells: set = set()
-    interfloor: list = []                             # (cell, kind, направление, other_rid)
+    interfloor: list = []                             # (cell, kind, direction, other_rid)
     for eid, e in enumerate(d["edges"]):
         if e["kind"] in ("stairs", "chute", "collapse"):
             fa = d["rooms"][e["a"]].get("floor", 0)
@@ -673,7 +672,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
             other = e["b"] if here_rid == e["a"] else e["a"]
             down = d["rooms"][other].get("floor", 0) > floor
             if e.get("one_way") and here_rid == e["b"]:
-                other = None                          # снизу жёлоб — только знак, не ход
+                other = None                          # chute from below — symbol only, not passage
             interfloor.append(((e["door"][0], e["door"][1]), e["kind"], down, other))
             continue
         if e["kind"] == "window" or not _vis_edge(eid, e):
@@ -737,19 +736,19 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
            f'<rect width="{W}" height="{H}" fill="#e9dfc6" filter="url(#stains)"/>',
            f'<rect width="{W}" height="{H}" fill="none" filter="url(#grain)"/>']
 
-    # drop shadow: смещённый силуэт — «карта лежит на бумаге» (Watabou)
+    # drop shadow: offset silhouette — "map lies on paper" (Watabou)
     for t in sorted(floor_cells):
         x, y = px(t)
         out.append(f'<rect x="{x + S * 0.22:.1f}" y="{y + S * 0.3:.1f}" width="{S}" '
                    f'height="{S}" fill="#c9bfa2" opacity="0.55"/>')
-    # пол: сетка клеток (коридоры чуть темнее)
+    # floor: grid of cells (corridors a bit darker)
     for t in sorted(floor_cells):
         x, y = px(t)
         fill = "#e4d9ba" if t in corr_cells else "#f3ecd8"
         out.append(f'<rect x="{x}" y="{y}" width="{S}" height="{S}" fill="{fill}" '
                    f'stroke="{INK}" stroke-width="0.3" opacity="0.95"/>')
 
-    # вода (шум+порог, только в комнатах) и колонны
+    # water (noise+threshold, rooms only) and columns
     wat = {tuple(t) for t in (d.get("water") or [])} & floor_cells
     for t in sorted(wat):
         x, y = px(t)
@@ -765,7 +764,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
         out.append(f'<circle cx="{x + S / 2}" cy="{y + S / 2}" r="{S * 0.2:.1f}" '
                    f'fill="{INK}"/>')
 
-    # ── стены: наружные (с хэтчем) и межкомнатные ──
+    # ── walls: external (with hatching) and internal ──
     ext_edges, int_edges = [], []
     for t in floor_cells:
         for dx, dy, nx, ny in ((0, -1, 0, -1), (0, 1, 0, 1), (-1, 0, -1, 0), (1, 0, 1, 0)):
@@ -773,7 +772,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
             if nb not in floor_cells:
                 ext_edges.append((t, (dx, dy), (nx, ny)))
             elif owner[nb] != owner[t] and frozenset((t, nb)) not in openings:
-                if (dx, dy) in ((1, 0), (0, 1)):      # каждую внутреннюю — один раз
+                if (dx, dy) in ((1, 0), (0, 1)):      # each internal — once
                     int_edges.append((t, (dx, dy)))
 
     def _edge_px(t, dxy):
@@ -791,8 +790,8 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
         out.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{INK}" '
                    f'stroke-width="3" stroke-linecap="square"/>')
 
-    # дайсон-хэтч по Watabou: точки Пуассона вокруг силуэта → кластеры изогнутых штрихов,
-    # угол на ближайшего соседа, длина до соседа, подрезка друг о друга (упрощённая: кап)
+    # Dyson hatching per Watabou: Poisson points around silhouette → curved stroke clusters,
+    # angle to nearest neighbor, length to neighbor, trim against each other (simplified: cap)
     pts = []
     for (t, dxy, nrm) in ext_edges:
         (x1, y1), (x2, y2) = _edge_px(t, dxy)
@@ -800,7 +799,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
             pts.append((x1 + (x2 - x1) * f + nrm[0] * rng.uniform(3, 7),
                         y1 + (y2 - y1) * f + nrm[1] * rng.uniform(3, 7), nrm))
     keep = []
-    for p_ in pts:                                    # пуассон-прореживание
+    for p_ in pts:                                    # Poisson thinning
         if all((p_[0] - q[0]) ** 2 + (p_[1] - q[1]) ** 2 > 7 ** 2 for q in keep):
             keep.append(p_)
     for (px_, py_, nrm) in keep:
@@ -814,7 +813,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
         ang += rng.uniform(-0.3, 0.3)
         ln = min(11.0, max(4.0, dist_n * 0.8))
         step = ln / 3.2
-        for j3 in range(rng.randint(2, 4)):           # кластер изогнутых штрихов
+        for j3 in range(rng.randint(2, 4)):           # cluster of curved strokes
             ox_ = px_ + math.cos(ang + 1.5708) * (j3 - 1) * step
             oy_ = py_ + math.sin(ang + 1.5708) * (j3 - 1) * step
             l2 = ln * rng.uniform(0.7, 1.0)
@@ -831,7 +830,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
         out.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{INK}" '
                    f'stroke-width="2.6" stroke-linecap="square"/>')
 
-    # двери-коробки на общих стенах
+    # door-frames on shared walls
     for (a_c, b_c, kind) in door_marks:
         if a_c not in floor_cells and b_c not in floor_cells:
             continue
@@ -845,7 +844,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
             out.append(f'<rect x="{mxp - dw / 2:.1f}" y="{myp - dh / 2:.1f}" '
                        f'width="{dw:.1f}" height="{dh:.1f}" fill="#f3ecd8" stroke="{INK}" '
                        f'stroke-width="1.7"{dash}/>')
-        if kind == "steps":                       # перепад: три черты поперёк проёма
+        if kind == "steps":                       # level change: three marks across opening
             for i3 in (-1, 0, 1):
                 if horiz:
                     out.append(f'<line x1="{mxp + i3 * 3.2:.1f}" y1="{myp - S * 0.28:.1f}" '
@@ -855,7 +854,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
                     out.append(f'<line x1="{mxp - S * 0.28:.1f}" y1="{myp + i3 * 3.2:.1f}" '
                                f'x2="{mxp + S * 0.28:.1f}" y2="{myp + i3 * 3.2:.1f}" '
                                f'stroke="{INK}" stroke-width="1.1"/>')
-        elif kind == "portcullis":                    # решётка: три точки
+        elif kind == "portcullis":                    # grate: three dots
             for i3 in (-1, 0, 1):
                 dx3, dy3 = (i3 * 3.4, 0) if not horiz else (0, i3 * 3.4)
                 out.append(f'<circle cx="{mxp + dx3:.1f}" cy="{myp + dy3:.1f}" r="1.1" '
@@ -867,12 +866,12 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
         elif kind == "secret":
             out.append(f'<text x="{mxp}" y="{myp + 3.8}" font-size="10.5" '
                        f'text-anchor="middle" font-style="italic" fill="{INK}">S</text>')
-            tw_, th_ = (2.6, S * 0.9) if horiz else (S * 0.9, 2.6)  # гобелен ЗАКРЫВАЕТ ход
+            tw_, th_ = (2.6, S * 0.9) if horiz else (S * 0.9, 2.6)  # tapestry BLOCKS passage
             out.append(f'<rect x="{mxp - tw_ / 2:.1f}" y="{myp - th_ / 2:.1f}" '
                        f'width="{tw_:.1f}" height="{th_:.1f}" fill="none" stroke="{INK}" '
                        f'stroke-width="1" stroke-dasharray="1.5 1.8"/>')
 
-    # межэтажные знаки: веер лестницы / зев жёлоба / пролом (+клик-переход в game)
+    # inter-floor symbols: stair-fan / chute-maw / collapse (+click-transition in game)
     for (cell, kind, down, other) in interfloor:
         if cell not in floor_tiles_all:
             continue
@@ -894,7 +893,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
             out.append(f'<circle cx="{cxp}" cy="{cyp}" r="{S * 0.36:.1f}" fill="{INK}" '
                        f'opacity="0.85"/><circle cx="{cxp}" cy="{cyp}" r="{S * 0.36:.1f}" '
                        f'fill="none" stroke="{INK}" stroke-width="1.2"/>')
-        else:                                         # пролом: россыпь обломков
+        else:                                         # collapse: rubble scatter
             for _ in range(6):
                 bx3 = cxp + rng.uniform(-S * 0.35, S * 0.35)
                 by3 = cyp + rng.uniform(-S * 0.35, S * 0.35)
@@ -904,7 +903,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
                    f'fill="{INK}">{"↓" if down else "↑"}</text>')
         out.append(g_close)
 
-    # нумерация по ЧАСОВОЙ вокруг центра карты (Watabou), коридоры не нумеруются
+    # numbering CLOCKWISE around map center (Watabou), corridors unnumbered
     ctr_x = sum(t[0] for t in floor_cells) / max(1, len(floor_cells))
     ctr_y = sum(t[1] for t in floor_cells) / max(1, len(floor_cells))
     numbered = [r for r in d["rooms"] if r.get("size", 0) < 2 and r["id"] in seen]
@@ -913,7 +912,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
         -(sum(t[1] for t in r["tiles"]) / len(r["tiles"]) - ctr_y)))
     room_no = {r["id"]: i + 1 for i, r in enumerate(numbered)}
 
-    # ── комнаты: значки/номера/маркер ──
+    # ── rooms: glyphs/numbers/marker ──
     for r in d["rooms"]:
         if r["id"] not in seen:
             if game and r["id"] in ghost_at:
@@ -939,7 +938,7 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
         h_ = max(ys_) - min(ys_) + 1
         c = r.get("content") or {}
         if w_ >= 5 and h_ >= 5 and len(tiles) >= 22 and r["kind"] != "entrance":
-            for cx2 in (min(xs_) + 1, max(xs_) - 1):  # колонны большого зала
+            for cx2 in (min(xs_) + 1, max(xs_) - 1):  # columns of great hall
                 for cy2 in (min(ys_) + 1, max(ys_) - 1):
                     if (cx2, cy2) in tiles:
                         cpx, cpy = px((cx2, cy2))
@@ -993,13 +992,13 @@ def dungeon_svg(d: dict, title: str = "", game: dict | None = None,
                        f'fill="transparent" data-room="{r["id"]}"{click}>'
                        f'<title>{tip}</title></rect>')
 
-    for eid, e in enumerate(d["edges"]):              # окна-предвестия
+    for eid, e in enumerate(d["edges"]):              # window-omens
         if e["kind"] != "window" or not _vis_edge(eid, e):
             continue
         if e["a"] in room_tiles and e["b"] in room_tiles:
             ca, cb = _center(d["rooms"][e["a"]]), _center(d["rooms"][e["b"]])
             if abs(ca[0] - cb[0]) + abs(ca[1] - cb[1]) > 9:
-                continue                              # окно — только меж БЛИЗКИМИ комнатами
+                continue                              # window — only between CLOSE rooms
             ax, ay = px(ca)
             bx2, by2 = px(cb)
             out.append(f'<line x1="{ax}" y1="{ay}" x2="{bx2}" y2="{by2}" stroke="{INK}" '

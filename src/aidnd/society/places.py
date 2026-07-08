@@ -1,11 +1,11 @@
-"""Места-как-удовлетворители-нужд — ДЕКЛАРАТИВНЫЙ, МОДУЛЬНЫЙ каталог. Добавить тип места, что
-закрывает нужду = добавить один PlaceKind в PLACES.
+"""Places-as-need-satisfiers — DECLARATIVE, MODULAR catalog. Adding a place type that
+satisfies a need = adding one PlaceKind to PLACES.
 
-Место «рекламирует» нужды (advertised actions, The Sims): sates = {нужда: скорость гашения/час}.
-Куда NPC пойдёт = utility: окно суток × тяга-по-характеру × Σ(реклама × давление нужды).
-`detect` связывает КАТАЛОГ с реальными зданиями мира: по типу/услугам фактшита определяем, какие
-place-kind воплощает здание (и значит — какие нужды оно закрывает). Один источник истины и для
-рутины (куда идти), и для сцены (что закрыть, стоя тут).
+A place "advertises" needs (advertised actions, The Sims): sates = {need: satiation rate/hour}.
+Where an NPC goes = utility: time-of-day window × character-driven pull × Σ(advertisement × need pressure).
+`detect` links the CATALOG with real-world buildings: by type/services from fact-sheet we determine which
+place-kinds a building implements (and thus which needs it satisfies). Single source of truth for both
+routine (where to go) and scene (which needs to satisfy, standing here).
 
 Key functions
 -------------
@@ -25,10 +25,10 @@ PHASES = ("morning", "day", "evening", "night")
 
 @dataclass(frozen=True)
 class PlaceKind:
-    """Тип места. sates — какие нужды и как быстро гасит; window — уместность по фазе суток;
-    likes — тяга по характеру (черта→вес, применяется как 1+Σ вес·(черта−0.5)); detect — слова
-    в типе/услугах здания, что метят это место; gate — кто вообще рассматривает (any|job|guard|
-    rogue); mobile — место не привязано к зданию (улица/дозор/промысел — точка на графе)."""
+    """Place type. sates — which needs and satiation rate; window — suitability by time-of-day phase;
+    likes — character-driven pull (trait→weight, applied as 1+Σ weight·(trait−0.5)); detect — words
+    in building type/services that mark this place; gate — who considers this at all (any|job|guard|
+    rogue); mobile — place not tied to a building (street/patrol/prowl — a point on the graph)."""
     id: str
     ru: str
     sates: dict = field(default_factory=dict)
@@ -39,11 +39,11 @@ class PlaceKind:
     mobile: bool = False
 
 
-# ── КАТАЛОГ МЕСТ (редактируется здесь) ──
+# ── PLACE CATALOG (edit here) ──
 PLACES: list[PlaceKind] = [
     PlaceKind("home", "дом", sates={"fatigue": 0.16, "comfort": 0.07},
               window={"morning": 0.5, "day": 0.25, "evening": 0.75, "night": 1.0},
-              likes={"sociability": -0.8}),                 # нелюдимого тянет домой
+              likes={"sociability": -0.8}),                 # introvert drawn home
     PlaceKind("work", "работа", sates={"wealth": 0.13, "purpose": 0.08},
               window={"morning": 1.0, "day": 1.0, "evening": 0.2, "night": 0.03},
               likes={"ambition": 0.6, "lawful": 0.4}, gate="job"),
@@ -78,21 +78,21 @@ PLACE: dict[str, PlaceKind] = {p.id: p for p in PLACES}
 
 
 def _blob(building: dict) -> str:
-    """Строка для матча detect: тип + имя + услуги фактшита здания."""
+    """String for detect matching: type + name + services from building fact-sheet."""
     d = building or {}
     return " ".join([str(d.get("type", "")), str(d.get("name", "")),
                      " ".join(d.get("services") or [])]).lower()
 
 
 def kinds_of(building: dict) -> list[str]:
-    """Какие place-kind воплощает здание (по detect). Пусто → не удовлетворяет специфичных нужд."""
+    """Which place-kinds a building implements (by detect). Empty → satisfies no specific needs."""
     blob = _blob(building)
     return [p.id for p in PLACES if p.detect and any(k in blob for k in p.detect)]
 
 
 def advertises(building: dict) -> dict:
-    """Что здание закрывает: объединение sates всех воплощаемых им place-kind (макс. по нужде).
-    ЕДИНЫЙ источник для рутины и для сцены (замена хардкода _live_affordances)."""
+    """What a building satisfies: union of sates across all place-kinds it implements (max per need).
+    SINGLE SOURCE for routine and scene (replaces hardcoded _live_affordances)."""
     out: dict = {}
     for kid in kinds_of(building):
         for need, rate in PLACE[kid].sates.items():
@@ -101,15 +101,15 @@ def advertises(building: dict) -> dict:
 
 
 def affinity(kind: str, traits: dict) -> float:
-    """Тяга NPC к месту по характеру: 1 + Σ вес·(черта−0.5), не ниже 0.1."""
+    """NPC pull to a place by character: 1 + Σ weight·(trait−0.5), not below 0.1."""
     pk = PLACE[kind]
     return max(0.1, 1.0 + sum(w * (traits.get(t, 0.5) - 0.5) for t, w in pk.likes.items()))
 
 
 def score(kind: str, pressured: dict, traits: dict, phase: str,
           window_kind: str | None = None) -> float:
-    """Полезность = окно суток × тяга-характера × Σ(реклама × давление).
-    window_kind: окно берётся от ДРУГОГО типа (работник таверны — от окна таверны)."""
+    """Utility = time-of-day window × character pull × Σ(advertisement × pressure).
+    window_kind: window taken from DIFFERENT type (tavern worker — from tavern window)."""
     pk = PLACE[kind]
     wk = PLACE.get(window_kind) if window_kind else None
     pull = sum(rate * pressured.get(need, 0.0) for need, rate in pk.sates.items())

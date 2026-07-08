@@ -1,9 +1,9 @@
-"""Крафт: мастер + станок + рецепт + материалы → предмет. Мастерство СДВИГАЕТ распределение исхода
-(качество / +mods / клеймо / прочность), брак рождает СКРЫТЫЙ flaw (тот же hidden-гейт) + хрупкость.
-Починка/перековка — тот же трансформ, гейт по мастерству. Детерминированно (score + бросок по seed).
+"""Crafting: master + station + recipe + materials → item. Mastery SHIFTS outcome distribution
+(quality / +mods / mark / durability); defects spawn HIDDEN flaw (same hidden-gate) + fragility.
+Repair/reforge — same transform, gate by mastery. Deterministic (score + roll by seed).
 
-Крафтит и NPC-мастер (Capability из NpcState), и игрок (pc-Capability). LLM тут НЕ нужен — механика
-табличная; флейвор-имя навешивает item_smith на слое игры (по желанию).
+Crafting by NPC-master (Capability from NpcState) and player (pc-Capability). LLM not needed here — mechanics
+are tabular; flavor-name applied by item_smith at game layer (optional).
 
 Key functions
 -------------
@@ -37,9 +37,9 @@ def materials_graph() -> dict:
 
 
 def craft_path(have: set, want: str, graph: dict | None = None, _depth: int = 0) -> list | None:
-    """Путь по ГРАФУ материалов: список рёбер, ведущих от имеющегося (have) к want.
-    Узел готов, когда все его входы либо в have, либо достижимы своими рёбрами. None — недостижимо.
-    Каждое ребро несёт гейты: tool/place/skill/time (проверяет игровой слой)."""
+    """Path through MATERIALS graph: list of edges leading from have to want.
+    Node is ready when all its inputs are either in have or reachable by their edges. None — unreachable.
+    Each edge carries gates: tool/place/skill/time (checked by game layer)."""
     have = set(have)
     if want in have or _depth > 8:
         return [] if want in have else None
@@ -48,14 +48,14 @@ def craft_path(have: set, want: str, graph: dict | None = None, _depth: int = 0)
     if not edge:
         return None
     steps: list = []
-    for src in edge["from"]:                               # рекурсивно добыть каждый вход
+    for src in edge["from"]:                               # recursively fetch each input
         sub = craft_path(have, src, graph, _depth + 1)
         if sub is None:
             return None
         for s in sub:
             if s not in steps:
                 steps.append(s)
-        have.add(src)                                      # вход добыт — доступен для следующих
+        have.add(src)                                      # input fetched — available for next steps
     steps.append(edge)
     return steps
 
@@ -78,10 +78,10 @@ class Recipe:
     dur: int = 30
     dc: int = 10
     slot: str = "none"
-    mod_target: str = ""             # что усиливает masterwork (attack | social:appearance | …)
+    mod_target: str = ""             # what masterwork amplifies (attack | social:appearance | …)
 
 
-# что ремесленник какой роли берётся сделать — ДАННЫЕ предметной системы (не код игрового слоя)
+# what a craftsman of each role takes on — SYSTEM DATA (not game layer code)
 ROLE_RECIPES = {
     "кузнец": Recipe("weapon", "нож", "anvil", 8, 40, 10, "main_hand", "attack"),
     "знахарка": Recipe("consumable", "целебный отвар", "cauldron", 12, 6, 11, "none", "special:heal"),
@@ -96,14 +96,14 @@ ROLE_RECIPES = {
 
 
 def mastery(cap: Capability, station: str, reputation: int = 0, station_tier: int = 1) -> int:
-    """Мастерство: профильная способность + намётанный глаз (компетенция) + станок + репутация."""
+    """Mastery: on-profile ability + trained eye (competency) + station + reputation."""
     ab = max((cap.mod(a) for a in _ABIL.get(station, ("dex",))), default=0)
     comp = 3 if _COMP.get(station) in cap.competencies else 0
     return ab + comp + station_tier + reputation
 
 
 def _material_bonus(inputs) -> int:
-    """Средний сдвиг от качества материалов-предметов (kind:material)."""
+    """Average shift from material-item quality (kind:material)."""
     qs = [{"crude": -1, "plain": 0, "fine": 1, "exquisite": 2}.get(i.get("quality"), 0)
           for i in (inputs or []) if isinstance(i, dict)]
     return round(sum(qs) / len(qs)) if qs else 0
@@ -111,7 +111,7 @@ def _material_bonus(inputs) -> int:
 
 def craft(cap: Capability, recipe: Recipe, *, seed: str, inputs=None,
           maker: dict | None = None, reputation: int = 0, station_tier: int = 1) -> dict:
-    """Скрафтить предмет. maker={id,name} — для клейма. Возвращает фактшит."""
+    """Craft an item. maker={id,name} — for mark. Returns fact sheet."""
     roll = Random(f"craft|{seed}").randint(1, 20)
     m = mastery(cap, recipe.station, reputation, station_tier)
     margin = m + roll + _material_bonus(inputs) - recipe.dc
@@ -121,7 +121,7 @@ def craft(cap: Capability, recipe: Recipe, *, seed: str, inputs=None,
     if recipe.mod_target and quality in ("fine", "exquisite"):
         mods.append({"target": recipe.mod_target, "op": "add", "amount": 1 if quality == "fine" else 2,
                      "when": "equipped" if recipe.slot != "none" else "on_use"})
-    if margin < 0:                                          # БРАК → скрытый порок + хрупкость
+    if margin < 0:                                          # DEFECT → hidden flaw + fragility
         weak_at = 0.3
         hidden.append({"prop": "flaw", "value": "скрытая трещина в работе",
                        "fact": "в изделии изъян — переломится раньше срока",
@@ -132,7 +132,7 @@ def craft(cap: Capability, recipe: Recipe, *, seed: str, inputs=None,
     mark = (maker or {}).get("name", "") if (maker and quality in ("fine", "exquisite")) else ""
     worth = round(recipe.base_worth * _QFACT[quality]) + (5 if mark else 0)
     return normalize({
-        "kind": recipe.out_kind, "name": recipe.name, "slot": recipe.slot,  # качество — отдельным полем (без грам. рода)
+        "kind": recipe.out_kind, "name": recipe.name, "slot": recipe.slot,  # quality — separate field (no grammatical gender)
         "quality": quality, "worth": worth, "apparent_worth": worth, "mods": mods, "hidden": hidden,
         "durability": {"max": dur_max, "current": dur_max, "break_behavior": _BREAK.get(recipe.out_kind, "snap"),
                        "repair_dc": recipe.dc, "weak_at": weak_at},
@@ -142,7 +142,7 @@ def craft(cap: Capability, recipe: Recipe, *, seed: str, inputs=None,
 
 
 def repair(item: dict, cap: Capability, *, seed: str, station: str = "anvil") -> dict:
-    """Починка/перековка — гейт по мастерству. Слабая рука чинит грубо (потолок просядет)."""
+    """Repair/reforge — gate by mastery. Weak hand repairs coarsely (durability ceiling drops)."""
     if item.get("kind") == "consumable":
         return {"ok": False, "reason": "снадобья и съестное не чинятся — только заново"}
     d = item.get("durability")

@@ -1,239 +1,225 @@
-# Система подземелий
+# Dungeon System
 
-Полный дизайн (2026-07-07). Цель — **лучшая возможная система данжей для игрока**:
-красивые клеточные D&D-карты на пергаменте (стиль городской системы локаций), много
-комнат, скрытые крылья, этажи, разнообразие форм — и всё это **выведено из сюжетной
-завязки** подземелья, а не наклеено поверх случайной геометрии.
+Complete design (2026-07-07). Goal — **the best possible dungeon system for the player**:
+beautiful grid-based D&D maps on parchment (styled like the city location system), many
+rooms, hidden wings, floors, diverse shapes — and all of it **derived from the dungeon's
+narrative premise** rather than pasted over random geometry.
 
-Основа — шесть ресёрч-потоков (наука PCG · индустрия Brogue/Spelunky/Unexplored/Qud ·
-бумажные конвенции + OSR-таблицы · LLM×PCG · **декомпиляция Watabou 1PDG** · дизайн
-приключений от премисы). Пост-мортем прежних заходов — §10. Данж остаётся **локацией
-мира**: комнаты = зоны живой сцены, городской стек (материализация, слышимость,
-mind-обитатели, deal-гейт, deeds, гильдия) работает внутри.
+Foundation — six research streams (PCG science · industry Brogue/Spelunky/Unexplored/Qud ·
+tabletop conventions + OSR tables · LLM×PCG · **Watabou 1PDG decompilation** · adventure
+design from premise). Post-mortem of previous attempts — §10. The dungeon remains a **location
+of the world**: rooms = zones of live scenes, the city stack (materialization, audibility,
+mind-inhabitants, deal-gates, deeds, guild) operates within.
 
 ---
 
-## 1. Формула
+## 1. Formula
 
-**Премиса (4 параметра) → три графа → укладка Watabou-аккрецией → наполнение слоями
-времени → рендер Dyson-алфавитом → игра с давлением ресурсов.**
+**Premise (4 parameters) → three graphs → Watabou-accretion layout → layering through time →
+Dyson-alphabet render → play under resource pressure.**
 
-Премиса раскладывается на четыре независимых входа генератора (Alexandrian/Monte Cook):
+The premise breaks down into four independent inputs to the generator (Alexandrian/Monte Cook):
 
-| Параметр | Определяет | Пример |
+| Parameter | Determines | Example |
 |---|---|---|
-| **Строитель** (кто и зачем построил) | ГЕОМЕТРИЮ: каждая комната имеет причину | гробница → ось процессии |
-| **Цель игрока** (украсть/спасти/убить/узнать) | ТОПОЛОГИЮ обхода: позиция цели, таймер, развязки | спасти → цель в середине, жёсткий таймер |
-| **Жильцы сейчас** (фракции и их желания) | ДИНАМИКУ: не сюжет, а ситуация | культ → знамения-фронт |
-| **Катастрофа** (что случилось между «тогда» и «сейчас») | НАПОЛНЕНИЕ: следы, контрасты | часовня→логово |
+| **Builder** (who built it and why) | GEOMETRY: each room has a reason | tomb → processional axis |
+| **Player goal** (steal/rescue/kill/learn) | TRAVERSAL TOPOLOGY: goal position, timer, denouements | rescue → goal in center, hard timer |
+| **Current inhabitants** (factions and their desires) | DYNAMICS: not plot, but situation | cult → sign-fronts |
+| **Catastrophe** (what happened between "then" and "now") | FURNISHINGS: traces, contrasts | chapel→lair |
 
-Из них строится **тройка графов** (главный вывод ресёрча приключений):
-1. *функциональный граф строителя* — план «как было» (типология §3);
-2. *исторический diff поколений* — «руины трёх авторов»: кто перестроил, что сломано,
-   какие дыры прокопаны (незапланированные петли!), какой мусор остался;
-3. *целевой граф игрока* — вход(ы), цель, ≥2 содержательно разных маршрута, петли,
-   замки-ключи, секретки, таймер.
-Карта — проекция первых двух; игра — обход третьего. Величие (Thracia) — когда игрок
-использует историю места (граф 2) как оружие против нынешних хозяев (граф 3).
+From these emerges a **triple of graphs** (chief insight from adventure design research):
+1. *builder's functional graph* — the plan "as it was" (typology §3);
+2. *historical diff across generations* — "ruins of three authors": who rebuilt it, what broke,
+   which holes were dug (unplanned loops!), what rubble remains;
+3. *player's goal graph* — entrance(s), goal, ≥2 meaningfully different routes, loops,
+   locks-and-keys, secrets, timer.
+The map is a projection of the first two; play is traversing the third. Greatness (Thracia) occurs
+when the player weaponizes the place's history (graph 2) against its current masters (graph 3).
 
-## 2. Геометрия: укладка Watabou-аккрецией (код, ноль LLM)
+## 2. Geometry: Watabou-accretion layout (code, zero LLM)
 
-Алгоритм 1PDG, восстановленный из декомпиляции бандла (`com.watabou.dungeon.*`) и
-подтверждённый цитатой автора («partly symmetrical tree accretion»). Наш порт:
+The 1PDG algorithm, reverse-engineered from bundle decompilation (`com.watabou.dungeon.*`) and
+confirmed by the author's own phrase ("partly symmetrical tree accretion"). Our port:
 
-1. **Комната = прямоугольник с осью**: `origin` (клетка входа), `axis` (направление
-   роста), `w×d`; ширины **нечётные** (дверь ровно на оси). Классы размеров: комната
-   (5|7)×(4-6), зал (5|7|9)×(7-9), короткий коридор 3×(4-5), клетка-сочленение 3×3.
-   **Коридор — та же комната** (узкий прямоугольник), никакой отдельной сущности.
-2. **Аккреция с зеркальной симметрией**: очередь `{seed, parent, origin, axis, size,
-   mirror}`; варианты спавна — симметричная пара по бокам от оси, ребёнок по оси в
-   дальнем торце, или всё сразу; **зеркальные близнецы получают ОДИН seed** → их
-   поддеревья разворачиваются идентично-зеркально (частичная симметрия = «рукотворность»).
-   Изредка асимметричный спавн со свежими seed. `validate`: коллизии + блок клеток у входа.
-3. **`grow()` — секрет плотности**: пост-проход, группы близнецов синхронно вытягиваются
-   вдоль оси по клетке, пока не упрутся в соседей (кап ×10) → комнаты распухают до
-   соприкосновения, делят стены, никаких пустот и коридоров-кишок.
-4. **Planner — драматургия на готовой плотной укладке**:
-   - вход = корень; **кульминация = самая далёкая комната по A\*** (рёбра через большие
-     залы дороже) — там босс/трон/цель;
-   - ante-room подводка перед кульминацией;
-   - **секретные КРЫЛЬЯ**: целые поддеревья прячутся за секретной дверью (не комната —
-     крыло; критпуть никогда через секретку);
-   - замки́: ключи кладутся в комнаты, достижимые БЕЗ прохода запертой двери
-     (по построению, Ashmore/Nitsche) + BFS-assert «комната × ключи»;
-   - backdoor — запасной вход (≥2 входа, где диегетически оправдано);
-   - **петли `createLoop`**: пары несвязанных комнат с общей стеной ≥3 клеток и графовым
-     расстоянием >5 → дверь в середину стены; повторять, пока есть кандидаты —
-     машинный jaquaysing;
-   - `cleanUp`: срез тупиковых коридоров (тупик остаётся только с контентом);
-   - ступени между комнатами (перепад высот внутри этажа), ротонды (симметричные группы
-     круглеют), колоннады в длинных залах, вода (шумовая карта + порог уровня, только
-     внутри комнат, Chaikin-сглаживание берега).
-5. **Профиль укладки от ТИПА помещения** (данные, `content/dungeon_types.json`) — теги
-   Watabou как ручки: гробница = string+ordered+ложные ветки; храм = ordered+ротонды+
-   колоннады; пещера = chaotic+блобы (клеточный автомат вместо прямоугольников у части
-   комнат); шахта = winding+deep (длинные штреки, осмысленные тупики-забои); тюрьма =
-   ordered+cramped (модули камер); канализация = решётка+петли по определению.
-   Каждый тип задаёт: классы размеров, симметрию, обязательные комнаты (§3),
-   вертикальность, словарь реквизита.
-6. **Гарантии кодом** (как в городских планах): solvable-BFS с ключами; критпуть чист от
-   секреток; фильтр Жаке (цикломатика ≥2 — кроме string-гробниц, там ложные ветки вместо
-   петель; тупики только осмысленные); Melan-тест: ≥2 содержательно разных маршрута к
-   цели. Аккреция+grow валидна почти всегда → под-сиды как страховка, не костыль.
+1. **Room = rectangle with axis**: `origin` (entrance cell), `axis` (growth direction), `w×d`;
+   widths are **odd** (door sits exactly on axis). Size classes: room (5|7)×(4-6), hall
+   (5|7|9)×(7-9), short corridor 3×(4-5), junction cell 3×3. **Corridor is the same as a room**
+   (narrow rectangle), no separate entity.
+2. **Accretion with mirror symmetry**: queue `{seed, parent, origin, axis, size, mirror}`;
+   spawn variants — symmetric pair on sides of axis, child along axis at far end, or all at once;
+   **mirror twins receive ONE seed** → their subtrees unfold identically-mirrored (partial
+   symmetry = "craftsmanship"). Occasionally asymmetric spawn with fresh seed. `validate`:
+   collisions + cell buffer at entrance.
+3. **`grow()` — the density secret**: post-pass, twin groups stretch synchronously along the axis
+   one cell at a time until they hit neighbors (cap ×10) → rooms bulge to touching, share walls,
+   no voids and intestinal corridors.
+4. **Planner — dramaturgy on solid layout**:
+   - entrance = root; **climax = farthest room by weighted A\*** (traversals through big halls cost more) —
+     boss/throne/goal goes there;
+   - ante-room buffer before climax;
+   - **secret WINGS**: entire subtrees hide behind a secret door (not a room — a wing; critical
+     path never goes through secrets);
+   - locks: keys placed in rooms reachable WITHOUT passing any locked door (by construction,
+     Ashmore/Nitsche) + BFS-assert "room × keys";
+   - backdoor — alternate entrance (≥2 entrances where narratively justified);
+   - **loops `createLoop`**: pairs of unlinked rooms sharing a wall ≥3 cells, graph distance >5
+     → door in wall midpoint; repeat while candidates exist — mechanical jaquaysing;
+   - `cleanUp`: prune dead-end corridors (dead-ends remain only if furnished);
+   - steps between rooms (height difference within floor), rotundas (symmetric groups round out),
+     colonnades in long halls, water (noise map + level threshold, rooms only, Chaikin-smoothed banks).
+5. **Layout profile by ROOM TYPE** (data, `content/dungeon_types.json`) — Watabou tags as knobs:
+   tomb = string+ordered+false branches; temple = ordered+rotundas+colonnades; cave = chaotic+blobs
+   (cellular automaton instead of rectangles for some rooms); mine = winding+deep (long drifts,
+   meaningful dead-end stopes); prison = ordered+cramped (cell modules); cistern = grid+loops
+   by definition. Each type specifies: size classes, symmetry, required rooms (§3), verticality,
+   prop vocabulary.
+6. **Code guarantees** (as in city plans): solvable-BFS with keys; critical path free of secrets;
+   Jaquays filter (cyclomaticity ≥2 — except string-tombs, which have false branches instead of
+   loops; dead-ends only if meaningful); Melan test: ≥2 meaningfully different routes to goal.
+   Accretion+grow nearly always valid → sub-seeds as insurance, not workaround.
 
-## 3. Типология помещений (данные)
+## 3. Room Typology (data)
 
-11 базовых типов с обязательными комнатами; сильный данж = **стык двух типов**, шов —
-сердце карты и место катастрофы (шахта вскрыла гробницу; храм над пещерой):
+11 base types with required rooms; a strong dungeon = **seam of two types**, the join being the
+heart of the map and site of catastrophe (mine breaks into tomb; temple above cave):
 
-| Тип | Структура | Обязательные комнаты | Фирменное |
+| Type | Structure | Required Rooms | Signature |
 |---|---|---|---|
-| гробница | линейная ось процессии + ложные ветки | притвор → часовня → ЛОЖНАЯ камера → шахта → истинная камера → сокровищница | ложный финал; секретки до 30%; нежить=легитимная стража |
-| шахта | дерево + вертикальные стволы | устье, стволы-горизонты, штреки по жиле, забои, водоотлив, контора | честные тупики; «прокопались куда не надо» |
-| храм/монастырь | публичная ось + кольцо клуатра + крипта | неф, алтарь, ризница, клуатр-петля, кельи, скрипторий, крипта | симметрия; осквернение как перелом |
-| тюрьма | луковица гейтов | КПП, караулки, блоки камер, карцер (цель!), кабинет начальника, дренаж | патрули; эскалация тревоги; ≥2 обходных пути |
-| крепость | концентрические кольца | гейтхаус, стены-маршруты, двор-хаб, донжон, арсенал, потерна | движение ПО стенам; мустер-зоны |
-| канализация | решётка с петлями | люки-входы (много!), коллектор, галереи-развязки, цистерна | поток=односторонние рёбра; слоение эпох |
-| логово зверя | компактная звезда 3-7 зон | подход со знаками, прихожая с останками, гнездо, клад, чёрный лаз | телеграф за N комнат; лаз, куда зверь не пролезет |
-| башня мага | вертикальный стек + взлом линейности | страж-прихожая, лаборатория, библиотека, круг призыва, обсерватория | телепорты; «этажей больше, чем снаружи» |
-| лаборатория | конвейер процесса | склад реагентов, препараторская, чаны с образцами, архив журналов, крематорий | сбежавший эксперимент; журналы=история |
-| тайник контрабандистов | двухфасадная: легальный верх + скрытый низ | грот-док, склад, контора с компроматом, лаз в город | люди, не монстры; прилив-таймер; пароли |
-| пещера | органика, максимум вертикали | грот, шкуродёр, зал со сталагмитами, река/озеро, сифон, пропасть | экосистема; стык с «построенным» = смена жанра |
+| tomb | linear processional axis + false branches | vestibule → chapel → FALSE chamber → shaft → true chamber → treasury | false ending; secrets up to 30%; undead=legitimate guard |
+| mine | tree + vertical shafts | mouth, shaft-horizons, drifts along vein, stopes, pumping station, office | honest dead-ends; "dug where we shouldn't" |
+| temple/monastery | public axis + cloister ring + crypt | nave, altar, sacristy, cloister-loop, cells, scriptorium, crypt | symmetry; desecration as turning point |
+| prison | gate-bulb | checkpoint, guardroom, cell blocks, solitary (goal!), governor's office, drain | patrols; alarm escalation; ≥2 bypass routes |
+| fortress | concentric rings | gatehouse, wall-routes, courtyard-hub, keep, armory, postern | movement ALONG walls; muster zones |
+| cistern | grid with loops | many hatch-entrances, collector, gallery-junctions, cistern | flow=one-way edges; epochal layering |
+| beast lair | compact 3-7 zone star | approach with signs, entrance with remains, nest, hoard, black passage | telegraph across N rooms; passage too tight for beast |
+| mage tower | vertical stack + breaking linearity | guard-foyer, laboratory, library, summoning circle, observatory | teleports; "more floors than outside" |
+| laboratory | process pipeline | reagent storage, dissection room, sample vats, journal archive, crematorium | escaped experiment; journals=history |
+| smuggler's cache | dual-façade: legal top + hidden base | grotto-dock, warehouse, office with blackmail files, passage to city | people, not monsters; tide-timer; passwords |
+| cave | organic, maximum verticality | grotto, skinning pit, stalactite hall, river/lake, siphon, chasm | ecosystem; seam with "built" = genre shift |
 
-## 4. Этажи
+## 4. Floors
 
-- **Лист-на-этаж** (бумажная традиция), лестницы **совмещены по XY** между этажами.
-- **≥2 разнотипных связи** между соседними уровнями (Jaquays): лестница + что-то ещё из
-  словаря 19 коннекторов Alexandrian (данные): шахта, склон-обман, люк, жёлоб-ловушка
-  (односторонний!), обвал, река, лифт, многоуровневый зал (один объём, входы на разных
-  высотах), связь через уровень (лестница L1→L3).
-- Вертикальные ЦИКЛЫ: спустился лестницей — вернулся рекой; провалился в жёлоб — вышел
-  штольней (бэктрекинг другим путём).
-- Число этажей и вертикальный профиль — из типа (башня 4-6 маленьких, гробница 1-2 вниз,
-  шахта 2-3 горизонта, логово 1) и CR.
-- Кульминация — на дальнем этаже; ярусы = ярусы напряжения (Sunless Citadel: вниз — жутче).
-- UI: пергамент этажа + переключатель ярусов; лестницы-веера с подписью вверх/вниз.
+- **Sheet-per-floor** (tabletop tradition), staircases **aligned by XY** between floors.
+- **≥2 different-type connections** between adjacent levels (Jaquays): stairs + something else
+  from Alexandrian's vocabulary of 19 connectors (data): shaft, deceptive slope, trapdoor,
+  chute-trap (one-way!), cave-in, river, elevator, multi-level hall (one volume, entrances at
+  different heights), cross-level link (stairs L1→L3).
+- Vertical CYCLES: descended stairs — returned via river; fell down chute — exited through drift
+  (backtrack via different route).
+- Number of floors and vertical profile — derived from type (tower 4-6 small, tomb 1-2 down,
+  mine 2-3 horizons, lair 1) and CR.
+- Climax — on distant floor; levels = tension levels (Sunless Citadel: deeper = creepier).
+- UI: floor parchment + level switcher; staircase fans with up/down labels.
 
-## 5. Наполнение: слои времени + квоты + чек-лист
+## 5. Furnishings: time layers + quotas + checklist
 
-1. **Три слоя времени на комнату**: след исходной функции (архитектура) + след перелома
-   (пролом, гарь, брошенное в спешке) + след нынешнего жильца (гнездо в алтаре).
-   Контраст слоёв = контент. Прошлое обязано быть считываемым и ПОЛЕЗНЫМ (не лекция).
-2. **Стокинг B/X-квотами** (проверено на 600 комнатах: 32/31/15/13): 33% монстр /
-   17% ловушка / 17% особенность / 33% пусто-но-обставлено; клады по классике
-   (monster 50%…empty 17%, у «пустых» — 1-к-6 тайник). Машины-виньетки
-   (`dungeon_machines.json`, Brogue): замок→ключ→риск→награда одной записью данных.
-   Ловушка = сигнал+триггер+эффект+спас, телеграф честный.
-3. **Чек-лист Goblin Punch — ассерты генератора** (7 обязательных): что украсть; кого
-   убить; что может убить ТЕБЯ (непосильная, но телеграфированная угроза + путь побега);
-   разные пути; **с кем поговорить** (пленник/призрак/соперники — комната=зонная сцена!);
-   с чем экспериментировать; что скорее всего НЕ найдут.
-4. **Цель из завязки** (таблица §2.2 ресёрча): украсть → цель в глубине за ложной целью,
-   обратный путь = отдельная фаза (шорткат открывается изнутри); спасти → цель в середине
-   + жёсткий таймер + ≥2 обходных пути; остановить культ → знамения-фронт (3-5 ступеней
-   эскалации, данж меняется между визитами); убить зверя → цель мобильна (расписание);
-   узнать → фрагменты размазаны по правилу трёх улик (каждый чокпойнт ≥3 решения).
-5. **Фракции с экономикой присутствия**: что едят, чего боятся, именованный NPC с желанием
-   (вождь городских происшествий = mind из пула); союз с фракцией = бесплатный проход по
-   её территории. Первые 3-5 комнат ОБУЧАЮТ языку данжа (Tomb of Serpent Kings).
+1. **Three time layers per room**: trace of original function (architecture) + trace of upheaval
+   (breach, scorch, abandoned in haste) + trace of current inhabitant (nest in altar).
+   Contrast between layers = content. The past must be readable and USEFUL (not a lecture).
+2. **B/X-quota stocking** (tested on 600 rooms: 32/31/15/13): 33% monster / 17% trap /
+   17% feature / 33% empty-but-furnished; treasure per classic ratios (monster 50%…empty 17%,
+   "empty" rooms 1-in-6 get hidden stash). Machine-vignettes (`dungeon_machines.json`, Brogue):
+   lock→key→risk→reward in one data record. Trap = signal+trigger+effect+save, honest telegraph.
+3. **Goblin Punch checklist — generator asserts** (7 required): what to steal; who to kill;
+   what can kill YOU (overwhelming but telegraphed threat + escape route); different paths;
+   **who to talk to** (prisoner/ghost/rivals — room=zone scene!); what to experiment with;
+   what they'll most likely miss.
+4. **Goal from premise** (table §2.2 research): steal → goal deep behind false goal, return path
+   = separate phase (shortcut opens from inside); rescue → goal in center + hard timer + ≥2
+   bypass routes; stop cult → sign-fronts (3-5 escalation stages, dungeon changes between visits);
+   kill beast → goal is mobile (schedule); learn → clues smeared per rule of three (each checkpoint
+   ≥3 solutions).
+5. **Factions with economy of presence**: what they eat, what they fear, named NPC with desire
+   (lord of city incidents = mind from pool); alliance with faction = free passage through its
+   territory. First 3-5 rooms TEACH the dungeon's language (Tomb of Serpent Kings).
 
-## 6. Рендер: Dyson/Watabou-алфавит на пергаменте (стиль городских планов)
+## 6. Render: Dyson/Watabou-alphabet on parchment (city plan style)
 
-- **Иерархия линий (строго 4 ступени)**: 0.5 сетка · 1.0 штриховка · 1.5 символы/вода ·
-  3.0 стены. **Сетка только на полу** (никогда на «скале»). Клетка крупная (~15px).
-- **Пергамент** — наш городской: feTurbulence зерно+пятна (floorart._defs), чернильный INK.
-- **Drop shadow**: силуэт данжа, смещённый на 0.2 клетки, серым — «карта лежит на бумаге».
-- **Дайсон-штриховка по силуэту**: кластеры 2-5 изогнутых штрихов (утолщение в середине)
-  на точках Пуассона вокруг контура; угол = направление на соседа + поворот; длина
-  масштабируется до соседа (дыры закрываются); штрихи подрезаются друг о друга.
-- **Словарь дверей** (Watabou, 8+ типов): проём · дверь-коробка · арка · двойная
-  (с чертой) · решётка (три точки, видно-но-не-пройти) · заблокированная · **секретная —
-  не рисуется вовсе** (+на стену вешается гобелен!) · вход-лестница · лестница вниз ·
-  ступени-перепад.
-- **Реквизит-глифы** (реюз городских + новые): алтарь, бочка, валун, ящик, сундук, подиум,
-  фонтан, саркофаг, статуя, гобелен, трон, колодец, колонны (шанс расколотой),
-  колоннады, трещины пола, обломки, вода (Chaikin ×3 + wavy-вершины + волнистые линии).
-- **Нумерация по часовой стрелке** вокруг центра; легенда на полях; текст с белым ореолом;
-  титул + сюжетная завязка курсивом под ним (из брифа).
-- Игра: туман (только seen), призраки-«?» у дверей, маркер игрока, зум по исследованному,
-  тултипы комнат.
+- **Line hierarchy (strictly 4 levels)**: 0.5 grid · 1.0 hatch · 1.5 symbols/water · 3.0 walls.
+  **Grid on floor only** (never on "rock"). Cell large (~15px).
+- **Parchment** — our city style: feTurbulence grain+stains (floorart._defs), ink INK.
+- **Drop shadow**: dungeon silhouette offset 0.2 cells, gray — "map rests on paper".
+- **Dyson-hatch by silhouette**: clusters of 2-5 curved strokes (thick in middle) on Poisson
+  points around outline; angle = direction to neighbor + rotation; length scales to neighbor
+  (closes gaps); strokes trim against each other.
+- **Door vocabulary** (Watabou, 8+ types): opening · door-frame · arch · double (with bar) ·
+  grating (three dots, visible-but-not-passable) · blocked · **secret — not drawn at all** (+tapestry
+  hung on wall!) · stair-entrance · stair-down · step-change.
+- **Prop-glyphs** (reuse city glyphs + new): altar, barrel, boulder, box, chest, podium,
+  fountain, sarcophagus, statue, tapestry, throne, well, columns (chance broken), colonnades,
+  floor cracks, rubble, water (Chaikin ×3 + wavy-crests + wavy lines).
+- **Clockwise numbering** around center; legend in margins; text with white halo; title +
+  narrative premise italicized below it (from brief).
+- Play: fog (seen only), ghost "?" at doors, player marker, zoom by explored, room tooltips.
 
-## 7. LLM и пул (наш паттерн, принцип без изменений)
+## 7. LLM and pool (our pattern, principle unchanged)
 
-Всё офлайн в пул (worlds.db kind=dungeon), рантайм детерминирован сидом, LLM в нём нет.
-**Бриф v2** (`dungeon_architect`): премиса 4 параметрами (строитель/цель/жильцы/
-катастрофа), тип(ы) помещения из enum §3 + шов, теги стиля из enum укладки, 5-9 битов-
-следов по трём слоям времени, фракция с желанием, именования, lock_flavor, знамения
-фронта. НИ ОДНОЙ координаты. **Декоратор v2**: виньетки на архетипы комнат ТИПА
-(не абстрактные hall/cave, а «притвор/ложная камера/забой/клуатр» из §3), каждая улика →
-id бита; валидатор бьёт висячие ссылки. Раздача виньеток без повторов по сиду.
+Everything offline in pool (worlds.db kind=dungeon), runtime deterministic by seed, no LLM at runtime.
+**Brief v2** (`dungeon_architect`): premise by 4 parameters (builder/goal/inhabitants/catastrophe),
+room type(s) from enum §3 + seam, style tags from enum layout, 5-9 bit-traces across three time
+layers, faction with desire, naming, lock_flavor, sign-fronts. NO COORDINATES. **Decorator v2**:
+vignettes keyed to TYPE room archetypes (not abstract hall/cave, but "vestibule/false-chamber/stope/cloister"
+from §3), each clue → bit id; validator catches dangling refs. Vignette distribution no-repeat by seed.
 
-## 8. Игра
+## 8. Gameplay
 
-Сохраняется всё работающее: обход с туманом, информированный выбор двери (намёк по
-содержимому), ловушки со спас-броском, обыск (клады/ключи/машины/секретки), бой комнаты
-на существующем гриде (форма комнаты → арена), блуждающие, происшествия города и
-логовища как ИСТОЧНИКИ ПРЕМИС, incident_resolve с реальными кошельками/пленниками.
-Добавляется по этапам: **свет как таймер** (факел 6 ходов, видимый счётчик давления),
-знамения-фронт (данж живёт между визитами), restocking 1-к-6 по дням, **комната = зонная
-сцена** (пленник-mind, переговоры, deal-гейт «подкупить часового»), вынос добычи как
-фаза, персист состояния обхода в pc-блоб.
+Everything that works is retained: traversal with fog, informed door choice (hint by contents),
+traps with save throw, searching (treasures/keys/machines/secrets), room combat on existing grid
+(room shape → arena), wandering encounters, city incidents and lair incidents as PREMISE SOURCES,
+incident_resolve with real coffers/prisoners. Added in phases: **light as timer** (torch 6 turns,
+visible pressure counter), sign-fronts (dungeon lives between visits), restocking 1-in-6 per day,
+**room = zone scene** (prisoner-mind, negotiation, deal-gate "bribe the guard"), extracting loot
+as separate phase, persist traversal state in pc-blob.
 
-## 9. План реализации
+## 9. Implementation Plan
 
-- **D1 — геометрия+рендер ✔ ЯДРО** (2026-07-07, на проде): `worldgen/watabou.py` — порт
-  1-в-1 (комната=прямоугольник с осью, нечётные ширины, очередь близнецов с ОДНИМ seed +
-  добор случайной комнатой «pick one of the rooms», grow-распухание группами до
-  соприкосновения, createLoop по общим стенам ≥3, cleanUp тупиков-коридоров с подрезкой
-  хвостов, ротонды у симметричных групп, вода шум+порог, колоннады). Planner в dungeongen:
-  цель = дальняя по взвешенному пути (залы дороже), секретные КРЫЛЬЯ-поддеревья, замки:
-  сперва запереть все — потом ключи ВНЕ любого замка, ступени, тупики с наградой. Рендер
-  v4: тень-подложка, сетка на полу, густой дайсон-хэтч кластерами, двери/ступени/решётки/
-  замки/S, вода волнами, колонны, нумерация по часовой. 48/48 сидов, ~8мс/данж.
-  ДОКРУЧЕНО по аудиту порта (2026-07-07): addSteps 0.5 как в оригинале, buildApproach
-  (ante-room «пост» перед кульминацией — страж в stock), addBackdoor (запасной вход тегом),
-  добор заглохшего дерева — К ЦЕНТРУ МАСС (лечит змеистость), порог петель >5 (оригинал),
-  пуассон-хэтч изогнутыми кластерами с прореживанием, гобелен на секретной двери.
-  **ОСТАТОК D1 ✔** (2026-07-07): профили типов — `content/dungeon_types.json` (7 профилей:
-  tomb/temple/mine/keep/warren/cistern/sanctum × ручки order/corridor/hall/string/rotunda/
-  water/steps + словарь реквизита + goal_prop), тип выбирается по среде логовища;
-  реквизит-глифы (саркофаг/трон/алтарь/статуя/сундук/бочка/ящик/фонтан/колодец/подиум/
-  валун — по образцу drawings.* оригинала), кульминация несёт профильный глиф; петли —
-  второй проход после cleanUp (медиана цикломатики 2). Не 1-в-1 остались: точные
-  вероятности спавна (в декомпиляции чисел не было) и Lehmer-RNG (сиды оригинала).
-- **D2 — этажи ✔** (2026-07-07, на проде): граф комнат ЕДИН (floor — поле комнаты,
-  межэтажные связи — рёбра stairs/chute/collapse), этаж = представление рендера
-  (лист-на-этаж). XY-совмещение честное: корень этажа N+1 = клетка лестницы этажа N
-  (лестница физически в обеих комнатах), нормализация одним сдвигом. Лестница — в ДАЛЬНЕЙ
-  комнате этажа; вторая разнотипная связь — по XY-пересечению этажей (жёлоб ОДНОСТОРОННИЙ
-  вниз / шахта / пролом) → вертикальные циклы. Цель всегда на нижнем ярусе; глубже — злее
-  (stock ×(1+0.25·floor)); гарантия возврата _solvable_back (жёлобы не запирают). Рендер:
-  знаки (веер лестницы/зев жёлоба/россыпь пролома + стрелка ↓↑), подпись «ярус K/N»,
-  межэтажный призрак кликабелен; галерея показывает все листы. Число этажей — из профиля
-  типа (шахта 2-3, логово 1). 4 floor-теста (174 всего).
-- **D3 — премиса**: dungeon_types.json → обязательные комнаты в Planner, бриф v2 +
-  декоратор v2, перековка пула, цель-из-завязки, чек-лист GP как ассерты.
-- **D4 — игра-глубина**: свет-таймер, знамения, restocking, комната=зонная сцена,
-  вынос добычи, персист обхода.
+- **D1 — geometry+render ✔ CORE** (2026-07-07, on prod): `worldgen/watabou.py` — 1-to-1 port
+  (room=rectangle with axis, odd widths, twin queue with ONE seed + random room picker "pick one
+  of the rooms", grow-bulge by groups to touching, createLoop on shared walls ≥3, cleanUp dead-end
+  corridors with tail trim, rotundas at symmetric groups, water noise+threshold, colonnades). Planner
+  in dungeongen: goal = farthest by weighted path (halls cost more), secret WING-subtrees, locks:
+  lock all first — then keys OUTSIDE any lock, steps, rewarded dead-ends. Render v4: shadow-underlay,
+  floor grid, dense Dyson-hatch by clusters, doors/steps/grates/locks/S, water with waves, columns,
+  clockwise numbering. 48/48 seeds, ~8ms/dungeon. FINALIZED per port audit (2026-07-07): addSteps
+  0.5 as original, buildApproach (ante-room "buffer" before climax — guard in stock), addBackdoor
+  (alternate entrance by tag), dead-tree completion — TO CENTROID (fixes snakiness), loop threshold
+  >5 (original), Poisson-hatch with curved clusters and thinning, tapestry on secret door.
+  **D1 REMAINDER ✔** (2026-07-07): type profiles — `content/dungeon_types.json` (7 profiles:
+  tomb/temple/mine/keep/warren/cistern/sanctum × knobs order/corridor/hall/string/rotunda/water/steps
+  + prop vocabulary + goal_prop), type chosen by lair environment; prop-glyphs (sarcophagus/throne/
+  altar/statue/chest/barrel/box/fountain/well/podium/boulder — per original drawings.*), climax carries
+  profile glyph; loops — second pass after cleanUp (median cyclomaticity 2). Not 1-to-1 retained:
+  exact spawn probabilities (no numbers in decompile) and Lehmer-RNG (original seeds).
+- **D2 — floors ✔** (2026-07-07, on prod): room graph UNIFIED (floor — room field, inter-floor links
+  — edges stairs/chute/collapse), floor = render view (sheet-per-floor). XY-alignment honest: floor
+  N+1 root = floor N staircase cell (staircase physically in both rooms), one-shift normalization.
+  Stairs — in FARTHEST room of floor; second different-type link — by XY floor intersection (chute
+  ONE-WAY down / shaft / cave-in) → vertical cycles. Goal always on lowest tier; deeper = meaner
+  (stock ×(1+0.25·floor)); return guarantee _solvable_back (chutes don't lock). Render: marks (stair
+  fan/chute gape/cave-in scatter + arrow ↓↑), label "level K/N", inter-floor ghost clickable; gallery
+  shows all sheets. Number of floors — from type profile (mine 2-3, lair 1). 4 floor tests (174 total).
+- **D3 — premise**: dungeon_types.json → required rooms in Planner, brief v2 + decorator v2, pool
+  reforging, goal-from-premise, GP checklist as asserts.
+- **D4 — depth gameplay**: light-timer, sign-fronts, restocking, room=zone scene, loot extraction,
+  traversal state persist.
 
-Каждый этап — зелёный инкремент на прод с галереей для смотрин ВКУСА до игровой интеграции.
+Each phase — green increment to prod with gallery for taste testing before game integration.
 
-## 10. Пост-мортем прежних заходов (чтобы не повторить)
+## 10. Post-mortem of previous attempts (to not repeat)
 
-1. *Кольцо на курс-решётке 9×7*: комнаты прибиты к редкой решётке → острова-квадратики
-   с коридорами-кишками. Ошибка: пространство подчинено графу.
-2. *Аккреция впритык без grow*: вид верный, но упаковка длинной цепочки кольца тупикует
-   (3/24 сидов не собрались за 24 под-сида), укладка ползёт колбасой. Ошибки: рост
-   цепочкой вместо дерева с симметрией; нет grow-распухания; петли укладываются, а не
-   находятся. Урок Watabou: **дерево аккрецией + grow до соприкосновения + петли/
-   кульминация/секретки НАХОДЯТСЯ на готовой плотной укладке** — валидность по
-   построению, драматургия отдельным проходом (Planner), и никогда наоборот.
-3. Словарь циклов Дорманса не выброшен — он переезжает в Planner как словарь паттернов
-   драматургии (две дуги = два маршрута к дальней комнате, короткий-опасный/
-   длинный-безопасный = разметка найденных петель, foreshadow = решётка/окно).
-4. Наработки, которые ПЕРЕЖИВАЮТ редизайн: стокинг B/X + машины + ловушки (§5), брифы
-   пула (переезд на v2), обход/туман/бой/обыск (handlers/dungeon.py), происшествия
-   города (incidents), словарь циклов (в Planner), пергамент/хэтч-примитивы floorart.
+1. *Ring on coarse 9×7 grid*: rooms pegged to sparse grid → square islands with intestinal
+   corridors. Error: space enslaved to graph.
+2. *Accretion flush without grow*: appearance correct, but packing a long ring chain stalls
+   (3/24 seeds failed to assemble in 24 sub-seeds), layout crawls sausage-like. Errors: chain
+   growth instead of tree with symmetry; no grow-bulge; loops laid out, not found. Watabou lesson:
+   **tree by accretion + grow to touching + loops/climax/secrets FOUND on solid layout** —
+   validity by construction, dramaturgy as separate pass (Planner), never the reverse.
+3. Dormans's cycle vocabulary not discarded — it moves to Planner as dramaturgy pattern vocabulary
+   (two arcs = two routes to farthest room, short-dangerous/long-safe = found-loop tagging, foreshadow
+   = grate/window).
+4. Work that SURVIVES the redesign: B/X stocking + machines + traps (§5), pool briefs (move to v2),
+   traversal/fog/combat/search (handlers/dungeon.py), city incidents, cycle vocabulary (in Planner),
+   parchment/hatch-primitives floorart.
 
-Связано: [worldgen.md](worldgen.md) · [locations.md](locations.md) · [combat.md](combat.md)
+Related: [worldgen.md](worldgen.md) · [locations.md](locations.md) · [combat.md](combat.md)
 · [items.md](items.md) · [loop.md](loop.md) · [entities.md](entities.md)

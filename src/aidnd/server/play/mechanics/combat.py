@@ -1,6 +1,6 @@
-"""Игровой контур — БОЙ И ГИЛЬДИЯ: логова, ранги/жетон, дуэли, авторезолв.
+"""Game loop — COMBAT AND GUILD: lairs, ranks/badge, duels, auto-resolve.
 
-Слой mechanics/ (см. docs/loop.md).
+mechanics/ layer (see docs/loop.md).
 
 Key functions
 -------------
@@ -54,9 +54,9 @@ from aidnd.server.play.mechanics.items import (
 )
 
 
-# ---------------------------------------- ЛОГОВА, ГИЛЬДИЯ, БОЙ (BG-lite) --- #
+# ---------------------------------------- LAIRS, GUILD, COMBAT (BG-lite) --- #
 def _lairs() -> list:
-    """Логова вокруг города: детерминированно из данных бестиария (вид/CR/среда), cleared — в store."""
+    """Lairs around city: deterministic from bestiary data (type/CR/env), cleared — in store."""
     if _S.get("lairs") is None:
         import math
 
@@ -89,7 +89,7 @@ def _lairs() -> list:
     ]
 
 
-# ---- РАНГИ ГИЛЬДИИ (данные): имя · потолок CR заказа · сколько закрытых заказов нужно ---- #
+# ---- GUILD RANKS (data): name · CR ceiling for contract · number of closed contracts needed ---- #
 GUILD_RANKS = (
     {"name": "Медь", "cr_max": 1.0, "need": 0},
     {"name": "Бронза", "cr_max": 2.0, "need": 2},
@@ -104,8 +104,8 @@ def _rank_by_name(nm: str) -> int:
 
 
 def _mint_badge(rank_idx: int, holder: str = "pc") -> str:
-    """Выковать жетон гильдии (предмет-удостоверение) данного ранга и вручить держателю.
-    Ранг/владелец живут во флагах, привязанных к id жетона (переживают кражу/передачу)."""
+    """Forge guild badge (credential item) of given rank and hand to holder.
+    Rank/owner live in flags tied to badge id (survive theft/transfer)."""
     nm = GUILD_RANKS[rank_idx]["name"]
     iid = _put_item(
         f"badge|{_wid()}|{holder}|{rank_idx}",
@@ -121,7 +121,7 @@ def _mint_badge(rank_idx: int, holder: str = "pc") -> str:
 
 
 def _pc_badge() -> tuple | None:
-    """(iid, rank_idx, owner) жетона в сумке игрока, либо None. Ранг — из флага (или из имени)."""
+    """(iid, rank_idx, owner) of badge in player inventory, or None. Rank — from flag (or from name)."""
     for r in _store().inventory(_wid(), "pc"):
         it = _store().get_item(r["item_id"])
         if it and it["kind"] == "document" and "Жетон гильдии" in it["name"]:
@@ -136,7 +136,7 @@ def _pc_badge() -> tuple | None:
 
 
 def _guild_steward():
-    """Распорядитель гильдии — работник её здания (для проверки лжи по чужому жетону)."""
+    """Guild steward — worker of its building (for checking lies about another's badge)."""
     gb = _guild_bid()
     people = _S.get("people") or {}
     return next((p for pid, p in people.items() if p.work == gb), None)
@@ -147,23 +147,23 @@ def _guild_closed() -> int:
 
 
 def _guild_promote() -> str | None:
-    """Повышение по числу закрытых заказов: если дорос — заменить жетон на старший ранг."""
+    """Promotion by number of closed contracts: if grown — replace badge with higher rank."""
     b = _pc_badge()
-    if not b or b[2] != "pc":  # без своего жетона не повышают
+    if not b or b[2] != "pc":  # no rank-up without your own badge
         return None
     iid, rank, _own = b
     closed = _guild_closed()
     nxt = rank + 1
     if nxt < len(GUILD_RANKS) and closed >= GUILD_RANKS[nxt]["need"]:
-        _store().inv_drop(_wid(), iid)  # старый жетон изымают
+        _store().inv_drop(_wid(), iid)  # old badge is confiscated
         _mint_badge(nxt)
         return f"Распорядитель вручает тебе жетон ({GUILD_RANKS[nxt]['name']}) — ранг повышен."
     return None
 
 
 def _guild_gate(job_cr: float) -> dict | None:
-    """Гейт доски/вылазки: жетон в сумке, ранг по чину, проверка лжи для чужого жетона.
-    Возвращает {error, dice?} при отказе, иначе None (и, для чужого жетона, {dice, stolen})."""
+    """Gate for board/sorties: badge in inventory, rank by degree, lie check for another's badge.
+    Returns {error, dice?} on rejection, else None (and for another's badge, {dice, stolen})."""
     if _store().flag_get(_wid(), "guild_mark|pc"):
         return {"error": f"на тебе чёрная метка гильдии — искупи вину ({PB['guild_mark_fine']} зм)"}
     b = _pc_badge()
@@ -175,7 +175,7 @@ def _guild_gate(job_cr: float) -> dict | None:
             "error": f"не по чину: жетон «{GUILD_RANKS[rank]['name']}» "
             f"берёт заказы до CR {GUILD_RANKS[rank]['cr_max']:g}"
         }
-    if owner != "pc":  # чужой жетон — распорядитель проверяет
+    if owner != "pc":  # someone else's badge — the steward checks
         stew = _guild_steward()
         wis = stew.state.config.abilities.get("wis", 10) if stew else 10
         pr, pw = (
@@ -193,7 +193,7 @@ def _guild_gate(job_cr: float) -> dict | None:
             "ok": me >= them,
             "label": "Обман (Cha) против чутья распорядителя",
         }
-        if me < them:  # раскусили — жетон изъят, метка
+        if me < them:  # rumbled — badge seized, marked
             _store().inv_drop(_wid(), iid)
             _store().flag_set(_wid(), "guild_mark|pc", "1")
             return {
@@ -201,12 +201,12 @@ def _guild_gate(job_cr: float) -> dict | None:
                 "а тебе — чёрную метку.",
                 "dice": dice,
             }
-        return {"ok_stolen": True, "dice": dice}  # прошло, но заслуги не твои
+        return {"ok_stolen": True, "dice": dice}  # passed, but the credit isn't yours
     return None
 
 
 def _guild_bid() -> str | None:
-    """Здание гильдии: лучший матч по данным (тип весомее имени — «склад гильдии» не гильдия)."""
+    """Guild building: best match by data (type outweighs name — 'guild storage' is not guild)."""
     best, score = None, 0
     for bid in sorted(set((_S.get("cr2b") or {}).values())):
         info = _binfo(bid)
@@ -221,7 +221,7 @@ def _guild_bid() -> str | None:
 
 
 def _guild_board() -> list:
-    """Доска гильдии: контракт на каждое незачищенное логово. Награда по CR из кассы гильдии."""
+    """Guild board: contract for each uncleared lair. Reward per CR from guild purse."""
     if not _store().flag_get(_wid(), "guild_purse"):
         _store().purse_add(_wid(), "guild", PB["guild_float"])
         _store().flag_set(_wid(), "guild_purse")
@@ -244,14 +244,14 @@ def _guild_board() -> list:
         )
     from aidnd.server.play.engine.incidents import incident_jobs
 
-    for j in incident_jobs():                         # городские происшествия — тот же лист
+    for j in incident_jobs():                         # city incidents — the same list
         if j["lair"] not in taken:
             out.append(j)
     return out
 
 
 def _guild_status() -> dict:
-    """Ранг игрока (по жетону в сумке), прогресс до следующего, метка."""
+    """Player rank (by badge in inventory), progress to next, mark."""
     b = _pc_badge()
     closed = _guild_closed()
     if not b:
@@ -282,7 +282,7 @@ def _pc_combatant():
     weapons = [it for _i, it in rows if it and it["kind"] == "weapon"]
     weapon = max(weapons, key=lambda w: w["worth"], default=None)
     combatant = from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon=weapon)
-    combatant.name = _pc_name()  # имя героя (с лендинга), не «Странник»
+    combatant.name = _pc_name()  # hero's name (from landing), not 'Wanderer'
     return combatant
 
 
@@ -290,7 +290,7 @@ _TIER_QUALITY = {"poor": "crude", "modest": "plain", "comfortable": "fine", "wea
 
 
 def _npc_weapon(p) -> dict | None:
-    """Оружие NPC для боя — из его персоны (имя даёт дальнобой, ярус → качество кости)."""
+    """NPC weapon for combat — from persona (name gives ranged, tier → bone quality)."""
     w = ((p.persona or {}).get("gear") or {}).get("weapon")
     if not w:
         return None
@@ -301,7 +301,7 @@ def _npc_weapon(p) -> dict | None:
 
 
 def _combatant_from_npc(pid, p):
-    """Боец из NPC: живучесть от выносливости/куража, оружие из персоны (from_npc сам считает hp)."""
+    """Combatant from NPC: durability from endurance/courage, weapon from persona (from_npc calculates hp)."""
     return from_npc(
         pid,
         p.name,
@@ -311,7 +311,7 @@ def _combatant_from_npc(pid, p):
 
 
 def _contract_on_death(pid: str) -> str | None:
-    """dead-предикат: заказанный враг мёртв — текущий шаг закрыт."""
+    """dead-predicate: contracted enemy dead — current step closed."""
     for ct in _store().contracts(_wid(), "active"):
         cur = _ct_cur(ct)
         if cur.get("kind") == "dead" and cur.get("target") == pid:
@@ -329,15 +329,15 @@ _EPITAPHS = (
 
 
 def _death(cause: str) -> dict:
-    """ПЕРМАСМЕРТЬ: мир юзера стирается целиком, сессия выбрасывается. Следующий заход в
-    /play создаст новый город с нуля (новый seed из монотонного счётчика)."""
+    """PERMADEATH: user's world erased entirely, session discarded. Next visit to
+    /play creates new city from scratch (new seed from monotonic counter)."""
     days = max(0, (_gt() - _GT0) // 1440)
-    epitaph = _EPITAPHS[(_gt() // 137) % len(_EPITAPHS)]  # варьируем без Random-состояния
+    epitaph = _EPITAPHS[(_gt() // 137) % len(_EPITAPHS)]  # vary without Random state
     wid = _wid()
-    if wid == 1:  # дев-мир: следующий — с новым сидом
+    if wid == 1:  # dev world: next one gets a new seed
         _store().flag_set(0, "dev_seed", str(int(_store().flag_get(0, "dev_seed") or 1) + 1))
     _store().destroy_world(wid)
-    _SESS.pop(wid, None)  # выкинуть мир из памяти (дев переиздаст с нуля)
+    _SESS.pop(wid, None)  # drop the world from memory (dev rebuilds from scratch)
     return {
         "status": "lost",
         "narr": [cause],
@@ -346,20 +346,20 @@ def _death(cause: str) -> dict:
 
 
 def _duel_wrapup(enc, cb) -> dict:
-    """Итог стычки с человеком: смерть реальна, мир видел, добро — победителю."""
+    """Outcome of skirmish with person: death is real, world saw, goods go to victor."""
     st = enc.status()
     pid = cb["npc"]
     p = _S["people"].get(pid)
-    if st == "lost":  # герой пал в дуэли — мир кончился
+    if st == "lost":  # hero fell in a duel — the world ended
         return _death(f"{p.name if p else 'Противник'} валит тебя наземь. Ты не встаёшь.")
-    _gt_add(max(1, enc.round * PB["combat_round_s"] // 60))  # бой в секундах: раунд = 5с
+    _gt_add(max(1, enc.round * PB["combat_round_s"] // 60))  # combat in seconds: round = 5s
     pc_u = enc.units.get("pc")
     out = {"status": st, "narr": []}
     if pc_u:
         _pc_hp(set_to=max(1, pc_u.hp))
     if st == "won" and p:
         _store().flag_set(_wid(), f"dead|{pid}")
-        for r in _store().inventory(_wid(), pid):  # труп обобран
+        for r in _store().inventory(_wid(), pid):  # corpse looted
             _store().inv_move(_wid(), r["item_id"], "pc")
         cnp = _store().purse_get(_wid(), pid)
         if cnp:
@@ -375,7 +375,7 @@ def _duel_wrapup(enc, cb) -> dict:
         _S["crof"].pop(pid, None)
         _S["people"].pop(pid, None)
         _pc_remember(f"убил {p.name}", 0.95, about=[pid])
-        if wit:  # УБИЙСТВО при свидетелях — тяжкий розыск
+        if wit:  # MURDER with witnesses — heavy wanted level
             _wanted_add(PB["crime_murder"] + min(4, len(wit)), f"убил {p.name}")
         out["narr"].append(
             f"{p.name} мёртв. Его добро — твоё. Свидетелей: {len(wit)}."
@@ -410,7 +410,7 @@ def _duel_wrapup(enc, cb) -> dict:
 
 
 def _droom_wrapup(enc, cb) -> dict:
-    """Итог боя КОМНАТЫ данжа: без зачистки логова — только hp/время/скромный лут."""
+    """Outcome of dungeon ROOM combat: no lair clear — only hp/time/modest loot."""
     st_d = _S.get("dungeon") or {}
     lair = st_d.get("lair") or {}
     stt = enc.status()
@@ -428,7 +428,7 @@ def _droom_wrapup(enc, cb) -> dict:
         out["coins"] = _pc_coins()
         if st_d.get("inc") and cb["droom"] == st_d["d"]["goal"]:
             from aidnd.server.play.engine.incidents import incident_resolve
-            out["narr"] += incident_resolve(st_d["inc"], [])  # цель взята — город расплатится
+            out["narr"] += incident_resolve(st_d["inc"], [])  # objective taken — city will pay
             ct = next((c for c in _store().contracts(_wid(), "active")
                        if c.get("target") == st_d["inc"]), None)
             if ct:
@@ -444,22 +444,22 @@ def _droom_wrapup(enc, cb) -> dict:
 
 
 def _combat_wrapup(enc, cb) -> dict:
-    """Итог боя: лут/награды/hp/последствия. Один путь для победы/бегства/поражения."""
+    """Combat outcome: loot/rewards/hp/consequences. Single path for victory/flight/defeat."""
     if isinstance(cb, dict) and cb.get("npc"):
         return _duel_wrapup(enc, cb)
     if isinstance(cb, dict) and cb.get("droom") is not None:
         st = _S.get("dungeon")
         if st is not None and enc.status() == "won":
-            st["cleared"].add(cb["droom"])            # комната данжа зачищена (босс — тоже)
+            st["cleared"].add(cb["droom"])            # dungeon room cleared (boss — too)
             for pid in (st.pop("fall_pending", {}) or {}).get(cb["droom"], []):
-                _store().flag_set(_wid(), f"dead|{pid}")  # горожанин-разбойник пал ВЗАПРАВДУ
-        if "lair" not in cb:                          # рядовой бой комнаты — свой итог
+                _store().flag_set(_wid(), f"dead|{pid}")  # city dweller-brigand fell FOR REAL
+        if "lair" not in cb:                          # regular room combat — its own outcome
             return _droom_wrapup(enc, cb)
     l = cb["lair"] if isinstance(cb, dict) and "lair" in cb else cb
     st = enc.status()
-    if st == "lost":  # герой пал в логове — мир кончился
+    if st == "lost":  # hero fell in the lair — the world ended
         return _death(f"Тьма смыкается в {l['name']}. Отсюда ты уже не выйдешь.")
-    _gt_add(max(1, enc.round * PB["combat_round_s"] // 60))  # бой в секундах: раунд = 5с
+    _gt_add(max(1, enc.round * PB["combat_round_s"] // 60))  # combat in seconds: round = 5s
     pc_u = enc.units.get("pc")
     out = {"status": st, "narr": []}
     if pc_u:
@@ -470,11 +470,11 @@ def _combat_wrapup(enc, cb) -> dict:
         total = _store().purse_add(_wid(), "pc", coins)
         out["narr"].append(f"Логово зачищено. В остатках — {coins} зм (кошель: {total}).")
         if random.Random(f"loot|{l['id']}").random() < PB["loot_item_chance"]:
-            it = _pool_draw(f"trophy|{l['id']}", tier="rare", holder="pc")  # трофей rare+ из пула
+            it = _pool_draw(f"trophy|{l['id']}", tier="rare", holder="pc")  # rare+ trophy from the pool
             if it:
                 out["narr"].append(f"Среди костей — «{it['name']}»{_rar_tag(it)}.")
-                _pool_add_new(it)  # добавить в пул мира (спека §5)
-        _merchant_restock(f"clearstock|{l['id']}")  # зачистка оживила рынок — новый товар
+                _pool_add_new(it)  # add to the world pool (spec §5)
+        _merchant_restock(f"clearstock|{l['id']}")  # the clear-out revived the market — new goods
         ct = next(
             (
                 c
@@ -492,7 +492,7 @@ def _combat_wrapup(enc, cb) -> dict:
             )
             out["narr"].append(f"Заказ гильдии закрыт: +{reward} зм (кошель: {total}).")
             b = _pc_badge()
-            if b and b[2] == "pc":  # заслуга идёт лишь под СВОИМ жетоном
+            if b and b[2] == "pc":  # credit counts only under your OWN badge
                 _store().flag_set(_wid(), "guild_closed|pc", str(_guild_closed() + 1))
                 up = _guild_promote()
                 if up:
@@ -540,7 +540,7 @@ async def combat_act(request: Request):
     b = await request.json()
     cur = enc.current()
     err = None
-    if cur and cur.id == "pc" and cur.incapacitated():  # связан/спит — ход героя потерян
+    if cur and cur.id == "pc" and cur.incapacitated():  # bound/asleep — hero's turn lost
         enc._log(f"{cur.name} {'связан' if cur.status.get('bound') else 'спит'} — ход потерян.")
         enc.end_turn()
     elif cur and cur.id == "pc":
@@ -560,8 +560,8 @@ async def combat_act(request: Request):
         if a in ("attack", "dodge", "flee"):
             enc.end_turn()
     guard = 0
-    while guard < 80:  # крутим ИИ до хода игрока; накаты по пути
-        if enc.foes_cleared() and enc.next_wave():  # текущий накат зачищен — следующий
+    while guard < 80:  # spin AI until player's turn; waves along the way
+        if enc.foes_cleared() and enc.next_wave():  # current wave cleared — next
             continue
         if enc.status() != "active":
             break
@@ -579,8 +579,8 @@ async def combat_act(request: Request):
 
 
 def _npc_delves() -> list:
-    """Утренние вылазки: пара смелых незанятых NPC берёт верхний заказ доски и идёт в бой
-    (авторезолв ТЕМ ЖЕ движком). Мир живёт: доска пустеет без игрока."""
+    """Morning sorties: pair of brave idle NPCs take top board contract and go to combat
+    (auto-resolved WITH SAME engine). World lives: board empties without player."""
     people = _S.get("people") or {}
     jobs = _guild_board()
     if not jobs or random.Random(f"delve|{_gt() // 1440}").random() > PB["npc_delve_chance"]:
@@ -594,7 +594,7 @@ def _npc_delves() -> list:
     ]
     if not brave:
         return []
-    # приоритет — бойцовым ролям (данные), внутри группы порядок случайный; отряд 2-3
+    # priority — to fighter roles (data), within group order is random; party 2-3
     brave.sort(key=lambda pp: (0 if pp[1].role in PB["fighter_roles"] else 1, rng.random()))
     duo = brave[: rng.randint(2, 3)]
     job = jobs[0]

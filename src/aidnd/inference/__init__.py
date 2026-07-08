@@ -1,7 +1,7 @@
-"""Inference — клиент модели, роутинг по ролям, structured output.
+"""Inference — model client, routing by role, structured output.
 
-Правило проекта: офлайн-фоллбэков НЕТ. Нет модели → LLMUnavailable; не разобрали
-ответ → LLMBadOutput. Обе ошибки честно доходят до игрока (503 на границе сервера).
+Project rule: no offline fallbacks. No model → LLMUnavailable; could not parse
+response → LLMBadOutput. Both errors honestly reach the player (503 at server boundary).
 
 Key functions
 -------------

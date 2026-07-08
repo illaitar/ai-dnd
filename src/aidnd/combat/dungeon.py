@@ -1,9 +1,9 @@
-"""Процедурное логово: раскладка препятствий (стены) под тактическую сетку Encounter + волны врагов.
+"""Procedural dungeon: obstacle layout (walls) for Encounter tactical grid + enemy waves.
 
-Наследует дух старого battlemap.py (архетип + клеточный автомат), но говорит на языке НОВОГО
-движка: не террейн-коды, а множество непроходимых клеток obstacles. Каверны (лесные/болотные/
-пещерные логова) — клеточный автомат; руины/городские — редкие столбы-опоры. Детерминировано по
-(seed, env). Волны: CR-бюджет режется на 2-3 накатывающие группы (то же pick_encounter по среде).
+Inherits the spirit of old battlemap.py (archetype + cellular automaton) but speaks in the NEW
+engine language: not terrain codes, but a set of impassable obstacles cells. Caverns (forest/marsh/
+cave dungeons) — cellular automaton; ruins/urban — rare support pillars. Deterministic by
+(seed, env). Waves: CR budget is split into 2-3 rolling groups (same pick_encounter by env).
 
 Key functions
 -------------
@@ -17,7 +17,7 @@ from random import Random
 
 from .encounters import pick_encounter
 
-# среды, которым идёт органичная каверна (иначе — руинные столбы)
+# Environments with organic caves (otherwise — ruin pillars)
 _CAVE_ENV = ("cave", "underdark", "swamp", "forest", "grassland", "hill", "coast",
              "пещер", "лес", "болот", "холм")
 
@@ -28,7 +28,7 @@ def _archetype(env: str) -> str:
 
 
 def _cave(w: int, h: int, rng: Random, fill: float = 0.48) -> set:
-    """Клеточный автомат: рандом-стены → сглаживание по соседям (границы считаем стенами)."""
+    """Cellular automaton: random walls → smoothing by neighbors (boundaries counted as walls)."""
     grid = [[1 if rng.random() < fill else 0 for _ in range(w)] for _ in range(h)]
     for _ in range(3):
         nxt = [[grid[y][x] for x in range(w)] for y in range(h)]
@@ -40,14 +40,14 @@ def _cave(w: int, h: int, rng: Random, fill: float = 0.48) -> set:
                         if (nx, ny) == (x, y):
                             continue
                         if not (0 <= nx < w and 0 <= ny < h) or grid[ny][nx]:
-                            walls += 1                     # за краем — тоже стена
+                            walls += 1                     # Beyond edge — also a wall
                 nxt[y][x] = 1 if walls >= 5 else 0
         grid = nxt
     return {(x, y) for y in range(h) for x in range(w) if grid[y][x]}
 
 
 def _ruin(w: int, h: int, rng: Random) -> set:
-    """Руина: редкие столбы-опоры кластерами (укрытия, а не сплошные стены)."""
+    """Ruin: rare support pillars in clusters (shelters, not solid walls)."""
     out: set = set()
     for _ in range(rng.randint(3, 5)):
         cx, cy = rng.randrange(3, w - 3), rng.randrange(1, h - 1)
@@ -58,21 +58,21 @@ def _ruin(w: int, h: int, rng: Random) -> set:
 
 
 def obstacles(w: int, h: int, env: str, seed: str) -> set:
-    """Непроходимые клетки логова. Края (колонки спавна) свободны; сквозь центр — чистый коридор,
-    чтобы карта всегда проходима (иначе стороны не сойдутся). Плотность ограничена."""
+    """Impassable dungeon cells. Edges (spawn columns) are clear; through center — clean corridor,
+    so the map is always passable (otherwise sides won't meet). Density is limited."""
     rng = Random(f"dungeon|{seed}|{env}")
     obs = _cave(w, h, rng) if _archetype(env) == "cave" else _ruin(w, h, rng)
-    obs = {(x, y) for (x, y) in obs if 2 <= x <= w - 3}     # спавн-края (0-1 и w-2..w-1) свободны
+    obs = {(x, y) for (x, y) in obs if 2 <= x <= w - 3}     # Spawn edges (0-1 and w-2..w-1) are clear
     corridor = h // 2
-    obs = {(x, y) for (x, y) in obs if y != corridor}       # сквозной проход — бойцы всегда сойдутся
-    cap = (w * h) // 4                                       # не заваливать сетку стенами
+    obs = {(x, y) for (x, y) in obs if y != corridor}       # Through passage — combatants always meet
+    cap = (w * h) // 4                                       # Don't fill grid with walls
     if len(obs) > cap:
         obs = set(rng.sample(sorted(obs), cap))
     return obs
 
 
 def waves(cr_budget: float, env: str, seed: str, n: int = 2, max_units: int = 4) -> list:
-    """Разбить CR-бюджет логова на n накатов (первый — сразу, остальные при зачистке)."""
+    """Split dungeon CR budget into n waves (first — immediately, rest on clearance)."""
     n = max(1, min(3, int(n)))
     per = cr_budget / n
     out = []

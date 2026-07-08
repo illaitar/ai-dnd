@@ -1,5 +1,5 @@
-"""Auth сервиса: argon2-пароли, непрозрачные отзывные токены сессий, зависимость current_user,
-регистрация/вход (email+пароль) и приём Google-аккаунта (id_token). Токены живут в auth_sessions.
+"""Auth service: argon2 passwords, opaque revocable session tokens, current_user dependency,
+registration/login (email+password) and Google account acceptance (id_token). Tokens live in auth_sessions.
 
 Key functions
 -------------
@@ -28,12 +28,12 @@ from .db import DbSession
 from .models import AuthSession, User
 
 _ph = PasswordHasher()
-COOKIE = "aidnd_session"                                  # имя cookie сессии
+COOKIE = "aidnd_session"                                  # session cookie name
 
 
 def set_session_cookie(response: Response, token: str) -> None:
-    """HttpOnly-cookie сессии: авто-отправляется на HTTP и на WS-хендшейк (тот же origin).
-    secure=True за TLS (AIDND_COOKIE_SECURE=1) — кука уходит только по HTTPS."""
+    """HttpOnly session cookie: auto-sent on HTTP and WS handshake (same origin).
+    secure=True for TLS (AIDND_COOKIE_SECURE=1) — cookie sent only over HTTPS."""
     response.set_cookie(COOKIE, token, httponly=True, samesite="lax", secure=config.COOKIE_SECURE,
                         max_age=config.SESSION_TTL_DAYS * 86400, path="/")
 
@@ -62,7 +62,7 @@ def _bearer(authorization: str) -> str:
 
 
 async def issue_token(db: AsyncSession, user: User) -> str:
-    """Выдать непрозрачный токен сессии (хранится в auth_sessions, отзывной)."""
+    """Issue opaque session token (stored in auth_sessions, revocable)."""
     token = secrets.token_urlsafe(32)
     db.add(AuthSession(token=token, user_id=user.id,
                        expires_at=_utcnow() + dt.timedelta(days=config.SESSION_TTL_DAYS)))
@@ -93,7 +93,7 @@ async def login(db: AsyncSession, email: str, password: str) -> tuple[User, str]
 
 
 async def verify_google_idtoken(id_token: str) -> dict:
-    """Проверить Google id_token (tokeninfo) и aud==наш client_id. Возвращает claims."""
+    """Verify Google id_token (tokeninfo) and aud==our client_id. Returns claims."""
     if not config.GOOGLE_CLIENT_ID:
         raise HTTPException(503, "вход через Google не настроен")
     async with httpx.AsyncClient(timeout=10) as c:
@@ -111,7 +111,7 @@ async def login_google(db: AsyncSession, id_token: str) -> tuple[User, str]:
     sub, email = claims.get("sub"), (claims.get("email") or "").lower()
     name = claims.get("name")
     user = (await db.execute(select(User).where(User.google_sub == sub))).scalar_one_or_none()
-    if not user and email:                               # привязать к существующему email-аккаунту
+    if not user and email:                               # attach to existing email account
         user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
         if user and not user.google_sub:
             user.google_sub = sub
@@ -142,7 +142,7 @@ async def revoke(db: AsyncSession, token: str) -> None:
 async def current_user(db: DbSession,
                        authorization: Annotated[str, Header()] = "",
                        aidnd_session: Annotated[str, Cookie()] = "") -> User:
-    """Зависимость FastAPI: токен из cookie сессии ИЛИ Bearer-заголовка, иначе 401."""
+    """FastAPI dependency: token from session cookie OR Bearer header, else 401."""
     user = await user_for_token(db, _bearer(authorization) or aidnd_session)
     if not user:
         raise HTTPException(401, "требуется вход")

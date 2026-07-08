@@ -1,12 +1,12 @@
-"""Обстановка локаций: шаблон зон (данные content/zones.json) + LLM-наполнение предметами.
+"""Zone furnishing: zone template (data from content/zones.json) + LLM-populated items.
 
-Зона — часть фактшита здания (docs/locations.md): kind/шум/приватность/вместимость/пост роли.
-Объект зоны — ПОЛНОЦЕННЫЙ предмет (фактшит items.normalize) + роли зоны: afford {нужда: рейт},
-fixed|loose. Никаких стопок: шесть кружек = шесть записей с живыми различиями.
+Zone — part of building factsheet (docs/locations.md): kind/noise/privacy/capacity/role post.
+Zone object — FULL item (factsheet items.normalize) + zone roles: afford {need: rate},
+fixed|loose. No stacks: six mugs = six entries with live differences.
 
-Слой ПУЛА: furnish_building пишет data["zones"] (building_pool, офлайн-скрипт scripts/furnish.py).
-Мир при создании материализует объекты в items/live.db (holder="zone:<bid>/<zid>") без LLM.
-LLMFurnisher — единственный рантайм-путь (роль furnisher); заглушек нет (принцип 1).
+POOL layer: furnish_building writes data["zones"] (building_pool, offline script scripts/furnish.py).
+World materializes objects into items/live.db at creation (holder="zone:<bid>/<zid>") without LLM.
+LLMFurnisher — only runtime path (furnisher role); no stubs (principle 1).
 
 Key functions
 -------------
@@ -49,7 +49,7 @@ def _defaults(kind: str) -> dict:
 
 
 def _count_for(entry: dict, data: dict, salt: str) -> int:
-    """Число инстансов групповой зоны: размер здания задаёт точку в [lo, hi], хэш — дрожь ±1."""
+    """Number of grouped zone instances: building size sets a point in [lo, hi], hash adds jitter ±1."""
     lo, hi = entry["count"]
     size_ix = {"small": 0.0, "medium": 0.5, "large": 1.0}.get(str(data.get("size")), 0.5)
     base = lo + (hi - lo) * size_ix
@@ -58,9 +58,9 @@ def _count_for(entry: dict, data: dict, salt: str) -> int:
 
 
 def zones_for(btype: str, data: dict, kind: str = "key") -> list[dict]:
-    """Состав зон по типу здания (шаблон = данные). kind: key | res | street.
-    Групповые якоря (столы, комнаты постоя) разворачиваются в ИНСТАНСЫ: каждый стол —
-    своя зона (атом разговора/приватности), положение (spot) двигает шум/приватность."""
+    """Zone composition by building type (template = data). kind: key | res | street.
+    Grouped anchors (tables, rooms) expand to INSTANCES: each table is
+    its own zone (conversation/privacy atom); position (spot) shifts noise/privacy."""
     cat = zone_catalog()
     hay = f"{btype} {data.get('type', '')} {data.get('name', '')}".lower()
     tpl = None
@@ -86,12 +86,12 @@ def zones_for(btype: str, data: dict, kind: str = "key") -> list[dict]:
              "noise": round(max(0.0, min(1.0, d["noise"] + noise_d)), 2),
              "privacy": round(max(0.0, min(1.0, d["privacy"] + priv_d)), 2),
              "cap": entry.get("cap", d["cap"])}
-        if entry.get("objects"):                     # уличные зоны: объекты из ДАННЫХ шаблона
+        if entry.get("objects"):                     # street zones: objects from template DATA
             z["objects"] = [dict(o) for o in entry["objects"]]
         if entry.get("lockable"):
             z["lockable"] = True
         if group:
-            z["group"] = group                       # инстансы одного якоря (для батч-обстановки)
+            z["group"] = group                       # instances of one anchor (for batch-furnishing)
         out.append(z)
         i += 1
 
@@ -168,7 +168,7 @@ _GROUP_SYS = (
 
 def _norm_objects(raw: list, where: str, hidden_budget: int = 1,
                   allow_empty: bool = False) -> list[dict]:
-    """Сырые объекты LLM → чистые фактшиты + роли зоны (afford/fixed), кламп тайников."""
+    """Raw LLM objects → clean factsheets + zone roles (afford/fixed), clamp hidden items."""
     out = []
     for o in raw[:12]:
         if not isinstance(o, dict) or not o.get("name"):
@@ -190,7 +190,7 @@ def _norm_objects(raw: list, where: str, hidden_budget: int = 1,
 
 
 class LLMFurnisher:
-    """Единственный рантайм-путь: роль furnisher — вызов на зону, батч-вызов на группу инстансов."""
+    """Only runtime path: furnisher role — call on zone, batch-call on instance group."""
 
     def __init__(self, manager):
         self.manager = manager
@@ -215,7 +215,7 @@ class LLMFurnisher:
         return _norm_objects(d["objects"], zone["name"], hidden_budget=1)
 
     def furnish_group(self, members: list[dict], data: dict, btype: str) -> list[list[dict]]:
-        """Инстансы одного якоря (столы/комнаты) — ОДИН батч-вызов на всю группу."""
+        """Instances of one anchor (tables/rooms) — ONE batch-call for entire group."""
         names = "; ".join(f"{j + 1}) {m['name']}" for j, m in enumerate(members))
         user = (f"ЗДАНИЕ: {self._bsum(data, btype)}.\n"
                 f"МЕСТА ГРУППЫ «{members[0].get('group')}», N={len(members)}: {names}.\n"
@@ -228,8 +228,8 @@ class LLMFurnisher:
         gs = d.get("groups") if d else None
         if not isinstance(gs, list) or not gs:
             raise LLMBadOutput(f"furnisher: группа «{members[0].get('group')}» не обставлена")
-        gs = (gs + [[] for _ in members])[: len(members)]        # выравниваем к N
-        budget = 1                                               # ≤1 тайника на ВСЮ группу
+        gs = (gs + [[] for _ in members])[: len(members)]        # align to N
+        budget = 1                                               # ≤1 hidden item per entire group
         out = []
         for m, raw in zip(members, gs):
             objs = _norm_objects(raw if isinstance(raw, list) else [], m["name"],
@@ -242,15 +242,15 @@ class LLMFurnisher:
 
 
 def _zone_for_container(cont: dict, zones: list[dict]) -> str:
-    """Ёмкость фактшита получает адрес-зону: по совпадению слов where/имени, иначе storage/первая."""
+    """Container factsheet gets zone address: by word match where/name, else storage/first."""
     hay = f"{cont.get('name', '')} {cont.get('where', '')}".lower()
     for z in zones:
-        if z.get("group"):                       # ёмкости — в функциональные зоны, не в инстансы столов
+        if z.get("group"):                       # containers — in functional zones, not in table instances
             continue
         toks = [w for w in re.split(r"[^\wа-яё]+", z["name"].lower()) if len(w) > 3]
-        if any((t[:5] if len(t) > 5 else t) in hay for t in toks):   # грубый стем: падежи русского
+        if any((t[:5] if len(t) > 5 else t) in hay for t in toks):   # rough stem: Russian case inflection
             return z["id"]
-    for kind in ("storage", "private"):                  # кладовая прежде кабинета
+    for kind in ("storage", "private"):                  # storage room first, then office
         for z in zones:
             if z["kind"] == kind:
                 return z["id"]
@@ -268,7 +268,7 @@ _LAYOUT_SYS = (
 
 
 def layout_params(data: dict, btype: str, manager) -> dict:
-    """Архитектурный пресет здания [LLM] → кламп enum'ами (геометрию всё равно строит код)."""
+    """Architectural layout preset from building factsheet [LLM] → clamp with enums (geometry is built by code)."""
     from .floorplan import clamp_layout
     resp = manager.call("layout_architect",
                         [{"role": "system", "content": _LAYOUT_SYS},
@@ -281,9 +281,9 @@ def layout_params(data: dict, btype: str, manager) -> dict:
 
 
 def furnish_building(data: dict, btype: str, manager, kind: str = "key") -> dict:
-    """Полная обстановка здания: зоны из шаблона + LLM-предметы + адресация ёмкостей.
-    Инстансы одной группы (столы) обставляются ОДНИМ батч-вызовом — дёшево и разнообразно.
-    Мутирует и возвращает data (пишется в building_pool офлайн-скриптом)."""
+    """Complete building furnishing: zones from template + LLM-items + container addressing.
+    Instances of one group (tables) are furnished by ONE batch-call — cheap and diverse.
+    Mutates and returns data (written to building_pool by offline script)."""
     zones = zones_for(btype, data, kind)
     data["layout"] = layout_params(data, btype, manager)
     furn = LLMFurnisher(manager)

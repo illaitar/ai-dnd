@@ -1,11 +1,11 @@
-"""СДЕЛКА игрока — deal-гейт цепочки: want × ставка × DC-из-разума × бросок → ОБЯЗАТЕЛЬСТВО.
+"""Player deal — deal-gate chain: want × stake × DC-from-mind × roll → COMMITMENT.
 
-Речь со ставкой = состояние мира: успех создаёт контракт giver=pc + эскроу золота + цель в
-агенду исполнителя + слово-deed со сроком; грязное предложение честному — розыск, память и
-deed «предлагал кровь» (пища дознавателям). DC собирается из mind-черт (honesty/malice),
-отношений и АДЕКВАТНОСТИ ставки против цены дела; формулы в PB (принцип 4).
-Исполнение заказов крови — утренний шаг _deal_jobs: авторезолв ТЕМ ЖЕ движком, что
-NPC-зачистки; исход настоящий (flag dead, deed murder, выплата эскроу / возврат задатка).
+Pitched speech = world state: success creates contract giver=pc + gold escrow + objective in
+executor's agenda + word-deed with deadline; dirty offer to honest NPC — search, memory and
+deed "offered blood" (fodder for investigators). DC built from mind-traits (honesty/malice),
+relationships and ADEQUACY of stake against deal price; formulas in PB (principle 4).
+Blood-deal execution — morning step _deal_jobs: auto-resolve with SAME engine as
+NPC-clears; outcome is real (flag dead, deed murder, escrow payout / stake return).
 
 Key functions
 -------------
@@ -41,7 +41,7 @@ def _clean(d: dict) -> dict:
 
 
 def _scene_witnesses(npc: str, manner: str) -> list:
-    """Кто слышал уговор: люди ТВОЕЙ зоны (слышимость сцены); шёпот — никто, кроме двоих."""
+    """Who heard the pitch: people in YOUR zone (scene audibility); whisper — no one but the two of us."""
     if manner == "stealthily":
         return []
     lv = _S.get("live") or {}
@@ -53,7 +53,7 @@ def _scene_witnesses(npc: str, manner: str) -> list:
 
 def deal_attempt(npc: str, deal: dict, manner: str, out: dict,
                  people, crof, loc) -> dict | None:
-    """Гейт сделки. None — «это не сделка» (пустая ставка/вид): пусть фраза идёт диалогом."""
+    """Deal gate. None — "not a deal" (empty stake/kind): let the phrase go as dialogue."""
     from aidnd.server.play.engine import deeds as _deeds
 
     p = people[npc]
@@ -63,7 +63,7 @@ def deal_attempt(npc: str, deal: dict, manner: str, out: dict,
     except (TypeError, ValueError):
         stake = 0
     if kind not in DEAL_KINDS or stake <= 0:
-        return None                                   # без ставки — обычные уговоры (диалог)
+        return None                                   # no stake — ordinary persuasion (dialogue)
     raw_t = str(deal.get("target") or "").strip()
     target = raw_t if raw_t in people else None
     want_txt = str(deal.get("want") or "")[:60]
@@ -82,7 +82,7 @@ def deal_attempt(npc: str, deal: dict, manner: str, out: dict,
     wit = _scene_witnesses(npc, manner)
     tname = people[target].name if target else want_txt
     if kind == "dead":
-        # свой человек — отказ без броска: родня по фамилии или тёплые отношения с целью
+        # own person — refuse without roll: kinship by name or warm relations with target
         t_aff = p.state.relationships.get(target, {}).get("affinity", 0)
         kin = p.name.split()[-1] == people[target].name.split()[-1]
         if kin or t_aff > PB["deal_kin_aff"]:
@@ -104,14 +104,14 @@ def deal_attempt(npc: str, deal: dict, manner: str, out: dict,
                           data={"kind": kind, "target": target, "stake": stake})
             _npc_save(npc)
             lv = _S.get("live")
-            if lv is not None:                       # зал вздрогнет: салиентное событие сцены
+            if lv is not None:                       # hall shudders: salient scene event
                 lv["salient"] = f"{p.name} кричит: чужак сулил золото за душегубство!"
             out["narr"].append(f"{p.name} отшатывается: «Да ты душегуб!» — и не понижает "
                                f"голоса. Свидетелей: {wn}. Город такое помнит.")
             out["fail"] = True
             return out
 
-    # DC: цена дела против ставки, нрав, отношения — всё из PB и mind-состояния
+    # DC: deal price vs stake, temperament, relations — all from PB and mind-state
     price = PB[f"deal_price_{kind}"]
     dc = PB[f"deal_dc_{kind}"]
     dc += tr.get("honesty", 0.5) * (PB["deal_honesty_dead_k"] if kind == "dead"
@@ -141,7 +141,7 @@ def deal_attempt(npc: str, deal: dict, manner: str, out: dict,
         out["fail"] = True
         return out
 
-    # СГОВОРИЛИСЬ: эскроу, контракт, агенда, слово со сроком — всё настоящее
+    # AGREED: escrow, contract, agenda, word with deadline — everything is real
     _store().purse_add(_wid(), "pc", -stake)
     summary = {"dead": f"убрать {tname}", "bring": f"добыть {want_txt or 'обещанное'}",
                "visit": f"прийти: {want_txt or 'куда уговорились'}",
@@ -167,8 +167,8 @@ def deal_attempt(npc: str, deal: dict, manner: str, out: dict,
 
 
 def _deal_jobs() -> list:
-    """Утро: наёмные дела исполняются НАСТОЯЩИМ миром — заказ крови = авторезолв
-    исполнитель против цели (тот же движок, что зачистки); просрочка = возврат задатка."""
+    """Morning: hired jobs execute in REAL world — blood contract = auto-resolve
+    executor vs target (same engine as clears); overdue = stake return."""
     from aidnd.combat.auto import resolve as combat_resolve
     from aidnd.server.play.engine import deeds as _deeds
     from aidnd.server.play.mechanics.combat import _combatant_from_npc
@@ -180,11 +180,11 @@ def _deal_jobs() -> list:
         if d.get("giver") != "pc" or not d.get("executor"):
             continue
         ex, cid = d["executor"], d["id"]
-        if ex not in people or ex in dead:             # исполнитель выбыл — задаток назад
+        if ex not in people or ex in dead:             # executor left — stake back
             _store().purse_add(_wid(), "pc", d["stake"])
             _store().save_contract(_wid(), cid, "failed", _clean(d))
             continue
-        if d["kind"] != "dead":                        # прочие виды: срок вышел — слово пало
+        if d["kind"] != "dead":                        # other kinds: deadline passed — word broken
             if _gt() > d["due_gt"]:
                 _store().purse_add(_wid(), "pc", d["stake"])
                 _store().save_contract(_wid(), cid, "failed", _clean(d))
@@ -192,10 +192,10 @@ def _deal_jobs() -> list:
                              about=[ex])
             continue
         if _gt() < d["made_gt"] + PB["deal_night_min"]:
-            continue                                   # на дело идут ночью — не сразу
+            continue                                   # dirty work happens at night — not right away
         tgt = d.get("target")
         if not tgt or tgt in dead or tgt not in people:
-            _store().purse_add(_wid(), ex, d["stake"])  # цель уже мертва — считает исполненным
+            _store().purse_add(_wid(), ex, d["stake"])  # target already dead — counts as done
             _store().save_contract(_wid(), cid, "done", _clean(d))
             continue
         hunter = _combatant_from_npc(ex, people[ex])

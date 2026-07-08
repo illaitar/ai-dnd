@@ -1,5 +1,5 @@
-"""Прочность: состояние, износ от использования, деградация mods, поломка. Живёт БЕЗ боёвки —
-инструменты/отмычки/ключи тупятся и ломаются, у зелий срок годности. Брак (weak_at) ломает раньше.
+"""Durability: condition, wear from use, mods degradation, breakage. Exists outside combat —
+tools/lockpicks/keys dull and break, potions expire. Defects (weak_at) break earlier.
 
 Key functions
 -------------
@@ -24,7 +24,7 @@ def condition(item: dict) -> dict | None:
 
 
 def active_mods(item: dict) -> list:
-    """Видимые mods с учётом износа: изношенный предмет теряет свои бонусы."""
+    """Visible mods accounting for wear: worn items lose their bonuses."""
     c = condition(item)
     if c and (c["broken"] or c["ratio"] < 0.34):
         return [m for m in item.get("mods", []) if m.get("when") == "passive"]
@@ -32,7 +32,7 @@ def active_mods(item: dict) -> list:
 
 
 def use(item: dict, amount: int = 1) -> dict:
-    """Применить предмет → износ. Возвращает событие (сломался/иссяк/потрепался)."""
+    """Apply item → wear. Returns event (broke/depleted/worn)."""
     d = item.get("durability")
     if not d:
         return {"broke": False, "worn": False}

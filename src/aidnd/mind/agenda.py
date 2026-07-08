@@ -1,12 +1,12 @@
-"""ДОЛГОСРОЧНЫЕ ЦЕЛИ (агенды) — слой поверх реактивной механики. Реактивное ядро умеет отвечать
-лишь на ТЕКУЩИЙ тик (нужда/угроза/возможность в поле зрения); оно НЕ придумает «скопить на пекарню»,
-«завоевать Нэлл» или «отомстить Гарету». Это придумывает LLM-планировщик (рефлексия по памяти/натуре/
-ситуации) и кладёт в state.agendas. Каждая агенда = исход + вехи; текущая веха ИНЖЕКТИТСЯ обычной
-механической целью в propose_goals, и ядро тянет её реактивно (сближается/выжидает/бьёт/работает/дарит).
+"""Long-term goals (agendas) — layer above reactive mechanics. The reactive core can only respond
+to the CURRENT tick (need/threat/opportunity in view); it WILL NOT invent "save for a bakery",
+"conquer Nell" or "take revenge on Gareth". The LLM planner (reflection on memory/nature/
+situation) invents this and puts it in state.agendas. Each agenda = outcome + milestones; the current milestone is INJECTED as a normal
+mechanical goal in propose_goals, and the core pursues it reactively (approaches/waits/strikes/works/gifts).
 
-Мирные и хищные цели — один механизм: отличается лишь kind вехи (need/affiliate/trade vs acquire/harm)
-и цель. Острая нужда/угроза по-прежнему ПЕРЕБИВАЮТ агенду (реактивный слой выигрывает арбитраж).
-LLM-планировщик — в llm_agent.plan_agenda; здесь модель данных + продвижение вех + офлайн-заглушка.
+Peaceful and predatory goals — one mechanism: differs only in the kind of milestone (need/affiliate/trade vs acquire/harm)
+and the goal. Acute need/threat still OVERRIDE the agenda (reactive layer wins arbitration).
+LLM planner — in llm_agent.plan_agenda; here is the data model + milestone advancement + offline stub.
 
 Key functions
 -------------
@@ -24,17 +24,17 @@ from dataclasses import dataclass, field
 @dataclass
 class Milestone:
     desc: str
-    kind: str                                   # механическая цель: need|affiliate|trade|acquire|harm
-    target: str | None = None                   # сущность / имя нужды / место
-    meta: dict = field(default_factory=dict)    # доп. (source для need и т.п.)
-    done: dict = field(default_factory=lambda: {"type": "never"})   # предикат завершения вехи
+    kind: str                                   # mechanical goal: need|affiliate|trade|acquire|harm
+    target: str | None = None                   # entity / need name / place
+    meta: dict = field(default_factory=dict)    # additional (source for need, etc.)
+    done: dict = field(default_factory=lambda: {"type": "never"})   # milestone completion predicate
 
 
 @dataclass
 class Agenda:
     summary: str
     kind: str = "ambition"                      # ambition|wealth|courtship|revenge|predation|…
-    importance: float = 0.7                     # базовый payoff инжектируемой цели [0..1]
+    importance: float = 0.7                     # base payoff of injected goal [0..1]
     milestones: list = field(default_factory=list)
     cursor: int = 0
     status: str = "active"                       # active | done | abandoned
@@ -57,7 +57,7 @@ def _wealth(state, world) -> float:
 
 
 def _met(cond: dict, state, world) -> bool:
-    """Проверяемый предикат завершения вехи (маленький словарь типов — расширяемо)."""
+    """Check milestone completion predicate (small dict of types — extensible)."""
     ty = cond.get("type")
     if ty == "wealth":
         return _wealth(state, world) >= float(cond.get("value", 1.0))
@@ -73,11 +73,11 @@ def _met(cond: dict, state, world) -> bool:
         b = world.bodies.get(state.config.id)
         nm = str(cond.get("item", "")).lower()
         return bool(b and any(nm in i.name.lower() for i in b.loot + b.carrying))
-    return False                                 # "never" — веха-стояк, сама не закрывается
+    return False                                 # "never" — standing milestone, doesn't close on its own
 
 
 def advance_agendas(state, world) -> list:
-    """Продвинуть вехи, чьи условия выполнены; завершить исчерпанные агенды. Вернуть события."""
+    """Advance milestones whose conditions are met; complete exhausted agendas. Return events."""
     events = []
     for ag in getattr(state, "agendas", None) or []:
         if ag.status != "active":
@@ -93,9 +93,9 @@ def advance_agendas(state, world) -> list:
     return events
 
 
-# ── заглушка планировщика ТОЛЬКО для тестов/демо (рантайм никогда не строит) ──
+# ── offline planner stub ONLY for tests/demo (runtime never builds) ──
 class StubPlanner:
-    """Тестовая: агенда из черт (мирная или хищная). Рантайм-путь — llm_agent.plan_agenda."""
+    """Test: agenda from traits (peaceful or predatory). Runtime path — llm_agent.plan_agenda."""
 
     def plan(self, state, world, ctx=None) -> Agenda | None:
         t = state.config.traits
@@ -107,7 +107,7 @@ class StubPlanner:
         return wealth_agenda((ctx or {}).get("dream", "своё дело"), goal=1.0)
 
 
-# ── фабрики типовых агенд (мирные и нет) ──
+# ── factories for typical agendas (peaceful and predatory) ──
 def wealth_agenda(dream: str, goal: float = 1.0, work: str | None = None) -> Agenda:
     src = {"source": work} if work else {}
     return Agenda(f"скопить на {dream}", "wealth", 0.75, [

@@ -1,6 +1,6 @@
-"""Игровой контур — МИР И ОРКЕСТРАЦИЯ: генерация, сцена, движение, диалог, действие, живая локация + HTTP-эндпоинты.
+"""Game loop — WORLD AND ORCHESTRATION: generation, scene, movement, dialogue, action, live location + HTTP endpoints.
 
-Слой mechanics/ (см. docs/loop.md).
+mechanics/ layer (see docs/loop.md).
 """
 
 from __future__ import annotations
@@ -87,10 +87,10 @@ from aidnd.worldgen.population import Townsperson
 
 
 def _world_events() -> None:
-    """Суточные события пассивного мира (раз в день, утром): розыск стынет, смелые уходят по
-    заказам гильдии, горожане правят столб объявлений, случайный караван везёт товар. Каждое — в
-    своём try: сбой одного не роняет мир."""
-    if _wanted() > 0:  # розыск остывает — память не вечна
+    """Daily passive world events (once per day, morning): wanted level cools, adventurers leave
+    on guild contracts, citizens post on board, random caravan brings goods. Each in its own try:
+    one failure doesn't crash world."""
+    if _wanted() > 0:  # wanted level cools — memory is finite
         _wanted_add(-PB["wanted_decay"])
     try:
         from aidnd.server.play.engine.incidents import gang_morning, incident_spawn
@@ -99,13 +99,13 @@ def _world_events() -> None:
         news = _npc_delves() + _deal_jobs() + incident_spawn() + gang_morning()
         if news:
             _S["guild_news"] = (_S.get("guild_news") or [])[-2:] + news
-    except Exception:  # noqa: BLE001 — вылазка не роняет мир
+    except Exception:  # noqa: BLE001 — raid doesn't crash the world
         pass
     try:
         bn = _board_npc_fulfill() + _board_publish()
         if bn:
             _S["board_news"] = (_S.get("board_news") or [])[-3:] + bn
-    except Exception:  # noqa: BLE001 — доска не роняет мир
+    except Exception:  # noqa: BLE001 — board doesn't crash the world
         pass
     try:
         if random.Random(f"caravan|{_gt() // 1440}|{_wid()}").random() < PB["caravan_chance"]:
@@ -115,23 +115,23 @@ def _world_events() -> None:
 
 
 def _apply_routine() -> None:
-    """Синхронизировать пассивный мир с текущим игровым временем: идемпотентно, дёшево — раз в фазу
-    суток (ключ фаза+день). Рутина ВСЕХ жителей строится из НУЖД/характера/времени (society, через
-    worldsim.routine_step), а не из хардкода ролей. На новой заре — суточные события."""
-    key = (_gt() // 30, _gt() // 1440)               # шаг рутины: каждые 30 игровых минут
+    """Sync passive world with current game time: idempotent, cheap — once per day phase
+    (key phase+day). Routine of ALL residents built from NEEDS/character/time (society, via
+    worldsim.routine_step), not hardcoded roles. At dawn — daily events."""
+    key = (_gt() // 30, _gt() // 1440)               # routine step: every 30 game minutes
     if _S.get("routine_key") == key or not _S.get("people"):
         return
     _S["routine_key"] = key
-    mkey = (_phase(), _gt() // 1440)                 # суточные события — раз на утро
+    mkey = (_phase(), _gt() // 1440)                 # daily events — once at morning
     if mkey[0] == "morning" and _S.get("events_key") != mkey:
         _S["events_key"] = mkey
         _world_events()
-    try:  # E1: экономика — ленивый catch-up по КАЖДОМУ пропущенному дню (не только «утром»)
+    try:  # E1: economy — lazy catch-up for EVERY skipped day (not just 'morning')
         from aidnd.server.play.engine.economy import economy_catchup
         en = economy_catchup()
         if en:
             _S["econ_news"] = (_S.get("econ_news") or [])[-2:] + en
-    except Exception:  # noqa: BLE001 — экономика не роняет мир
+    except Exception:  # noqa: BLE001 — economy doesn't crash the world
         pass
     routine_step(_S["people"], _S["crof"])
 
@@ -156,9 +156,9 @@ _TIE_ROLES = {
 
 
 def _weave_ties(people) -> None:
-    """Связи персон («должен головорезам», «враждует со старостой») ПРИВЯЗЫВАЮТСЯ к реальным
-    людям пула: обоюдные отношения в mind + память с настоящим именем. Граф «кто кого знает»
-    становится настоящим; детерминировано, идемпотентно (по метке в памяти)."""
+    """Person ties ('owes cutthroats', 'feuds with elder') are BOUND to real pool people:
+    mutual relations in mind + memory with real name. Graph 'who knows whom' becomes real;
+    deterministic, idempotent (by memory mark)."""
     rng = random.Random("ties|1")
     byrole: dict = {}
     for oid, o in sorted(people.items()):
@@ -166,7 +166,7 @@ def _weave_ties(people) -> None:
     for pid, p in sorted(people.items()):
         st = p.state
         if any("— это про" in m.text for m in st.memory.items):
-            continue  # уже вязан (в т.ч. восстановлен из npc_state)
+            continue  # already bound (incl. restored from npc_state)
         for tie in ((p.persona or {}).get("ties") or [])[:2]:
             tl = tie.lower()
             role = next((r for w, r in _TIE_ROLES.items() if w in tl), None)
@@ -179,15 +179,15 @@ def _weave_ties(people) -> None:
             hostile = any(w in tl for w in ("вражд", "подозр", "ненавид", "угрож", "презир"))
             debt = any(w in tl for w in ("должен", "долг", "задолж"))
             fear = any(w in tl for w in ("боит", "страш", "опаса"))
-            if hostile:  # настоящая вражда — обоюдно негатив
+            if hostile:  # real feud — mutual negative
                 ar["fear"] = max(ar["fear"], 0.3)
                 ar["affinity"] = min(ar["affinity"], -0.2)
                 br["affinity"] = min(br["affinity"], -0.1)
-            elif debt:  # долг — обязательство, НЕ ненависть
-                ar["fear"] = max(ar["fear"], 0.2)  # должник слегка опасается кредитора
-            elif fear:  # страх без вражды — симпатия нейтральна
+            elif debt:  # debt — obligation, NOT hatred
+                ar["fear"] = max(ar["fear"], 0.2)  # debtor slightly fears creditor
+            elif fear:  # fear without feud — affinity neutral
                 ar["fear"] = max(ar["fear"], 0.35)
-            else:  # доброе знакомство/родство
+            else:  # good acquaintance/kinship
                 ar["affinity"] = max(ar["affinity"], 0.4)
                 ar["trust"] = max(ar["trust"], 0.3)
                 br["affinity"] = max(br["affinity"], 0.3)
@@ -198,7 +198,7 @@ def _weave_ties(people) -> None:
 
 
 def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
-    """Готовый NPC из банка → Townsperson с мозгом (mind) + богатой персоной/портретами."""
+    """Ready NPC from bank → Townsperson with mind + rich persona/portraits."""
     mech = row.get("mech") or {}
     cfg = NpcConfig(
         id=row["id"],
@@ -208,10 +208,10 @@ def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
         abilities=mech.get("abilities") or {},
     )
     st = NpcState.from_config(cfg)
-    r = random.Random(row["id"])  # лёгкий фон нужд, детерминированно
+    r = random.Random(row["id"])  # light background needs, deterministic
     for n in st.needs:
         st.needs[n] = round(r.uniform(0.1, 0.35), 2)
-    saved = _store().get_npc_state(_wid(), row["id"])  # прожитое переживает рестарт
+    saved = _store().get_npc_state(_wid(), row["id"])  # lived experience survives restart
     if saved:
         st.relationships = saved.get("relationships") or {}
         st.needs.update(saved.get("needs") or {})
@@ -236,13 +236,13 @@ def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
         persona=row.get("persona"),
         portraits=row.get("portraits") or {},
     )
-    if work:  # владелец здания → ключи от его закрытых ёмкостей
+    if work:  # building owner → keys to his locked containers
         tp.keys = _building_keys(work)
     return tp
 
 
 def _building_keys(bid: str) -> list:
-    """Ключи-открывашки от LOCKED-ёмкостей здания (для владельца)."""
+    """Keys to unlock LOCKED containers in building (for owner)."""
     bd = _store().get_building(_wid(), bid)
     if not bd:
         return []
@@ -254,7 +254,7 @@ def _building_keys(bid: str) -> list:
 
 
 def _building_rooms(bid: str) -> list:
-    """Суб-помещения здания (мини-граф): name/kind/access/hidden (скрытое видно лишь по зоркому осмотру)."""
+    """Building sub-rooms (mini-graph): name/kind/access/hidden (hidden visible only on keen inspection)."""
     bd = _store().get_building(_wid(), bid)
     if not bd:
         return []
@@ -265,7 +265,7 @@ def _building_rooms(bid: str) -> list:
 
 
 def _building_containers(bid: str, room: str | None = None) -> list:
-    """Ёмкости ТЕКУЩЕГО помещения (без содержимого — вскрывается взаимодействием)."""
+    """Containers of CURRENT room (without contents — opened by interaction)."""
     bd = _store().get_building(_wid(), bid)
     if not bd:
         return []
@@ -283,8 +283,8 @@ def _building_containers(bid: str, room: str | None = None) -> list:
 
 
 def _assign_key_buildings(city) -> None:
-    """Мир создан → раздать ключевым слотам здания ИЗ ПУЛА по типу-хинту слота (гильдия — гильдией).
-    Пишется в live-БД мира один раз; повторный заход читает готовое."""
+    """World created → distribute key building slots FROM POOL by slot type-hint (guild → guild).
+    Written to live-DB once; re-entry reads ready data."""
     store, pool = _store(), _pool()
     have = store.building_ids(_wid())
     todo = [bid for bid in city.key_buildings if bid not in have]
@@ -298,8 +298,8 @@ def _assign_key_buildings(city) -> None:
     used = set()
 
     def take(hint):
-        h = hint.split()[0].lower()  # «Храм удачи» → храм
-        for r in rows:  # сперва по типу, потом любой
+        h = hint.split()[0].lower()  # 'Temple of Fortune' → temple
+        for r in rows:  # by type first, then any
             if r["id"] not in used and h in r["btype"].lower():
                 used.add(r["id"])
                 return r
@@ -321,7 +321,7 @@ _RES_POOL = None
 
 
 def _res_binfo(bid: str) -> dict | None:
-    """Жилой дом: фактшит детерминированно из пула (без записи в БД — функция от (мир, дом))."""
+    """Residential building: fact sheet deterministic from pool (no DB write — function of (world, building))."""
     global _RES_POOL
     if _RES_POOL is None:
         _RES_POOL = _pool().pool_buildings("res")
@@ -330,10 +330,10 @@ def _res_binfo(bid: str) -> dict | None:
     return random.Random(f"res|{_wid()}|{bid}").choice(_RES_POOL)["data"]
 
 
-# Категории профессий (роль→нужен venue vs производит дома). Данные в коде — маленькая
-# таблица; при росте вынести в content/professions.json.
-_VENUE_NEED = {"трактирщик", "лавочник", "оружейник", "жрец", "маг"}   # нет venue ⟹ подёнщик
-_HOME_PRODUCER = {"дубильщик", "сапожник", "мельник", "кузнец", "знахарка"}  # ремесло на дому
+# Profession categories (role→needs venue vs produces at home). Data in code — small table;
+# scale up later to content/professions.json.
+_VENUE_NEED = {"трактирщик", "лавочник", "оружейник", "жрец", "маг"}   # no venue ⟹ day laborer
+_HOME_PRODUCER = {"дубильщик", "сапожник", "мельник", "кузнец", "знахарка"}  # craft at home
 _MOBILE_ROLE = {"стражник", "головорез", "бродяга", "бард", "горожанин"}
 _WORKCAP = {"таверн": 6, "трактир": 6, "гильд": 6, "игорн": 4, "лавк": 3, "оружейн": 2,
             "кузн": 3, "храм": 3, "молельн": 3, "часовн": 3, "лечебн": 3, "мастерск": 3,
@@ -341,9 +341,9 @@ _WORKCAP = {"таверн": 6, "трактир": 6, "гильд": 6, "игорн
 
 
 def _plan_jobs(city, homes: dict, roles: dict) -> dict:
-    """ДЕТЕРМИНИРОВАННО: кто на каком venue работает (гравитация — ближайшие по дому) + кого
-    реклассифицировать. Возвращает pid → (work_bid|None, role_override|None). Чистая функция
-    от (город, дома, роли) — один результат в обоих путях расселения (свежий/восстановление)."""
+    """DETERMINISTIC: who works at which venue (gravity — nearest by home) + who to reclassify.
+    Returns pid → (work_bid|None, role_override|None). Pure function of (city, homes, roles) —
+    same result in both settlement paths (fresh/restore)."""
     xy = {n.id: (n.x, n.y) for n in city.nodes()}
 
     def dist(pid, node):
@@ -355,7 +355,7 @@ def _plan_jobs(city, homes: dict, roles: dict) -> dict:
 
     out: dict = {}
     assigned: set = set()
-    for bid, kb in sorted(city.key_buildings.items()):  # venue набирает БЛИЖАЙШИХ по роли
+    for bid, kb in sorted(city.key_buildings.items()):  # venue recruits NEAREST by role
         want = _role_for_building(bid)
         info = (_binfo(bid)["kind"] + " " + _binfo(bid)["name"]).lower()
         cap = next((c for w, c in _WORKCAP.items() if w in info), 3)
@@ -365,24 +365,24 @@ def _plan_jobs(city, homes: dict, roles: dict) -> dict:
         for pid in cand[:cap]:
             out[pid] = (bid, None)
             assigned.add(pid)
-    for pid, r in roles.items():                        # остаток: дом-производитель / подёнщик
+    for pid, r in roles.items():                        # remainder: home-producer / day laborer
         if pid in assigned:
             continue
-        if r in _VENUE_NEED:                            # услуге без venue не быть — подёнщик
+        if r in _VENUE_NEED:                            # service without venue won't work — day laborer
             out[pid] = (None, "подёнщик")
-        # HOME_PRODUCER и MOBILE — без override (производят дома / мобильны), work=None
+        # HOME_PRODUCER and MOBILE — no override (produce at home / mobile), work=None
     return out
 
 
 def _surname(name: str) -> str:
-    """Фамилия = последний токен имени (иначе пусто) — та же логика, что предзнакомство-родня."""
+    """Surname = last name token (else empty) — same logic as pre-acquaintance kin."""
     parts = name.split()
     return parts[-1] if len(parts) > 1 else ""
 
 
 def _households(rows: list, rng) -> list:
-    """D1: разбить пул на СЕМЬИ-домохозяйства — малые группы одной фамилии (couple/siblings),
-    каждая живёт в одном доме. Детерминир. (rng из settle|wid). Размер 1-5, пик 2-3."""
+    """D1: split pool into FAMILY households — small groups of one surname (couple/siblings),
+    each lives in one house. Deterministic (rng from settle|wid). Size 1-5, peak 2-3."""
     by_sur: dict = {}
     for r in rows:
         by_sur.setdefault(_surname(r["name"]) or r["id"], []).append(r["id"])
@@ -399,9 +399,9 @@ def _households(rows: list, rng) -> list:
 
 
 def _reclass_note(p, former: str) -> None:
-    """Нарративная нисходящая мобильность: метка «прежде был X» + former_role (для выкупа venue,
-    слой B3) — не молчаливая смена ярлыка."""
-    p.former_role = former                            # аспирант помнит ремесло (может выкупить)
+    """Narrative downward mobility: mark 'was once X' + former_role (for venue buyout,
+    layer B3) — not silent role change."""
+    p.former_role = former                            # grad student remembers craft (can buy out)
     if any("прежде был" in m.text for m in p.state.memory.items):
         return
     p.state.memory.add(f"прежде был {former}, да места не нашёл — перебиваюсь подёнщиной",
@@ -514,19 +514,19 @@ def _play():
     if _S["city"] is None:
         params = CityParams(seed=_S["seed"], key_buildings=12, river=True, walls=True, segment=16)
         city = generate(params)
-        _assign_key_buildings(city)  # мир юзера: здания из ПУЛА, без LLM
-        _seed_item_pool()  # пул предметов мира (сид-набор, данные)
-        vis = visual(params, interactive=True)  # богатый визуал + кликабельные дома
+        _assign_key_buildings(city)  # user's world: buildings from POOL, no LLM
+        _seed_item_pool()  # world items pool (seed-set, data)
+        vis = visual(params, interactive=True)  # rich visual + clickable houses
         xy = {n.id: (n.x, n.y) for n in city.nodes()}
         keynode = {
             bid: kb.node for bid, kb in city.key_buildings.items()
-        }  # здание → БЛИЖАЙШАЯ точка (дверь)
+        }  # building → NEAREST point (door)
         kps = city.key_points()
-        people, spot = _fill_from_pool(city, keynode, kps)  # только банк; пустой банк = ошибка
-        n2b = {}  # узел-точка → здание (ключевые прежде домов)
+        people, spot = _fill_from_pool(city, keynode, kps)  # only bank; empty bank = error
+        n2b = {}  # node-point → building (key before homes)
         for bid, kb in city.key_buildings.items():
             n2b.setdefault(kb.node, bid)
-        for hid, ho in city.houses.items():  # жилые дома тоже входимы (фактшит из пула)
+        for hid, ho in city.houses.items():  # residential houses also enterable (fact sheet from pool)
             n2b.setdefault(ho.node, hid)
         start = (
             next(
@@ -535,8 +535,8 @@ def _play():
             )
             or kps[0]
         )
-        _weave_ties(people)  # связи персон → реальные люди пула
-        row = _store().get_pc(_wid()) or {}  # позиция игрока ПЕРЕЖИВАЕТ рестарт/деплой
+        _weave_ties(people)  # person ties → real pool people
+        row = _store().get_pc(_wid()) or {}  # player position SURVIVES restart/deploy
         saved_loc = row.get("loc")
         if saved_loc in xy:
             start = saved_loc
@@ -552,15 +552,15 @@ def _play():
         )
         if saved_loc in xy and row.get("inside") in n2b.values():
             _S["inside"], _S["room"] = row["inside"], row.get("room")
-            _S["zone"] = row.get("zone")             # и место в зале — тоже позиция
-    _apply_routine()  # споты = f(время): распорядок дня
+            _S["zone"] = row.get("zone")             # and place in hall — also position
+    _apply_routine()  # spots = f(time): daily schedule
     return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]
 
 
 def _build_geom(city, xy, n2b, vis) -> dict:
-    """Лёгкий интерактивный слой поверх богатого визуала: система координат — холст рендера 0 0 W H.
-    Дома/улицы/река/стены рисует сам SVG (vis['inner']); клик по дому → его БЛИЖАЙШАЯ точка дороги
-    (h2n = h.node, НЕ перекрёсток). Метки зданий подписываем поверх; _xy — узел→xy для маршрута."""
+    """Light interactive layer over rich visual: coordinate system — render canvas 0 0 W H.
+    Houses/streets/river/walls drawn by SVG itself (vis['inner']); click house → its NEAREST
+    road point (h2n = h.node, NOT crossroad). Building labels above; _xy — node→xy for routing."""
     h2n = {h.id: h.node for h in city.houses.values()}
     road = (NodeKind.CROSSROAD, NodeKind.POINT, NodeKind.BRIDGE, NodeKind.GATE)
     points = [
@@ -568,7 +568,7 @@ def _build_geom(city, xy, n2b, vis) -> dict:
             "id": n,
             "x": round(xy[n][0], 1),
             "y": round(xy[n][1], 1),
-        }  # ВСЕ узлы дорог (не только перекрёстки)
+        }  # ALL road nodes (not just crossroads)
         for n in xy
         if city.node_kind(n) in road
     ]
@@ -583,7 +583,7 @@ def _build_geom(city, xy, n2b, vis) -> dict:
                 "bid": bid,
             }
         )
-    cx, cy = vis["W"] / 2, vis["H"] / 2  # ДОСКА-СТОЛБ: перекрёсток ближе к центру
+    cx, cy = vis["W"] / 2, vis["H"] / 2  # BOARD-POST: crossroad closest to center
     cross = [n for n in xy if city.node_kind(n) == NodeKind.CROSSROAD]
     plaza = min(cross, key=lambda n: (xy[n][0] - cx) ** 2 + (xy[n][1] - cy) ** 2) if cross else None
     if plaza is not None:
@@ -612,7 +612,7 @@ def _look_key(loc, inside) -> str:
 
 
 def _looked_level(loc, inside) -> int:
-    """0 = не осматривался (туман: людей/ёмкостей не различаешь), 1 = осмотрелся, 2 = зоркий бросок."""
+    """0 = not examined (fog: can't distinguish people/containers), 1 = looked around, 2 = keen check."""
     return int((_S.setdefault("looked", {})).get(_look_key(loc, inside), 0))
 
 
@@ -741,7 +741,7 @@ def _scene_dict(city, people, crof, cr2b, loc):
 
 
 def _watch_check(people, crof, loc):
-    """Стража вяжет: если розыск ≥ порога И на локации есть стражник — конфронтация."""
+    """Guard binds: if wanted ≥ threshold AND guard at location — confrontation."""
     if _wanted() < PB["wanted_confront"]:
         return None
     guard = next((pid for pid in _here(loc, crof) if people[pid].role == "стражник"), None)
@@ -772,13 +772,13 @@ def scene():
         "mana_cap": _mana_cap(),
         "fatigue": _fatigue(),
     }
-    return out  # доска/ранг гильдии — из _scene_dict
+    return out  # board/guild rank — from _scene_dict
 
 
-# --------------------------------------------- КРАФТ / ПРОЧНОСТЬ (срез 2) - #
+# --------------------------------------------- CRAFTING / DURABILITY (slice 2) - #
 
 
-# ----------------------------------------------- ТОРГОВЛЯ И КРАЖА (срез 2) - #
+# ----------------------------------------------- TRADE AND THEFT (slice 2) - #
 
 
 @router.post("/api/play/ad_take")
@@ -805,7 +805,7 @@ async def contract_accept(request: Request):
         _wid(), cid, "active", {k: v for k, v in ct.items() if k not in ("id", "status")}
     )
     note = None
-    if ct.get("kind") == "deliver" and ct.get("deliver_item"):  # посылку вручают сразу
+    if ct.get("kind") == "deliver" and ct.get("deliver_item"):  # package handed immediately
         _store().inv_move(_wid(), ct["deliver_item"], "pc")
         note = f"«{ct['want']}» ложится в твою сумку — доставь по адресу."
     _pc_remember(
@@ -823,7 +823,7 @@ def contracts_list():
     active = []
     for ct in _store().contracts(_wid(), "active"):
         steps = _ct_steps(ct)
-        if len(steps) > 1:  # многоэтапный — показать прогресс и текущий шаг
+        if len(steps) > 1:  # multi-step — show progress and current step
             cur = _ct_cur(ct)
             ct = {
                 **ct,
@@ -839,20 +839,20 @@ def contracts_list():
     return {"active": active, "done": _store().contracts(_wid(), "done")[-3:]}
 
 
-# --------------------------------- ЕДИНЫЙ КОНТУР ДЕЙСТВИЯ (примитив×манера) - #
-# Никаких кнопок-глаголов: свободный текст → LLM-интент → attempt() → события мира.
-# Гейты по манере: openly (просто), stealthily (dex vs бдительность, свидетели),
-# forcefully (сила vs храбрость, страх+гнев+свидетели), persuasively (симпатия vs натура).
+# --------------------------------- UNIFIED ACTION LOOP (primitive×manner) - #
+# No verb buttons: free text → LLM intent → attempt() → world events.
+# Manner gates: openly (simple), stealthily (dex vs vigilance, witnesses),
+# forcefully (strength vs bravery, fear+anger+witnesses), persuasively (affinity vs nature).
 
-# ------------------------------------------- ЖИВАЯ ЛОКАЦИЯ (mind + LLM) --- #
-# NPC текущей локации живут по-настоящему: каждый тик КАЖДЫЙ решает ходом гибридного мозга
-# (механика даёт побуждения → LLM выбирает В ХАРАКТЕРЕ, пишет реплику и описание). Действия
-# реальны (apply_actions мутирует мир и память), фид — то, что игрок видит/слышит; незнакомцы
-# обезличены дескриптором, имя открывается знакомством (talk).
-_LIVE_GAP = PB["live_gap_s"]  # мин. сек между тиками (защита от бури поллов)
+# ------------------------------------------- LIVE LOCATION (mind + LLM) --- #
+# NPCs at current location live realistically: each tick EACH chooses via hybrid mind
+# (mechanics give drives → LLM chooses IN CHARACTER, writes line and description). Actions
+# are real (apply_actions mutates world and memory), feed — what player sees/hears; strangers
+# shown by descriptor, name opens via introduction (talk).
+_LIVE_GAP = PB["live_gap_s"]  # min. sec between ticks (protection from poll storm)
 
 
-# нужда → как это выглядит «изнутри» локации (флейвор для сцены; сами нужды — из society-каталога)
+# need → how it looks 'inside' location (flavor for scene; needs themselves — from society catalog)
 _NEED_ITEM = {
     "hunger": "горячая похлёбка",
     "comfort": "кружка эля у очага",
@@ -865,8 +865,8 @@ _NEED_ITEM = {
 
 
 def _live_affordances(bid) -> list:
-    """Чем локация закрывает нужды — ИЗ ЕДИНОГО каталога мест (society.advertises по фактшиту
-    здания): та же реклама нужд, по которой жители сюда и приходят. Улица — новизна/суета."""
+    """What location satisfies needs — FROM UNIFIED place catalog (society.advertises per
+    building fact sheet): same needs ads that bring residents here. Street — novelty/bustle."""
     if not bid:
         return [MItem("уличная суета", 0.15, satisfies="novelty")]
     data = (_store().get_building(_wid(), bid) or {}).get("data") or {}
@@ -885,14 +885,14 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     from aidnd.worldgen.furnish import zones_for
 
     _zd, zones = building_zones(bid)
-    if not zones and not bid:  # УЛИЦА — тоже локация с зонами (docs/locations.md)
+    if not zones and not bid:  # STREET — also location with zones (docs/locations.md)
         street_kind = "площадь" if loc == (_S.get("geom") or {}).get("plaza") else "улица"
         zones = zones_for(street_kind, {}, kind="street")
-    ent = "у входа" if bid else "обочина"            # точка появления: дверь или край улицы
+    ent = "у входа" if bid else "обочина"            # spawn point: door or street edge
     zone_names = {z["id"]: z["name"] for z in zones}
     zone_ids = {v: k for k, v in zone_names.items()}
     w = MWorld()
-    if zones:  # ВОЛНА 2: зоны = МЕСТА разума — move сам переезжает, use ест ресурс СВОЕЙ зоны
+    if zones:  # WAVE 2: zones = PLACES of mind — move relocates itself, use consumes its zone's resource
         znames = list(zone_names.values())
         w.link(ent, "улица")
         for i, za in enumerate(znames):
@@ -900,12 +900,12 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             w.link(ent, za)
             for zb in znames[i + 1:]:
                 w.link(za, zb)
-        if bid:  # обстановка здания = НАСТОЯЩИЕ предметы live.db (лениво, идемпотентно)
+        if bid:  # building furnishings = REAL items live.db (lazy, idempotent)
             from aidnd.server.play.mechanics.items import _materialize_zones, _zone_stock
 
             _materialize_zones(bid)
-        zone_items: dict = {}                        # место → {имя: iid} (loose — можно взять)
-        zone_fixed: dict = {}                        # место → {имя: iid} (прибито — не унести)
+        zone_items: dict = {}                        # place → {name: iid} (loose — can take)
+        zone_fixed: dict = {}                        # place → {name: iid} (nailed — can't take)
         for z in zones:
             itms = []
             src = ([(None, o) for o in (z.get("objects") or [])] if not bid
@@ -915,22 +915,22 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                 if aff:
                     need, rate = max(aff.items(), key=lambda kv: kv[1])
                     if need == "fatigue" and z["kind"] not in ("beds", "cell"):
-                        need = "comfort"             # скамья — отдых, но НЕ сон: спят в постели
+                        need = "comfort"             # bench — rest, but NOT sleep: sleep in bed
                     itms.append(MItem(o["name"], min(0.5, round(rate * 2.2, 2)), satisfies=need))
                 if iid:
                     tgt = zone_fixed if o.get("fixed") else zone_items
                     tgt.setdefault(zone_names[z["id"]], {})[o["name"]] = iid
             w.ground[zone_names[z["id"]]] = itms[:6]
-        if _phase() == "night":                      # ночь: улица честно рекламирует постель дома
+        if _phase() == "night":                      # night: street honestly advertises home bed
             w.ground["улица"] = [MItem("путь домой, к постели", 0.55, satisfies="fatigue")]
     else:
         w.link(place, "улица")
         w.ground[place] = _live_affordances(bid)
     hero = _pc_name()
-    names = {PLAYER: hero if hero != "Странник" else "чужак"}  # NPC зовут по имени, если знают
+    names = {PLAYER: hero if hero != "Странник" else "чужак"}  # NPCs call by name if they know
     known_by = {
         pid
-        for pid in _here(loc, crof)  # кто из присутствующих УЖЕ знаком с игроком
+        for pid in _here(loc, crof)  # who of present ALREADY know player
         if PLAYER in people[pid].state.relationships
     }
     roles = {
@@ -943,11 +943,11 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         )
     }
     rng = random.Random(f"live|{loc}")
-    npc_map: dict = {}  # pid → {имя вещи: item_id} (кражи реальны)
+    npc_map: dict = {}  # pid → {thing name: item_id} (thefts real)
     here_all = _here(loc, crof)
-    # LOD-КОЛЬЦО только на УЛИЦЕ (открытый узел без естественной ёмкости): не симулируем
-    # весь квартал. ВНУТРИ здания кэпа нет — сцена = все, кто реально там (ёмкость держит
-    # симуляция города, routine_step). Дирижёр всё равно даёт LLM-ход лишь салиентным.
+    # LOD-RING only on STREET (open node without natural capacity): don't simulate
+    # whole block. INSIDE building no cap — scene = all who are really there (capacity held by
+    # city sim, routine_step). Conductor still gives LLM turn only to salient.
     if not bid and len(here_all) > PB["street_lod_cap"]:
         met = _met()
         core = [i for i in here_all if people[i].work] + [
@@ -963,7 +963,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                            workers=workers) if zones else {}
     for pid in here_all:
         p = people[pid]
-        _materialize_npc(pid, "visible")  # у присутствующих настоящие вещи при себе
+        _materialize_npc(pid, "visible")  # present NPCs have real items on them
         loot, imap = [], {}
         coins_np = _store().purse_get(_wid(), pid)
         if coins_np > 0:
@@ -1011,13 +1011,13 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             attention=0.85,
             loot=pc_loot,
         )
-    )  # добыча игрока НАСТОЯЩАЯ (кража реальна)
-    w.npc_minds = {pid: people[pid].state for pid in here_all}  # умы = те же, кто в телах (кэп LOD)
-    w.names = names  # память пишет имена, не id
+    )  # player loot REAL (theft real)
+    w.npc_minds = {pid: people[pid].state for pid in here_all}  # minds = same as in bodies (LOD cap)
+    w.names = names  # memory writes names, not ids
     w.aliases = {v.lower(): k for k, v in names.items()}
-    w.lookup = lambda q: _world_lookup(q, loc)  # тулкол know: знание мира по запросу
+    w.lookup = lambda q: _world_lookup(q, loc)  # tool know: world knowledge on demand
     personas = {}
-    for pid in here_all:  # глубина: манера/причуда/стремления из банка
+    for pid in here_all:  # depth: manner/quirk/wants from bank
         per = people[pid].persona or {}
         bits = []
         if per.get("origin"):
@@ -1034,7 +1034,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             bits.append("к чужакам — " + _STANCE.get(per["stance"], "нейтрально"))
         if people[pid].work:
             bits.append("ты здесь НА РАБОТЕ — твой пост тут")
-        if pid in known_by:  # знакомство переживает тики и перестройки сцены
+        if pid in known_by:  # acquaintance survives ticks and scene rebuilds
             bits.append(
                 f"с гостем ({names[PLAYER]}) вы УЖЕ ЗНАКОМЫ и уже здоровались — "
                 "НЕ приветствуй заново и не спрашивай, кто он; продолжай общение по делу"
@@ -1042,8 +1042,8 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         if bits:
             personas[pid] = ". ".join(bits)
     here = _here(loc, crof)
-    # ПРЕДЗНАКОМСТВО: жители одного городка знакомы (родня > коллеги > соседи).
-    # Сеем только отсутствующие связи — прожитые отношения не трогаем.
+    # PRE-ACQUAINTANCE: residents of one town know each other (kin > colleagues > neighbors).
+    # Seed only absent ties — lived relations untouched.
     for i, a in enumerate(here_all):
         for b in here_all[i + 1:]:
             pa, pb = people[a], people[b]
@@ -1051,11 +1051,11 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                 continue
             sur_a = pa.name.split()[-1] if len(pa.name.split()) > 1 else ""
             sur_b = pb.name.split()[-1] if len(pb.name.split()) > 1 else ""
-            if sur_a and sur_a == sur_b:                       # родня
+            if sur_a and sur_a == sur_b:                       # kin
                 aff, tr, note = 0.45, 0.5, f"{{}} — моя родня (мы {sur_a}ы)"
-            elif pa.work and pa.work == pb.work:               # коллеги по месту
+            elif pa.work and pa.work == pb.work:               # workplace colleagues
                 aff, tr, note = 0.3, 0.35, "{} — работаем бок о бок"
-            else:                                              # соседи по городку
+            else:                                              # town neighbors
                 aff, tr, note = 0.15, 0.2, None
             for x, y, yid in ((pa, pb, b), (pb, pa, a)):
                 rel = x.state.rel(yid)
@@ -1066,7 +1066,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                                        about=[yid])
     mgr = _model()
     todo = [pid for pid in here_all if not (people[pid].state.agendas or [])]
-    if todo:  # долгая цель для placed NPC (редкий вызов)
+    if todo:  # long-term goal for placed NPC (rare call)
 
         def plan_one(pid):
             st = people[pid].state
@@ -1085,7 +1085,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         keep = set(zone_names.values()) | {ent}
         for pid in here_all:
             if prev_places.get(pid) in keep:
-                w.bodies[pid].place = prev_places[pid]          # человек ГДЕ СИДЕЛ, там и сидит
+                w.bodies[pid].place = prev_places[pid]          # person WHERE THEY SAT, they sit there
         zonemap = {pid: zone_ids.get(w.bodies[pid].place) for pid in here_all}
     prev_convs = [c for c in (prev.get("convs") or [])
                   if sum(1 for m in c["members"] if m in here_all or m == PLAYER) >= 2]
@@ -1136,7 +1136,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
 
 
 def _gossip(actor_st, actor_name: str, target_st) -> None:
-    """Разговор NPC↔NPC переносит яркое воспоминание — сплетни ходят, репутация возникает сама."""
+    """NPC↔NPC talk carries vivid memory — gossip spreads, reputation emerges."""
     juicy = [
         m
         for m in actor_st.memory.items
@@ -1147,13 +1147,13 @@ def _gossip(actor_st, actor_name: str, target_st) -> None:
     m = juicy[-1]
     tale = f"{actor_name} рассказал(а) мне: {m.text}"
     if any(x.text == tale for x in target_st.memory.items[-30:]):
-        return  # эту сплетню уже слышал
+        return  # heard this gossip already
     target_st.memory.add(tale, _mt(), max(0.25, m.importance - 0.15), kind="gossip", about=m.about)
 
 
 def _scene_zones() -> list[dict]:
-    """Зоны ТЕКУЩЕЙ позиции игрока — где бы он ни был: живая сцена (интерьер ИЛИ улица) —
-    истина; без сцены — шаблон здания или уличный шаблон узла. Один источник для интента."""
+    """Zones of CURRENT player position — wherever: live scene (interior OR street) — truth;
+    no scene — building template or street template of node. Single source for intent."""
     lv = _S.get("live") or {}
     if lv.get("zones") and lv.get("loc") == _S.get("loc"):
         return lv["zones"]
@@ -1181,11 +1181,11 @@ def _live_tick(people) -> tuple:
         and (w.bodies[pid].place in inz if inz else w.bodies[pid].place == lv["place"])
     ]
     random.Random(f"tick|{lv['clock']}").shuffle(order)
-    # МОЛЧАНИЕ — тоже сигнал: окликнул чужака, а тот не ответил → это факт мира, NPC его помнит
+    # SILENCE — also signal: hailed stranger, they didn't respond → this is world fact, NPC remembers
     awaiting = lv.get("awaiting") or []
     if awaiting and not lv.pop("pc_spoke", False):
         for pid in awaiting:
-            if pid in w.npc_minds:  # kind=note → попадает в «ТВОИ МЫСЛИ» решений
+            if pid in w.npc_minds:  # kind=note → goes into 'YOUR THOUGHTS' of decisions
                 w.npc_minds[pid].memory.add(
                     "я окликнул(а) чужака, но он ПРОМОЛЧАЛ — не хочет говорить, навязываться дальше стыдно",
                     lv["clock"],
@@ -1195,7 +1195,7 @@ def _live_tick(people) -> tuple:
                 )
         lv["last"][PLAYER] = "молчит — на обращения не отвечает, в разговоры не вступает"
     lv["awaiting"] = []
-    # чем занят чужак ПРЯМО СЕЙЧАС — часть мира: NPC сами решают, лезть ли (характер, не таймер)
+    # what stranger is DOING NOW — part of world: NPCs decide themselves whether to butt in (character, not timer)
     roles = dict(lv["roles"])
     dlg = _S.get("dlg")
     if dlg and dlg in people and dlg in order:
@@ -1210,13 +1210,13 @@ def _live_tick(people) -> tuple:
             "в разговоре: НЕ окликай и не приветствуй заново; отвечай на его слова, "
             "а если он молчит — не дёргай, дай ему выпить/подумать, займись делом"
         ).lstrip(". ")
-    # ВОЛНА 2: позиция = ТЕЛО в зоне-месте (двигает сам разум move'ом); zonemap — производная
+    # WAVE 2: position = BODY in zone-place (mind moves itself via move); zonemap — derivative
     zones_l = lv.get("zones") or []
     zmap = lv.setdefault("zonemap", {})
     zone_feed = []
     if zones_l:
         pbody = w.bodies.get(PLAYER)
-        if pbody is not None:  # позиция игрока — из его состояния (клик по плану/фриформ)
+        if pbody is not None:  # player position — from their state (click on map/freeform)
             pbody.place = lv["zone_names"].get(_S.get("zone")) or lv.get("ent", "у входа")
         for pid in list(w.npc_minds):
             zmap[pid] = lv["zone_ids"].get(w.bodies[pid].place)
@@ -1225,13 +1225,13 @@ def _live_tick(people) -> tuple:
     if zones_l and w.bodies.get(PLAYER) and w.bodies[PLAYER].place != lv.get("ent", "у входа"):
         zname_of[PLAYER] = w.bodies[PLAYER].place
     if lv["clock"] >= 3 and "незнакомец" in str(roles.get(PLAYER, "")):
-        # к чужаку ПРИГЛЯДЕЛИСЬ — состояние сцены, не кулдаун: он больше не главное событие зала
+        # stranger NOTICED — scene state, not cooldown: no longer main event of hall
         roles[PLAYER] = ("чужак, который тут уже посидел — к нему пригляделись и вернулись "
                          "к своим делам; лезть к нему без причины незачем")
     if zname_of.get(PLAYER):
         roles[PLAYER] = f"{roles.get(PLAYER, 'чужак')}; он сейчас — {zname_of[PLAYER]}"
     news = [str(x) for x in ((_S.get("guild_news") or []) + (_S.get("board_news") or []))[-2:]]
-    news += _deeds.town_talk(lv["names"], limit=2)     # свежие ДЕЛА города — в сплетни
+    news += _deeds.town_talk(lv["names"], limit=2)     # fresh TOWN ACTS — into gossip
     rums = lv.get("rumors") or []
     rumor_of = ({pid: rums[hash((pid, _gt() // 1440)) % len(rums)] for pid in order}
                 if rums else {})
@@ -1253,7 +1253,7 @@ def _live_tick(people) -> tuple:
         "time": f"{_PHASE_RU[_phase()]}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}",
     }
 
-    # ── ДИРИЖЁР: LLM-ход получает тот, кому ЕСТЬ ЗАЧЕМ (долг > эмоция > нужда > беседа > фон)
+    # ── CONDUCTOR: LLM turn to those who HAVE REASON (debt > emotion > need > talk > background)
     from aidnd.server.play.engine.convo import (
         conv_block,
         conv_debt_to,
@@ -1280,7 +1280,7 @@ def _live_tick(people) -> tuple:
         elif conv_debt_to(lv, pid):
             imp, why = 4.0, "долг ответа"
         elif pid in oaths_due:
-            imp, why = 2.6, "слово"                    # срок пришёл — данное слово тянет
+            imp, why = 2.6, "слово"                    # deadline reached — given promise pulls
         elif max(st.emotion.get("fear", 0), st.emotion.get("anger", 0)) >= 0.5:
             imp, why = 3.0, "эмоция"
         elif c is not None and c.get("quiet", 9) <= 1:
@@ -1295,8 +1295,8 @@ def _live_tick(people) -> tuple:
         imp += (st.config.traits.get("sociability", 0.5) - 0.5) * 0.5
         impulses[pid] = (round(imp, 2), why)
     ranked_imp = sorted(order, key=lambda p: -impulses[p][0])
-    # РЕШЕНИЕ автора (2026-07-07): ВСЕ присутствующие ходят через LLM, латентность пока
-    # неважна. Дирижёр остаётся ПОРЯДКОМ (импульс → волны анти-хора), не отбором/капом.
+    # AUTHOR DECISION (2026-07-07): ALL present go through LLM, latency
+    # unimportant yet. Conductor stays ORDERED (impulse → anti-chorus waves), not selection/cap.
     actors = ranked_imp
     background: list = []
     ctx["convs"] = {pid: b for pid in actors
@@ -1305,15 +1305,15 @@ def _live_tick(people) -> tuple:
         ctx["event"] = salient
     ctx["oaths"] = oaths
 
-    def think_one(pid):  # внутри волны — параллельно; волны видят заявки предыдущих
+    def think_one(pid):  # inside wave — parallel; waves see previous claims
         st = w.npc_minds[pid]
         _decay_needs(st)
         _decay_emotion(st)
-        advance_agendas(st, w)  # долгие цели двигаются
+        advance_agendas(st, w)  # long-term goals advance
         return pid, decide_hybrid(st, w, mind_perceive(st, w), mgr, ctx)
 
     def _claim(pid, d) -> str:
-        """Заявка актёра для следующей волны: что он ПРЯМО СЕЙЧАС делает/говорит."""
+        """Actor's claim for next wave: what they DOING/SAYING RIGHT NOW."""
         bits = []
         for a in (d.get("actions") or [])[:2]:
             if not isinstance(a, dict):
@@ -1329,7 +1329,7 @@ def _live_tick(people) -> tuple:
 
     from concurrent.futures import ThreadPoolExecutor
 
-    # АНТИ-ХОР: волны решений — лидер (высший импульс) первым, свита видит его заявку
+    # ANTI-CHORUS: decision waves — leader (highest impulse) first, retinue sees their claim
     decisions: dict = {}
     waves = [actors[:1], actors[1:]] if len(actors) > 1 else [actors]
     with ThreadPoolExecutor(max_workers=8) as ex:
@@ -1341,10 +1341,10 @@ def _live_tick(people) -> tuple:
             decisions.update(ex.map(think_one, wave))
     ctx.pop("now", None)
 
-    # фоновые ЖИВУТ без LLM: заняты предметом своей зоны, нужды закрываются, зал их видит
+    # BACKGROUND LIVE without LLM: busy with zone item, needs close, hall sees
     bg_feed = []
     rng_bg = random.Random(f"bg|{lv['clock']}")
-    busy: set = set()                                 # одна кочерга — один ворошащий
+    busy: set = set()                                 # one poker — one stirring
     for d_ in decisions.values():
         for a_ in d_.get("actions") or []:
             if isinstance(a_, dict) and a_.get("tool") == "use" and a_.get("item"):
@@ -1368,7 +1368,7 @@ def _live_tick(people) -> tuple:
         if rng_bg.random() < PB["bg_feed_p"]:
             bg_feed.append({"k": "deed", "who": _display(pid, people), "text": act})
 
-    # ── подробный лог сцены (data/debug/play.log): «почему» каждого NPC за тик ──
+    # ── detailed scene log (data/debug/play.log): 'why' of each NPC per tick ──
     import logging as _logging
 
     _slog = _logging.getLogger("aidnd.scene")
@@ -1411,24 +1411,24 @@ def _live_tick(people) -> tuple:
                 acts)
 
     feed, address = list(zone_feed) + bg_feed, []
-    said_n = 0  # LOD-кэп реплик ленты
-    topics = lv.setdefault("topics", [])  # анти-эхо ПОМНИТ прошлые тики (хвост сигнатур)
+    said_n = 0  # LOD-cap for feed lines
+    topics = lv.setdefault("topics", [])  # anti-echo REMEMBERS past ticks (signature tail)
     pc = _pc()
 
     def _say_ok(txt: str) -> bool:
         nonlocal said_n
         sig = frozenset(list(_tokens_ru(txt))[:6])
-        if said_n >= PB["say_cap_per_tick"]:  # лимит реплик — остальные слушают
+        if said_n >= PB["say_cap_per_tick"]:  # line cap — rest listen
             return False
         if sig and any(len(sig & s) >= max(2, len(sig) // 2 + 1) for s in topics):
-            return False  # почти дубль уже сказанного — «заезженная тема»
+            return False  # near duplicate already spoken — 'beaten topic'
         topics.append(sig)
-        del topics[:-12]  # помним последние ~4 тика разговоров
+        del topics[:-12]  # remember last ~4 talk ticks
         said_n += 1
         return True
 
-    used_items: set = set()                           # физика: один предмет — одни руки за тик
-    for pid in actors:  # применяем последовательно (честный порядок)
+    used_items: set = set()                           # physics: one item — one hands per tick
+    for pid in actors:  # apply sequentially (honest order)
         d = decisions[pid]
         for a in d.get("actions") or []:
             if not (isinstance(a, dict) and a.get("tool") == "use" and a.get("item")):
@@ -1440,11 +1440,11 @@ def _live_tick(people) -> tuple:
             taken = {k[1] for k in used_items if k[0] == w.bodies[pid].place}
             alt = next((i for i in w.ground.get(w.bodies[pid].place, [])
                         if i.satisfies and i.name.lower() not in taken), None)
-            if alt is not None:                       # кружка занята — берёт соседнюю
+            if alt is not None:                       # mug taken — takes neighbor
                 a["item"] = alt.name
                 used_items.add((w.bodies[pid].place, alt.name.lower()))
             else:
-                a["tool"] = "wait"                    # всё разобрано — ждёт своей очереди
+                a["tool"] = "wait"                    # all taken — waits turn
         st = w.npc_minds[pid]
         before = {vid: {i.name for i in b.loot} for vid, b in w.bodies.items() if vid != pid}
         my_place = w.bodies[pid].place
@@ -1452,10 +1452,10 @@ def _live_tick(people) -> tuple:
         evs = apply_actions(d.get("actions") or [], st, w, lv["clock"])
         for nm in gr_before - {i.name for i in (w.ground.get(my_place) or [])}:
             iid = (lv.get("zone_items") or {}).get(my_place, {}).pop(nm, None)
-            if iid:                                  # поднял вещь заведения — она теперь ЕГО
+            if iid:                                  # picked up venue item — it's now THEIRS
                 _store().inv_move(_wid(), iid, pid)
                 st.memory.add(f"прибрал(а) к рукам: {nm}", lv["clock"], 0.5)
-        for vid, names_before in before.items():  # кражи РЕАЛЬНЫ (у игрока и NPC↔NPC)
+        for vid, names_before in before.items():  # THEFTS REAL (from player and NPC↔NPC)
             b = w.bodies.get(vid)
             stolen = names_before - ({i.name for i in b.loot} if b else set())
             for nm in stolen:
@@ -1526,16 +1526,16 @@ def _live_tick(people) -> tuple:
                     )
         who = _display(pid, people)
         said = False
-        spoke = []  # речь — тоже ДЕЙСТВИЕ: попадает в last/hist/память
+        spoke = []  # speech — also ACTION: goes into last/hist/memory
         for a in d.get("actions") or []:
             if isinstance(a, dict) and a.get("tool") == "say" and str(a.get("text") or "").strip():
                 tgt = str(a.get("to") or "")
                 tid = (w.aliases or {}).get(tgt.strip().lower(), tgt)
                 txt = str(a["text"])[:180]
-                if not _say_ok(txt):  # кэп реплик / анти-эхо — этот молчит
+                if not _say_ok(txt):  # line cap / anti-echo — this one silent
                     continue
                 said = True
-                if tid == PLAYER:  # решение «заговорить с чужаком» — за самим NPC
+                if tid == PLAYER:  # decision 'talk to stranger' — NPC's own
                     conv_note_say(lv, pid, PLAYER, txt, w.bodies[pid].place)
                     address.append({"npc": pid, "who": who, "text": txt})
                     pc.memory.add(f"{who} обратился ко мне: «{txt[:100]}»", _mt(), 0.4, about=[pid])
@@ -1548,17 +1548,17 @@ def _live_tick(people) -> tuple:
                     )
                     lv.setdefault("awaiting", []).append(
                         pid
-                    )  # ответит ли чужак — узнаем следующим тиком
+                    )  # will stranger answer — learn next tick
                 else:
                     conv_note_say(lv, pid, tid, txt, w.bodies[pid].place)
-                    # СЛЫШИМОСТЬ (docs/locations.md): своя зона — полностью; чужая — обрывком
+                    # AUDIBILITY (docs/locations.md): own zone — fully; other — snippet
                     same_zone = (not zones_l) or (
                         PLAYER in w.bodies and w.bodies[pid].place == w.bodies[PLAYER].place)
                     ev = _S.get("eaves") or {}
                     eaves_on = (zones_l and not same_zone
                                 and ev.get("place") == w.bodies[pid].place
                                 and lv["clock"] <= ev.get("until", -1))
-                    if same_zone or eaves_on:        # прослушка = честно добытый ярус слуха
+                    if same_zone or eaves_on:        # eavesdropping = honestly earned hearing tier
                         feed.append(
                             {
                                 "k": "speech",
@@ -1594,19 +1594,19 @@ def _live_tick(people) -> tuple:
                                 about=[pid],
                             )
                         else:
-                            lv["murmur"] = lv.get("murmur", 0) + 1   # общий гул вместо прослушки
+                            lv["murmur"] = lv.get("murmur", 0) + 1   # general murmur instead of eavesdropping
                     spoke.append(f"сказал(а) {lv['names'].get(tid, tgt)}: «{txt[:50]}»")
                     if tid in w.npc_minds and ((not zones_l)
                                                or w.bodies[tid].place == w.bodies[pid].place):
                         _gossip(st, lv["names"].get(pid, pid), w.npc_minds[tid])
-                    if tid in w.npc_minds:  # обращение доходит и через зал (окликнули)
+                    if tid in w.npc_minds:  # address reaches through hall too (hailed)
                         w.npc_minds[tid].memory.add(
                             f"ко мне обратился {who}: «{txt[:80]}» — стоит ответить",
                             lv["clock"],
                             0.55,
                             about=[pid],
                         )
-        for a in d.get("actions") or []:                 # СЛОВО NPC → обязательство мира
+        for a in d.get("actions") or []:                 # NPC PROMISE → world obligation
             if isinstance(a, dict) and a.get("tool") == "promise" and a.get("to"):
                 to_id = (w.aliases or {}).get(str(a["to"]).strip().lower(), str(a["to"]))
                 wtok = _tokens_ru(str(a.get("where") or ""))
@@ -1620,8 +1620,8 @@ def _live_tick(people) -> tuple:
                 feed.append({"k": "deed", "who": who,
                              "text": f"даёт слово: {str(a.get('what') or '')[:60]}"})
         if any(isinstance(a, dict) and a.get("tool") == "attack" for a in d.get("actions") or []):
-            lv["salient"] = f"{who} бросается в драку!"     # событие: зал вздрогнет в след. тик
-        # ЕДА НЕ БЕСПЛАТНА: use съестного при работнике заведения = заказ с оплатой
+            lv["salient"] = f"{who} бросается в драку!"     # event: hall will flinch next tick
+        # FOOD NOT FREE: use food with venue worker = order with payment
         owner = next((wk for wk in (lv.get("workers") or ()) if wk in order), None)
         if owner and owner != pid:
             for a in d.get("actions") or []:
@@ -1634,11 +1634,11 @@ def _live_tick(people) -> tuple:
                         if random.Random(f"pay|{pid}|{lv['clock']}").random() < 0.3:
                             feed.append({"k": "deed", "who": _display(pid, people),
                                          "text": f"кидает пару монет за {a['item']}"})
-        acted = "; ".join(evs + spoke)  # NPC ПОМНИТ и дела, и слова — не повторяется
+        acted = "; ".join(evs + spoke)  # NPC REMEMBERS both acts and words — no repeat
         lv["last"][pid] = acted[:110] or "—"
         lv["hist"].setdefault(pid, []).append(acted[:80])
         does = (d.get("does") or "").strip()
-        if does and not said:  # реплика сама несёт момент — не дублируем
+        if does and not said:  # line itself carries moment — don't duplicate
             feed.append({"k": "deed", "who": who, "text": does[:150]})
     if lv.pop("murmur", 0) and lv["clock"] % 3 == 0:
         feed.append({"k": "deed", "who": "зал", "text": "за столами гудит негромкий говор"})
@@ -1646,33 +1646,33 @@ def _live_tick(people) -> tuple:
         for pid in order:
             zmap[pid] = lv["zone_ids"].get(w.bodies[pid].place)
     lv["clock"] += 1
-    _gt_add(PB["live_tick_min"])  # тик мира (игровые минуты)
+    _gt_add(PB["live_tick_min"])  # world tick (game minutes)
     _pc_save()
-    for pid in order:  # прожитое переживает рестарт
+    for pid in order:  # lived experience survives restart
         _npc_save(pid)
     return feed, address
 
 
 def _world_tick() -> dict:
-    """★ ТИК МИРА — единственная точка «мир сделал ход». Зовётся в конце обработки ЛЮБОГО действия
-    игрока (пошаговость, как за столом). Два слоя:
-      1) ПАССИВНЫЙ мир — рутина ВСЕХ жителей из нужд/характера/времени + суточные события
-         (aidnd.society → worldsim.routine_step; синхронизируется в _play/_apply_routine,
-         идемпотентно по фазе суток);
-      2) ЖИВАЯ сцена — кто рядом с игроком, думают/говорят/действуют (mind + LLM, _live_tick).
+    """★ WORLD TICK — only point where 'world moved'. Called at end of processing ANY player
+    action (turn-based, like table). Two layers:
+      1) PASSIVE world — routine of ALL residents from needs/character/time + daily events
+         (aidnd.society → worldsim.routine_step; sync in _play/_apply_routine,
+         idempotent per day phase);
+      2) LIVE scene — who's near player, think/talk/act (mind + LLM, _live_tick).
 
-    ИГРОВОЙ ЦИКЛ (каждый @router.post /api/play/*):
-        действие игрока → _gt_add(время действия) → мутация мира → _world_tick() → сцена в ответ.
+    GAME CYCLE (each @router.post /api/play/*):
+        player action → _gt_add(action time) → world mutation → _world_tick() → scene response.
     """
-    city, people, crof, cr2b, loc = _play()  # _play → _apply_routine: пассивный мир синхронен
+    city, people, crof, cr2b, loc = _play()  # _play → _apply_routine: passive world synced
     lv = _S.get("live")
     if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
         _live_build(city, people, crof, cr2b, loc)
     try:
-        feed, address = _live_tick(people)  # живая сцена: те, кто рядом
-    except (LLMUnavailable, LLMBadOutput):  # без модели не притворяемся — честная ошибка игроку
+        feed, address = _live_tick(people)  # live scene: those nearby
+    except (LLMUnavailable, LLMBadOutput):  # no model won't pretend — honest error to player
         raise
-    except Exception:  # noqa: BLE001 — прочие баги тика не роняют действие игрока
+    except Exception:  # noqa: BLE001 — other tick bugs don't drop the player's action
         import logging
 
         logging.getLogger("aidnd").warning("live tick failed", exc_info=True)

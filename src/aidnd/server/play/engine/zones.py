@@ -1,8 +1,8 @@
-"""Зоны живой сцены: выбор зоны НУЖДАМИ — рекурсия society-скоринга внутрь здания
-(docs/locations.md, кейс 13: голодный к столу, уставший к лежанке, нелюдим в тень).
+"""Live scene zones: choose zone by NEEDS — recursion of society-scoring into building
+(docs/locations.md, case 13: hungry to table, tired to bed, antisocial to shade).
 
-Скоринг и выбор — чистые функции (тестируются без сервера и LLM). building_zones —
-резолв обстановки здания: мир → пул по имени → пул по типу (мост до материализации шага 2).
+Scoring and choosing — pure functions (tested without server and LLM). building_zones —
+resolve building layout: world → pool by name → pool by type (bridge before materialization step 2).
 
 Key functions
 --------------
@@ -16,14 +16,14 @@ from __future__ import annotations
 
 import random
 
-POST_BONUS = 3.0            # рабочий пост держит работника
-CROWD_PENALTY = 0.35        # толчея сверх вместимости отталкивает
-MOVE_HYSTERESIS = 0.22      # пересаживаемся, только если новая зона ЗАМЕТНО лучше
-SERVICE_KINDS = {"private", "storage", "cell"}   # служебные зоны — не для посетителей
+POST_BONUS = 3.0            # worker post holds worker
+CROWD_PENALTY = 0.35        # crowding beyond capacity repels
+MOVE_HYSTERESIS = 0.22      # relocate only if new zone is NOTICEABLY better
+SERVICE_KINDS = {"private", "storage", "cell"}   # service zones — not for visitors
 
 
 def building_zones(bid) -> tuple[dict, list]:
-    """Фактшит здания с зонами: мир → пул по имени → пул по типу. ({}, []) если зон нет."""
+    """Building layout with zones: world → pool by name → pool by type. ({}, []) if no zones."""
     from aidnd.server.play.engine.core import _pool, _store, _wid
     if not bid:
         return {}, []
@@ -42,8 +42,8 @@ def building_zones(bid) -> tuple[dict, list]:
 
 
 def zone_score(state, zone: dict, load: int = 0) -> float:
-    """Насколько зона закрывает нужды человека: afford её ПРЕДМЕТОВ × давление нужд
-    + приватность по нраву (нелюдим тянется в тень, общительный — в гул) − толчея."""
+    """How much zone covers person's needs: afford of its ITEMS × pressure of needs
+    + privacy to taste (antisocial drawn to shade, sociable to noise) − crowding."""
     s = 0.04
     needs = getattr(state, "needs", None) or {}
     for o in zone.get("objects") or []:
@@ -61,8 +61,8 @@ def zone_score(state, zone: dict, load: int = 0) -> float:
 
 def choose_zone(state, zones: list, load: dict, rng: random.Random,
                 role: str = "", works_here: bool = False, current: str | None = None):
-    """Зона для человека: рабочий пост держит; иначе лучшая по нуждам; гистерезис
-    против дёрганья (пересел — значит, было ЗАЧЕМ). Запертые зоны не предлагаем."""
+    """Zone for person: worker post holds; else best by needs; hysteresis
+    against jitter (moved — means had reason). Don't offer locked zones."""
     if works_here and role:
         rl = role.lower()
         zp = next((z for z in zones
@@ -87,7 +87,7 @@ def choose_zone(state, zones: list, load: dict, rng: random.Random,
 
 def assign_zones(states: dict, zones: list, seed: str,
                  roles: dict | None = None, workers: set | None = None) -> dict:
-    """Начальная расстановка компании по зонам — детерминированно по сиду, посты первыми."""
+    """Initial placement of party by zones — deterministic by seed, posts first."""
     rng = random.Random(seed)
     out: dict = {}
     load: dict = {}

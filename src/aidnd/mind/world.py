@@ -1,8 +1,8 @@
-"""Микромир для симуляции разума: места-граф + тела-агенты + предметы.
+"""Microworld for simulating a mind: place-graph + bodies-agents + items.
 
-Это ЧИСТЫЙ стенд для проверки эмерджентных сценариев — без citygraph/LLM. Тот же контур
-value/act позже подключится к настоящему городу (citygraph.City как подложка мест). Здесь
-ничего «про сценарий» не зашито: только тела с наблюдаемыми атрибутами и граф мест.
+This is a CLEAN test bench for checking emergent scenarios — without citygraph/LLM. The same
+value/act loop will later connect to the real city (citygraph.City as place substrate). Nothing
+"about scenario" is hardcoded here: only bodies with observable attributes and a place graph.
 
 Key functions
 -------------
@@ -26,28 +26,28 @@ ENEMY_FACTIONS = {"monster", "bandit", "outlaw"}
 @dataclass
 class Item:
     name: str
-    value: float = 0.2          # базовая ценность [0..1] (объективная; worth субъективирует её)
-    satisfies: str | None = None  # если удовлетворяет нужду: имя нужды (hunger/purpose/…)
-    kind: str = "good"          # good | coin (деньги — такой же предмет)
-    amount: float = 1.0         # для делимого (монеты — сумма в кошеле)
+    value: float = 0.2          # base value [0..1] (objective; worth subjectifies it)
+    satisfies: str | None = None  # if satisfies a need: name of the need (hunger/purpose/…)
+    kind: str = "good"          # good | coin (coins are the same item type)
+    amount: float = 1.0         # for divisible items (coins — sum in wallet)
 
 
 @dataclass
 class Body:
-    """Физическое тело агента в мире (NPC-разум ссылается на него по id)."""
+    """Physical body of an agent in the world (NPC-mind references it by id)."""
     id: str
     place: str
     hp: int = 10
     max_hp: int = 10
-    power: float = 1.0          # боевая сила
-    appearance: float = 0.2     # видимое БОГАТСТВО [0..1] (богатая одежда → мишень для хищника)
-    charisma: float = 0.3       # привлекательность/обаяние [0..1] (тянет ОБЩАТЬСЯ, не грабить)
-    attention: float = 0.7      # бдительность [0..1] (низкая → легко обокрасть)
+    power: float = 1.0          # combat power
+    appearance: float = 0.2     # visible WEALTH [0..1] (rich clothes → target for a predator)
+    charisma: float = 0.3       # attractiveness/charm [0..1] (draws toward TALK, not rob)
+    attention: float = 0.7      # vigilance [0..1] (low → easy to pickpocket)
     faction: str = "town"
-    carrying: list = field(default_factory=list)    # Item — на виду
-    loot: list = field(default_factory=list)        # Item — добыча (кошель и т.п.)
-    attacking: str | None = None                    # кого атакует прямо сейчас (для защиты союзника)
-    talking_to: str | None = None                   # с кем говорит прямо сейчас (пары; толпа у «звезды»)
+    carrying: list = field(default_factory=list)    # Item — in plain sight
+    loot: list = field(default_factory=list)        # Item — loot (wallet, etc.)
+    attacking: str | None = None                    # whom to attack right now (to defend an ally)
+    talking_to: str | None = None                   # whom to talk to right now (pairs; crowd around a "star")
     alive: bool = True
 
     def down(self) -> bool:
@@ -58,8 +58,8 @@ class Body:
 class World:
     places: dict = field(default_factory=dict)      # place -> [neighbors]
     bodies: dict = field(default_factory=dict)       # id -> Body
-    ground: dict = field(default_factory=dict)       # place -> [Item] (бесхозное)
-    risk: dict = field(default_factory=dict)         # place -> базовый риск узла [0..1]
+    ground: dict = field(default_factory=dict)       # place -> [Item] (unclaimed)
+    risk: dict = field(default_factory=dict)         # place -> base node risk [0..1]
 
     def link(self, a: str, b: str) -> None:
         self.places.setdefault(a, [])

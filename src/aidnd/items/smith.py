@@ -1,7 +1,7 @@
-"""Ковка предмета: контекст (тип/источник/полоса качества/подсказка-имя) → фактшит с surface+hidden.
-Табличный скелет качества/цены/DC + LLM-флейвор и ПРИРОДА скрытого («выглядит как X, на деле Y»).
+"""Item forging: context (type/source/quality_band/name_hint) → factsheet with surface+hidden.
+Quality/price/DC table skeleton + LLM-flavor and hidden NATURE (looks like X, actually Y).
 
-LLMSmith — единственный рантайм-путь (роль item_smith); StubSmith — ТОЛЬКО тесты.
+LLMSmith — only runtime path (item_smith role); StubSmith — tests only.
 
 Key functions
 -------------
@@ -24,9 +24,9 @@ from .model import normalize
 @dataclass
 class ItemCtx:
     kind: str = "misc"
-    source: str = ""                   # откуда: «касса трактира», «пояс головореза», «полка»
-    name_hint: str = ""                # исходная строка (contents/valuable)
-    quality_band: str = "plain"        # crude|plain|fine|exquisite — ориентир
+    source: str = ""                   # where: "tavern till", "brigand's belt", "shelf"
+    name_hint: str = ""                # source string (contents/valuable)
+    quality_band: str = "plain"        # crude|plain|fine|exquisite — guideline
     region: str = "фронтир тёмного фэнтези (D&D)"
 
 
@@ -74,7 +74,7 @@ class Smith:
 
 
 class StubSmith(Smith):
-    """ТОЛЬКО для тестов (рантайм никогда не строит) — предмет со скрытым происхождением под гейтом."""
+    """Tests only (runtime never builds) — item with hidden provenance gated."""
 
     def forge(self, ctx: ItemCtx) -> dict:
         n = ctx.name_hint or "невзрачная вещица"
@@ -89,7 +89,7 @@ class StubSmith(Smith):
 
 
 class LLMSmith(Smith):
-    """Реальный путь: роль item_smith, JSON-фактшит (без прозы)."""
+    """Live path: item_smith role, JSON factsheet (no prose)."""
 
     def __init__(self, manager):
         self.manager = manager

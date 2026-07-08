@@ -1,10 +1,10 @@
-"""Публичные дататипы графа города. Только данные, без логики — их и видит внешний мир.
+"""Public city graph data types. Data only, no logic — this is what the external world sees.
 
-Узлы графа: перекрёсток (узел уличной сети), точка (вставленная при разбиении дороги на ~равные
-отрезки), мост (узел на переправе), ворота (в стене), нутро (interior — здание или под-здание).
-Рёбра типизированы: road (дорога↔дорога), door (нутро↔точка дороги — это вход/выход),
-internal (нутро↔под-здание, напр. лестница в подвал).
-Дома — второй слой: каждый дом привязан к ближайшей точке дороги (двери) и к одному перекрёстку.
+Graph nodes: crossroad (street network node), point (inserted when dividing road into ~equal
+segments), bridge (node on a crossing), gate (in wall), interior (interior — building or sub-building).
+Edges are typed: road (road↔road), door (interior↔road point — this is entry/exit),
+internal (interior↔sub-building, e.g. stairs to basement).
+Houses — second layer: each house is anchored to the nearest road point (door) and to one crossroad.
 
 Key functions
 -------------
@@ -23,11 +23,11 @@ from dataclasses import dataclass, field
 
 
 class NodeKind(enum.StrEnum):
-    CROSSROAD = "crossroad"   # узел уличной сети (перекрёсток/вершина дороги)
-    POINT = "point"           # точка-разбиение вдоль дороги (равные отрезки)
-    BRIDGE = "bridge"         # узел на переправе через реку
-    GATE = "gate"             # ворота в крепостной стене
-    INTERIOR = "interior"     # нутро здания / под-здание (подвал и т.п.)
+    CROSSROAD = "crossroad"   # street network node (crossroad/road vertex)
+    POINT = "point"           # division point along road (equal segments)
+    BRIDGE = "bridge"         # node on a crossing over river
+    GATE = "gate"             # gate in fortification wall
+    INTERIOR = "interior"     # building interior / sub-building (basement, etc.)
 
 
 @dataclass(frozen=True)
@@ -43,20 +43,20 @@ class Edge:
     a: int
     b: int
     length: float
-    bridge: bool = False      # ребро-переправа через реку
-    kind: str = "road"        # road | door (вход/выход) | internal (между под-зданиями)
+    bridge: bool = False      # edge-crossing over river
+    kind: str = "road"        # road | door (entry/exit) | internal (between sub-buildings)
 
 
 @dataclass
 class House:
-    """Дом (второй слой). node — ближайшая точка дороги (дверь); crossroad — ровно один
-    перекрёёсток, к которому дом приписан (раздел домов по ключевым точкам)."""
+    """House (second layer). node — nearest road point (door); crossroad — exactly one
+    crossroad to which the house is assigned (division of houses by key points)."""
     id: str
     x: float
     y: float
     node: int
     crossroad: int
-    building: str | None = None   # id ключевого здания, если дом его вмещает
+    building: str | None = None   # id of key building if house contains it
 
 
 @dataclass
@@ -65,16 +65,16 @@ class KeyBuilding:
     name: str
     x: float
     y: float
-    node: int                 # дверь — ближайшая точка дороги
-    crossroad: int            # перекрёсток, к которому приписано (для раздела домов)
-    house: str                # id дома-носителя
+    node: int                 # door — nearest road point
+    crossroad: int            # crossroad to which it is assigned (for house division)
+    house: str                # id of containing house
     kind: str = ""
-    interior: int = -1        # узел-нутро в графе: вход/выход через door-ребро к node
+    interior: int = -1        # interior node in graph: entry/exit via door edge to node
 
 
 @dataclass(frozen=True)
 class Sign:
-    """Вывеска: ключевое здание, мимо которого проходишь по маршруту (линк на него)."""
+    """Sign: key building you pass by on the route (link to it)."""
     building: str
     name: str
     at_node: int
@@ -83,16 +83,16 @@ class Sign:
 
 @dataclass(frozen=True)
 class Move:
-    """Легальный переход из узла. kind: road | enter | exit | internal."""
+    """Legal transition from a node. kind: road | enter | exit | internal."""
     to: int
     kind: str
-    heading: str | None = None   # румб (С/СВ/…) для road-переходов
-    name: str | None = None      # имя здания/под-здания для enter/exit/internal
+    heading: str | None = None   # bearing (N/NE/…) for road transitions
+    name: str | None = None      # name of building/sub-building for enter/exit/internal
 
 
 @dataclass(frozen=True)
 class Step:
-    """Типизированный шаг маршрута."""
+    """Typed route step."""
     frm: int
     to: int
     kind: str                    # road | enter | exit | internal
@@ -102,7 +102,7 @@ class Step:
 
 @dataclass(frozen=True)
 class Nearby:
-    """Ближайшее ориентир-здание (его «сущность»)."""
+    """Nearest landmark building (its 'entity')."""
     id: str
     name: str
     dist: float
@@ -110,10 +110,10 @@ class Nearby:
 
 @dataclass
 class Route:
-    """Результат прохода А→Б. steps — типизированные шаги (вход/выход обозначены явно);
-    crossroads — ключевые точки в порядке прохода; signs — линки на ключевые здания по пути.
-    bearing — сторона света старт→финиш; near_target — ближайшее к цели ключевое здание (кроме неё);
-    landmarks — ориентиры у цели (river|wall|gate|bridge)."""
+    """Result of A→B passage. steps — typed steps (entry/exit explicitly marked);
+    crossroads — key points in passage order; signs — links to key buildings along the route.
+    bearing — compass direction start→finish; near_target — key building nearest to target (except it);
+    landmarks — landmarks at target (river|wall|gate|bridge)."""
     found: bool
     nodes: list[int] = field(default_factory=list)
     edges: list[tuple[int, int]] = field(default_factory=list)

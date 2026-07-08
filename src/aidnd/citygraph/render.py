@@ -1,13 +1,13 @@
-"""Порт citygen.js (Watabou-стиль город) 1:1 на Python — self-contained (только math/sys).
+"""Port of citygen.js (Watabou-style city) 1:1 to Python — self-contained (only math/sys).
 
-Was `server/web/citygen.py`; moved into the citygraph package (docs/structure.md шаг 5b) so the
+Was `server/web/citygen.py`; moved into the citygraph package (docs/structure.md step 5b) so the
 sole owner of "city visuals" is `citygraph/`, and `generate.py` imports it as a normal sibling
 instead of the old importlib-by-path hack.
 
-Генерация: mulberry32 → точки (спираль) → 2× Ллойд → Вороной (клип в рамку) →
-городские клетки → площадь → граф улиц → кварталы (shrink) → рекурсивное subdivide →
-дома → стены по граничным рёбрам + ворота + башни → рынок → лендмарки → река (безье) →
-номерные бейджи + легенда. Рендер — в SVG (canvas-эквивалент без зависимостей).
+Generation: mulberry32 → points (spiral) → 2× Lloyd → Voronoi (clip to box) →
+city cells → plaza → street graph → blocks (shrink) → recursive subdivide →
+houses → walls at boundary edges + gates + towers → market → landmarks → river (bezier) →
+numbered badges + legend. Render — to SVG (canvas-equivalent without dependencies).
 
 Key functions
 -------------
@@ -29,7 +29,7 @@ import math
 import sys
 
 
-# ----------------------------------------------------------------- RNG (mulberry32, 1:1 с JS)
+# ----------------------------------------------------------------- RNG (mulberry32, 1:1 from JS)
 def mulberry32(a: int):
     """JS: a=a+0x6D2B79F5|0; t=imul(a^a>>>15,1|a); t=(t+imul(t^t>>>7,61|t))^t; ((t^t>>>14)>>>0)/2^32."""
     state = a & 0xFFFFFFFF
@@ -44,7 +44,7 @@ def mulberry32(a: int):
         return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
     return rng
 
-# ----------------------------------------------------------------- геометрия
+# ----------------------------------------------------------------- geometry
 def area(p):
     s = 0.0
     n = len(p)
@@ -95,8 +95,8 @@ def pt_in_poly(q, poly):
     return inside
 
 def inscribe_rect(poly):
-    """Вписать в участок ОРИЕНТИРОВАННЫЙ прямоугольник (вдоль длинной кромки): часть домов —
-    прямые коробки вместо кривых полигонов. None, если по-человечески не влезает."""
+    """Inscribe an ORIENTED rectangle in the plot (along the longest edge): some houses —
+    straight boxes instead of curved polygons. None if it doesn't fit humanly."""
     c = centroid(poly)
     a, b = longest_edge(poly)
     d = norm([b[0] - a[0], b[1] - a[1]])
@@ -147,7 +147,7 @@ def subdivide(poly, minA, rng, out, d):
     else:
         out.append(poly)
 
-# ----------------------------------------------------------------- река (примитив, режущий клетки)
+# ----------------------------------------------------------------- river (primitive cutting cells)
 def _seg_int(a, b, c, d):
     r0, r1 = b[0] - a[0], b[1] - a[1]
     s0, s1 = d[0] - c[0], d[1] - c[1]
@@ -170,7 +170,7 @@ def dist_to_polyline(p, pts):
     return min(_dist_seg(p, pts[i], pts[i + 1]) for i in range(len(pts) - 1))
 
 def on_ward_boundary(plot, ward, eps=2.5):
-    """Есть ли у участка вершина на внешнем контуре квартала (примыкает к краю)."""
+    """Does the plot have a vertex on the outer contour of the block (touching the edge)."""
     n = len(ward)
     for v in plot:
         for i in range(n):
@@ -179,7 +179,7 @@ def on_ward_boundary(plot, ward, eps=2.5):
     return False
 
 def river_dir_at(cp, pts):
-    """Направление реки в ближайшем к cp сегменте (единичный вектор)."""
+    """River direction in the segment closest to cp (unit vector)."""
     bi, bd = 0, 1e18
     for i in range(len(pts) - 1):
         mx, my = (pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2
@@ -189,7 +189,7 @@ def river_dir_at(cp, pts):
     return norm([pts[bi + 1][0] - pts[bi][0], pts[bi + 1][1] - pts[bi][1]])
 
 def ray_to_border(p, d, W, H, pad=2):
-    """Точка выхода луча p+d*t на край канваса."""
+    """Exit point of ray p+d*t to canvas edge."""
     ts = []
     if d[0] > 1e-6:   ts.append((W - pad - p[0]) / d[0])
     elif d[0] < -1e-6: ts.append((pad - p[0]) / d[0])
@@ -200,9 +200,9 @@ def ray_to_border(p, d, W, H, pad=2):
     return [p[0] + d[0] * t, p[1] + d[1] * t]
 
 def make_river(seed, W, H, CX, CY):
-    """Извилистая осевая реки через город (отдельный rng-поток, чтобы не сдвигать раскладку)."""
+    """Winding river centerline through the city (separate rng stream to not shift layout)."""
     rng = mulberry32((seed * 2654435761) & 0xFFFFFFFF)
-    off = (rng() - 0.5) * H * 0.30            # смещение от центра — не резать рынок пополам
+    off = (rng() - 0.5) * H * 0.30            # offset from center — don't cut market in half
     slope = (rng() - 0.5) * 0.5
     a1, f1, p1 = H * (0.04 + rng() * 0.05), (1.0 + rng() * 1.4) * 6.2832 / W, rng() * 6.2832
     a2, f2, p2 = H * (0.02 + rng() * 0.03), (2.4 + rng() * 2.0) * 6.2832 / W, rng() * 6.2832
@@ -226,7 +226,7 @@ def cell_river_hits(pts, poly):
     return [h[1] for h in hits]
 
 def seg_cross_polyline(a, b, pts):
-    """Точка пересечения отрезка a-b с рекой (ломаной), или None."""
+    """Intersection point of segment a-b with river (polyline), or None."""
     for i in range(len(pts) - 1):
         x = _seg_int(a, b, pts[i], pts[i + 1])
         if x:
@@ -234,7 +234,7 @@ def seg_cross_polyline(a, b, pts):
     return None
 
 def order_loop(bnd):
-    """Упорядочить граничные рёбра в замкнутый контур (полигон вершин)."""
+    """Order boundary edges into a closed loop (polygon of vertices)."""
     if not bnd:
         return []
     by_start = {(round(e['a'][0]), round(e['a'][1])): e for e in bnd}
@@ -251,7 +251,7 @@ def order_loop(bnd):
     return poly
 
 def simplify_loop(poly, thr):
-    """Схлопнуть рёбра короче thr в одну вершину (нет наслоения вершин/башен)."""
+    """Collapse edges shorter than thr into one vertex (no vertex/tower overlaps)."""
     pts = [list(p) for p in poly]
     changed = True
     while changed and len(pts) > 4:
@@ -267,7 +267,7 @@ def simplify_loop(poly, thr):
     return pts
 
 
-# ----------------------------------------------------------------- Вороной (Bowyer–Watson + клип в рамку)
+# ----------------------------------------------------------------- Voronoi (Bowyer–Watson + clip to box)
 class _Pt:
     __slots__ = ('x', 'y')
     def __init__(self, x, y):
@@ -276,7 +276,7 @@ class _Pt:
 class _Tri:
     __slots__ = ('a', 'b', 'c', 'cx', 'cy', 'r2')
     def __init__(self, a, b, c):
-        if (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) < 0:   # привести к CCW
+        if (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) < 0:   # make CCW
             b, c = c, b
         self.a, self.b, self.c = a, b, c
         ax, ay, bx, by, cx, cy = a.x, a.y, b.x, b.y, c.x, c.y
@@ -293,7 +293,7 @@ class _Tri:
         return ((self.a is u and self.b is v) or (self.b is u and self.c is v) or (self.c is u and self.a is v))
 
 def _clip_rect(poly, x0, y0, x1, y1):
-    """Сазерленд–Ходжман: клип выпуклого polygon к прямоугольнику."""
+    """Sutherland–Hodgman: clip convex polygon to rectangle."""
     def clip(poly, inside, inter):
         out = []
         n = len(poly)
@@ -318,10 +318,10 @@ def _clip_rect(poly, x0, y0, x1, y1):
     return p
 
 def voronoi_cells(pts, box):
-    """Клетки Вороного для pts (в порядке pts), клипнутые в box=(x0,y0,x1,y1). None если пусто."""
+    """Voronoi cells for pts (in pts order), clipped to box=(x0,y0,x1,y1). None if empty."""
     x0, y0, x1, y1 = box
     P = [_Pt(p[0], p[1]) for p in pts]
-    # супер-рамка далеко за box
+    # super-frame far outside box
     span = max(x1 - x0, y1 - y0) * 1000 + 1000
     midx, midy = (x0 + x1) / 2, (y0 + y1) / 2
     f1, f2, f3, f4 = _Pt(midx - span, midy - span), _Pt(midx - span, midy + span), _Pt(midx + span, midy - span), _Pt(midx + span, midy + span)
@@ -342,7 +342,7 @@ def voronoi_cells(pts, box):
         tris = [t for t in tris if id(t) not in bset]
         for (u, v) in edges:
             tris.append(_Tri(u, v, p))
-    # карта вершина -> инцидентные треугольники
+    # map vertex -> incident triangles
     inc = {id(p): [] for p in P}
     for t in tris:
         for v in (t.a, t.b, t.c):
@@ -356,15 +356,15 @@ def voronoi_cells(pts, box):
             cells.append(None)
             continue
         verts = [(t.cx, t.cy) for t in ts]
-        # сортировка по углу вокруг p (CCW)
+        # sort by angle around p (CCW)
         verts.sort(key=lambda c: math.atan2(c[1] - p.y, c[0] - p.x))
         poly = _clip_rect([[v[0], v[1]] for v in verts], x0, y0, x1, y1)
         cells.append(poly if len(poly) >= 3 else None)
     return cells
 
-# ----------------------------------------------------------------- палитры/хелперы стиля
+# ----------------------------------------------------------------- palettes/style helpers
 ROOFS = ['#a8542f', '#b56a3c', '#8a5630', '#9c6b44', '#7a4a30', '#86603e', '#94472a', '#a36240']
-# базовые цвета крыш по районам (мегакварталам) — разные приглушённые тона
+# base roof colors by district (megablock) — various muted tones
 DISTRICT_ROOFS = ['#a8542f', '#8a5630', '#b08a3e', '#6f6c74', '#5f7080', '#5f7d52', '#9c6b44', '#8a6a72']
 DISTRICT_NAMES = ['Старый город', 'Купеческий', 'Ремесленный', 'Гончарный ряд', 'Кузнечный',
                   'Рыбацкий', 'Храмовый', 'Верхний город', 'Нижний город', 'Садовый', 'Дозорный', 'Портовый']
@@ -385,14 +385,14 @@ def shade(hexc, f):
     c = lambda v: max(0, min(255, int(v * f)))
     return f"rgb({c(n >> 16)},{c((n >> 8) & 255)},{c(n & 255)})"
 
-# ----------------------------------------------------------------- генерация города
+# ----------------------------------------------------------------- city generation
 def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Городок'):
     buildings = buildings or []
     key_map = {h['id']: h for h in (key_houses or [])}
     CX, CY = W / 2, H / 2
     rng = mulberry32(seed)
 
-    # точки + Ллойд + Вороной
+    # points + Lloyd + Voronoi
     N = round(110 * min(1.6, (W * H) / (980 * 700))) + 30
     pts = []
     for _ in range(N):
@@ -425,7 +425,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
         if dist(c['site'], [CX, CY]) < dist(square['site'], [CX, CY]):
             square = c
 
-    # РАТУША — крупный квартал, граничащий с площадью; ЗАМОК — компактный квартал на краю города
+    # TOWNHALL — large block adjoining plaza; CASTLE — compact block at city edge
     sqset = set((round(v[0]), round(v[1])) for v in square['poly'])
     th_cands = [c for c in city if c is not square
                 and any((round(v[0]), round(v[1])) in sqset for v in c['poly'])]
@@ -435,21 +435,21 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
                 and 80 < centroid(c['poly'])[0] < W - 80 and 80 < centroid(c['poly'])[1] < H - 80
                 and dist(c['site'], [CX, CY]) < min(W, H) * 0.34]
     if ca_cands:
-        max(ca_cands, key=lambda c: dist(c['site'], [CX, CY]))['special'] = 'castle'   # на краю города, в кадре
+        max(ca_cands, key=lambda c: dist(c['site'], [CX, CY]))['special'] = 'castle'   # at the city edge, within frame
 
-    # РЕКА: извилистая осевая режет городские клетки на берега (канал шириной river_w)
+    # RIVER: winding centerline cuts city cells into banks (channel width river_w)
     river_pts, river_w = make_river(seed, W, H, CX, CY)
     hw = river_w / 2
-    wall_cells = list(city)        # стена — по контуру ДО разреза рекой (иначе внутри города обрубки)
+    wall_cells = list(city)        # wall — along contour BEFORE river cut (else stumps inside city)
     new_city = []
     for c in city:
-        if c is square or c.get('special'):               # рынок/ратушу/замок не режем
+        if c is square or c.get('special'):               # don't cut market/townhall/castle
             new_city.append(c); continue
         hits = cell_river_hits(river_pts, c['poly'])
         if len(hits) >= 2:
             E, Q = hits[0], hits[-1]
             d = norm([Q[0] - E[0], Q[1] - E[1]])
-            nx, ny = -d[1], d[0]                            # нормаль к руслу
+            nx, ny = -d[1], d[0]                            # normal to riverbed
             left = clip_half(c['poly'], [E[0] + nx * hw, E[1] + ny * hw], nx, ny, True)
             right = clip_half(c['poly'], [E[0] - nx * hw, E[1] - ny * hw], nx, ny, False)
             if len(left) >= 3 and len(right) >= 3 and area(left) > 60 and area(right) > 60:
@@ -460,7 +460,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
         new_city.append(c)
     city = new_city
 
-    # граф улиц
+    # street graph
     nmap, nodes, adj = {}, [], []
     def nkey(p):
         return f"{round(p[0])},{round(p[1])}"
@@ -490,7 +490,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
             sd, start = d, i
     streets = {'nodes': nodes, 'adj': adj, 'start': start}
 
-    # лендмарк-кварталы по сторонам света
+    # landmark quarters by cardinal directions
     used = {id(square)}
     Rl = min(W, H) * 0.30
     for b in buildings:
@@ -512,7 +512,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
         roof = next((LM_ROOF[a] for a in (b.get('affordances') or []) if a in LM_ROOF), None)
         best['roof'] = roof or LM_ROOF.get(kind_from_aff(b.get('affordances')), '#9a7b30')
 
-    # стены: граничные рёбра города ДО разреза рекой (контур, без внутренних обрубков)
+    # walls: city boundary edges BEFORE river cut (contour, no internal stumps)
     seen = {}
     def ekey(a, b):
         A, B = [round(a[0]), round(a[1])], [round(b[0]), round(b[1])]
@@ -527,9 +527,9 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
             else:
                 seen[k] = {'a': a, 'b': b, 'n': 1}
     bnd = [e for e in seen.values() if e['n'] == 1]
-    wall_poly = simplify_loop(order_loop(bnd), 12)        # контур стены: рёбра короче 12 схлопнуты в одно
+    wall_poly = simplify_loop(order_loop(bnd), 12)        # wall contour: edges shorter than 12 collapse into one
 
-    # ВОРОТА: несколько по периметру (разнесены по направлениям, не у реки) → из каждого дорога наружу
+    # GATES: several around perimeter (spread by direction, not at river) → each has road out
     rng_r = mulberry32((seed ^ 0x27D4EB2F) & 0xFFFFFFFF)
     nwp = len(wall_poly)
     gcand = []
@@ -537,12 +537,12 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
         a, b = wall_poly[i], wall_poly[(i + 1) % nwp]
         gm = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
         if dist_to_polyline(gm, river_pts) < river_w * 1.1 or seg_cross_polyline(a, b, river_pts):
-            continue                                      # не у воды
+            continue                                      # not at water
         gcand.append((i, gm, math.atan2(gm[1] - CY, gm[0] - CX)))
     gate_edges, roads_out = [], []
     NG = 5
     for k in range(NG):
-        target = math.pi / 2 + k * 2 * math.pi / NG        # юг + равномерно по кругу
+        target = math.pi / 2 + k * 2 * math.pi / NG        # south + evenly around the circle
         best, bd = None, 9.9
         for (i, gm, ang) in gcand:
             if i in gate_edges:
@@ -556,11 +556,11 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
             od = norm([gm[0] - CX, gm[1] - CY])
             endp = ray_to_border(gm, od, W, H)
             perp = [-od[1], od[0]]
-            off = (rng_r() - 0.5) * dist(gm, endp) * 0.16   # лёгкий извив
+            off = (rng_r() - 0.5) * dist(gm, endp) * 0.16   # slight curve
             midp = [(gm[0] + endp[0]) / 2 + perp[0] * off, (gm[1] + endp[1]) / 2 + perp[1] * off]
             roads_out.append([gm, midp, endp])
 
-    # МОСТЫ: внутренние рёбра-улицы (n==2), пересекающие реку → мост идёт ИЗ дороги В дорогу
+    # BRIDGES: inner street-edges (n==2) crossing river → bridge goes FROM road TO road
     Rc = min(W, H) * 0.40
     crossings = []
     for ed in seen.values():
@@ -577,11 +577,11 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
         if len(bridges) >= 3:
             break
 
-    # дома по кварталам
+    # houses by blocks
     wards, marks, hits = [], [], []
-    courtyards = []                                        # центры дворов → узлы движения (спицы к улице)
+    courtyards = []                                        # courtyard centers → movement nodes (spokes to street)
     near_river_b = lambda p: dist_to_polyline(p, river_pts) < river_w * 1.15
-    # центры районов (мегакварталов) для цветовой гаммы крыш (отдельный rng — не сдвигает раскладку)
+    # district centers (megablocks) for roof color palette (separate rng — doesn't shift layout)
     rng_d = mulberry32((seed ^ 0x1B873593) & 0xFFFFFFFF)
     dseeds = []
     for k in range(7):
@@ -610,12 +610,12 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
         if sp == 'castle':
             cc = centroid(c['poly'])
             cw = shrink(c['poly'], 0.93)
-            for v in cw:                                  # снап опорных точек замка к близким точкам городской стены
+            for v in cw:                                  # snap castle anchor points to nearby city wall points
                 for wv in wall_poly:
                     if dist(v, wv) < 14:
                         v[0], v[1] = wv[0], wv[1]
                         break
-            cw = simplify_loop(cw, 12)                    # слить короткие рёбра по трешхолду (как у городской стены)
+            cw = simplify_loop(cw, 12)                    # merge short edges by threshold (like city wall)
             wards.append({'special': 'castle', 'wall': cw,
                           'keep': simplify_loop(shrink(c['poly'], 0.40), 8), 'cc': cc})
             marks.append({'c': cc, 'name': 'Замок', 'roof': '#5f6470',
@@ -625,7 +625,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
             continue
         ward = shrink(c['poly'], 0.86)
         lm = c['lm']
-        dcolor = district_color(c['site'])                  # цвет района
+        dcolor = district_color(c['site'])                  # district color
         plots = []
         subdivide(ward, 120 + rng() * 90, rng, plots, 0)
         key_plot = None
@@ -645,23 +645,23 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
             if area(inset) < 18:
                 continue
             if near_river_b(centroid(inset)):
-                continue                                   # прибрежную полосу НЕ застраиваем (набережной-заплатки больше нет)
+                continue                                   # don't build riverbank strip (no quay patches anymore)
             is_lm = bool(lm) and pl is key_plot
             if not is_lm and not on_ward_boundary(pl, ward):
-                r_c = rng()                                # внутренний двор: сад / пусто / застроить
+                r_c = rng()                                # inner courtyard: garden / empty / build
                 if r_c < 0.35:
                     houses.append({'garden': True, 'poly': inset, 'court': True})
                     if area(inset) >= 40:
-                        courtyards.append(centroid(inset))     # точка движения — во двор можно зайти
+                        courtyards.append(centroid(inset))     # movement point — the courtyard is enterable
                     continue
                 if r_c < 0.60:
-                    continue                               # двор остаётся пустым
-                courtyards.append(centroid(inset))         # застроенный двор тоже достижим
+                    continue                               # courtyard stays empty
+                courtyards.append(centroid(inset))         # built-up courtyard is also reachable
             if not is_lm and rng() < 0.07:
                 houses.append({'garden': True, 'poly': inset})
                 continue
             boxy = False
-            if not is_lm and rng() < 0.4:                  # часть домов — прямые коробки
+            if not is_lm and rng() < 0.4:                  # some houses — straight boxes
                 rect = inscribe_rect(inset)
                 if rect is not None:
                     inset, boxy = rect, True
@@ -677,7 +677,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
                        'roof': LM_ROOF.get(promo.get('kind'), '#9a7b30'), 'id': hid, 'go': None}
             else:
                 key = None
-            roof = key['roof'] if key else shade(dcolor, 0.88 + rng() * 0.24)   # оттенок цвета района
+            roof = key['roof'] if key else shade(dcolor, 0.88 + rng() * 0.24)   # district color shade
             a, b = longest_edge(inset)
             d = norm([b[0] - a[0], b[1] - a[1]])
             Lr = math.sqrt(area(inset)) * 0.42
@@ -692,10 +692,10 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
                              'kind': key['kind'], 'go': key['go'], 'landmark': bool(key['go']), 'key': True})
             else:
                 hits.append({'x': cc[0], 'y': cc[1], 'r': r, 'id': hid, 'kind': 'home', 'house': True})
-        wards.append({'ward': ward, 'fill': '#cdb585',     # единый цвет двора — без цветной подложки под landmark
+        wards.append({'ward': ward, 'fill': '#cdb585',     # uniform courtyard color — no colored backing under a landmark
                       'houses': houses, 'lm': lm, 'roof': c['roof']})
 
-    # дворы входят в граф движения: узел в центре двора + спица к ближайшему уличному узлу
+    # courtyards enter movement graph: node at courtyard center + spoke to nearest street node
     for cyc in courtyards:
         best, bd = None, 1e18
         for i, nd in enumerate(nodes):
@@ -709,7 +709,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
             if j not in adj[best]:
                 adj[best].append(j)
 
-    # мегакварталы = цветовые районы. Группируем кварталы по ближайшему dseed, одна надпись на район.
+    # megablocks = color districts. Group blocks by nearest dseed, one label per district.
     groups = {}
     for c in city:
         if c is square or c.get('special'):
@@ -726,7 +726,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
     dist_labels = []
     for _k, gc in sorted(groups.items(), key=lambda kv: -sum(area(c['poly']) for c in kv[1])):
         tot = sum(area(c['poly']) for c in gc)
-        if tot < 4500:                                    # мелкий район — без надписи
+        if tot < 4500:                                    # small district — no label
             continue
         sx = sy = sa = 0.0
         minx = miny = 1e9; maxx = maxy = -1e9
@@ -740,7 +740,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
         if len(dist_labels) >= 6:
             break
 
-    # бейджи/легенда (сверху-вниз, слева-направо)
+    # badges/legend (top-bottom, left-right)
     marks.sort(key=lambda m: (m['c'][1], m['c'][0]))
     legend = []
     for i, m in enumerate(marks):
@@ -748,7 +748,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
                        'id': m['id'], 'x': m['c'][0], 'y': m['c'][1], 'status': m.get('status', 'open')})
 
     Rcity = min(W, H) * 0.40
-    # поля с зерном и хутора ЗА городом (визуальный слой; в граф движения не входят)
+    # grain fields and farmsteads OUTSIDE city (visual layer; not in movement graph)
     fields = []
     rng_f = mulberry32((seed ^ 0x51ED270B) & 0xFFFFFFFF)
     for c in cells:
@@ -756,9 +756,9 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
             continue
         d0 = dist(c['site'], [CX, CY])
         if not (Rcity * 1.02 < d0 < Rcity * 1.85):
-            continue                                       # пояс предместий вокруг стен
+            continue                                       # suburban ring around walls
         if dist_to_polyline(c['site'], river_pts) < river_w * 1.8:
-            continue                                       # поле поперёк реки — нелепо
+            continue                                       # field across river — awkward
         if rng_f() >= 0.24 or len(fields) >= 9:
             continue
         fp = shrink(c['poly'], 0.78)
@@ -769,7 +769,7 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
         nv = [-dv[1], dv[0]]
         cc0 = centroid(fp)
         rr = math.sqrt(area(fp))
-        hx = cc0[0] + nv[0] * rr * 0.45 + (rng_f() - .5) * 8   # хутор у кромки поля
+        hx = cc0[0] + nv[0] * rr * 0.45 + (rng_f() - .5) * 8   # homestead at the field's edge
         hy = cc0[1] + nv[1] * rr * 0.45 + (rng_f() - .5) * 8
         hw, hh = 5.5 + rng_f() * 2.5, 3.6 + rng_f() * 1.6
         house = [[hx + dv[0] * su * hw + nv[0] * sv * hh, hy + dv[1] * su * hw + nv[1] * sv * hh]
@@ -787,18 +787,18 @@ def build_city(seed=1, W=980, H=700, buildings=None, key_houses=None, title='Г�
 
 
 def city_graph(m):
-    """НАСТОЯЩИЙ граф города поверх визуального SVG (любой пригодный дататип):
-    - intersections: перекрёстки (узлы улиц) с координатами;
-    - edges: рёбра улиц между перекрёстками;
-    - buildings: ключевые здания (game-id) с привязкой к БЛИЖАЙШЕМУ перекрёстку (door = вход/выход).
-    На этом графе строятся спатиаль и реальная система передвижения (улица→улица, вход в здание с двери)."""
+    """REAL city graph over visual SVG (any suitable datatype):
+    - intersections: intersections (street nodes) with coordinates;
+    - edges: street edges between intersections;
+    - buildings: key buildings (game-id) tied to NEAREST intersection (door = entrance/exit).
+    Spatial and actual movement system built on this graph (street→street, entry to building from door)."""
     nodes = m['streets']['nodes']
     adj = m['streets']['adj']
     inters = [{'i': i, 'x': nodes[i][0], 'y': nodes[i][1]} for i in range(len(nodes))]
     edges = sorted({(min(i, j), max(i, j)) for i, nbrs in enumerate(adj) for j in nbrs})
     buildings = []
     for h in m['hits']:
-        if not h.get('landmark'):                         # только реальные здания (game-id), не дома/перекрёстки
+        if not h.get('landmark'):                         # only real buildings (game-id), not houses/intersections
             continue
         bx, by = h['x'], h['y']
         door = (min(range(len(nodes)), key=lambda i: (nodes[i][0] - bx) ** 2 + (nodes[i][1] - by) ** 2)
@@ -809,7 +809,7 @@ def city_graph(m):
             'buildings': buildings, 'start': m['streets'].get('start', 0)}
 
 
-# ----------------------------------------------------------------- рендер в SVG
+# ----------------------------------------------------------------- render to SVG
 def _poly_d(p, close=True):
     d = "M" + f"{p[0][0]:.2f} {p[0][1]:.2f}"
     for q in p[1:]:
@@ -819,22 +819,22 @@ def _poly_d(p, close=True):
 def render_svg(m, chrome=True, interactive=False, marks=True):
     W, H, CY = m['W'], m['H'], m['CY']
     seed = m['seed']
-    rngf = mulberry32(seed ^ 0x9E3779B9)   # отдельный поток для лесных кочек (детерминирован)
+    rngf = mulberry32(seed ^ 0x9E3779B9)   # separate stream for forest hillocks (deterministic)
     e = []
     e.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" font-family="Georgia, serif">')
     e.append('<defs><radialGradient id="vg" cx="50%" cy="47.5%" r="62%">'
              '<stop offset="55%" stop-color="rgba(0,0,0,0)"/><stop offset="100%" stop-color="rgba(40,28,12,.34)"/>'
              '</radialGradient></defs>')
-    # фон
+    # background
     e.append(f'<rect width="{W}" height="{H}" fill="#a9b878"/>')
-    # лес (кочки на не-городских клетках; поля не зарастают)
+    # forest (hillocks on non-city cells; fields don't overgrow)
     e.append('<g fill="#5f7d42">')
     for c in m['cells']:
         if not c['city'] and not c.get('field') and rngf() < 0.55:
             r = 3 + rngf() * 3
             e.append(f'<circle cx="{c["site"][0]:.1f}" cy="{c["site"][1]:.1f}" r="{r:.1f}"/>')
     e.append('</g>')
-    # поля с зерном и хутора за городом
+    # grain fields and farmsteads outside city
     for fi, f in enumerate(m.get('fields', [])):
         fd = _poly_d(f['poly'])
         e.append(f'<path d="{fd}" fill="#d3b862" stroke="rgba(90,66,34,.45)" stroke-width="0.8"/>')
@@ -844,50 +844,50 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
         L = math.sqrt(area(f['poly'])) * 0.95
         e.append(f'<g clip-path="url(#fld{fi})" stroke="rgba(122,94,38,.5)" stroke-width="0.7">')
         g0 = -L
-        while g0 < L:                                       # рядки вдоль длинной кромки
+        while g0 < L:                                       # rows along long edge
             e.append(f'<line x1="{cc0[0] + nv[0]*g0 - dv[0]*L:.1f}" y1="{cc0[1] + nv[1]*g0 - dv[1]*L:.1f}" '
                      f'x2="{cc0[0] + nv[0]*g0 + dv[0]*L:.1f}" y2="{cc0[1] + nv[1]*g0 + dv[1]*L:.1f}"/>')
             g0 += 3.4
         e.append('</g>')
         th = mulberry32((int(cc0[0] * 11 + cc0[1] * 17)) & 0xFFFFFFFF)
-        for _ in range(1 + int(th() * 2)):                  # стога
+        for _ in range(1 + int(th() * 2)):                  # haystacks
             e.append(f'<circle cx="{cc0[0] + (th() - .5) * L * .9:.1f}" cy="{cc0[1] + (th() - .5) * L * .9:.1f}" '
                      f'r="{1.8 + th() * 1.4:.1f}" fill="#c9a34b" stroke="#8a6a2c" stroke-width="0.6"/>')
         e.append(f'<path d="{_poly_d(f["house"])}" fill="#8a6a3c" stroke="#2c2113" stroke-width="1"/>')
         e.append(f'<line x1="{f["hridge"][0][0]:.1f}" y1="{f["hridge"][0][1]:.1f}" '
                  f'x2="{f["hridge"][1][0]:.1f}" y2="{f["hridge"][1][1]:.1f}" stroke="rgba(0,0,0,.25)" stroke-width="0.8"/>')
-    # дороги снаружи в город (casing + центр) — рисуем до земли города, чтобы внутренний конец ушёл под кварталы
+    # roads outside to city (casing + center) — paint until city ground so inner end goes under blocks
     for road in m.get('roads_out', []):
         dd = f"M{road[0][0]:.1f} {road[0][1]:.1f} L{road[1][0]:.1f} {road[1][1]:.1f} L{road[2][0]:.1f} {road[2][1]:.1f}"
         e.append(f'<path d="{dd}" fill="none" stroke="#8c7038" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>')
         e.append(f'<path d="{dd}" fill="none" stroke="#cdb585" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>')
-    # земля города
+    # city ground
     e.append('<g fill="#d8c39a">')
     for c in m['city']:
         e.append(f'<path d="{_poly_d(c["poly"])}"/>')
     e.append('</g>')
-    # кварталы и дома
+    # blocks and houses
     for w in m['wards']:
         if w.get('special') == 'townhall':
             d, cc = _poly_d(w['building']), w['cc']
             e.append(f'<path d="{d}" fill="{w["roof"]}" stroke="#2c2113" stroke-width="1.8"/>')
-            e.append(f'<circle cx="{cc[0]:.1f}" cy="{cc[1]:.1f}" r="3.2" fill="#2c2113"/>')   # шпиль ратуши
+            e.append(f'<circle cx="{cc[0]:.1f}" cy="{cc[1]:.1f}" r="3.2" fill="#2c2113"/>')   # townhall spire
             continue
         if w.get('special') == 'castle':
             wp, kp = w['wall'], w['keep']
-            e.append(f'<path d="{_poly_d(wp)}" fill="#cdb585"/>')                                      # двор
-            e.append(f'<path d="{_poly_d(wp)}" fill="none" stroke="#3a2c14" stroke-width="4.5" stroke-linejoin="round"/>')  # стена замка
+            e.append(f'<path d="{_poly_d(wp)}" fill="#cdb585"/>')                                      # courtyard
+            e.append(f'<path d="{_poly_d(wp)}" fill="none" stroke="#3a2c14" stroke-width="4.5" stroke-linejoin="round"/>')  # castle wall
             e.append('<g fill="#5a4a2c" stroke="#352a16" stroke-width="1">')
             for v in wp:
-                e.append(f'<rect x="{v[0]-4:.1f}" y="{v[1]-4:.1f}" width="8" height="8"/>')             # угловые башни
+                e.append(f'<rect x="{v[0]-4:.1f}" y="{v[1]-4:.1f}" width="8" height="8"/>')             # corner towers
             e.append('</g>')
-            e.append(f'<path d="{_poly_d(kp)}" fill="#5f6470" stroke="#2c2113" stroke-width="1.8"/>')   # донжон
+            e.append(f'<path d="{_poly_d(kp)}" fill="#5f6470" stroke="#2c2113" stroke-width="1.8"/>')   # keep
             continue
         e.append(f'<path d="{_poly_d(w["ward"])}" fill="{w["fill"]}"/>')
         for h in w['houses']:
             if h['garden']:
                 e.append(f'<path d="{_poly_d(h["poly"])}" fill="#9fae6e" stroke="rgba(60,80,40,.4)" stroke-width="0.7"/>')
-                if h.get('court'):                          # сад во дворе: пара крон (детерминированно от центра)
+                if h.get('court'):                          # garden in courtyard: pair of crowns (deterministic from center)
                     gc = centroid(h['poly'])
                     tr = mulberry32((int(gc[0] * 7 + gc[1] * 13)) & 0xFFFFFFFF)
                     rr = math.sqrt(area(h['poly']))
@@ -897,17 +897,17 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
                                  f'fill="#5f7d42" opacity=".85"/>')
                 continue
             d = _poly_d(h['poly'])
-            # крыша (в интерактиве — кликабельный полигон дома с id); статус меняет цвет
+            # roof (in interactive — clickable house polygon with id); status changes color
             ha = f' class="h" data-id="{h.get("id","")}"' if interactive else ''
             st = (h.get('key') or {}).get('status', 'open')
             rf = '#8d8d8d' if st == 'closed' else ('#4a4036' if st == 'ruined' else h['roof'])
             e.append(f'<path d="{d}" fill="{rf}"{ha}/>')
-            # конёк
+            # ridge
             rg = h['ridge']
             e.append(f'<line x1="{rg[0][0]:.1f}" y1="{rg[0][1]:.1f}" x2="{rg[1][0]:.1f}" y2="{rg[1][1]:.1f}" stroke="rgba(0,0,0,.22)" stroke-width="1"/>')
             key = h['key']
             e.append(f'<path d="{d}" fill="none" stroke="{"#3a2c14" if key else "rgba(40,28,12,.5)"}" stroke-width="{1.3 if key else 0.8}"/>')
-    # рыночная площадь
+    # market plaza
     sq = shrink(m['square']['poly'], 0.9)
     e.append(f'<path d="{_poly_d(sq)}" fill="#c9b486"/>')
     sc, SR = centroid(sq), math.sqrt(area(sq))
@@ -919,28 +919,28 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
         g += 9
     e.append('</g>')
     e.append(f'<circle cx="{sc[0]:.1f}" cy="{sc[1]:.1f}" r="5" fill="#7a6238"/><circle cx="{sc[0]:.1f}" cy="{sc[1]:.1f}" r="2.4" fill="#3a2c18"/>')
-    # река: вода в каналах между берегами (над землёй, под стенами). Набережной-заплатки нет —
-    # прибрежная полоса просто не застраивается. КЛИП по холсту: за краем карты реки нет.
+    # river: water in channels between banks (above ground, under walls). No quay patches —
+    # riverbank strip simply not built. CLIP to canvas: no river outside map edge.
     rp, rw = m['river_pts'], m['river_w']
     rd = f"M{rp[0][0]:.1f} {rp[0][1]:.1f} " + " ".join(f"L{q[0]:.1f} {q[1]:.1f}" for q in rp[1:])
     e.append(f'<clipPath id="mapclip"><rect x="0" y="0" width="{W}" height="{H}"/></clipPath>')
     e.append('<g clip-path="url(#mapclip)">')
-    e.append(f'<path d="{rd}" fill="none" stroke="#cdb98f" stroke-width="{rw:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')   # песчаный берег у воды
+    e.append(f'<path d="{rd}" fill="none" stroke="#cdb98f" stroke-width="{rw:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')   # sandy bank at water
     e.append(f'<path d="{rd}" fill="none" stroke="#37607c" stroke-width="{rw*0.66+2:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')
     e.append(f'<path d="{rd}" fill="none" stroke="#4a7ba0" stroke-width="{rw*0.6:.1f}" stroke-linejoin="round" stroke-linecap="round"/>')
     e.append(f'<path d="{rd}" fill="none" stroke="rgba(150,200,225,.4)" stroke-width="2" stroke-linejoin="round"/>')
     e.append('</g>')
     near_river = lambda p: dist_to_polyline(p, rp) < rw * 0.95
-    # стены по контуру wall_poly — РАЗРЫВ точно в точке пересечения ребра с рекой (проём-водяные-ворота)
+    # walls around wall_poly contour — BREAK exactly at edge-river intersection (water-gate opening)
     wp, nw = m['wall_poly'], len(m['wall_poly'])
-    gate_set = set(m.get('gate_edges', []))                  # рёбра-ворота (под дороги)
-    seg_gap = rw * 0.95                                      # полуразрыв стены под реку
-    gate_gap = 7.0                                           # полуразрыв-ворота под дорогу (как у реки, но в середине ребра)
+    gate_set = set(m.get('gate_edges', []))                  # gate-edges (under roads)
+    seg_gap = rw * 0.95                                      # half-break wall for river
+    gate_gap = 7.0                                           # half-break gate for road (like river, but at edge midpoint)
     wsegs, gate_posts = [], []
     for i in range(nw):
         a, b = wp[i], wp[(i + 1) % nw]
         d = norm([b[0] - a[0], b[1] - a[1]])
-        if i in gate_set:                                    # ВОРОТА: разрыв в середине ребра (где выходит дорога)
+        if i in gate_set:                                    # GATES: break at edge midpoint (where road exits)
             gm = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
             A2 = [gm[0] - d[0] * gate_gap, gm[1] - d[1] * gate_gap]
             B2 = [gm[0] + d[0] * gate_gap, gm[1] + d[1] * gate_gap]
@@ -949,7 +949,7 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
             if dist(B2, b) > 2:
                 wsegs.append((B2, b)); gate_posts.append(B2)
             continue
-        X = seg_cross_polyline(a, b, rp)                     # РЕКА: разрыв в точке пересечения
+        X = seg_cross_polyline(a, b, rp)                     # RIVER: break at intersection point
         if X:
             A2 = [X[0] - d[0] * seg_gap, X[1] - d[1] * seg_gap]
             B2 = [X[0] + d[0] * seg_gap, X[1] + d[1] * seg_gap]
@@ -966,20 +966,20 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
             e.append(f'<line x1="{a[0]:.1f}" y1="{a[1]:.1f}" x2="{b[0]:.1f}" y2="{b[1]:.1f}"/>')
         e.append('</g>')
     e.append('</g>')
-    # башни на вершинах (не у воды) + башенки-стойки ворот
+    # towers at vertices (not at water) + gate posts
     e.append('<g fill="#5a4a2c" stroke="#352a16" stroke-width="1">')
     for i in range(nw):
         v = wp[i]
         if not near_river(v):
             e.append(f'<rect x="{v[0]-3.5:.1f}" y="{v[1]-3.5:.1f}" width="7" height="7"/>')
     for gp in gate_posts:
-        e.append(f'<rect x="{gp[0]-3:.1f}" y="{gp[1]-3:.1f}" width="6" height="6"/>')   # стойка ворот
+        e.append(f'<rect x="{gp[0]-3:.1f}" y="{gp[1]-3:.1f}" width="6" height="6"/>')   # gate post
     e.append('</g>')
-    # мосты через реку в черте города
+    # bridges across river within city
     for br in m['bridges']:
         a, b, cp = br['a'], br['b'], br['cross']
         d = norm([b[0] - a[0], b[1] - a[1]]); nx, ny = -d[1], d[0]
-        # мост тянется вдоль ребра-улицы ровно до кромок берегов (где начинаются дороги), не в дома
+        # bridge spans along street-edge exactly to bank edges (where roads begin), not into houses
         rdir = river_dir_at(cp, rp)
         sin = max(0.4, abs(d[0] * rdir[1] - d[1] * rdir[0]))
         L = min(rw * 1.7, (rw * 0.5 + 1.5) / sin)
@@ -987,20 +987,20 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
         P1, P2 = [cp[0] + d[0] * L, cp[1] + d[1] * L], [cp[0] - d[0] * L, cp[1] - d[1] * L]
         c0 = [P1[0] + nx * hwd, P1[1] + ny * hwd]; c1 = [P2[0] + nx * hwd, P2[1] + ny * hwd]
         c2 = [P2[0] - nx * hwd, P2[1] - ny * hwd]; c3 = [P1[0] - nx * hwd, P1[1] - ny * hwd]
-        e.append(f'<path d="{_poly_d([c0, c1, c2, c3])}" fill="#caa46a"/>')                       # продолжение дороги
-        e.append(f'<line x1="{c0[0]:.1f}" y1="{c0[1]:.1f}" x2="{c1[0]:.1f}" y2="{c1[1]:.1f}" stroke="#2c2113" stroke-width="1.4"/>')  # ребро вдоль реки
+        e.append(f'<path d="{_poly_d([c0, c1, c2, c3])}" fill="#caa46a"/>')                       # road continuation
+        e.append(f'<line x1="{c0[0]:.1f}" y1="{c0[1]:.1f}" x2="{c1[0]:.1f}" y2="{c1[1]:.1f}" stroke="#2c2113" stroke-width="1.4"/>')  # edge along river
         e.append(f'<line x1="{c2[0]:.1f}" y1="{c2[1]:.1f}" x2="{c3[0]:.1f}" y2="{c3[1]:.1f}" stroke="#2c2113" stroke-width="1.4"/>')
-    # названия мегакварталов — путь = доступная ширина района, кегль подобран чтобы строка влезла (центр → без обрезки)
+    # megablock names — path = available district width, font size chosen so text fits (center → no crop)
     specials = [mk['c'] for mk in m['marks'] if mk.get('kind') in ('townhall', 'castle')]
     for li, lb in enumerate(m.get('dist_labels', [])):
         C, nm = lb['c'], lb['name']
-        avail = lb['w'] * 0.80                              # сколько ширины района даём под надпись
+        avail = lb['w'] * 0.80                              # how much district width to allocate for label
         fs = min(18.0, avail / (len(nm) * 0.64), lb['h'] * 0.5)
-        if fs < 8:                                          # район слишком тесный — пропускаем
+        if fs < 8:                                          # district too cramped — skip
             continue
-        half = avail / 2                                    # путь во всю доступную ширину → текст не обрежется
+        half = avail / 2                                    # path across full available width → text won't crop
         cx, ly = C[0], C[1]
-        for spc in specials:                                # не наезжать на ратушу/замок — сдвиг по вертикали
+        for spc in specials:                                # don't collide with townhall/castle — shift vertically
             if cx - half - 14 < spc[0] < cx + half + 14 and abs(spc[1] - ly) < fs * 0.9 + 14:
                 ly = spc[1] - (fs * 0.9 + 16) if ly <= spc[1] else spc[1] + (fs * 0.9 + 16)
         sag = min(half * 0.10, 13.0)
@@ -1011,30 +1011,30 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
         e.append(f'<text font-size="{fs:.1f}" font-weight="bold" letter-spacing="0.4" '
                  f'fill="#1a1410" stroke="#caa46a" stroke-width="{max(2.0, fs*0.18):.1f}" paint-order="stroke" stroke-linejoin="round">'
                  f'<textPath href="#{pid}" startOffset="50%" text-anchor="middle">{nm}</textPath></text>')
-    # номерные бейджи
+    # numbered badges
     e.append('<g text-anchor="middle" dominant-baseline="central">')
     _ST_FILL = {'closed': 'rgba(200,200,200,.96)', 'ruined': 'rgba(170,135,120,.96)', 'new': 'rgba(190,232,170,.97)'}
     _ST_STROKE = {'closed': '#6f6f6f', 'ruined': '#7a3a2a', 'new': '#3b6d11'}
     _ST_GLYPH = {'closed': '×', 'ruined': '!', 'new': '+'}
-    for i, mk in enumerate(m['marks'] if marks else []):     # marks=False → бейджи кладёт фронт (только записанные)
+    for i, mk in enumerate(m['marks'] if marks else []):     # marks=False → frontend lays badges (recorded only)
         n, x, y = i + 1, mk['c'][0], mk['c'][1]
         st = mk.get('status', 'open')
         bf = _ST_FILL.get(st, 'rgba(245,236,212,.97)')
         bs = _ST_STROKE.get(st, mk["roof"])
         e.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="9.5" fill="{bf}" stroke="{bs}" stroke-width="2"/>')
         e.append(f'<text x="{x:.1f}" y="{y+0.5:.1f}" fill="#2c2113" font-weight="bold" font-size="12">{n}</text>')
-        if st in _ST_GLYPH:                                 # статус-маркер (закрыто/руины/новое)
+        if st in _ST_GLYPH:                                 # status marker (closed/ruins/new)
             e.append(f'<circle cx="{x+8:.1f}" cy="{y-8:.1f}" r="5.5" fill="{bs}"/>'
                      f'<text x="{x+8:.1f}" y="{y-7.3:.1f}" fill="#fff" font-weight="bold" font-size="9">{_ST_GLYPH[st]}</text>')
     e.append('</g>')
-    # обрамление
+    # frame
     e.append(f'<rect width="{W}" height="{H}" fill="url(#vg)"/>')
     e.append(f'<rect x="5" y="5" width="{W-10}" height="{H-10}" fill="none" stroke="#4a3415" stroke-width="5"/>')
-    if chrome:                                              # компас (без верхней подписи города)
+    if chrome:                                              # compass (no city name label)
         e.append(f'<g transform="translate({W-40},46)"><circle r="18" fill="rgba(233,216,175,.85)" stroke="#4a3415" stroke-width="1"/>'
                  f'<path d="M0 -20 L4 -3 L-4 -3 Z" fill="#4a3415"/>'
                  f'<text y="-22" text-anchor="middle" fill="#4a3415" font-weight="bold" font-size="9">С</text></g>')
-    if interactive:                                         # клик по дому → яркое выделение полигона + событие cityHouse
+    if interactive:                                         # house click → bright polygon highlight + cityHouse event
         e.append('<style>.h{cursor:pointer}.h.sel{fill:#ffd23f !important;stroke:#7a3a00 !important;stroke-width:1.8 !important}</style>')
         e.append('<script><![CDATA['
                  'var sel=null;'
@@ -1050,7 +1050,7 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
 
 
 def render_page(seed=1, W=980, H=700, title='Фэндалин'):
-    """Готовая HTML-страница с интерактивным городом (для встраивания/демо)."""
+    """Ready HTML page with interactive city (for embedding/demo)."""
     m = build_city(seed, W, H, title=title)
     svg = render_svg(m, interactive=True) if m else '<svg/>'
     return ('<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">'

@@ -1,10 +1,10 @@
-"""Обмен как АБСТРАКЦИЯ (не хардкод sell/buy). Деньги — такой же предмет (kind='coin', делимая сумма
-amount). Ценность СУБЪЕКТИВНА: worth(предмет, агент) зависит от нужд/запаса/натуры. Сделка = обоюдно
-выгодный обмен через тот же примитив give: продавец отдаёт товар (у него дёшев — запас), покупатель
-отдаёт монеты (товар ему ценен — нужда). Тот же worth+give даёт куплю-продажу, бартер (плата — другой
-товар) и взятку (плата — за расположение). Игрок — такой же агент: его «согласен» приходит от игрока.
+"""Trade as an ABSTRACTION (not hardcoded sell/buy). Money is just an item (kind='coin', divisible
+amount). Value is SUBJECTIVE: worth(item, agent) depends on needs/inventory/nature. A deal = mutually
+beneficial exchange via the same primitive give: seller gives goods (cheap for him — inventory), buyer
+gives coins (valuable to him — need). The same worth+give yields commerce, barter (payment is another
+good) and bribery (payment for favor). The player is just another agent: their "consent" comes from the player.
 
-Никакого «продать» в коде нет — сделка ВЫПАДАЕТ из ценностного коридора между двумя worth.
+No "sell" in the code — a deal EMERGES from the value corridor between two worth values.
 
 Key functions
 -------------
@@ -21,7 +21,7 @@ from .world import Item
 
 
 def money_demand(st) -> float:
-    """Сколько одна монета стоит ДЛЯ агента (спрос на деньги от нужды/натуры)."""
+    """How much one coin is worth FOR an agent (demand for money from need/nature)."""
     t = st.config.traits
     return 0.4 + 0.8 * st.needs.get("wealth", 0.0) + 0.3 * t.get("greed", 0.5) + 0.2 * t.get("ambition", 0.5)
 
@@ -45,19 +45,19 @@ def _purse(st, world) -> Item:
 
 
 def worth(item: Item, st, world) -> float:
-    """Субъективная ценность ОБЛАДАНИЯ предметом для агента (не для добычи — для жизни)."""
+    """Subjective value of POSSESSING an item for an agent (not for looting — for living)."""
     if item.kind == "coin":
         return item.amount * money_demand(st)
     have = sum(i.amount for i in _inv(st, world) if i.name == item.name and i is not item)
-    base = item.value / (1.0 + 0.4 * have)                 # запас обесценивает (у торговца дёшево)
+    base = item.value / (1.0 + 0.4 * have)                 # possession devalues (cheap for a merchant)
     if item.satisfies and item.satisfies in st.needs:
-        base += st.needs[item.satisfies] * 0.7             # нужда поднимает ценность
+        base += st.needs[item.satisfies] * 0.7             # need raises value
     return base
 
 
 def propose_sale(seller_st, buyer_st, world):
-    """Найти обоюдно выгодную продажу товара за монеты. Возвращает (item, price, buyer_gain) или None.
-    Цена садится в коридор [минимум продавца … максимум покупателя] — торг сходится к середине."""
+    """Find a mutually profitable sale of goods for coins. Returns (item, price, buyer_gain) or None.
+    Price fits in the corridor [seller's minimum … buyer's maximum] — negotiation converges to the middle."""
     seller = world.bodies[seller_st.config.id]
     cw_s, cw_b = money_demand(seller_st), money_demand(buyer_st)
     purse = money_of(buyer_st, world)
@@ -65,22 +65,22 @@ def propose_sale(seller_st, buyer_st, world):
     for good in list(seller.carrying):
         if good.kind == "coin":
             continue
-        sw = worth(good, seller_st, world)                 # почём продавцу расстаться
-        bw = worth(good, buyer_st, world)                  # сколько стоит покупателю
-        lo, hi = sw / cw_s, bw / cw_b                       # ценовой коридор В МОНЕТАХ
+        sw = worth(good, seller_st, world)                 # what the seller asks to part with
+        bw = worth(good, buyer_st, world)                  # how much it's worth to the buyer
+        lo, hi = sw / cw_s, bw / cw_b                       # price corridor IN COINS
         if bw <= sw or lo > hi:
-            continue                                       # нет выгоды от обмена
-        price = min((lo + hi) / 2.0, purse)                # середина, но не больше кошелька
-        if price < lo:                                     # покупателю не хватает → продавцу невыгодно
+            continue                                       # no benefit from exchange
+        price = min((lo + hi) / 2.0, purse)                # midpoint, but not more than purse
+        if price < lo:                                     # buyer doesn't have enough → not profitable for seller
             continue
-        gain = bw - price * cw_b                           # выгода покупателя от сделки
+        gain = bw - price * cw_b                           # buyer's gain from the deal
         if gain > 0 and (best is None or gain > best[2]):
             best = (good, round(price, 3), round(gain, 3))
     return best
 
 
 def settle_sale(deal, seller_st, buyer_st, world) -> dict:
-    """Провести сделку тем же give: товар продавец→покупатель, монеты покупатель→продавец."""
+    """Execute a deal via the same give: goods from seller→buyer, coins from buyer→seller."""
     good, price, _ = deal
     seller, buyer = world.bodies[seller_st.config.id], world.bodies[buyer_st.config.id]
     seller.carrying.remove(good)

@@ -1,6 +1,6 @@
-"""Пошаговый боевой движок (5e-lite): инициатива d20+dex, ход = движение (клетки, BFS) + одно
-действие (attack / dodge / flee / end). Атака d20+to_hit против AC (dodge = помеха), урон кости+бонус,
-резист/иммун по типу. Мораль: слабые бегут. Детерминирован сидом. Лог сухой, как у мастера за столом.
+"""Turn-based combat engine (5e-lite): initiative d20+dex, turn = movement (cells, BFS) + one
+action (attack / dodge / flee / end). Attack d20+to_hit vs AC (dodge = disadvantage), damage dice+bonus,
+resist/immune by type. Morale: weak units flee. Deterministic via seed. Log dry, like DM at table.
 
 Key functions
 -------------
@@ -23,7 +23,7 @@ from random import Random
 from .model import Combatant
 
 MAX_ROUNDS = 40
-MORALE_HP = 0.3                      # ниже этой доли hp слабые (cr<2) проверяют мораль
+MORALE_HP = 0.3                      # below this hp fraction, weak (cr<2) check morale
 MORALE_DC = 8
 
 
@@ -39,7 +39,7 @@ class Encounter:
         self.rng = Random(f"enc|{seed}")
         self.w, self.h = w, h
         self.obstacles = obstacles if obstacles is not None else self._gen_obstacles()
-        self.pending_waves = list(waves or [])             # накаты 2..n (первый — уже в foes)
+        self.pending_waves = list(waves or [])             # waves 2..n (first already in foes)
         self.units: dict[str, Combatant] = {}
         for i, c in enumerate(party):
             c.side = "party"
@@ -50,10 +50,10 @@ class Encounter:
         order = sorted(self.units.values(),
                        key=lambda c: -(self.rng.randint(1, 20) + c.init_mod))
         self.order = [c.id for c in order]
-        self.ti = 0                                        # индекс хода в order
+        self.ti = 0                                        # turn index in order
         self.round = 1
         self.log: list[str] = []
-        self.moved: int = 0                                # клетки, потраченные в текущем ходу
+        self.moved: int = 0                                # cells spent in current turn
         self.acted: bool = False
         self._log(f"Инициатива: {', '.join(self.units[i].name for i in self.order)}.")
 
@@ -61,20 +61,20 @@ class Encounter:
         return not any(u.side == "foes" and not u.down() for u in self.units.values())
 
     def next_wave(self) -> bool:
-        """Если текущие враги повержены, а накаты остались — выпустить следующий у дальней стены."""
+        """If current foes defeated and waves remain — spawn next wave at far wall."""
         if not self.pending_waves or not self.foes_cleared():
             return False
         wave = self.pending_waves.pop(0)
         base = len(self.units)
         for i, c in enumerate(wave):
             c.side = "foes"
-            c.id = f"{c.id}:w{len(self.pending_waves)}:{i}"    # уникальный id в накате
+            c.id = f"{c.id}:w{len(self.pending_waves)}:{i}"    # unique id in wave
             self._spawn(c, left=False, slot=base + i)
             self.order.append(c.id)
         self._log(f"Из темноты накатывает подмога врага: {', '.join(c.name for c in wave)}.")
         return True
 
-    # ------------------------------------------------------------ сетап --- #
+    # ------------------------------------------------------------ setup --- #
     def _gen_obstacles(self) -> set:
         out = set()
         for _ in range(self.w * self.h // 10):
@@ -91,7 +91,7 @@ class Encounter:
                 break
         self.units[c.id] = c
 
-    # ------------------------------------------------------------ гео ----- #
+    # ------------------------------------------------------------ geo ----- #
     def _occupied(self, x, y, ignore=None):
         return any(u.x == x and u.y == y and not u.down() and u.id != ignore
                    for u in self.units.values())
@@ -100,7 +100,7 @@ class Encounter:
         return max(abs(a.x - b.x), abs(a.y - b.y))
 
     def path_len(self, c: Combatant, tx: int, ty: int) -> int | None:
-        """BFS по клеткам (8 направлений), препятствия и занятые клетки непроходимы."""
+        """BFS over cells (8 directions), obstacles and occupied cells impassable."""
         if (tx, ty) in self.obstacles or self._occupied(tx, ty, ignore=c.id):
             return None
         seen, q = {(c.x, c.y)}, deque([(c.x, c.y, 0)])
@@ -118,7 +118,7 @@ class Encounter:
                         q.append((nx, ny, d + 1))
         return None
 
-    # ------------------------------------------------------------ ход ----- #
+    # ------------------------------------------------------------ turn ----- #
     def current(self) -> Combatant | None:
         alive = [i for i in self.order if not self.units[i].down()]
         if not alive:
@@ -142,7 +142,7 @@ class Encounter:
         c = self.current()
         if c:
             c.dodging = False if self.acted or self.moved else c.dodging
-            for k in list(c.status):                       # статусы тают на исходе СВОЕГО хода
+            for k in list(c.status):                       # statuses fade at end of OWN turn
                 if c.status[k] > 0:
                     c.status[k] -= 1
                 if c.status[k] <= 0:
@@ -157,7 +157,7 @@ class Encounter:
         if len(self.log) > 200:
             self.log = self.log[-120:]
 
-    # ------------------------------------------------------------ действия - #
+    # ------------------------------------------------------------ actions - #
     def act_move(self, c: Combatant, tx: int, ty: int) -> str | None:
         d = self.path_len(c, tx, ty)
         if d is None:
@@ -177,7 +177,7 @@ class Encounter:
         if self.dist(c, t) > c.range:
             return "не дотянуться"
         self.acted = True
-        # дальнобой в упор (враг вплотную) — стрелять несподручно: помеха
+        # ranged in melee (enemy adjacent) — shooting awkward: disadvantage
         crowded = c.range > 1 and any(u.side != c.side and not u.down() and self.dist(c, u) <= 1
                                       for u in self.units.values())
         r1 = self.rng.randint(1, 20)
@@ -194,7 +194,7 @@ class Encounter:
         elif c.dmg_type in t.resist:
             dmg //= 2
         t.hp -= dmg
-        if dmg > 0 and t.status.pop("asleep", 0):          # удар будит спящего
+        if dmg > 0 and t.status.pop("asleep", 0):          # hit wakes the sleeping
             self._log(f"{t.name} просыпается от удара.")
         crit = " (крит!)" if roll == 20 else ""
         if t.hp <= 0:
@@ -221,10 +221,10 @@ class Encounter:
         self._log(f"{c.name} покидает бой.")
         return None
 
-    # ------------------------------------------------------------ ИИ ------ #
+    # ------------------------------------------------------------ AI ------ #
     def ai_turn(self, c: Combatant) -> None:
-        """Простая тактика: мораль → бегство; иначе к ближайшему врагу и бить.
-        Статусы: связан/спит — ход пропущен; напуган — держится подальше, не атакует."""
+        """Simple tactic: morale → flee; else approach nearest foe and attack.
+        Statuses: bound/asleep — skip turn; afraid — kite away, don't attack."""
         foes = [u for u in self.units.values() if u.side != c.side and not u.down()]
         if not foes:
             self.end_turn()
@@ -233,7 +233,7 @@ class Encounter:
             self._log(f"{c.name} {'связан' if c.status.get('bound') else 'спит'} — ход потерян.")
             self.end_turn()
             return
-        if c.status.get("afraid", 0) > 0:                   # напуган: пятится к краю, не бьёт
+        if c.status.get("afraid", 0) > 0:                   # afraid: kites toward edge, doesn't attack
             nearest = min(foes, key=lambda u: self.dist(c, u))
             spot = self._kite(c, nearest)
             if spot:
@@ -255,16 +255,16 @@ class Encounter:
                     self.end_turn()
                     return
         t = min(foes, key=lambda u: self.dist(c, u))
-        if c.range > 1:                                     # ДАЛЬНОБОЙ: держать дистанцию, стрелять
-            if any(self.dist(c, u) <= 1 for u in foes):     # кто-то в упор — отойти (кайт)
+        if c.range > 1:                                     # RANGED: keep distance, shoot
+            if any(self.dist(c, u) <= 1 for u in foes):     # someone adjacent — kite away
                 spot = self._kite(c, min(foes, key=lambda u: self.dist(c, u)))
                 if spot:
                     c.x, c.y = spot
-            elif self.dist(c, t) > c.range:                 # цель дальше выстрела — сблизиться
+            elif self.dist(c, t) > c.range:                 # target out of range — approach
                 spot = self._approach(c, t, c.range)
                 if spot:
                     c.x, c.y = spot
-        elif self.dist(c, t) > c.range:                     # ближний: подойти вплотную
+        elif self.dist(c, t) > c.range:                     # melee: close in
             spot = self._approach(c, t, c.range)
             if spot:
                 c.x, c.y = spot
@@ -273,7 +273,7 @@ class Encounter:
         self.end_turn()
 
     def _approach(self, c: Combatant, t: Combatant, stop: int):
-        """Клетка в пределах хода, приближающая к t (стоп при dist ≤ stop). None если некуда."""
+        """Cell within move range that closes distance to t (stop if dist ≤ stop). None if blocked."""
         best, bd = None, self.dist(c, t)
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
@@ -294,7 +294,7 @@ class Encounter:
         return best
 
     def _kite(self, c: Combatant, foe: Combatant):
-        """Отойти от foe (до 3 клеток), максимизируя дистанцию. None если зажат."""
+        """Move away from foe (up to 3 cells), maximizing distance. None if trapped."""
         best, bd, lim = None, self.dist(c, foe), min(c.speed, 3)
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):

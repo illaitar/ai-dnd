@@ -1,12 +1,12 @@
-"""Домен ПОДЗЕМЕЛЬЕ — обход данжа комната-за-комнатой (docs/dungeons.md, этап C).
+"""Dungeon domain — traversing dungeon room-by-room (docs/dungeons.md, stage C).
 
-Логово карты = настоящий данж (worldgen/dungeongen + бриф из пула). Состояние обхода в
-_S["dungeon"]: позиция, туман (seen), зачищенные/обысканные комнаты, ключи, найденные
-секретки. Информированный выбор двери (Hades): намёк по СОДЕРЖИМОМУ соседней комнаты —
-рычание/блеск/сквозняк. Ловушки телеграфируют и бьют одноразово; клады лутаются обыском;
-машины-виньетки будят стражей; ключи открывают замки с lock_flavor брифа; блуждающие —
-давление времени (1-к-6 каждые 2 перехода). Бой комнаты — существующий Encounter, арена
-из ФОРМЫ комнаты. Босс — контур логова (гильдия/cleared/трофеи) без изменений.
+Lair map = true dungeon (worldgen/dungeongen + brief from pool). Traversal state in
+_S["dungeon"]: position, fog-of-war (seen), cleared/searched rooms, keys, discovered
+secrets. Informed door choice (Hades): hint by CONTENT of adjacent room —
+roar/glint/draft. Traps telegraph and strike once; loot is searched; machine-vignettes
+wake guards; keys unlock locks with lock_flavor from brief; wanderers —
+time pressure (1-in-6 every 2 steps). Room combat — existing Encounter, arena
+from room SHAPE. Boss — lair perimeter (guild/cleared/trophies) unchanged.
 
 Key functions
 -------------
@@ -61,15 +61,15 @@ def _dng() -> dict | None:
 
 
 def build_dungeon(l: dict) -> dict:
-    """Данж логова: скелет+наполнение по сиду мира, бриф из пула по среде (LLM в рантайме нет)."""
+    """Lair dungeon: skeleton+fill by world seed, brief from pool by environment (no LLM at runtime)."""
     briefs = [r["data"] for r in _pool().pool_buildings("dungeon") if r["btype"] == l["env"]]
     brief = random.Random(f"dbrief|{_wid()}|{l['id']}").choice(briefs) if briefs else None
     return generate(f"dng|{_wid()}|{l['id']}", l["env"], cr=l["cr"], brief=brief)
 
 
 def incident_delve(inc: dict) -> dict:
-    """Вход в ГОРОДСКОЕ происшествие: маленький данж; шайка = РЕАЛЬНЫЕ горожане по комнатам
-    (глава — в комнате цели), пленник — в кладовой; резолв цели закрывает происшествие."""
+    """Enter URBAN incident: small dungeon; gang = REAL townsfolk distributed across rooms
+    (chief — in goal room), captive — in storage; goal resolution closes incident."""
     people = _S.get("people") or {}
     briefs = [r["data"] for r in _pool().pool_buildings("dungeon")
               if r["btype"] == inc["env"]]
@@ -85,7 +85,7 @@ def incident_delve(inc: dict) -> dict:
           "inc": inc["id"], "is_lair": False, "npc_at": {}, "captive_at": None}
     dead = {k.split("|", 1)[1] for k in _store().flags_prefix(_wid(), "dead|")}
     members = [m for m in (inc.get("members") or []) if m in people and m not in dead]
-    if members:                                       # горожане-разбойники по комнатам
+    if members:                                       # townsfolk-bandits distributed across rooms
         chief = inc.get("chief") if inc.get("chief") in members else members[0]
         st["npc_at"][d["goal"]] = [chief]
         rest = [m for m in members if m != chief]
@@ -94,11 +94,11 @@ def incident_delve(inc: dict) -> dict:
                      and r["kind"] == "room"]
         for m, rid in zip(rest, mob_rooms):
             st["npc_at"][rid] = st["npc_at"].get(rid, []) + [m]
-        for r in d["rooms"]:                          # прочих тварей из дома выметаем
+        for r in d["rooms"]:                          # sweep other creatures out of dungeon
             c = r.get("content") or {}
             if c.get("kind") == "monster" and r["id"] not in st["npc_at"]:
                 r["content"] = {"kind": "empty"}
-    if inc.get("captive"):                            # пленник — в кладовой/схроне
+    if inc.get("captive"):                            # captive — in storage/stash room
         spot = next((r["id"] for r in d["rooms"]
                      if "treasure" in r["tags"] or r.get("frole") == "склад"), d["goal"])
         st["captive_at"] = spot
@@ -111,7 +111,7 @@ def incident_delve(inc: dict) -> dict:
 
 
 def delve_enter(l: dict) -> dict:
-    """Вход в логово: строим данж, ставим игрока на лестницу входа."""
+    """Enter lair: build dungeon, place player at entrance stairs."""
     d = build_dungeon(l)
     _S["dungeon"] = {"lair": l, "d": d, "room": d["entrance"], "seen": {d["entrance"]},
                      "cleared": set(), "looted": set(), "keys": set(), "found": set(),
@@ -134,9 +134,9 @@ def _exits(st: dict) -> list:
         if e["kind"] in ("window", "portcullis") or cur not in (e["a"], e["b"]):
             continue
         if e["kind"] == "secret" and eid not in st["found"]:
-            continue                                  # секретка невидима, пока не найдена
+            continue                                  # secret door invisible until discovered
         if e.get("one_way") and cur == e["b"]:
-            continue                                  # вверх по жёлобу не выбраться
+            continue                                  # can't climb back up the chute
         other = e["b"] if e["a"] == cur else e["a"]
         ro = d["rooms"][other]
         locked = bool(e["kind"] == "locked" and e["lock"] not in st["keys"])
@@ -174,7 +174,7 @@ def dungeon_payload(narr: list | None = None) -> dict:
 
 
 def _room_obstacles(r: dict) -> set:
-    """Форма комнаты → арена 12×9: тайлы масштабируются, вне пола — стены; тесно — зал."""
+    """Room shape → 12×9 arena: tiles scale, outside floor → walls; cramped → open hall."""
     tiles = {tuple(t) for t in r["tiles"]}
     xs = [t[0] for t in tiles]
     ys = [t[1] for t in tiles]
@@ -187,7 +187,7 @@ def _room_obstacles(r: dict) -> set:
             ty = min(ys) + int(gy * h / 9)
             if (tx, ty) not in tiles:
                 obs.add((gx, gy))
-    return obs if 12 * 9 - len(obs) >= 25 else set()  # совсем тесно — честный зал
+    return obs if 12 * 9 - len(obs) >= 25 else set()  # too cramped — fair open arena
 
 
 def _room_fight(rid: int, units, head_sub: str, boss: bool) -> dict:
@@ -198,10 +198,10 @@ def _room_fight(rid: int, units, head_sub: str, boss: bool) -> dict:
     cb = {"enc": enc, "droom": rid,
           "head": {"name": r.get("name") or f"Комната {rid + 1}", "sub": head_sub}}
     if boss:
-        cb["lair"] = st["lair"]                       # босс = контур логова (гильдия/cleared)
+        cb["lair"] = st["lair"]                       # boss = lair perimeter (guild/cleared)
     _S["combat"] = cb
     guard = 0
-    while enc.status() == "active" and guard < 50:    # докрутить ИИ до хода игрока
+    while enc.status() == "active" and guard < 50:    # spin AI up to player turn
         c0 = enc.current()
         if c0 is None or c0.id == "pc":
             break
@@ -214,7 +214,7 @@ def _room_fight(rid: int, units, head_sub: str, boss: bool) -> dict:
 
 
 def _spring_trap(rid: int, t: dict) -> tuple:
-    """Ловушка бьёт одноразово: спас-бросок, урон кубиками из данных."""
+    """Trap strikes once: save throw, damage by dice from data."""
     st = _dng()
     st["sprung"].add(rid)
     n = random.Random(f"trap|{st['d']['seed']}|{rid}")
@@ -303,7 +303,7 @@ async def dungeon_move(request: Request):
                                   bool(c.get("boss")) and st.get("is_lair", True)),
                     "narr": narr}
         st["cleared"].add(to)
-    # блуждающие: цена времени (1-к-6 каждые 2 перехода)
+    # wanderers: time cost (1-in-6 every 2 steps)
     if st["steps"] % PB["dungeon_wander_n"] == 0 and not _S.get("combat"):
         if random.Random(f"wander|{st['d']['seed']}|{st['steps']}").random() < 1 / 6:
             units = pick_encounter(max(0.2, st["lair"]["cr"] * 0.25), st["d"]["env"],
@@ -316,7 +316,7 @@ async def dungeon_move(request: Request):
 
 @router.post("/api/play/dungeon_loot")
 async def dungeon_loot(request: Request):
-    """Обыск комнаты: клад (по сокрытию), ключ, машины-виньетки (риск!), поиск секреток."""
+    """Search room: treasure (by concealment), key, machine-vignettes (risk!), find secrets."""
     st = _dng()
     if not st:
         return {"error": "ты не в подземелье"}
@@ -354,13 +354,13 @@ async def dungeon_loot(request: Request):
             narr.append(f"{m['name']}: {m['note']}.")
         else:
             narr.append("Ничего ценного — пыль да тени.")
-        for k in st["d"]["keys"]:                     # ключ лежит здесь — забираем
+        for k in st["d"]["keys"]:                     # key is here — take it
             if k["room"] == rid and k["id"] not in st["keys"]:
                 st["keys"].add(k["id"])
                 narr.append(f"Находишь ключ. {st['d'].get('lock_flavor') or ''}".strip())
     else:
         narr.append("Здесь ты уже всё перетряс.")
-    # поиск секреток из этой комнаты — бросок восприятия
+    # search for secrets from this room — perception check
     hidden = [eid for eid, e in enumerate(st["d"]["edges"])
               if e["kind"] == "secret" and rid in (e["a"], e["b"])
               and eid not in st["found"]]

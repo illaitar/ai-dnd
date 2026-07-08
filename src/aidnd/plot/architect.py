@@ -1,5 +1,5 @@
-"""Архитектор сюжета: сид + профиль города → библия. StubArchitect — детерминированный шаблон
-«культ жертв» (офлайн/фоллбэк, ВАЛИДЕН по правилам). LLM-архитектор (роль plot_architect) — С-1б.
+"""Plot architect: seed + city profile → bible. StubArchitect — deterministic template
+"cult of sacrifices" (offline/fallback, VALID by rules). LLM-architect (role plot_architect) — С-1б.
 
 Key functions
 -------------
@@ -13,7 +13,7 @@ import random
 
 from .bible import validate_bible
 
-# шаблонные лица врага: (ранг, роль, важность, желание, чехов если важность>=7)
+# template enemy faces: (rank, role, importance, desire, chekhov if importance>=7)
 _ENEMY_TPL = [
     (1, "антагонист-в-тени", 9, "закончить Великую Жатву",
      "в кульминации сам проводит ритуал — уязвим единственный раз"),
@@ -55,7 +55,7 @@ _NEUTRAL_TPL = [
 
 
 class StubArchitect:
-    """Детерминированная библия-шаблон: культ, жрущий город. Валидна по правилам §3."""
+    """Deterministic template bible: cult consuming the city. Valid by rules §3."""
 
     def build(self, seed: str, city: str, rng=None) -> dict:
         rng = rng or random.Random(f"plot|{city}|{seed}")
@@ -82,12 +82,12 @@ class StubArchitect:
             add("союзник", role, imp, want, chek)
         for role, imp, want, chek in _NEUTRAL_TPL:
             add("нейтрал", role, imp, want, chek)
-        # арки: слабое звено (перевербовка игроком) и правая рука (падение)
+        # arcs: weak link (recruitment by player) and right hand (downfall)
         next(a for a in cast if a["роль"] == "слабое звено")["арка"] = \
             "перевербовка: доверие/шантаж → сдаёт бухгалтерию"
         next(a for a in cast if a["роль"] == "правая рука")["арка"] = \
             "падение: подсидев фасада, приводит культ к краху"
-        # смутные лица из прошлого (НЕ антагонист — правда добывается заново)
+        # vague faces from the past (NOT antagonist — truth is discovered anew)
         next(a for a in cast if a["роль"] == "фасадный лидер")["память"] = \
             "это лицо было НАД процессиями — но что-то в его глазах было не властью, а страхом"
         next(a for a in cast if a["роль"] == "слабое звено")["память"] = \
@@ -101,7 +101,7 @@ class StubArchitect:
             "правда": "фасадный лидер — заложник; истинный глава прячется в тени ремесла",
             "прошлый_цикл": (f"В прошлый раз {city} съела Жатва: игрок понял всё слишком поздно, "
                              "союзники погибли по одному, и город принял тьму как цену покоя."),
-            # то, что игрок ЗНАЕТ с пролога — только общее, БЕЗ правды (кто глава — добывать)
+            # what the player KNOWS from prologue — general only, NO truth (who is leader — to discover)
             "память_регрессора": [
                 "в городе действует культ — исчезновения не случайны",
                 "беда идёт по расписанию: примерно раз в несколько дней — новая жертва",
@@ -127,6 +127,6 @@ class StubArchitect:
             "каст": cast,
         }
         errs = validate_bible(bible)
-        if errs:                                            # заглушка ОБЯЗАНА быть валидной
+        if errs:                                            # stub MUST be valid
             raise ValueError("StubArchitect невалиден: " + "; ".join(errs))
         return bible

@@ -33,7 +33,7 @@ _FEMALE = ["Мара", "Сельма", "Лия", "Нэлл", "Гвен", "Ода
 _SURN = ["Камнехват", "Тихвуд", "Долинный", "Пивовар", "Кожемяка", "Рыжий", "с Холма",
          "Вересковый", "Косой", "Быстрый", "Медовар", "Тёмный", "Полынь", "Овражный"]
 
-# роли ключевых зданий (по кругу) — родовой набор фронтирного городка
+# roles of key buildings (in rotation) — ancestral set of frontier town
 KEY_ROLES = ["трактирщик", "кузнец", "лавочник", "стражник", "жрец", "знахарка",
              "бард", "мельник", "дубильщик", "сапожник"]
 
@@ -49,7 +49,7 @@ ROLE_TRAITS: dict[str, dict[str, float]] = {
     "дубильщик": {"honesty": .55, "bravery": .45},
     "сапожник": {"honesty": .6, "sociability": .55},
     "горожанин": {"honesty": .55, "bravery": .45},
-    "бродяга": {"greed": .85, "honesty": .12, "lawful": .15, "bravery": .4},        # мелкий вор
+    "бродяга": {"greed": .85, "honesty": .12, "lawful": .15, "bravery": .4},        # petty thief
     "головорез": {"greed": .7, "bravery": .8, "honesty": .25, "lawful": .2, "malice": .4},
 }
 _CHA = {"бард": .85, "трактирщик": .7, "знахарка": .6, "жрец": .55, "лавочник": .5}
@@ -61,14 +61,14 @@ class Townsperson:
     id: str
     name: str
     role: str
-    home: int                       # узел-жильё (citygraph)
-    work: str | None                # id ключевого здания (место работы) / None
+    home: int                       # home node (citygraph)
+    work: str | None                # key building id (workplace) / None
     charisma: float
-    appearance: float               # видимое богатство
+    appearance: float               # visible wealth
     state: NpcState = field(default=None)
-    persona: dict = None            # богатая персона из пула (worldgen) — None у голого населения
-    portraits: dict = None          # {эмоция: путь-к-портрету} из пула
-    keys: list = None               # ключи от закрытых ёмкостей своего здания (владелец) — рантайм
+    persona: dict = None            # rich persona from pool (worldgen) — None for bare population
+    portraits: dict = None          # {emotion: path-to-portrait} from pool
+    keys: list = None               # keys to locked containers of own building (owner) — runtime
 
     def view(self) -> dict:
         return {"id": self.id, "name": self.name, "role": self.role, "home": self.home,
@@ -77,7 +77,7 @@ class Townsperson:
 
 
 def _name(rng: random.Random) -> tuple[str, str]:
-    """Имя + пол (согласованы: пол выбираем ПЕРВЫМ, имя — из пула этого пола)."""
+    """Name + sex (coordinated: sex chosen FIRST, name — from pool of that sex)."""
     sex = "m" if rng.random() < 0.5 else "f"
     first = rng.choice(_MALE if sex == "m" else _FEMALE)
     return f"{first} {rng.choice(_SURN)}", sex
@@ -96,7 +96,7 @@ def _person(pid: str, role: str, home: int, work: str | None, rng: random.Random
     name, _sex = _name(rng)
     cfg = NpcConfig(id=pid, name=name, role=role, traits=_traits(role, rng))
     st = NpcState.from_config(cfg)
-    for n in st.needs:                              # лёгкий фон нужд
+    for n in st.needs:                              # light background of needs
         st.needs[n] = round(rng.uniform(0.1, 0.35), 2)
     cha = min(1.0, max(0.1, _CHA.get(role, 0.3) + rng.uniform(-0.1, 0.1)))
     app = min(1.0, max(0.1, _WEALTH.get(role, 0.25) + rng.uniform(-0.08, 0.08)))
@@ -104,8 +104,8 @@ def _person(pid: str, role: str, home: int, work: str | None, rng: random.Random
 
 
 def person_core(role: str, rng: random.Random) -> dict:
-    """Механическое ядро NPC для ПУЛА (без места): имя, 11 черт, обаяние, богатство. Тот же генератор,
-    что у населения → банк и populate дают согласованную механику."""
+    """Mechanical core of NPC for POOL (no placement): name, 11 traits, charisma, wealth. Same generator
+    as population → bank and populate yield consistent mechanics."""
     cha = min(1.0, max(0.1, _CHA.get(role, 0.3) + rng.uniform(-0.1, 0.1)))
     app = min(1.0, max(0.1, _WEALTH.get(role, 0.25) + rng.uniform(-0.08, 0.08)))
     name, sex = _name(rng)
@@ -114,7 +114,7 @@ def person_core(role: str, rng: random.Random) -> dict:
 
 
 def populate(city, seed: int = 1, commoners: int = 12, deviants: int = 2) -> dict:
-    """Заселить городок: работники ключевых зданий + горожане по домам + пара отклонений."""
+    """Populate town: key building workers + townspeople by houses + couple of deviants."""
     rng = random.Random(f"pop|{seed}")
     houses = [h.node for h in city.houses.values()]
     rng.shuffle(houses)

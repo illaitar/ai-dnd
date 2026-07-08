@@ -1,223 +1,210 @@
-# Симуляция города
+# City Simulation
 
-`src/aidnd/society/` (модель) + `src/aidnd/server/play/engine/worldsim.py` (`routine_step`).
-~900 NPC живут сутки ДЁШЕВО без LLM: каждый на смене фазы/тика выбирает МЕСТО утилити-моделью
-над нуждами. Это ядро «живого фронтира»: днём город работает, вечером пьёт, ночью спит —
-эмерджентно, из индивидуальных нужд, а не из хардкода «create crowd».
+`src/aidnd/society/` (model) + `src/aidnd/server/play/engine/worldsim.py` (`routine_step`).
+~900 NPCs live out a day CHEAPLY without LLM: each at every phase/tick chooses a PLACE via utility-model
+over needs. This is the core of the "living frontier": by day the city works, by evening drinks, by night sleeps—
+emergently, from individual needs, not hardcoded "create crowd".
 
-Отдельно от ЖИВОЙ СЦЕНЫ (LLM, [locations.md](locations.md)): город — дешёвый пассивный слой
-(ноль LLM), сцена вокруг игрока — дорогой LLM-слой. Симуляция кладёт NPC на узлы графа;
-сцена берёт тех, кто рядом.
+Separate from the LIVE SCENE (LLM, [locations.md](locations.md)): the city is a cheap passive layer
+(zero LLM), the scene around the player is an expensive LLM-layer. Simulation places NPCs on graph nodes;
+the scene takes those nearby.
 
-## Модель (Sims/Zubek needs-utility + RimWorld-окна)
+## Model (Sims/Zubek needs-utility + RimWorld-windows)
 
-Подтверждено ресёрчем (2026-07-07, 2 потока: индустрия daily-life + агентное/визуализация).
-Наша `society/` — уже правильная модель, менять ядро не надо:
+Verified by research (2026-07-07, 2 threads: daily-life industry + agent/visualization).
+Our `society/` is already the right model, no need to rewrite the core:
 
-- **Нужды** (`needs.py`): 7 нужд-урджей (hunger/fatigue/social/wealth/purpose/comfort/novelty),
-  каждая сама растёт в час (`grow`), усиливается чертой, гасится в местах. Циркадность —
-  через скорости (усталость копится к ночи, голод к полудню) → сон/еда встают в ритм сами.
-- **Места рекламируют нужды** (`places.py`, smart objects The Sims): `PlaceKind.sates =
-  {нужда: скорость гашения}`; `window` — уместность по фазе суток (наш RimWorld-timetable);
-  `likes` — тяга по характеру; `gate` — кому доступно (any/job/guard/rogue); `detect` —
-  связь с реальными зданиями. Каталог: home/work/tavern/temple/market/street/patrol/prowl/
+- **Needs** (`needs.py`): 7 need-urges (hunger/fatigue/social/wealth/purpose/comfort/novelty),
+  each grows on its own per hour (`grow`), amplified by traits, sated at places. Circadian rhythm—
+  via speeds (fatigue builds toward night, hunger toward noon) → sleep/eating fall into rhythm naturally.
+- **Places advertise needs** (`places.py`, smart objects like The Sims): `PlaceKind.sates =
+  {need: sate_rate}`; `window`—suitability by time of day (our RimWorld-timetable);
+  `likes`—affinity by trait; `gate`—who has access (any/job/guard/rogue); `detect`—
+  link to real buildings. Catalog: home/work/tavern/temple/market/street/patrol/prowl/
   appointment.
-- **Выбор** (`routine.py`): `score = окно × affinity(черты) × Σ(реклама×давление-нужды)`;
-  `choose_c` — лотерея близких (≥0.85·best, антизалипание) + инерция ×1.12 к «где стоял»
-  (антидёрганье, урок Sims). `explain()` — диагностика [(kind, score)] для /minddebug и UI.
-- **routine_step**: гоняет ВСЕХ жителей O(люди×места), дёшево; ёмкость зданий
-  ([locations.md](locations.md)), обязательства (deeds appointment), запись выбранного
-  вида-занятия в `_S["crof_kind"]` (для наблюдаемости/GIF).
+- **Choice** (`routine.py`): `score = window × affinity(traits) × Σ(sate_rate×need_pressure)`;
+  `choose_c`—lottery among top choices (≥0.85·best, anti-stickiness) + inertia ×1.12 toward "current place"
+  (anti-jitter, lesson from Sims). `explain()`—diagnostics [(kind, score)] for /minddebug and UI.
+- **routine_step**: cycles ALL residents O(people×places), cheaply; building capacity
+  ([locations.md](locations.md)), obligations (deeds, appointments), write chosen activity-kind to
+  `_S["crof_kind"]` (for observability/GIF).
 
-**Философия (принципы 6, 7, 10):** LLM только ОФЛАЙН (персоны, агенды, day_curve при ковке
-пула); рантайм — чистая арифметика. Наивный LLM-агент ≈ $25/агент/час (Stanford Smallville) —
-для 900 NPC неприемлемо; «день как данные» + утилити = 50-100× дешевле (Lyfe/AGA/ORACLE).
+**Philosophy (principles 6, 7, 10):** LLM only OFFLINE (personas, agendas, day_curve at pool forging);
+runtime—pure arithmetic. Naive LLM-agent ≈ $25/agent/hour (Stanford Smallville)—unacceptable for 900 NPCs;
+"day as data" + utility = 50-100× cheaper (Lyfe/AGA/ORACLE).
 
-## Сделано (2026-07-07, на проде)
+## Done (2026-07-07, on prod)
 
-- **Работа ВСЕМ** (корень «живого дня»): было — работу имели 24 из 900 (владельцы ключевых
-  зданий), остальные 876 дрейфовали по улицам. Теперь **ремесленник трудится ДОМА**
-  (историческая норма Watabou: жильё за/над мастерской): у кого нет заведения и роль ≠
-  «горожанин» — work-кандидат = его дом. Замер дня: работают 10→**620** утром.
-- **Калибровка окон под колокол/канонические часы**: работа — пик утро-день (1.0), спад
-  вечер (0.2), ночь ≈0; таверна — вечер пик (1.0), НОЧЬ комендантский час (0.15); рынок —
-  день (1.0), ночь ≈0; храм — утренняя служба + вечерня; улица — день, ночь комендантский
-  (0.05, остаются лишь patrol/prowl). Замер ночи: полночь = **590 дома, 104 промысел (воры),
-  49 дозор (стража), таверны 123** — правдоподобная ночь.
-- **Инерция** (×1.12 к текущему месту) — против мигания между равными местами.
-- **crof_kind** — вид занятия каждого NPC (для GIF и будущих UI-подсказок «работает/
-  ужинает/в дозоре»).
+- **Work for all** (root of the "living day"): before—24 of 900 worked (key building owners),
+  the other 876 drifted through streets. Now **craftspeople labor at HOME**
+  (Watabou's historical norm: dwelling above/behind the workshop): anyone without a venue and role ≠
+  "townsperson"—work-candidate = their home. Day count: 10→**620** working by morning.
+- **Window calibration to bells/canonical hours**: work—peak morning-day (1.0), decline evening (0.2),
+  night ≈0; tavern—evening peak (1.0), NIGHT curfew (0.15); market—day (1.0), night ≈0; temple—
+  morning service + evensong; street—day, night curfew (0.05, only patrol/prowl remain). Night count:
+  midnight = **590 at home, 104 criminal (thieves), 49 on patrol (guard), taverns 123**—plausible night.
+- **Inertia** (×1.12 toward current place)—against flickering between equal-value places.
+- **crof_kind**—activity-kind per NPC (for GIF and future UI hints "working/dining/on patrol").
 
-## ГИФ «день города» (`scripts/cityday.py`)
+## GIF "City Day" (`scripts/cityday.py`)
 
-Сутки по 30 мин (48 кадров) → снимок позиций всех 900 NPC на графе → пузыри ∝ √числа на
-узле, цвет = занятие (дом/работа/таверна/храм/рынок/улица/дозор/промысел, палитра под
-«Breathing City»), фон темнеет ночью, часы+легенда → `ffmpeg` в зацикленный GIF
-(`data/debug/cityday/day.gif`). Инструмент диагностики: наглядно видно, работает ли ритм.
+A day in 30 minutes (48 frames) → snapshot of all 900 NPCs' positions on the graph → bubbles ∝ √number at node,
+color = activity (home/work/tavern/temple/market/street/patrol/criminal, palette after "Breathing City"),
+background darkens at night, clock+legend → `ffmpeg` to looped GIF (`data/debug/cityday/day.gif`). Diagnostic tool:
+visually shows whether the rhythm works.
 
-## Проектирование v2 (дизайн, НЕ реализовано)
+## Designing v2 (design, NOT implemented)
 
-Текущая модель — хороший дешёвый **placement** («где все сейчас, по времени суток»), но не
-**life**. Дизайн ниже надстраивает три вещи (интент, экономика, роль↔venue) поверх
-утилити-ядра (оно верное, НЕ переписывается). Прошёл red-team (2026-07-07) — учтены
-сохранение денег, видимость экономики, стык с LLM-агендами, пошаговость, демография.
+The current model is good cheap **placement** ("where everyone is, by time of day"), but not
+**life**. The design below layers three things (intent, economy, role↔venue) atop the
+utility-core (it's sound, NOT rewritten). Passed red-team (2026-07-07)—accounting for
+money conservation, economy visibility, seam with LLM-agendas, turn-based play, demography.
 
-**Два структурных разворота (главное из red-team):**
-- **Экономика — НЕ агрегат-primary, а ИМЕНОВАННЫЕ supply-chain-primary.** Ощущаемая
-  экономика = конкретная цепочка «этот мельник → эта пекарня → эта лавка», которую игрок
-  видит и рвёт; агрегат-стоки — лишь фон для безымянной массы. Чинит невидимость,
-  сохранение денег (в малой замкнутой цепочке легко) и стык с агендами (про конкретных людей).
-- **Интент — QUERY-shaped, не state-shaped.** Не «NPC несёт план в БД», а функция
-  `predict(pid, phase) → (узел, зачем, маршрут)` — прогон утилити вперёд для фазы (дёшево,
-  детерминировано сидом, ничего не персистим). Follow/перехват/выслеживание = запрос к
-  прогнозу. Ложится на пошаговость (тик прыгает часами — хранимая траектория иллюзорна).
+**Two structural pivots (key from red-team):**
+- **Economy—NOT aggregate-primary, but NAMED supply-chain-primary.** Felt
+  economy = specific chain "this miller → this bakery → this shop", visible to the player and can be broken;
+  aggregate sinks—only backdrop for nameless masses. Fixes invisibility,
+  money conservation (easy in small closed loop), and seam with agendas (about specific people).
+- **Intent—QUERY-shaped, not state-shaped.** Not "NPC carries plan in DB", but function
+  `predict(pid, phase) → (node, why, route)` — running utility forward for a phase (cheap,
+  deterministic by seed, nothing persisted). Follow/intercept/tracking = query the forecast.
+  Fits turn-based play (tick jumps hours—stored trajectory is illusion).
 
-Инварианты: **0 LLM в рантайме**, **данные не код**, **LOD** (именованное у игрока, агрегат —
-масса), **всё настоящее** (деньги/товар движутся, сохраняются), **без механических гейтов**.
+Invariants: **0 LLM at runtime**, **data not code**, **LOD** (named at player, aggregate—
+mass), **everything real** (money/goods move, persist), **no mechanical gates**.
 
-### Слой A — ИНТЕНТ как ПРОГНОЗ (query-shaped)
+### Layer A—INTENT as FORECAST (query-shaped)
 
-- `predict(pid, phase)` = тот же `choose_c`, прогнанный для заданной фазы → `(узел, place-kind,
-  маршрут-узлов)`. Ноль хранимого состояния, ноль персиста; детерминировано. Текущий
-  `routine_step` = «применить predict для текущей фазы ко всем» + запись в crof/crof_kind.
-- **Перехват/встреча — на уровне ПЛАНА, не позиции**: «пересекается ли маршрут вора с узлом
-  N в фаза-окно», а не «стоит ли он на клетке» (в пошаговом мире позиции нет). Стража ловит
-  вора, если прогнозы-маршруты делят узел в одну фазу.
-- **Обязательства — ОВЕРРАЙДЫ прогноза** (данные-флаги, не отдельная траектория): `flee >
-  appointment(deeds) > shift(смена) > follow(за игроком) > errand(доставка) > routine`.
-  Follow = predict пиновать к узлу игрока, НО критнужда перебивает (RimWorld: голодный
-  спутник отойдёт поесть — явное правило, не «идёт за тобой до смерти»). Appointment уже так.
-- Разблокирует: «иди со мной», перехват, засада на дороге, доставки (errand с on_arrive),
-  «выследить X» (= читать predict(X)). Investigators/квесты читают прогноз, не гадают.
+- `predict(pid, phase)` = same `choose_c`, run for given phase → `(node, place-kind,
+  node-route)`. Zero stored state, zero persist; deterministic. Current
+  `routine_step` = "apply predict for current phase to all" + write to crof/crof_kind.
+- **Intercept/meeting—at PLAN level, not position**: "does rogue's route cross node
+  N in phase-window", not "is he on the tile" (turn-based world has no position). Guard catches rogue
+  if forecast-routes share a node in one phase.
+- **Obligations—FORECAST overrides** (data-flags, not separate trajectory): `flee >
+  appointment(deeds) > shift(duty) > follow(player) > errand(delivery) > routine`.
+  Follow = pin predict to player's node, BUT critical need overrides (RimWorld: hungry
+  companion leaves to eat—explicit rule, not "follows you to death"). Appointment already does this.
+- Unlocks: "come with me", intercepts, ambush on route, deliveries (errand with on_arrive),
+  "track X" (= read predict(X)). Investigators/quests read forecast, not guess.
 
-### Слой B — ЭКОНОМИКА: именованные цепочки + фон
+### Layer B—ECONOMY: named chains + background
 
-**Ярус ГЛАВНЫЙ — ИМЕНОВАННЫЕ ЦЕПОЧКИ (felt, агентно, ~5-10 на город).** При создании мира
-из реальных venue+производителей собираются несколько цепочек `сырьё → производитель@venue
-→ товар → лавка/рынок → потребители` (данные-шаблоны `content/chains.json`: помол зерна,
-кожа→обувь, руда→утварь, эль, снадобья…). Каждая — маленький граф именованных NPC + узлов +
-реальный товар (item-фактшит) + цена. **Игрок видит и рвёт**: убил мельника → помол встал →
-пекарь без муки → хлеб дорожает (наблюдаемая именованная цепочка, не абстракция); скупил
-лавку → дефицит; сбыл кожу из данжа → затоварка дубильни → цена вниз.
+**PRIMARY tier—NAMED CHAINS (felt, agent-level, ~5-10 per city).** When building the world from real venues+producers,
+several chains assemble `raw → producer@venue → good → shop/market → consumers` (data-templates `content/chains.json`:
+grain milling, hide→shoes, ore→vessels, ale, potions…). Each—small graph of named NPCs + nodes +
+real goods (item-factsheet) + price. **Player sees and breaks it**: kill miller → milling halts →
+baker out of flour → bread prices rise (visible named chain, not abstraction); hoard the shop →
+shortage; dump dungeon leather → tannery gluts → prices fall.
 
-**СОХРАНЕНИЕ ДЕНЕГ (замкнутый контур, чинит runaway).** Монета города `M` — фиксирована
-(меняется ТОЛЬКО притоком/оттоком игрока: лут из данжа влил золото → инфляция; игрок скупил
-и увёз → дефляция — реальный ощущаемый эффект). Раз в день монета ТЕЧЁТ по цепочкам
-`потребитель → лавка → производитель → (вход+маржа+своё потребление) → назад` — циркулирует,
-не создаётся. Бедность = потеря своей доли оборота (твой товар не в спросе / тебя подрезали),
-а не «монета испарилась». Никакого безусловного «+coin за работу» — доход ТОЛЬКО из чужой
-траты. Это делает `wealth`-нужду настоящей: пустой кошелёк = высокая нужда = давление к
-работе/промыслу/долгу (а долг/промысел — уже механики).
+**MONEY CONSERVATION (closed loop, fixes runaway).** City's coin `M`—fixed (changes ONLY by player inflow/outflow:
+dungeon loot inflates → inflation; player hoards and leaves → deflation—real felt effect). Once per day money
+FLOWS through chains `consumer → shop → producer → (take+margin+own consumption) → back`—circulates, not created.
+Poverty = loss of share of turnover (your goods unwanted / you got undercut), not "coin vanished". No unconditional
+"+coin for work"—income ONLY from others' spending. This makes `wealth`-need real: empty purse = high need = pressure
+to work/crime/debt (debt/crime—already mechanics).
 
-**Цены** per-товар из запаса-vs-спрос цепочки, с КЛАМПАМИ и ЭЛАСТИЧНОСТЬЮ (дорого → меньше
-покупают → сток не уходит в минус; редундантность/замена/импорт против единой точки отказа —
-убил единственного мельника: хлеб дорожает, но караван/соседний помол смягчают, не «голод
-навсегда»).
+**Prices**—per-good from chain supply-vs-demand, with CLAMPS and ELASTICITY (expensive → fewer buy → stock doesn't
+go negative; redundancy/substitution/import against single point of failure—kill the only miller: bread gets dear,
+but caravan/neighbor's mill soften it, not "starvation forever").
 
-**Ярус ФОН — безымянная масса (агрегат, дёшево).** ~850 нецепочечных NPC = абстрактный спрос
-на еду (кормит спрос пищевых цепочек) + подённый труд + медленный дрейф достатка в ОГРАНИЧЕННОМ
-пуле монеты (не поагентный runaway). Это «население»-число, не индивидуальная эконом-симуляция.
+**BACKGROUND tier—nameless masses (aggregate, cheap).** ~850 non-chain NPCs = abstract food demand (feeds food-chain
+demand) + casual labor + slow drift of wealth in LIMITED coin pool (no per-agent runaway). This—"population"-number,
+not per-agent econ simulation.
 
-**Стык с LLM-агендами (чинит «пустую болтовню»).** Агенды про КОНКРЕТНЫХ людей/venue
-(«выкупить мельницу», «разорить сапожника Аля») получают механику: именованный NPC копит
-маржу цепочки → если владелец умер/разорился, честолюбец **реально выкупает venue** → город
-меняет владельца (крупное последствие, deed). Агенды безымянной массы остаются флейвором.
-Так «всё настоящее» доходит до экономики.
+**Seam with LLM-agendas (fixes "empty chatter").** Agendas about SPECIFIC people/venues ("buy out the mill",
+"ruin shoemaker Alia") get mechanics: named NPC accumulates chain margin → if owner dies/ruined, ambitious one
+**really buys venue** → city changes owner (major consequence, deed). Nameless-mass agendas stay flavor.
+So "everything real" reaches the economy.
 
-### Слой C — Роль↔venue (пространственно ПЕРВЫМ, экономически — с B)
+### Layer C—Role↔venue (spatially FIRST, economically—with B)
 
-- **C-пространственный (можно первым, до экономики):** услуги (трактирщик/лавочник/жрец) —
-  нужен venue, гравитация `P ∝ ёмкость / расстояние(дом,venue)^β`; профицит профессии над
-  слотами → реклассификация как **нарративная нисходящая мобильность** (разорившийся
-  трактирщик → озлобленный подёнщик, с меткой в память/агенду — не молчаливая смена ярлыка).
-  Правит и генерацию пула: доля профессий ∝ спросу города (офлайн при ковке).
-- **C-экономический (только с B):** производства (дубильщик/ткач/мельник) работают дома, но
-  **производят в товар цепочки** — «дом=мастерская» честно лишь когда сток из B существует.
-  До B — не заявлять «производит».
+- **C-spatial (can be first, before economy):** services (innkeeper/shopkeeper/priest)—
+  need venue, gravity `P ∝ capacity / distance(home,venue)^β`; profession surplus over slots →
+  reclassification as **narrative downward mobility** (ruined innkeeper → bitter day-laborer,
+  marked in memory/agenda—not silent label-swap). Also governs pool generation: profession share ∝ city demand
+  (offline at forging).
+- **C-economic (only with B):** crafts (tanner/weaver/miller) work at home, but
+  **produce into chain goods**—"home=workshop" only honest when B's stock exists.
+  Before B—don't claim "produces".
 
-### Слой D — Демография и households (РЕШЕНИЕ ТРЕБУЕТСЯ)
+### Layer D—Demography and households (DECISION NEEDED)
 
-Пул сейчас: 661 adult / 188 middle / 47 young / 4 old — **почти все работоспособные,
-иждивенцев нет**. «Домохозяйство с иждивенцами» строить не на чем. Развилка (выбрать до кода):
-(а) **доковать демографию в пул** офлайн — дети/старики на домохозяйство (иждивенцы
-потребляют, не производят; заземляет наследование/«пощади родню»/демографию); ИЛИ (б)
-**сузить households** до «взрослые под одной крышей + эконом-солидарность» без иждивенцев
-(дешевле, но беднее). Рекомендация — (а) малым офлайн-проходом при ковке пула, раз household
-нужен иждивенцам для смысла. Семьи из ties сейчас РАССЕЛЕНЫ ВРОЗЬ — households требует селить
-родню вместе (менять расселение, следить за детерминизмом/сейвами).
+Pool now: 661 adult / 188 middle / 47 young / 4 old—**almost all working-age, no dependents**.
+"Household with dependents" has nothing to build on. Fork (choose before code): (a) **augment demography
+in pool** offline—children/elderly in households (dependents consume, don't produce; grounds inheritance/
+"spare the family"/demography); OR (b) **restrict households** to "adults under one roof + econ-solidarity"
+without dependents (cheaper, leaner). Recommendation—(a) via small offline pass at pool forging, since households
+need dependents for sense. Families from ties now SCATTERED—households need family settling together (reshape placement,
+watch determinism/saves).
 
-### Слой E — Время (один источник истины)
+### Layer E—Time (single source of truth)
 
-`open_hours` (открытие/закрытие в игровых часах) на venue — **единственный** источник «когда
-место активно»; 4-фазные окна утилити становятся ПРОИЗВОДНЫМИ от них (не два механизма).
-Плюс день недели / рыночный день (рынок ×1.5) и канонические часы служб. Данные, не код.
-Экономика «раз в день» ленива к пропущенным дням (игрок спит/в данже 3 дня → догнать 3
-апдейта по сроку, как deeds-appointments) — против рассинхрона при отлучках.
+`open_hours` (opening/closing in game time) on venue—**single** source of "when place is active"; 4-phase utility
+windows become DERIVED from them (not two systems). Plus day of week / market day (market ×1.5) and canonical service
+hours. Data, not code. Economy "once per day" lazy on skipped days (player sleeps/in dungeon 3 days → catch up 3
+updates by day, like deeds-appointments)—against desync on absences.
 
-### Наблюдаемость
+### Observability
 
-Карточка распорядка NPC (Majora's Bombers' Notebook — шкала «где в какую фазу» из `predict()`);
-ярлык занятия над NPC («работает/ужинает/в дозоре» из crof_kind); стенд `/citydebug/cityday`
-(GIF + именованные цепочки как приборка: кто→кому→почём, где дефицит); градация занятости
-(DF low/high: «занят важным» → короче отвечает игроку).
+NPC schedule card (Majora's Bombers' Notebook—scale "where at what phase" from `predict()`);
+activity label above NPC ("working/dining/on patrol" from crof_kind); stand `/citydebug/cityday`
+(GIF + named chains as dashboard: who→whom→price, where shortage); occupancy gradient
+(DF low/high: "busy with important" → shorter replies to player).
 
-### Порядок реализации (дешёвые зелёные инкременты; C-простр → A → B → C-экон → D/E)
+### Implementation order (cheap green increments; C-spatial → A → B → C-econ → D/E)
 
-1. **C-пространственный ✔** (2026-07-07, на проде): `_plan_jobs` (детерминир., оба пути
-   расселения) — venue набирает БЛИЖАЙШИХ по дому работников роли (гравитация, workcap по
-   типу); профицит услуг → реклассификация в подёнщика с памятью «прежде был X»; производства
-   работают дома (роль сохранена). Замер: таверны по 6, трактирщик 54→12, 143 подёнщика.
-   Ложь «трактирщик дома» устранена; агенды «скопить на своё» обрели смысл.
-2. **A интент-прогноз ✔** (2026-07-07, на проде): `predict(pid,phase)`→{node,kind,route},
-   `forecast(pid)`=распорядок дня, `crosses(pid,node,phase)`=перехват на уровне плана;
-   обязательства как оверрайд (set_commit/clear_commit: flee>appointment>shift>follow>errand;
-   follow пинует к игроку, уступает критнужде). Эндпоинт /api/play/schedule (карточка для
-   знакомого). Ядро (choose_c) не трогалось. 4 теста.
-3. **B1 экономика ✔** (2026-07-07, на проде): 10 именованных цепочек (chains.json) +
-   `economy.py` — сид монеты M + суточный economy_step (производство→товар, покупка=перевод
-   монеты СОХРАНЕНИЕ M, цены от спроса/запаса кламп+эластичность) + wealth-нужда от кошелька;
-   эндпоинт /api/play/economy (стенд). Замер: M инвариант, неравенство эмерджентно, разрыв
-   цепочки→цена вверх. 4 теста.
-   **B2 товарный рынок игрока ✔** (2026-07-07, на проде): внутри venue игрок торгует товарами
-   цепочек по живой цене — `market_here/player_buy/player_sell`. Скупка: запас−, цена↑ (кламп
-   base×4), монета pc→производителям = ИНФЛЯЦИЯ (M+), товар в котомку. Сбыт: запас+, цена↓,
-   монета скупщиков→pc = ДЕФЛЯЦИЯ (M−), спред 0.7 + неликвид. Рыночная диверсия: скупил хлеб →
-   цена ×8 → город голодает. Починка семантики цены economy_step (спрос=demand, не ×3 — запас
-   теперь копится профицитом; дефицит→вверх/избыток→вниз; потолок склада demand×8). Эндпоинты
-   /api/play/market[/buy|/sell] + UI-модалка «прилавок». 3 теста (M инвариант 12897).
-   **B3 выкуп venue ✔** (2026-07-07, на проде): `former_role` при реклассификации (C-простр);
-   суточный `venue_buyouts` — аспирант-подёнщик со СВОИМ бывшим ремеслом + деньгами выкупает
-   вакантный venue (владелец умер/мест < ёмкости) → work=venue, роль восстановлена, deed
-   'acquire', деньги совладельцу (M сохр.) или из города (M−). Экономическое исцеление: убил
-   производителя цепочки → аспирант оживляет её. Живьём: убил работников таверны → бывший
-   трактирщик выкупил, ремесло вернулось. 5 тестов (детерминизм: форс пересборки мира per-test).
-4. **C-экономический ✔** (2026-07-07) свёрнут в B: производство = output×живые производители в
-   economy_step (отдельного слоя не нужно). ИТОГО B готов (B1+B2+B3).
-5. **D демография/households ✔** (2026-07-07, на проде, развилка (а) — иждивенцы В ПУЛ):
-   **D1** — `_households` разбивает пул на семьи (по фамилии, размер 1-5), каждая живёт в ОДНОМ
-   доме (дома дедуплены по узлу); замер 349 домохозяйств, 0 смешанных фамилий. **D2** —
-   scripts/depgen.py (офлайн, без LLM) доковал +454 иждивенца (дети/старики, mech.dependent+head,
-   шаблонная персона) в worlds.db (900→1354); селятся в дом главы семьи, work=None, исключены из
-   «работы дома» (_NONCRAFT); top-up доселяет их в СТАРЫЕ миры не тревожа взрослых. Замер: 100%
-   под крышей взрослой родни, restore держит. 5 тестов. ДАЛЬШЕ: household-экономика (глава кормит
-   иждивенцев → пищевой спрос), персоны/портреты иждивенцам (отд. батч).
-6. **E время ✔** (2026-07-07, на проде): **E1 ленивый catch-up** — economy_step(day=) по
-   конкретным суткам; economy_catchup() гонит оборот за КАЖДЫЙ пропущенный день (базлайн — день
-   старта, flag econ_day, кап 7 = LOD), отвязан от «утра» (хук в _apply_routine, идемпотентно);
-   прыжок 0→5=[1..5], монета сохранена. **E2 open_hours** (единый источник часов) — канон окон по
-   типу заведения (таверна 11-01, рынок/лавка день, храм службы, игорный 18-04, окна за полночь);
-   гейтит торговлю игрока B2 (закрыто→«откроется в N:00», баннер 🔒), питает нарратив. 4 теста.
-   ДАЛЬШЕ: рыночный день (раз в неделю рынок гуще), NPC-окна places.py вывести из того же канона.
-7. Наблюдаемость (стенд /citydebug/cityday, ярлык занятия над NPC, карточки) — параллельно.
+1. **C-spatial ✔** (2026-07-07, on prod): `_plan_jobs` (deterministic, both placement paths)—
+   venue recruits NEAREST-by-home workers of role (gravity, workcap by type); service surplus →
+   day-laborer reclassification with memory "was X before"; crafts work at home (role kept). Count:
+   taverns 6 each, innkeeper 54→12, 143 day-laborers. Lie "innkeeper at home" fixed; agendas
+   "save for my own" gain meaning.
+2. **A intent-forecast ✔** (2026-07-07, on prod): `predict(pid,phase)`→{node,kind,route},
+   `forecast(pid)`=day schedule, `crosses(pid,node,phase)`=plan-level intercept;
+   obligations as override (set_commit/clear_commit: flee>appointment>shift>follow>errand;
+   follow pins to player, yields to critical need). Endpoint /api/play/schedule (card for acquaintance).
+   Core (choose_c) untouched. 4 tests.
+3. **B1 economy ✔** (2026-07-07, on prod): 10 named chains (chains.json) +
+   `economy.py`—coin-seed M + daily economy_step (production→goods, purchase=coin transfer
+   CONSERVATION M, prices from demand/stock clamp+elasticity) + wealth-need from purse;
+   endpoint /api/play/economy (stand). Count: M invariant, inequality emergent, chain break→price up. 4 tests.
+   **B2 player commodity market ✔** (2026-07-07, on prod): inside venue player trades chain goods at live price—
+   `market_here/player_buy/player_sell`. Buy: stock−, price↑ (clamp base×4), coin player→producers = INFLATION (M+),
+   good to pack. Sell: stock+, price↓, coin buyers→player = DEFLATION (M−), spread 0.7 + illiquid. Market trick:
+   hoard bread → price ×8 → city starves. Fix price semantics in economy_step (demand=demand, not ×3—stock now
+   accumulates in surplus; shortage→up/excess→down; stock ceiling demand×8). Endpoints /api/play/market[/buy|/sell] +
+   UI modal "vendor". 3 tests (M invariant 12897).
+   **B3 venue buyout ✔** (2026-07-07, on prod): `former_role` at reclassification (C-spatial);
+   daily `venue_buyouts`—aspirant day-laborer with OWN former craft + money buys vacant venue (owner dead/spots < capacity)
+   → work=venue, role restored, deed 'acquire', money to co-owner (M kept) or from city (M−). Economic healing:
+   kill chain producer → aspirant revives it. Live: kill tavern workers → ex-innkeeper buys back, craft returned.
+   5 tests (determinism: force world rebuild per-test).
+4. **C-economic ✔** (2026-07-07) folded into B: production = output×live producers in
+   economy_step (no separate layer). TOTAL B done (B1+B2+B3).
+5. **D demography/households ✔** (2026-07-07, on prod, fork (a)—dependents IN POOL):
+   **D1**—`_households` splits pool into families (by surname, size 1-5), each lives in ONE house
+   (houses deduplicated by node); count 349 households, 0 mixed-surname. **D2**—scripts/depgen.py
+   (offline, no LLM) augmented +454 dependents (children/elderly, mech.dependent+head, template persona)
+   into worlds.db (900→1354); settle in household head's house, work=None, excluded from "home work"
+   (_NONCRAFT); top-up settles them in OLD worlds without disturbing adults. Count: 100% under adult
+   kin roof, restore holds. 5 tests. NEXT: household-economy (head feeds dependents → food demand),
+   personas/portraits for dependents (separate batch).
+6. **E time ✔** (2026-07-07, on prod): **E1 lazy catch-up**—economy_step(day=) for specific days;
+   economy_catchup() runs turnover for EACH skipped day (baseline—day start, flag econ_day, cap 7 = LOD),
+   decoupled from "morning" (hook in _apply_routine, idempotent); jump 0→5=[1..5], coin kept.
+   **E2 open_hours** (single source of hours)—canon windows by venue type (tavern 11-01, market/shop day,
+   temple services, gambling 18-04, hours past midnight); gates player trade B2 (closed→"opens at N:00",
+   banner 🔒), feeds narrative. 4 tests. NEXT: market day (weekly markets busier), NPC-windows places.py
+   derive from same canon.
+7. Observability (stand /citydebug/cityday, activity label above NPC, cards)—in parallel.
 
-### Что НЕ ломается
+### What Does NOT Break
 
-Утилити-ядро (`society/`), сцена (читает crof/predict так же), происшествия (места=реальные
-дома/работы; с экономикой — богаче: дефицит-происшествие из реальной цепочки), deal-гейт
-(наём за настоящие деньги из `M`), пошаговость (интент — прогноз, не реальное время). Ядро не
-переписывается, слои надстраиваются.
+Utility-core (`society/`), scene (reads crof/predict same way), events (places=real homes/jobs;
+with economy—richer: deficit-event from real chain), deal-gate (hire with real money from `M`),
+turn-based (intent—forecast, not real time). Core not rewritten, layers stack.
 
 
-Связано: [mind.md](mind.md) (разум NPC) · [locations.md](locations.md) (живая сцена, ёмкость,
-материализация=ярус 2) · [worldgen.md](worldgen.md) (граф, расселение, пул) ·
-[items.md](items.md) (товар=фактшит) · [quests.md](quests.md) · [entities.md](entities.md)
+Related: [mind.md](mind.md) (NPC minds) · [locations.md](locations.md) (live scene, capacity,
+materialization=layer 2) · [worldgen.md](worldgen.md) (graph, settlement, pool) ·
+[items.md](items.md) (goods=factsheet) · [quests.md](quests.md) · [entities.md](entities.md)

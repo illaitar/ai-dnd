@@ -60,6 +60,7 @@ from aidnd.server.play.engine.core import (
     router,
 )
 from aidnd.server.play.engine.resolve import _STANCE, _VOICE, _world_lookup
+from aidnd.server.play.engine.sound import audibility, overheard_line
 from aidnd.server.play.engine.worldsim import routine_step
 from aidnd.server.play.mechanics.combat import (
     _guild_bid,
@@ -84,6 +85,16 @@ from aidnd.server.play.mechanics.items import (
     _seed_item_pool,
 )
 from aidnd.worldgen.population import Townsperson
+
+
+def _overheard(text, player_zone, speaker_zone, zone_name, seed, boost=0):
+    """(tier_int|None, display_text, mem_weight) for a conversation line the player
+    overhears — spatial audibility tier drives the fidelity (docs/sound-attention.md)."""
+    tier = audibility(player_zone, speaker_zone, PB["sound_voice"], boost=boost)
+    if tier is None:
+        return None, "", 0.0
+    disp, w = overheard_line(text, tier, zone_name, seed)
+    return int(tier[1]), disp, w
 
 
 def _world_events() -> None:
@@ -1565,50 +1576,24 @@ def _live_tick(people) -> tuple:
                     )  # will stranger answer — learn next tick
                 else:
                     conv_note_say(lv, pid, tid, txt, w.bodies[pid].place)
-                    # AUDIBILITY (docs/locations.md): own zone — fully; other — snippet
-                    same_zone = (not zones_l) or (
-                        PLAYER in w.bodies and w.bodies[pid].place == w.bodies[PLAYER].place)
+                    zn_by_place = {z["name"]: z for z in zones_l}
+                    sp_place = w.bodies[pid].place
+                    pl_place = w.bodies[PLAYER].place if PLAYER in w.bodies else sp_place
                     ev = _S.get("eaves") or {}
-                    eaves_on = (zones_l and not same_zone
-                                and ev.get("place") == w.bodies[pid].place
-                                and lv["clock"] <= ev.get("until", -1))
-                    if same_zone or eaves_on:        # eavesdropping = honestly earned hearing tier
-                        feed.append(
-                            {
-                                "k": "speech",
-                                "who": who,
-                                "to": _display(tid, people) if tid in people else tgt,
-                                "text": txt if same_zone
-                                else f"(подслушано — {w.bodies[pid].place}) {txt}",
-                            }
-                        )
-                        pc.memory.add(
-                            f"слышал в «{lv['place']}»: {who} — {txt[:90]}",
-                            _mt(),
-                            0.18 if same_zone else 0.3,
-                            kind="heard",
-                            about=[pid],
-                        )
+                    boost = 1 if (ev.get("place") == sp_place
+                                  and lv["clock"] <= ev.get("until", -1)) else 0
+                    tier, disp, mw = _overheard(
+                        txt, zn_by_place.get(pl_place, {"id": pl_place}),
+                        zn_by_place.get(sp_place, {"id": sp_place}),
+                        sp_place, f"hear|{lv['clock']}|{pid}", boost=boost)
+                    if tier is None:
+                        lv["murmur"] = lv.get("murmur", 0) + 1
                     else:
-                        znm = w.bodies[pid].place
-                        if random.Random(f"hear|{lv['clock']}|{pid}").random() < 0.35:
-                            feed.append(
-                                {
-                                    "k": "speech",
-                                    "who": who,
-                                    "to": _display(tid, people) if tid in people else tgt,
-                                    "text": f"({znm}, краем уха) …{txt[:34]}…",
-                                }
-                            )
-                            pc.memory.add(
-                                f"краем уха ({znm}): {who} о чём-то говорил — …{txt[:36]}…",
-                                _mt(),
-                                0.08,
-                                kind="heard",
-                                about=[pid],
-                            )
-                        else:
-                            lv["murmur"] = lv.get("murmur", 0) + 1   # general murmur instead of eavesdropping
+                        feed.append({"k": "speech", "who": who, "tier": tier,
+                                     "to": _display(tid, people) if tid in people else tgt,
+                                     "text": disp})
+                        pc.memory.add(f"слышал в «{lv['place']}»: {who} — {disp[:90]}",
+                                      _mt(), mw, kind="heard", about=[pid])
                     spoke.append(f"сказал(а) {lv['names'].get(tid, tgt)}: «{txt[:50]}»")
                     if tid in w.npc_minds and ((not zones_l)
                                                or w.bodies[tid].place == w.bodies[pid].place):

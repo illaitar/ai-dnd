@@ -10,7 +10,6 @@ import random
 from fastapi import Request
 
 from aidnd import society
-from aidnd.inference import LLMBadOutput, LLMUnavailable
 from aidnd.mind import Body, advance_agendas
 from aidnd.mind import Item as MItem
 from aidnd.mind import World as MWorld
@@ -39,11 +38,12 @@ from aidnd.server.play.engine.core import (
     _scene_descriptors,
     _store,
     _tokens_ru,
-    _wanted,
-    _wanted_add,
     _wid,
     router,
 )
+from aidnd.server.play.engine.loop.routine import _apply_routine as _apply_routine
+from aidnd.server.play.engine.loop.routine import _world_events as _world_events
+from aidnd.server.play.engine.loop.tick import _world_tick as _world_tick
 from aidnd.server.play.engine.resolve import _STANCE, _VOICE, _world_lookup
 from aidnd.server.play.engine.scene.view import _scene_ambient as _scene_ambient
 from aidnd.server.play.engine.scene.view import _scene_dict as _scene_dict
@@ -77,20 +77,13 @@ from aidnd.server.play.engine.worldbuild.population import _surname as _surname
 from aidnd.server.play.engine.worldbuild.population import _topup_dependents as _topup_dependents
 from aidnd.server.play.engine.worldbuild.ties import _weave_locals as _weave_locals
 from aidnd.server.play.engine.worldbuild.ties import _weave_ties as _weave_ties
-from aidnd.server.play.engine.worldsim import routine_step
-from aidnd.server.play.mechanics.combat import (
-    _npc_delves,
-)
 from aidnd.server.play.mechanics.contracts import (
-    _board_npc_fulfill,
-    _board_publish,
     _ct_cur,
     _ct_steps,
     _step_desc,
 )
 from aidnd.server.play.mechanics.items import (
     _materialize_npc,
-    _merchant_restock,
     _pc_coins,
 )
 
@@ -103,56 +96,6 @@ def _overheard(text, player_zone, speaker_zone, zone_name, seed, boost=0):
         return None, "", 0.0
     disp, w = overheard_line(text, tier, zone_name, seed)
     return int(tier[1]), disp, w
-
-
-def _world_events() -> None:
-    """Daily passive world events (once per day, morning): wanted level cools, adventurers leave
-    on guild contracts, citizens post on board, random caravan brings goods. Each in its own try:
-    one failure doesn't crash world."""
-    if _wanted() > 0:  # wanted level cools — memory is finite
-        _wanted_add(-PB["wanted_decay"])
-    try:
-        from aidnd.server.play.engine.incidents import gang_morning, incident_spawn
-        from aidnd.server.play.mechanics.deals import _deal_jobs
-
-        news = _npc_delves() + _deal_jobs() + incident_spawn() + gang_morning()
-        if news:
-            _S["guild_news"] = (_S.get("guild_news") or [])[-2:] + news
-    except Exception:  # noqa: BLE001 — raid doesn't crash the world
-        pass
-    try:
-        bn = _board_npc_fulfill() + _board_publish()
-        if bn:
-            _S["board_news"] = (_S.get("board_news") or [])[-3:] + bn
-    except Exception:  # noqa: BLE001 — board doesn't crash the world
-        pass
-    try:
-        if random.Random(f"caravan|{_gt() // 1440}|{_wid()}").random() < PB["caravan_chance"]:
-            _merchant_restock(f"caravan|{_gt() // 1440}")
-    except Exception:  # noqa: BLE001
-        pass
-
-
-def _apply_routine() -> None:
-    """Sync passive world with current game time: idempotent, cheap — once per day phase
-    (key phase+day). Routine of ALL residents built from NEEDS/character/time (society, via
-    worldsim.routine_step), not hardcoded roles. At dawn — daily events."""
-    key = (_gt() // 30, _gt() // 1440)               # routine step: every 30 game minutes
-    if _S.get("routine_key") == key or not _S.get("people"):
-        return
-    _S["routine_key"] = key
-    mkey = (_phase(), _gt() // 1440)                 # daily events — once at morning
-    if mkey[0] == "morning" and _S.get("events_key") != mkey:
-        _S["events_key"] = mkey
-        _world_events()
-    try:  # E1: economy — lazy catch-up for EVERY skipped day (not just 'morning')
-        from aidnd.server.play.engine.economy import economy_catchup
-        en = economy_catchup()
-        if en:
-            _S["econ_news"] = (_S.get("econ_news") or [])[-2:] + en
-    except Exception:  # noqa: BLE001 — economy doesn't crash the world
-        pass
-    routine_step(_S["people"], _S["crof"], pin=set(_here(_S["loc"], _S["crof"])))
 
 
 # --------------------------------------------- CRAFTING / DURABILITY (slice 2) - #
@@ -1010,30 +953,3 @@ def _live_tick(people) -> tuple:
     for pid in order:  # lived experience survives restart
         _npc_save(pid)
     return feed, address
-
-
-def _world_tick() -> dict:
-    """★ WORLD TICK — only point where 'world moved'. Called at end of processing ANY player
-    action (turn-based, like table). Two layers:
-      1) PASSIVE world — routine of ALL residents from needs/character/time + daily events
-         (aidnd.society → worldsim.routine_step; sync in _play/_apply_routine,
-         idempotent per day phase);
-      2) LIVE scene — who's near player, think/talk/act (mind + LLM, _live_tick).
-
-    GAME CYCLE (each @router.post /api/play/*):
-        player action → _gt_add(action time) → world mutation → _world_tick() → scene response.
-    """
-    city, people, crof, cr2b, loc = _play()  # _play → _apply_routine: passive world synced
-    lv = _S.get("live")
-    if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
-        _live_build(city, people, crof, cr2b, loc)
-    try:
-        feed, address = _live_tick(people)  # live scene: those nearby
-    except (LLMUnavailable, LLMBadOutput):  # no model won't pretend — honest error to player
-        raise
-    except Exception:  # noqa: BLE001 — other tick bugs don't drop the player's action
-        import logging
-
-        logging.getLogger("aidnd").warning("live tick failed", exc_info=True)
-        return {"feed": [], "address": []}
-    return {"feed": feed, "address": address}

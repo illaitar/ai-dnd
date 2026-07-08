@@ -15,6 +15,7 @@ import pytest
 
 from aidnd.server.play.engine import core, worldsim
 from aidnd.server.play.engine import world as W
+from aidnd.server.play.engine.loop import routine as loop_routine
 from aidnd.server.play.engine.session import persist
 
 
@@ -31,7 +32,9 @@ def world(monkeypatch):
 def test_apply_routine_pins_present(world, monkeypatch):
     """_apply_routine hands routine_step the set of NPCs at the player's node as `pin`."""
     captured = {}
-    monkeypatch.setattr(W, "routine_step", lambda people, crof, pin=None: captured.update(pin=pin))
+    monkeypatch.setattr(
+        loop_routine, "routine_step", lambda people, crof, pin=None: captured.update(pin=pin)
+    )
     core._S["routine_key"] = None                 # force a routine step this call
     core._S["gt"] = core._S["gt"] + 60            # cross a 30-min bucket
     W._apply_routine()

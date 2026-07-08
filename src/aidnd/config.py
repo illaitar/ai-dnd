@@ -56,9 +56,10 @@ DEEPSEEK_BASE: str = os.environ.get("DEEPSEEK_BASE", "https://api.deepseek.com")
 DEEPSEEK_MODEL: str = os.environ.get("AIDND_DEEPSEEK_MODEL", "deepseek-chat")
 # enrich parallelism: cloud (network-bound) parallelized, local Ollama not (swap on 1 GPU)
 DEEPSEEK_CONCURRENCY: int = int(os.environ.get("AIDND_DEEPSEEK_CONCURRENCY", "8"))
-# live-scene NPC decisions run concurrently (network-bound LLM calls, no client lock). Raise for a
-# busier scene, bounded by the LLM provider's rate/concurrency limit (too high → 429s).
-LIVE_CONCURRENCY: int = int(os.environ.get("AIDND_LIVE_CONCURRENCY", "16"))
+# live-scene NPC decisions run concurrently (network-bound LLM calls, no client lock). 64 lets a full
+# tavern (~35-63 present) decide in ONE wave; bounded by the LLM provider's rate/concurrency limit
+# (too high → 429s → LLMUnavailable). Raise via env for bigger crowds if the account allows.
+LIVE_CONCURRENCY: int = int(os.environ.get("AIDND_LIVE_CONCURRENCY", "64"))
 
 # --- service: user/session/game DB (Postgres, async) + auth ---
 DATABASE_URL: str = os.environ.get("AIDND_DATABASE_URL", "postgresql+asyncpg://localhost/aidnd_dev")

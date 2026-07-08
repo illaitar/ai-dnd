@@ -10,7 +10,9 @@ audibility(listener_zone, source_zone, loudness, boost=0) -> "L1"|"L2"|"L3"|None
     Fidelity tier of a sound of given loudness for a listener, by centroid distance.
 """
 
+import json
 import math
+import os
 
 from .core import PB
 
@@ -46,3 +48,28 @@ def audibility(listener_zone: dict, source_zone: dict, loudness: float,
     else:
         return None
     return _TIERS[max(0, idx - max(0, boost))]
+
+
+_SOURCES: dict | None = None
+
+
+def load_sound_sources() -> dict:
+    """Authored ambient descriptors (cached): {by_object, by_kind} → {loudness, ambient_ru}."""
+    global _SOURCES
+    if _SOURCES is None:
+        p = os.path.join(os.path.dirname(__file__), "..", "..", "..", "content",
+                         "sound_sources.json")
+        with open(p, encoding="utf-8") as f:
+            _SOURCES = json.load(f)
+    return _SOURCES
+
+
+def zone_source(zone: dict) -> dict | None:
+    """Fixed ambient source for a zone: matched by a contained object's kind/name,
+    else by the zone's own kind. None if the zone emits nothing authored."""
+    cat = load_sound_sources()
+    for o in zone.get("objects", []):
+        hit = cat["by_object"].get(o.get("kind")) or cat["by_object"].get(o.get("name"))
+        if hit:
+            return hit
+    return cat["by_kind"].get(zone.get("kind"))

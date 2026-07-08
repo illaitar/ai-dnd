@@ -1,0 +1,13 @@
+{
+  "by_object": {
+    "очаг":  {"loudness": 0.5, "ambient_ru": "потрескивает очаг"},
+    "камин": {"loudness": 0.5, "ambient_ru": "гудит пламя в камине"},
+    "горн":  {"loudness": 0.85, "ambient_ru": "звенит молот у горна"},
+    "фонтан": {"loudness": 0.4, "ambient_ru": "журчит вода"}
+  },
+  "by_kind": {
+    "kitchen": {"loudness": 0.55, "ambient_ru": "с кухни доносится стук и шипение"},
+    "forge":   {"loudness": 0.85, "ambient_ru": "лязг ковки заполняет воздух"},
+    "hearth":  {"loudness": 0.5, "ambient_ru": "потрескивает огонь"}
+  }
+}

@@ -9,7 +9,7 @@ test_missing_centroid_none  : a zone without a centroid is treated as inaudible.
 test_boost_lifts_tier       : boost=1 lifts L2→L1 (the listen primitive).
 """
 
-from aidnd.server.play.engine.sound import audibility
+from aidnd.server.play.engine.sound import audibility, zone_source
 
 
 def _z(zid, cx=None, cy=None):
@@ -42,3 +42,17 @@ def test_missing_centroid_none():
 def test_boost_lifts_tier():
     a, b = _z("z0", 0.0, 0.0), _z("z1", 10.0, 0.0)
     assert audibility(a, b, 0.8, boost=1) == "L1"  # L2 lifted one tier
+
+
+def test_zone_source_by_object():
+    z = {"id": "z0", "kind": "hall", "objects": [{"name": "очаг", "kind": "очаг"}]}
+    src = zone_source(z)
+    assert src and src["ambient_ru"] == "потрескивает очаг"
+
+
+def test_zone_source_by_kind():
+    assert zone_source({"id": "z1", "kind": "forge"})["loudness"] == 0.85
+
+
+def test_zone_source_none():
+    assert zone_source({"id": "z2", "kind": "table"}) is None

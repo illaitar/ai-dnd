@@ -876,6 +876,29 @@ def _live_affordances(bid) -> list:
     return out or [MItem("уличная суета", 0.15, satisfies="novelty")]
 
 
+_SQUALOR_HINTS = ("оборван", "грязн", "рвань", "лохмот")  # ragged/filthy clothing tokens
+
+
+def _npc_surface(p) -> dict:
+    """Project a Townsperson's persona onto the visible surface the mind's appraisal reads.
+
+    race — persona race token (default "человек"); squalor [0..1] — grime/disrepair, derived
+    from visible wealth (poorer NPCs read dirtier) and bumped up if the clothing text hints at
+    rags/filth; marks — visible tokens (scars, brands, insignia, ...) from persona look.
+    """
+    per = p.persona or {}
+    look = per.get("look") if isinstance(per.get("look"), dict) else {}
+    squalor = round(min(1.0, max(0.0, 0.55 - p.appearance)), 2)
+    clothing = str(look.get("clothing") or "").lower()
+    if any(hint in clothing for hint in _SQUALOR_HINTS):
+        squalor = round(min(1.0, squalor + 0.35), 2)
+    return {
+        "race": str(per.get("race") or "человек").strip() or "человек",
+        "squalor": squalor,
+        "marks": list(look.get("marks") or []),
+    }
+
+
 def _live_build(city, people, crof, cr2b, loc) -> None:
     bid = cr2b.get(loc)
     place = _binfo(bid)["name"] if bid else "улица"
@@ -967,6 +990,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             loot.append(MItem(it["name"], min(1.0, it["worth"] / 40)))
             imap[it["name"]] = iid
         npc_map[pid] = imap
+        surf = _npc_surface(p)
         w.add(
             Body(
                 id=pid,
@@ -975,6 +999,9 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                 appearance=p.appearance,
                 attention=round(rng.uniform(0.45, 0.85), 2),
                 loot=loot,
+                race=surf["race"],
+                squalor=surf["squalor"],
+                marks=surf["marks"],
             )
         )
         names[pid], roles[pid] = p.name, p.role
@@ -990,6 +1017,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     if best[1]:
         pc_loot.append(MItem(best[1]["name"], min(1.0, best[1]["worth"] / 40)))
         pc_map[best[1]["name"]] = best[0]
+    pc_row = _store().get_pc(_wid()) or {}
     w.add(
         Body(
             id=PLAYER,
@@ -998,6 +1026,9 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             appearance=min(0.8, 0.25 + coins / 60),
             attention=0.85,
             loot=pc_loot,
+            race="человек",
+            squalor=float(pc_row.get("squalor") or 0.0),
+            marks=[],
         )
     )  # player loot REAL (theft real)
     w.npc_minds = {pid: people[pid].state for pid in here_all}  # minds = same as in bodies (LOD cap)

@@ -16,14 +16,45 @@ is a `Body`.
 ## The entity
 
 - **Mechanical core** (forged in the pool, mirrored into the mind `config`): identity (name, sex,
-  race, life-stage, build), the **11 traits**, the **6 abilities**, charisma, appearance/status.
+  **race**, **numeric age** → life-stage, build), the **11 traits**, the **6 abilities**,
+  **skills** (learned proficiencies, below), charisma, appearance/status.
+- **Body / condition** (persistent, per-user): **hp / max_hp** (real, not just combat-time) and
+  **injuries** (persistent wounds/illness that heal over time and modify abilities/actions).
 - **Mind** (`mind.NpcState`, per-user runtime): 7 needs, emotions, relationships
   `{trust, affinity, fear}`, episodic memory, agendas, plan, mode.
-- **Player parity** — TODO. `_pc()` is already an `NpcState` with memory/relationships and a `Body`
-  whose `appearance = 0.25 + coins/60` (a broke player already reads poor). Two gaps: (1) the
-  player's traits are flat defaults (0.5) — give the player a real mech-core so others can read
-  *their* pride/malice; (2) the player's `Body` carries only wealth — project the same visible
-  **surface** (below) onto it so the appraisal treats the player identically.
+- **Player parity** — the player is one instance of this entity, judged like any stranger by
+  **surface + behaviour**, not an internal personality: traits are hidden, and the *human* drives
+  the player's choices, so the player does **not** get a game-side trait allocation. What the player
+  needs is a real **surface** (appearance/hygiene/dress/race/age — settable) so a ragged player
+  *reads as a beggar*, plus hp/injury/age/skills like anyone. (`_pc()` is already an `NpcState` with
+  memory/relationships and a `Body` whose `appearance = 0.25 + coins/60`; we add the rest.) Only the
+  **autonomous benchmark player** ([bench.md](bench.md)) gets a trait vector, because it must decide
+  on its own.
+
+## Body & lifecycle — health · injury · age · skills
+
+Pulled in from the earlier non-goals: the entity is a full body, not a mind on a stick.
+
+- **Health** — `hp/max_hp` become **persistent** (today hp is default 10 in the mind and only
+  computed at combat). `max_hp` derives from the mech-core (con + build + age); current hp persists
+  in `npc_state`/`pc_state`, regenerates slowly (a heal tick, like needs advance) or via rest/care/a
+  healer (знахарка). `hp ≤ 0` = death (corpse + witnesses, as combat already does).
+- **Injury / illness** — a list of persistent **conditions** (bleeding, broken limb, fever, poison)
+  that modify abilities/actions (a broken arm drops `str`/`dex`), heal over game-time or with care,
+  and are **surface or hidden** (a limp shows; an early fever is hidden until close). They arise from
+  combat, hazards, hunger/exposure, disease, and feed appraisal (a visibly sick or maimed person
+  draws pity, disgust, or avoidance by trait).
+- **Age** — a **number** (life-stage `child/adult/elder` derives from it). Shapes the mech-core
+  (elders: lower str/con, higher wis/skill; children: lower across the board), is a surface signal,
+  set at pool-forge (`depgen` already assigns stages). Aging over play is slow — a stored number,
+  not a live clock, for now.
+- **Skills** — learned **proficiencies** beyond the 6 abilities: a per-entity level in a set of
+  competencies (smithing/metalwork, herbs/medicine, letters/lore, trade, faith, law, stealth,
+  weapon-skill, persuasion…). This **unifies** three things already half-built: the items
+  `COMPETENCIES` list (inspection gates), craft `mastery`, and role. Skills gate & modify **rolls**
+  (`d20 + ability-mod + skill`), so a skilled smith forges masterwork and a skilled thief lifts a
+  purse a novice can't. Gained by **doing** (practice) and by **learning from a teacher** (same shape
+  as glyph-learning in magic).
 
 ## Two-layer visibility
 
@@ -64,10 +95,11 @@ one traits genuinely can't derive.
   warmth ≈ `sociability × B.charisma`; deference toward high status, amplified by low `ambition`.
   A proud citizen sits away from a beggar with **nothing authored** — it falls out of his traits
   meeting the beggar's surface.
-- **B — group/cultural tables (authored once, world-wide)** — cultural facts traits can't derive
-  (a timid, kind dwarf still inherits "distrust orcs"). A small `content/` table
-  `race × race → sentiment` (and optionally faction/class); every member reads it, their own traits
-  modulate it. Shared by thousands of NPCs, not per-NPC prose.
+- **B — group/cultural tables (authored once, world-wide) — IN NOW.** Cultural facts traits can't
+  derive (a timid, kind dwarf still inherits "distrust orcs"). Ship `content/race_relations.json`
+  (`race × race → sentiment`) now and **seed non-human NPCs into the pool** so race-hatred is live
+  from the start; every member reads the table, their own traits modulate it. Faction/class tables
+  follow. Shared by thousands of NPCs, not per-NPC prose.
 - **C — personal history (already exists)** — "the orc who killed my brother." `relationships` +
   `memory` + persona `ties`.
 
@@ -112,10 +144,11 @@ ticks). Make attention a **contested resource**:
 - **Earned salience.** An entity is salient when *new* (novelty, which **decays**), when it *did
   something* (spoke, drew steel, is wanted), or when it's *relevant to that NPC's goals* (a customer
   to the keeper, a mark to the thief). Absent a reason, a busy NPC does not turn.
-- **Current activity is an importance-weighted commitment.** The mind already has `engagement` and
-  `plan.importance` = "resistance to interruption" — underused. Model an NPC's real task (serve the
-  queue, finish a chat) as a plan with importance; greeting a stranger must **beat** it. So the
-  bored regular greets you; the harried keeper gives a nod and keeps pouring.
+- **Current activity is an importance-weighted commitment — derived, not authored.** Being on-shift
+  at your venue (role at workplace during `open_hours`) is an implicit "working" commitment whose
+  importance comes from the `purpose` need + being on shift — no per-role task lists. Reuses the
+  underused `engagement`/`plan.importance` ("resistance to interruption"). Greeting a stranger must
+  **beat** it, so the bored regular greets you while the harried keeper nods and keeps pouring.
 - **No player privilege.** The player competes for attention exactly like a salient NPC would.
 
 ## Conversation is freeform — no dialogue interface
@@ -140,19 +173,22 @@ There is **no separate dialogue mode, panel, or reply-thread**. Talking is a fre
 - **Keep / extend:** `appraise()` (dims→emotion), the `goals.py` appraisal loop, `Body` surface,
   the `converse` goal formula, `engagement`/`plan.importance`, `salient`, `_met`, the items
   inspection-gate model, the utility core.
-- **Add:** `disgust` emotion; a full visible **surface** on every `Body` (incl. the player);
-  identity appraisal on perceive → `Impression`; a `race × race` (± faction/class) sentiment table;
-  the proxemics utility term; earned-salience + importance-weighted-activity attention; a real
-  mech-core (traits + surface) for the player.
+- **Add:** `disgust` emotion; a full visible **surface** on every `Body` incl. the player; identity
+  appraisal on perceive → `Impression`; `content/race_relations.json` + seeded non-human NPCs; the
+  proxemics utility term; earned-salience + derived-activity attention; persistent **hp/injury**, a
+  numeric **age**, and a **skills** system; the player's surface (no game-side traits).
 - **Remove:** the separate dialogue interface (all talking is freeform).
 
-## Open decisions
+## Open decisions (the four big calls are resolved & folded in above)
 
-- Where the player's real traits come from (character creation vs. a chosen archetype vs. derived).
-- Exact `content/race_relations.json` values (and whether faction/class get tables now or later).
-- Whether "current activity as a plan" needs new authored tasks (serve/tend) or can derive from
-  `work` + place.
-- Non-goal for now: persistent health/injury, numeric age, skills beyond the 6 abilities (Seam ③).
+- **Skills:** the exact skill list, the practice-vs-teaching curve (how fast doing/learning raises a
+  skill), and which existing rolls become skill-modified.
+- **Race:** which non-human races to seed, at what pool fraction, and the `race_relations.json`
+  sentiment values.
+- **Injury:** the condition set (bleeding/broken/fever/poison/…), each one's ability/action modifier
+  + heal rate, and which are surface vs. hidden.
+- **Player surface:** how the player's dress/hygiene/race/age start (default stranger vs. a light
+  pick) and how they change in play (dirt, wounds, disguise).
 
 Related: [mind.md](mind.md) (utility core) · [entities.md](entities.md) · [items.md](items.md)
 (surface/hidden precedent) · [locations.md](locations.md) (zones/proxemics) · [loop.md](loop.md)

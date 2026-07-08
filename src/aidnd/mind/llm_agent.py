@@ -31,7 +31,8 @@ from .appraisal import _race_rel, appraise_present
 NEED_RU = {"fatigue": "усталость", "hunger": "голод", "social": "тяга к общению",
            "purpose": "нужда в деле", "wealth": "жажда наживы", "comfort": "тяга к уюту",
            "novelty": "тяга к новизне"}
-EMO_RU = {"anger": "гнев", "fear": "страх", "joy": "радость", "distress": "подавленность"}
+EMO_RU = {"anger": "гнев", "fear": "страх", "joy": "радость", "distress": "подавленность",
+          "disgust": "отвращение"}
 TRAIT_RU = {"bravery": "храбрость", "greed": "жадность", "honesty": "честность",
             "curiosity": "любопытство", "pride": "гордость", "loyalty": "верность",
             "sociability": "общительность", "ambition": "амбиции", "lawful": "законопослушность",
@@ -46,7 +47,7 @@ TOOLSPEC = """ДОСТУПНЫЕ ИНСТРУМЕНТЫ (верни послед
   say    {"to": "<имя>", "text": "<реплика>"}   — сказать вслух РАДИ ЦЕЛИ (узнать/сторговаться/запугать)
   know   {"query": "<что вспоминаешь о городе/людях>"} — вспомнить факт мира (где что, кто есть кто);
                                                  ответ ляжет в память к следующему ходу
-  feel   {"emotion": "anger|fear|joy|distress", "value": 0.0-1.0} — изменить свою эмоцию
+  feel   {"emotion": "anger|fear|joy|distress|disgust", "value": 0.0-1.0} — изменить свою эмоцию
   need   {"need": "hunger|fatigue|social|purpose|wealth|comfort|novelty", "value": 0.0-1.0} — свою нужду
   note   {"text": "<мысль/намерение>"}          — записать замысел в память (увидишь в след. ходы)
   promise {"to": "<имя>", "what": "<что сделаешь>", "when": "утром|днём|вечером|ночью|завтра",

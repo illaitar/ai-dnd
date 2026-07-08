@@ -4,7 +4,8 @@ How an entity **hears** its surroundings and how what it hears **competes for it
 tick**. Two coupled pillars — *audibility* (what reaches you, at what fidelity) and the *attention
 economy* (what you do about it). Extends [mind.md](mind.md) (utility core) and
 [npc-brain.md](npc-brain.md) (perception/appraisal, which shipped Subsystem 1); the attention
-economy sketched there is fully specified here. Design, not yet built.
+economy sketched there is fully specified here. **Pillar 1 (sound & audibility) is on prod**
+(commits 92f3b53..71f32e6); **Pillar 2 (attention economy) is designed, not yet built.**
 
 ## Guiding principle: one entity, hearing is symmetric
 
@@ -169,7 +170,13 @@ one target; NPCs commit via utility.
 
 ## Increments (each green → commit → deploy)
 
-**Pillar 1 — sound & audibility**
+**Pillar 1 — sound & audibility — ✔ on prod (Increments 1–3).** Note carried into Pillar 2:
+**symmetric NPC overheard memory** (a bystander NPC recording a tier-weighted overheard line) is
+*not* wired yet — the `audibility()` core is symmetric, but only the player's overheard memory is
+written today; it folds naturally into Pillar 2, where overheard content becomes a salience input.
+Follow-ups: the narrator's conversation context (`resolve.py` "ПОСЛЕДНИЕ РЕПЛИКИ") still uses the
+old same-zone/eaves gate rather than the 3-tier model; the live 3-grey gradient wants an eyeball in
+playtest.
 1. **Audibility foundation.** Per-zone `(cx,cy)` in furnish; `content/sound_sources.json`; pure
    `audibility(listener_zone, source_zone, loudness) → tier` + `PB` thresholds. Unit-tested; no
    behavior change yet.

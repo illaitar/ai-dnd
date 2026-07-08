@@ -1134,7 +1134,8 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
 
         from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        from aidnd import config
+        with ThreadPoolExecutor(max_workers=config.LIVE_CONCURRENCY) as ex:
             list(ex.map(plan_one, todo))
     prev = _S.get("live") or {}
     prev_places = {pid: b.place for pid, b in (prev.get("world").bodies.items()
@@ -1387,10 +1388,13 @@ def _live_tick(people) -> tuple:
 
     from concurrent.futures import ThreadPoolExecutor
 
-    # ANTI-CHORUS: decision waves — leader (highest impulse) first, retinue sees their claim
+    from aidnd import config
+
+    # ANTI-CHORUS: decision waves — leader (highest impulse) first, retinue sees their claim.
+    # Wave 2 (the retinue) runs concurrently, LIVE_CONCURRENCY calls in flight (no client lock).
     decisions: dict = {}
     waves = [actors[:1], actors[1:]] if len(actors) > 1 else [actors]
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=config.LIVE_CONCURRENCY) as ex:
         for wave in waves:
             if not wave:
                 continue

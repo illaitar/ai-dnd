@@ -22,13 +22,20 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.engine.world import _look_key, _looked_level, _play, _scene_dict
+from aidnd.server.play.engine.world import (
+    _look_key,
+    _looked_level,
+    _play,
+    _scene_dict,
+    _world_tick,
+)
 from aidnd.server.play.mechanics.items import _pc_coins
 
 
 @router.post("/api/play/look")
 async def look(request: Request):
-    """Look around: d20+Wis roll against DC — removes fog of war (discern NPCs/containers)."""
+    """Look closer: a d20+Wis roll for what's HIDDEN (concealed rooms, stashes, a lurker). Basic
+    vision — who is in the room and what they do — is never gated; a keen look only adds the hidden."""
     city, people, crof, cr2b, loc = _play()
     inside = _S.get("inside")
     key = _look_key(loc, inside)
@@ -39,25 +46,23 @@ async def look(request: Request):
     stay = min(6, ((_S.get("live") or {}).get("clock", 0))
                if (_S.get("live") or {}).get("loc") == loc else 0)   # hour in room = got acclimated
     total = roll + mod + stay
-    lvl = 2 if total >= PB["look_good"] else 1 if total >= PB["look_dc"] else 0
-    prev = _looked_level(loc, inside)
-    _S.setdefault("looked", {})[key] = max(prev, lvl, 1 if total >= PB["look_dc"] else prev)
+    keen = total >= PB["look_good"]
+    _S.setdefault("looked", {})[key] = max(_looked_level(loc, inside), 2 if keen else 1)
     _gt_add(PB["give_min"])
+    t = _world_tick()                                    # a beat passes — the room lives while you look
     sc = _scene_dict(city, people, crof, cr2b, loc)
     dice = {
         "die": 20,
         "roll": roll,
         "mod": mod,
         "total": total,
-        "dc": PB["look_dc"],
-        "ok": total >= PB["look_dc"],
+        "dc": PB["look_good"],
+        "ok": keen,
         "label": "Внимательность (Wis)",
     }
     narr = (
-        "Ты оглядываешься, но взгляд скользит мимо: толком ничего не разобрал."
-        if total < PB["look_dc"]
-        else "Ты внимательно оглядываешься по сторонам."
-        if total < PB["look_good"]
-        else "От твоего взгляда мало что ускользает."
+        "От твоего взгляда мало что ускользает — примечаешь и то, что хотели скрыть."
+        if keen
+        else "Ты оглядываешься по сторонам: всё на виду, ничего припрятанного в глаза не бросается."
     )
-    return {**sc, "dice": dice, "narr": [narr], "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}
+    return {**sc, **t, "dice": dice, "narr": [narr], "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}

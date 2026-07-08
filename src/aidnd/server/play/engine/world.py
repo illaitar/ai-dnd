@@ -674,13 +674,8 @@ def _scene_ambient(here, lvl):
         "time": _PHASE_RU[_phase()],
         "weather": "дождь",
         "mood": "оживлённо" if len(here) > 2 else "тихо",
-        "event": (
-            "Ты ещё не осмотрелся здесь."
-            if lvl == 0 and here
-            else "Народ занят своими делами."
-            if here
-            else "Пусто; лишь ветер гуляет меж домов."
-        ),
+        "event": ("Народ занят своими делами." if here
+                  else "Пусто; лишь ветер гуляет меж домов."),
     }
 
 
@@ -742,7 +737,7 @@ def _scene_dict(city, people, crof, cr2b, loc):
     here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
     lvl = _looked_level(loc, inside)
     more = 0  # no cap — the scene shows everyone present
-    vis_here = here if lvl >= 1 else []  # fog: you tell people apart only after looking around
+    vis_here = here  # basic vision: who is in the room is ALWAYS visible; a keen look reveals HIDDEN things
     room = _S.get("room") if inside else None
     rooms = _scene_rooms(inside, lvl)
     if inside and room:
@@ -754,7 +749,7 @@ def _scene_dict(city, people, crof, cr2b, loc):
         "rooms": rooms,
         "enterable": ({"bid": bid, "name": _binfo(bid)["name"]} if (bid and not inside) else None),
         "looked": lvl,
-        "here_more": (more if lvl >= 1 else 0),
+        "here_more": more,
         "location": {
             "name": name,
             "kind": kind,

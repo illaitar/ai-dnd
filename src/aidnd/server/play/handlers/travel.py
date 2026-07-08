@@ -307,12 +307,7 @@ def _plan_payload() -> dict:
     plan = plan_location(data, seed_key=f"{_wid()}|{bid}")
     here = [pid for pid in _here(loc, crof) if pid != PLAYER]
     here.sort(key=lambda i: (people[i].work != bid, i))      # workers at home — first
-    more = 0  # no cap — the building map shows everyone present
-    from aidnd.server.play.engine.world import _looked_level
-
-    if _looked_level(loc, bid) < 1:                          # fog of people — like in scene:
-        more += len(here)                                    # haven't looked — only "how many souls"
-        here = []
+    more = 0  # no cap — the building map shows everyone present (basic vision is not gated)
     lv = _S.get("live")
     if lv and lv.get("loc") == loc and lv.get("zonemap"):    # live scene = source of truth for positions
         seats = {p: z for p, z in lv["zonemap"].items() if p in here and z}

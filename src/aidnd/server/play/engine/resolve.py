@@ -39,6 +39,7 @@ from aidnd.server.play.engine.core import (
     _store,
     _wid,
 )
+from aidnd.server.play.engine.sound import audible_ambient
 
 # Registry of primitives: targets — which fields must be filled; when — how to recognize intent.
 PRIMITIVES = (
@@ -370,6 +371,16 @@ def _dm_snapshot(sc: dict) -> str:
                          f"{(lv.get('last') or {}).get(pid, 'занят собой')}")
         if folks:
             parts.append("ЛЮДИ: " + "; ".join(folks) + ".")
+        zonemap = lv.get("zonemap") or {}
+        occ: dict = {}
+        for zid in zonemap.values():
+            occ[zid] = occ.get(zid, 0) + 1
+        listener_zone_id = zonemap.get(PLAYER)
+        lz = next((z for z in (lv.get("zones") or []) if z.get("id") == listener_zone_id), None)
+        if lz is not None:
+            note = _ambient_note(lv, lz, occ)
+            if note:
+                parts.append(note)
         lines = []
         my = (lv.get("zonemap") or {}).get(PLAYER)
         ev = _S.get("eaves") or {}
@@ -384,3 +395,9 @@ def _dm_snapshot(sc: dict) -> str:
         if lines:
             parts.append("ПОСЛЕДНИЕ РЕПЛИКИ (что игроку слышно): " + " | ".join(lines[-5:]))
     return "\n".join(parts)
+
+
+def _ambient_note(lv: dict, listener_zone: dict, occupancy: dict) -> str:
+    """Russian one-liner of audible ambient sound for the DM snapshot; '' if silent."""
+    phrases = audible_ambient(lv.get("zones") or [], listener_zone, occupancy)
+    return f"слышно: {', '.join(phrases)}" if phrases else ""

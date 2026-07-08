@@ -103,3 +103,19 @@ def overheard_line(text: str, tier: str, zone_name: str, seed: str) -> tuple[str
     if tier == "L2":
         return cutout(text, seed), PB["sound_mem_l2"]
     return f"у «{zone_name}» о чём-то говорят", PB["sound_mem_l3"]
+
+
+def audible_ambient(zones: list[dict], listener_zone: dict,
+                    occupancy: dict) -> list[str]:
+    """Russian ambient phrases the listener can hear: authored fixed sources that
+    carry to the listener + a crowd-murmur phrase for busy zones. Never masked."""
+    out: list[str] = []
+    total = sum(occupancy.values()) or 1
+    for z in zones:
+        src = zone_source(z)
+        if src and audibility(listener_zone, z, src["loudness"]):
+            out.append(src["ambient_ru"])
+        murmur = PB["sound_murmur_k"] * (occupancy.get(z["id"], 0) / total) * z.get("noise", 0.0)
+        if murmur and audibility(listener_zone, z, murmur):
+            out.append("гул голосов")
+    return list(dict.fromkeys(out))                     # dedup, keep order

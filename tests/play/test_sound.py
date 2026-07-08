@@ -10,7 +10,13 @@ test_boost_lifts_tier       : boost=1 lifts L2→L1 (the listen primitive).
 test_boost_promotes_l3_to_l2 : boost=1 lifts L3→L2 (wiring check for `listen`, Task 7).
 """
 
-from aidnd.server.play.engine.sound import audibility, cutout, overheard_line, zone_source
+from aidnd.server.play.engine.sound import (
+    audibility,
+    audible_ambient,
+    cutout,
+    overheard_line,
+    zone_source,
+)
 
 
 def _z(zid, cx=None, cy=None):
@@ -89,3 +95,17 @@ def test_overheard_l1_verbatim():
 def test_overheard_l3_presence_only():
     text, w = overheard_line("секрет", "L3", "у дальнего стола", "s")
     assert "секрет" not in text and "у дальнего стола" in text
+
+
+def test_ambient_includes_near_source():
+    zones = [{"id": "z0", "kind": "hall", "cx": 0.0, "cy": 0.0},
+             {"id": "z1", "kind": "forge", "cx": 3.0, "cy": 0.0}]
+    out = audible_ambient(zones, zones[0], {"z0": 1, "z1": 0})
+    assert any("ковк" in s for s in out)               # the forge carries to the listener
+
+
+def test_ambient_drops_distant_quiet_source():
+    zones = [{"id": "z0", "kind": "hall", "cx": 0.0, "cy": 0.0},
+             {"id": "z1", "kind": "hearth", "cx": 30.0, "cy": 0.0}]
+    out = audible_ambient(zones, zones[0], {"z0": 1, "z1": 0})
+    assert not any("огонь" in s for s in out)          # quiet hearth too far → silent

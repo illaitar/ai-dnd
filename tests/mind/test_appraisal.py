@@ -4,7 +4,10 @@ Key functions
 -------------
 test_revulsion_raises_disgust : revulsion dim raises disgust emotion + sets emotion_target.
 test_body_surface_defaults_and_armed : Body exposes race/squalor/marks + armed() from carrying.
+test_race_sentiment : race_sentiment reads the race_relations table (self, authored pair, unknown).
 """
+
+from aidnd.mind.appraisal import load_race_relations, race_sentiment
 
 from aidnd.mind.model import EMOTIONS, NpcConfig, NpcState
 from aidnd.mind.tick import appraise
@@ -24,3 +27,10 @@ def test_body_surface_defaults_and_armed():
     assert b.race == "орк" and b.squalor == 0.7
     assert b.armed() is True
     assert Body(id="y", place="зал").armed() is False   # empty-handed default
+
+
+def test_race_sentiment():
+    rr = load_race_relations()
+    assert race_sentiment(rr, "человек", "человек") >= 0.0
+    assert race_sentiment(rr, "дворф", "орк") < 0.0      # authored enmity
+    assert race_sentiment(rr, "человек", "неведомый") == 0.0   # unknown -> neutral

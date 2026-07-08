@@ -307,8 +307,7 @@ def _plan_payload() -> dict:
     plan = plan_location(data, seed_key=f"{_wid()}|{bid}")
     here = [pid for pid in _here(loc, crof) if pid != PLAYER]
     here.sort(key=lambda i: (people[i].work != bid, i))      # workers at home — first
-    more = max(0, len(here) - PB["here_show_cap"])           # LOD scene: like "who's here"
-    here = here[: PB["here_show_cap"]]
+    more = 0  # no cap — the building map shows everyone present
     from aidnd.server.play.engine.world import _looked_level
 
     if _looked_level(loc, bid) < 1:                          # fog of people — like in scene:

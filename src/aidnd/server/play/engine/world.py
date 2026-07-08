@@ -133,7 +133,7 @@ def _apply_routine() -> None:
             _S["econ_news"] = (_S.get("econ_news") or [])[-2:] + en
     except Exception:  # noqa: BLE001 — economy doesn't crash the world
         pass
-    routine_step(_S["people"], _S["crof"])
+    routine_step(_S["people"], _S["crof"], pin=set(_here(_S["loc"], _S["crof"])))
 
 
 _TIE_ROLES = {
@@ -705,9 +705,7 @@ def _scene_dict(city, people, crof, cr2b, loc):
     name, kind = _scene_locinfo(city, loc, bid, inside, plaza)
     here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
     lvl = _looked_level(loc, inside)
-    cap = len(here) if inside else PB["here_show_cap"]  # inside a building: show ALL occupants (no LOD cap indoors)
-    more = max(0, len(here) - cap)
-    here = here[:cap]
+    more = 0  # no cap — the scene shows everyone present
     vis_here = here if lvl >= 1 else []  # fog: you tell people apart only after looking around
     room = _S.get("room") if inside else None
     rooms = _scene_rooms(inside, lvl)
@@ -945,18 +943,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     }
     rng = random.Random(f"live|{loc}")
     npc_map: dict = {}  # pid → {thing name: item_id} (thefts real)
-    here_all = _here(loc, crof)
-    # LOD-RING only on STREET (open node without natural capacity): don't simulate
-    # whole block. INSIDE building no cap — scene = all who are really there (capacity held by
-    # city sim, routine_step). Conductor still gives LLM turn only to salient.
-    if not bid and len(here_all) > PB["street_lod_cap"]:
-        met = _met()
-        core = [i for i in here_all if people[i].work] + [
-            i for i in here_all if not people[i].work and i in met
-        ]
-        rest = [i for i in here_all if i not in core]
-        rng.shuffle(rest)
-        here_all = (core + rest)[: PB["street_lod_cap"]]
+    here_all = _here(loc, crof)  # everyone present — no LOD cap (buildings bounded by _building_cap)
     workers = {pid for pid in here_all if people[pid].work == bid}
     zonemap = assign_zones({pid: people[pid].state for pid in here_all}, zones,
                            f"zones|{_wid()}|{bid}|{_phase()}",
@@ -1412,20 +1399,15 @@ def _live_tick(people) -> tuple:
                 acts)
 
     feed, address = list(zone_feed) + bg_feed, []
-    said_n = 0  # LOD-cap for feed lines
     topics = lv.setdefault("topics", [])  # anti-echo REMEMBERS past ticks (signature tail)
     pc = _pc()
 
     def _say_ok(txt: str) -> bool:
-        nonlocal said_n
         sig = frozenset(list(_tokens_ru(txt))[:6])
-        if said_n >= PB["say_cap_per_tick"]:  # line cap — rest listen
-            return False
         if sig and any(len(sig & s) >= max(2, len(sig) // 2 + 1) for s in topics):
             return False  # near duplicate already spoken — 'beaten topic'
         topics.append(sig)
         del topics[:-12]  # remember last ~4 talk ticks
-        said_n += 1
         return True
 
     used_items: set = set()                           # physics: one item — one hands per tick

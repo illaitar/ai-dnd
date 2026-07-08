@@ -191,9 +191,11 @@ def _commit_node(pid: str, phase: str, people: dict, crof: dict) -> int | None:
     return c.get("node")
 
 
-def routine_step(people: dict, crof: dict) -> None:
+def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
     """Recalculate where each resident is based on needs/traits/time. Cheap (no LLM/DB in loop):
-    one building index + O(people×places) utility. Mutates crof (spot) and needs in people[*].state."""
+    one building index + O(people×places) utility. Mutates crof (spot) and needs in people[*].state.
+    `pin` — residents present in the player's live scene (ring A owns them): skipped here so ring A
+    and ring B never both move the same NPC (docs/loop.md LOD rings)."""
     phase = _phase()
     keynode, kps, place_idx, work_kinds = _place_context(people)
     gt = _gt()
@@ -236,6 +238,8 @@ def routine_step(people: dict, crof: dict) -> None:
     last = _S.setdefault("needs_gt", {})
     order = sorted(people.items(), key=lambda kv: (kv[1].work is None, kv[0]))  # workers first
     for pid, p in order:
+        if pin and pid in pin:  # ring A owns present NPCs — don't move them from the sim (no A/B overlap)
+            continue
         st = p.state
         mins = max(0, gt - last.get(pid, gt - 360))  # time since last step (start: ~phase)
         here = node2kind.get(crof.get(pid))  # where stood → what sated

@@ -112,9 +112,6 @@ PB = {
     "merchant_float": 30,
     "hostile_aff": -0.2,
     # NPC schedule — from NEEDS (aidnd.society), not from role probabilities (see society/*)
-    "live_llm_cap": 8,      # LATENCY CEILING: how many NPCs get LLM turn per tick (conductor)
-    "street_lod_cap": 10,   # LOD-ring STREET: how many we see at open node (in building — all)
-    "impulse_llm": 1.0,  # conductor: LLM turn only if impulse above threshold (debt/need/talk)
     "plan_cap": 3,  # chain links from one phrase: plan longer — truncate
     # PLAYER DEALS (deal-gate): base DC/prices by type, weight of temperament/bet adequacy
     "deal_dc_dead": 15,
@@ -143,7 +140,6 @@ PB = {
     "listen_noise_k": 8,
     "listen_ticks": 3,
     "bg_feed_p": 0.25,  # background activity appears in feed with this probability (LOD)
-    "here_show_cap": 12,
     # gift: affinity gain = min(cap, base + worth/div)
     "gift_aff_base": 0.05,
     "gift_aff_div": 100,
@@ -166,7 +162,6 @@ PB = {
     "incident_gang_malice": 0.55,  # threshold for criminals: townspeople form gangs
     "caravan_chance": 0.35,  # chance of caravan with goods in morning
     "path_event_dc": 0.7,  # NPC emotion threshold that breaks path
-    "say_cap_per_tick": 3,  # no more than this many lines per live tick (LOD feed)
     # GUARD / WANTED: crime weight (points), arrest threshold, decay/day, fine, escape
     "crime_pickpocket": 1,
     "crime_rob": 3,

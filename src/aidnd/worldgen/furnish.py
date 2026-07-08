@@ -29,6 +29,7 @@ import re
 from ..inference import LLMBadOutput
 from ..items.model import KINDS as ITEM_KINDS
 from ..items.model import normalize as item_normalize
+from .centroids import store_centroids
 
 NEEDS = ("fatigue", "hunger", "social", "purpose", "wealth", "comfort", "novelty")
 
@@ -301,4 +302,5 @@ def furnish_building(data: dict, btype: str, manager, kind: str = "key") -> dict
     for c in data.get("containers") or []:
         c["zone"] = _zone_for_container(c, zones)
     data["zones"] = zones
+    store_centroids(data)                # spatial positions for audibility
     return data

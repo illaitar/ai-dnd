@@ -147,3 +147,19 @@ def deeds_list(limit: int = 12):
     _play()
     from aidnd.server.play.engine.core import _store, _wid
     return {"deeds": _store().deeds(_wid(), limit=min(int(limit), 50))}
+
+
+@router.post("/api/play/newworld")
+async def new_world():
+    """Start a FRESH world from the SAME pools: wipe only this user's runtime (destroy_world) so a
+    new city regenerates from the persistent NPC/building/portrait bank in worlds.db. Voluntary
+    rebirth — same mechanism as permadeath, minus the death. The frontend reloads to pick up the
+    freshly-created world (a new seed → a different town)."""
+    _play()
+    from aidnd.server.play.engine.core import _SESS, _store, _wid
+    wid = _wid()
+    if wid == 1:  # dev/open-play shared world: bump the seed so a different town generates
+        _store().flag_set(0, "dev_seed", str(int(_store().flag_get(0, "dev_seed") or 1) + 1))
+    _store().destroy_world(wid)  # runtime only — worlds.db pools (people/buildings/portraits) untouched
+    _SESS.pop(wid, None)         # drop the cached session → next request rebuilds a fresh city from pools
+    return {"ok": True, "reload": True}

@@ -705,8 +705,9 @@ def _scene_dict(city, people, crof, cr2b, loc):
     name, kind = _scene_locinfo(city, loc, bid, inside, plaza)
     here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
     lvl = _looked_level(loc, inside)
-    more = max(0, len(here) - PB["here_show_cap"])
-    here = here[: PB["here_show_cap"]]
+    cap = len(here) if inside else PB["here_show_cap"]  # inside a building: show ALL occupants (no LOD cap indoors)
+    more = max(0, len(here) - cap)
+    here = here[:cap]
     vis_here = here if lvl >= 1 else []  # fog: you tell people apart only after looking around
     room = _S.get("room") if inside else None
     rooms = _scene_rooms(inside, lvl)

@@ -312,7 +312,7 @@
 <div class="top">
   <span class="brand">&#10022; AI-DnD</span>
   <span class="loc"><b id="locname">Трактир</b><span class="sep">·</span><span id="locdist"></span></span>
-  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="mana" title="мана" style="cursor:pointer;color:var(--gold)" onclick="openMagic()">&#10022; 12/14</span><span id="coins">12 зм</span><a id="dbglog" href="/api/play/debuglog?download=1" title="скачать подробный лог сессии для отладки" style="color:var(--faint);text-decoration:none;cursor:pointer" onclick="event.preventDefault();downloadLog()">&#8681; лог</a></span>
+  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="mana" title="мана" style="cursor:pointer;color:var(--gold)" onclick="openMagic()">&#10022; 12/14</span><span id="coins">12 зм</span><a title="начать новый мир — стереть прогресс и сгенерировать город заново" style="color:var(--faint);text-decoration:none;cursor:pointer" onclick="newWorld()">&#10227; новый мир</a><a id="dbglog" href="/api/play/debuglog?download=1" title="скачать подробный лог сессии для отладки" style="color:var(--faint);text-decoration:none;cursor:pointer" onclick="event.preventDefault();downloadLog()">&#8681; лог</a></span>
 </div>
 
 <div class="stage">
@@ -727,6 +727,7 @@ async function enterB(){applyWorld(await api('/api/play/enter',{}));}
 async function exitB(){applyWorld(await api('/api/play/exit',{}));}
 async function waitTurn(){applyWorld(await api('/api/play/live',{}));}
 async function lookAround(){applyWorld(await api('/api/play/look',{}));}
+async function newWorld(){if(!confirm('Начать НОВЫЙ мир? Текущий прогресс будет стёрт — город и жители сгенерируются заново (из тех же пулов).'))return;const d=await api('/api/play/newworld',{});if(d&&d.reload)location.reload();}
 function showDice(d){
   const box=$('d20box'),txt=$('dtxt'),wrap=$('dicewrap');
   wrap.classList.add('on');

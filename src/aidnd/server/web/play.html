@@ -6,17 +6,23 @@
 <title>AI-DnD</title>
 <style>
   :root{
-    --bg:#0f1116; --panel:#171a22; --panel2:#1e222c; --raise:#242938;
-    --line:#2a2f3c; --line2:#353b4a;
-    --ink:#e9e6dd; --dim:#9aa0ad; --faint:#6c7280;
-    --gold:#d9a441; --gold-dim:#8a6f34;
-    --green:#5db07a; --blue:#5698e0; --red:#d9615a; --violet:#9b7bd4;
+    /* Реваколь / Disco Elysium — desaturated teal-green ground, aged-parchment ink,
+       ochre gold, oxblood accents. Muted and painterly, never bright. */
+    --bg:#0e1413; --panel:#161d1c; --panel2:#1b2422; --raise:#212b29;
+    --line:#2a3634; --line2:#384643;
+    --ink:#dccfb4; --dim:#8a968b; --faint:#5a6660;
+    --gold:#c9a24e; --gold-dim:#8f7539;
+    --green:#6f9e72; --blue:#6f909c; --red:#bd5749; --violet:#8f78ad;
     --serif:"Iowan Old Style",Georgia,"Times New Roman",serif;
     --sans:-apple-system,Segoe UI,Roboto,sans-serif;
   }
   *{box-sizing:border-box}
   html,body{height:100%}
-  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);overflow:hidden}
+  body{margin:0;color:var(--ink);font:14px/1.5 var(--sans);overflow:hidden;
+    background:
+      radial-gradient(130% 100% at 12% -8%, #1b2726 0%, transparent 55%),
+      radial-gradient(120% 120% at 100% 108%, #14201d 0%, transparent 60%),
+      var(--bg)}
   .top{height:46px;display:flex;align-items:center;gap:14px;padding:0 18px;
     border-bottom:1px solid var(--line);background:var(--panel)}
   .brand{font:600 15px var(--serif);letter-spacing:.02em;color:var(--gold)}
@@ -28,9 +34,10 @@
      layout property; flex-basis/grid-template sticks mid-transition in some engines). Every
      column keeps flex-basis:0, so grow ratios alone set the split. */
   .stage{display:flex;gap:12px;padding:12px;height:calc(100vh - 46px)}
-  .col{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-width:0;
-    display:flex;flex-direction:column;overflow:hidden;flex:1 1 0;
-    transition:flex-grow .46s cubic-bezier(.42,0,.16,1),opacity .32s ease,border-color .3s}
+  .col{background:linear-gradient(168deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:12px;min-width:0;box-shadow:inset 0 1px 0 rgba(230,220,190,.03);
+    display:flex;flex-direction:column;overflow:hidden;flex:1 1 0;contain:paint;
+    transition:flex-grow .19s cubic-bezier(.2,.7,.3,1),opacity .16s ease,border-color .3s}
   .left{flex-grow:1.15}     /* slot 1 — work column (map · inventory · magic) */
   .center{flex-grow:1.5}    /* slot 2 — chat (never moves) */
   .right{flex-grow:0.85}    /* slot 3 — conditions */

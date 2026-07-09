@@ -94,7 +94,6 @@ PB = {
     # LEISURE (tavern playtest): a leisure venue lifts converse toward ACQUAINTANCES only (aff>0),
     # so regulars talk instead of idly eating; strangers get no lift. Set on present states in _live_build.
     "leisure_social_lift": 3.0,
-    "bg_feed_p": 0.25,  # background activity appears in feed with this probability (LOD)
     # gift: affinity gain = min(cap, base + worth/div)
     "gift_aff_base": 0.05,
     "gift_aff_div": 100,

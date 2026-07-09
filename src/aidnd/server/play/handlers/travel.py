@@ -132,8 +132,8 @@ async def move(request: Request):
     _gt_add(PB["step_min"] * max(1, len(seg) - 1))  # travel time: minutes per step taken
     _apply_routine()  # world may shift phases during travel
     ct_done = _contract_on_move(dest)  # visit-contract: reached — fulfilled
-    sc = _scene_dict(city, people, crof, cr2b, dest)
-    t = _world_tick()  # world gets turn (turn-based)
+    t = _world_tick()  # world gets turn (turn-based) — rebuilds the live scene at `dest` FIRST,
+    sc = _scene_dict(city, people, crof, cr2b, dest)  # so scene/ambient reflect the arrival, not the old spot
     extra = {}
     if stop:
         extra["stopped"] = stop["kind"]

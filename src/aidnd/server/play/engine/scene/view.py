@@ -4,7 +4,8 @@ and the guild/board/watch extras. Also hosts the /api/play/scene HTTP endpoint.
 Key functions
 -------------
 _scene_locinfo(city, loc, bid, inside, plaza) -> (name, kind) : Scene's display name + kind.
-_scene_ambient(here, lvl) -> dict : Time/weather/mood/event ambient line.
+_scene_soundscape() -> list[str] : Audible soundscape at the player's zone (sound/ambient.py).
+_scene_ambient(here, lvl) -> dict : Time/weather/mood/event ambient line + audible soundscape.
 _scene_folk(vis_here, people) -> list : Visible people → display cards.
 _scene_extras(d, bid, loc, inside, plaza, people, crof) -> None : Guild/board/watch sections, in place.
 _scene_rooms(inside, lvl) -> list : Building rooms, hidden ones gated by fog level.
@@ -20,6 +21,7 @@ from aidnd.server.play.engine.core import (
     _PHASE_RU,
     _S,
     PB,
+    PLAYER,
     _binfo,
     _city_name,
     _display,
@@ -40,6 +42,7 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
+from aidnd.server.play.engine.sound import audible_ambient, room_center
 from aidnd.server.play.engine.worldbuild.assembly import _play as _play
 from aidnd.server.play.engine.worldbuild.building import (
     _building_containers,
@@ -73,15 +76,35 @@ def _scene_locinfo(city, loc, bid, inside, plaza):
     return "Улица", "мостовая меж домов"
 
 
+def _scene_soundscape() -> list[str]:
+    """Audible soundscape at the player's CURRENT position: authored zone sources (fire, taps,
+    prayer…) plus occupancy-based crowd murmur (sound/ambient.py). Falls back to the room's
+    average centroid when the player hasn't picked a spot yet (fresh at the entrance). [] outside
+    a zoned scene or before any zone is placed (no centroid — stale/legacy building data)."""
+    lv = _S.get("live") or {}
+    zones = lv.get("zones") or []
+    if not zones:
+        return []
+    zonemap = lv.get("zonemap") or {}
+    occ: dict = {}
+    for zid in zonemap.values():
+        if zid:
+            occ[zid] = occ.get(zid, 0) + 1
+    lz = next((z for z in zones if z.get("id") == zonemap.get(PLAYER)), None) or room_center(zones)
+    return audible_ambient(zones, lz, occ) if lz else []
+
+
 def _scene_ambient(here, lvl):
-    """Ambient line for the scene: time-of-day, weather, crowd mood, and a one-line event that
-    depends on whether the player has looked around yet."""
+    """Ambient line for the scene: time-of-day, weather, crowd mood, a one-line event that
+    depends on whether the player has looked around yet, and the real audible soundscape
+    (near conversations/sources clearer, far ones folded into crowd murmur)."""
     return {
         "time": _PHASE_RU[_phase()],
         "weather": "дождь",
         "mood": "оживлённо" if len(here) > 2 else "тихо",
         "event": ("Народ занят своими делами." if here
                   else "Пусто; лишь ветер гуляет меж домов."),
+        "sound": _scene_soundscape(),
     }
 
 

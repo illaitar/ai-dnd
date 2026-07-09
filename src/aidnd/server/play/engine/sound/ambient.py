@@ -9,6 +9,9 @@ zone_source(zone) -> dict | None
     else by the zone's own kind. None if the zone emits nothing authored.
 audible_ambient(zones, listener_zone, occupancy) -> list[str]
     Russian ambient phrases the listener can hear.
+room_center(zones) -> dict | None
+    Fallback listener position for 'just arrived, haven't picked a spot yet' (e.g. still at
+    the entrance) — the room's average centroid. None if no zone is placed yet.
 """
 
 import json
@@ -40,6 +43,16 @@ def zone_source(zone: dict) -> dict | None:
         if hit:
             return hit
     return cat["by_kind"].get(zone.get("kind"))
+
+
+def room_center(zones: list[dict]) -> dict | None:
+    """Fallback listener position for someone standing at the entrance who hasn't picked a
+    spot yet: the average centroid of the room's PLACED zones. None if none are placed."""
+    placed = [z for z in zones if "cx" in z and "cy" in z]
+    if not placed:
+        return None
+    return {"id": "__room__", "cx": sum(z["cx"] for z in placed) / len(placed),
+            "cy": sum(z["cy"] for z in placed) / len(placed)}
 
 
 def audible_ambient(zones: list[dict], listener_zone: dict,

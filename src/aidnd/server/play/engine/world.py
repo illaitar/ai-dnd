@@ -54,7 +54,7 @@ from aidnd.server.play.engine.scene.view import _scene_rooms as _scene_rooms
 from aidnd.server.play.engine.scene.vision import _look_key as _look_key
 from aidnd.server.play.engine.scene.vision import _looked_level as _looked_level
 from aidnd.server.play.engine.scene.vision import _watch_check as _watch_check
-from aidnd.server.play.engine.sound import audibility, overheard_line
+from aidnd.server.play.engine.sound import audibility, audible_ambient, overheard_line, room_center
 from aidnd.server.play.engine.worldbuild.assembly import _fill_from_pool as _fill_from_pool
 from aidnd.server.play.engine.worldbuild.assembly import _play as _play
 from aidnd.server.play.engine.worldbuild.assembly import _settle_fresh as _settle_fresh
@@ -96,6 +96,43 @@ def _overheard(text, player_zone, speaker_zone, zone_name, seed, boost=0):
         return None, "", 0.0
     disp, w = overheard_line(text, tier, zone_name, seed)
     return int(tier[1]), disp, w
+
+
+def _player_in_scene(zones_l, pid, w, lv) -> bool:
+    """Gate: may `pid` address the player DIRECTLY ('— тебе')? Only if the player is actually
+    present in the scene (inside the building, not merely approaching/at the door) AND within
+    conversational proximity — same zone, or L1 (near) via the existing audibility() tiering.
+    A miss doesn't silence the NPC — their line still falls through to the overheard/ambient
+    path below, just not as a direct greeting."""
+    if lv.get("bid") and not _S.get("inside"):
+        return False  # scene is a building interior but player hasn't stepped in yet
+    if PLAYER not in w.bodies:
+        return False
+    if not zones_l:
+        return True  # no sub-zones (single-room venue/street) — one conversational space
+    zn_by_place = {z["name"]: z for z in zones_l}
+    p_place, s_place = w.bodies[PLAYER].place, w.bodies[pid].place
+    tier = audibility(zn_by_place.get(p_place, {"id": p_place}),
+                       zn_by_place.get(s_place, {"id": s_place}), PB["sound_voice"])
+    return tier == "L1"
+
+
+def _idle_ambient(w, zones_l, order, zone_ids) -> str:
+    """Audible soundscape around the player's CURRENT position — authored zone sources +
+    occupancy crowd murmur (sound/ambient.py). Falls back to the room's average centroid when
+    the player hasn't picked a spot yet. '' if nothing audible (no zones/unplaced)."""
+    if not zones_l or PLAYER not in w.bodies:
+        return ""
+    lz = (next((z for z in zones_l if z.get("id") == zone_ids.get(w.bodies[PLAYER].place)), None)
+          or room_center(zones_l))
+    if lz is None:
+        return ""
+    occ: dict = {}
+    for pid in order:
+        zid = zone_ids.get(w.bodies[pid].place)
+        if zid:
+            occ[zid] = occ.get(zid, 0) + 1
+    return "; ".join(audible_ambient(zones_l, lz, occ))
 
 
 # --------------------------------------------- CRAFTING / DURABILITY (slice 2) - #
@@ -442,6 +479,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         "convs": prev_convs,
         "clock": (prev.get("clock", 0) if same_loc else 0),
         "loc": loc,
+        "bid": bid,  # truthy only for a building interior — street/plaza scenes have none
         "place": place,
         "ts": 0.0,
         "who": frozenset(here),
@@ -628,7 +666,6 @@ def _live_tick(people) -> tuple:
     # AUTHOR DECISION (2026-07-07): ALL present go through LLM, latency
     # unimportant yet. Conductor stays ORDERED (impulse → anti-chorus waves), not selection/cap.
     actors = ranked_imp
-    background: list = []
     ctx["convs"] = {pid: b for pid in actors
                     if (b := conv_block(lv, pid, lv["names"]))}
     if salient:
@@ -674,33 +711,6 @@ def _live_tick(people) -> tuple:
             decisions.update(ex.map(think_one, wave))
     ctx.pop("now", None)
 
-    # BACKGROUND LIVE without LLM: busy with zone item, needs close, hall sees
-    bg_feed = []
-    rng_bg = random.Random(f"bg|{lv['clock']}")
-    busy: set = set()                                 # one poker — one stirring
-    for d_ in decisions.values():
-        for a_ in d_.get("actions") or []:
-            if isinstance(a_, dict) and a_.get("tool") == "use" and a_.get("item"):
-                busy.add(str(a_["item"]).lower())
-    for pid in background:
-        st = w.npc_minds[pid]
-        _decay_needs(st)
-        _decay_emotion(st)
-        body = w.bodies[pid]
-        itms = [i for i in w.ground.get(body.place, [])
-                if i.satisfies and i.satisfies != "fatigue" and i.name.lower() not in busy]
-        if itms:
-            it = max(itms, key=lambda i: st.needs.get(i.satisfies or "", 0.0))
-            busy.add(it.name.lower())
-            st.needs[it.satisfies] = max(0.35 if it.satisfies == "fatigue" else 0.0,
-                                          st.needs.get(it.satisfies, 0.0) - 0.12)
-            act = f"занят своим: {it.name}"
-        else:
-            act = "сидит, поглядывая на зал"
-        lv["last"][pid] = act
-        if rng_bg.random() < PB["bg_feed_p"]:
-            bg_feed.append({"k": "deed", "who": _display(pid, people), "text": act})
-
     # ── detailed scene log (data/debug/play.log): 'why' of each NPC per tick ──
     import logging as _logging
 
@@ -711,12 +721,6 @@ def _live_tick(people) -> tuple:
                     lv["clock"], ctx["time"], lv["place"], len(order), len(actors),
                     len(lv.get("convs") or []),
                     w.bodies[PLAYER].place if PLAYER in w.bodies else "?", _S.get("zone"))
-        for pid in background:
-            im, why = impulses[pid]
-            _slog.debug("  · фон %s [%s] зона=%s имп=%.2f(%s) → %s",
-                        lv["names"].get(pid, pid), lv["roles"].get(pid, "?"),
-                        w.bodies[pid].place if zones_l else "—", im, why,
-                        lv["last"].get(pid, "—"))
         for pid in actors:
             st = w.npc_minds[pid]
             d = decisions[pid]
@@ -743,7 +747,7 @@ def _live_tick(people) -> tuple:
                 "; ".join(f"{p[0]}({p[1]},{p[2]:.2f})" for p in (d.get("prefs") or [])[:5]),
                 acts)
 
-    feed, address = list(zone_feed) + bg_feed, []
+    feed, address = list(zone_feed), []
     topics = lv.setdefault("topics", [])  # anti-echo REMEMBERS past ticks (signature tail)
     pc = _pc()
 
@@ -863,7 +867,8 @@ def _live_tick(people) -> tuple:
                 if not _say_ok(txt):  # line cap / anti-echo — this one silent
                     continue
                 said = True
-                if tid == PLAYER:  # decision 'talk to stranger' — NPC's own
+                if tid == PLAYER and _player_in_scene(zones_l, pid, w, lv):
+                    # decision 'talk to stranger' — NPC's own, player actually in earshot
                     conv_note_say(lv, pid, PLAYER, txt, w.bodies[pid].place)
                     address.append({"npc": pid, "who": who, "text": txt})
                     pc.memory.add(f"{who} обратился ко мне: «{txt[:100]}»", _mt(), 0.4, about=[pid])
@@ -893,7 +898,8 @@ def _live_tick(people) -> tuple:
                         lv["murmur"] = lv.get("murmur", 0) + 1
                     else:
                         feed.append({"k": "speech", "who": who, "tier": tier,
-                                     "to": _display(tid, people) if tid in people else tgt,
+                                     "to": (_display(tid, people) if tid in people
+                                            else lv["names"].get(tid, tgt)),
                                      "text": disp})
                         pc.memory.add(f"слышал в «{lv['place']}»: {who} — {disp[:90]}",
                                       _mt(), mw, kind="heard", about=[pid])
@@ -942,8 +948,12 @@ def _live_tick(people) -> tuple:
         does = (d.get("does") or "").strip()
         if does and not said:  # line itself carries moment — don't duplicate
             feed.append({"k": "deed", "who": who, "text": does[:150]})
-    if lv.pop("murmur", 0) and lv["clock"] % 3 == 0:
+    if lv.pop("murmur", 0):  # someone spoke too far off to make out — no longer gated to every 3rd tick
         feed.append({"k": "deed", "who": "зал", "text": "за столами гудит негромкий говор"})
+    if not feed:  # idle backstop: nothing surfaced this tick — soundscape fills the silence
+        amb = _idle_ambient(w, zones_l, order, lv["zone_ids"])
+        if amb:
+            feed.append({"k": "deed", "who": "зал", "text": amb})
     if zones_l:
         for pid in order:
             zmap[pid] = lv["zone_ids"].get(w.bodies[pid].place)

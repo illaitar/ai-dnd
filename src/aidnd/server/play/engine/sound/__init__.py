@@ -18,9 +18,11 @@ zone_source(zone) -> dict | None
     Fixed ambient source for a zone.
 audible_ambient(zones, listener_zone, occupancy) -> list[str]
     Russian ambient phrases the listener can hear.
+room_center(zones) -> dict | None
+    Fallback listener position for someone standing at the entrance, spot not chosen yet.
 """
 
-from .ambient import audible_ambient, load_sound_sources, zone_source
+from .ambient import audible_ambient, load_sound_sources, room_center, zone_source
 from .audibility import _TIERS, _dist, audibility
 from .fidelity import cutout, overheard_line
 
@@ -33,4 +35,5 @@ __all__ = [
     "load_sound_sources",
     "zone_source",
     "audible_ambient",
+    "room_center",
 ]

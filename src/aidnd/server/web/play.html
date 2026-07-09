@@ -53,6 +53,8 @@
   body.view-dialogue .center{flex-grow:2.2}                          /* повествование вперёд */
   body.view-dialogue .right{flex-grow:0.95}
   .invlist{flex:1 1 auto;overflow:auto;padding:2px 12px 12px;display:flex;flex-direction:column;gap:7px}
+  .magbody{flex:1 1 auto;overflow:auto;padding:10px 14px 16px}
+  body.view-magic #combat{display:none}   /* drawing a circle mid-combat: reveal the panel, keep combat state */
   #viewback{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:40;display:none;
     align-items:center;gap:8px;cursor:pointer;background:var(--panel2);border:1px solid var(--line2);
     border-radius:22px;padding:7px 16px;color:var(--dim);font:500 12.5px var(--sans);
@@ -373,7 +375,33 @@
       <div class="cap">🎒 сумка <span id="invn" style="color:var(--gold)"></span></div>
       <div class="invlist" id="invlist"></div>
     </div>
-    <div id="magicpanel" class="workpanel"></div>
+    <div id="magicpanel" class="workpanel">
+      <div class="cap">&#10022; круг чар <span onclick="setView('explore')" style="cursor:pointer;color:var(--faint);float:right">✕</span></div>
+      <div class="magbody">
+        <div class="manabar"><div class="manafill" id="magfill" style="width:0%"></div></div>
+        <div class="manatxt" id="magmana">мана —</div>
+        <div class="fatline" id="magfat" style="display:none"></div>
+        <div class="magsec">круг <span class="candle" id="magcandle"></span></div>
+        <div class="ringwrap"><svg id="magring" viewBox="0 0 240 240"></svg></div>
+        <div class="circle" id="magcircle"><span class="ph">кликни глиф — на круг; тяни — размещай; клик по глифу на круге — размер; за край — стереть</span></div>
+        <div class="magrow">
+          <span class="hint" id="maghint"></span>
+          <span id="magtargetwrap" style="display:none">цель: <select id="magtarget"></select></span>
+          <button class="castbtn" id="magcast" onclick="doCast()">замкнуть круг</button>
+          <button class="gtile" onclick="clearCircle()">сброс</button>
+        </div>
+        <div class="magsec">стихии</div>
+        <div class="gtiles" id="magelems"></div>
+        <div class="magsec">глифы</div>
+        <div class="gtiles" id="magglyphs"></div>
+        <div id="magteachwrap" style="display:none">
+          <div class="magsec">наставник рядом</div>
+          <div id="magteach"></div>
+        </div>
+        <div class="magsec">гримуар <span id="magrimn" style="color:var(--faint)"></span></div>
+        <div id="magrim"><span class="hint">пока пусто — сотвори чистый круг, и закон впишется сюда</span></div>
+      </div>
+    </div>
   </div>
 
   <div class="col center">
@@ -418,37 +446,6 @@
     <h3>&#127974; Прилавок <span id="mktcoins" style="font:400 13px var(--serif);color:var(--dim);margin-left:6px"></span>
       <span class="x" onclick="$('mktwrap').classList.add('hidden')">✕</span></h3>
     <div id="mktbody" style="margin-top:6px"></div>
-  </div>
-</div>
-<div id="magicwrap" class="overlay hidden" onclick="if(event.target===this)closeMagic()">
-  <div class="magwin">
-    <h3>&#10022; Круг чар <span class="x" onclick="closeMagic()">✕</span></h3>
-    <div class="manabar"><div class="manafill" id="magfill" style="width:0%"></div></div>
-    <div class="manatxt" id="magmana">мана —</div>
-    <div class="fatline" id="magfat" style="display:none"></div>
-
-    <div class="magsec">круг <span class="candle" id="magcandle"></span></div>
-    <div class="ringwrap"><svg id="magring" viewBox="0 0 240 240"></svg></div>
-    <div class="circle" id="magcircle"><span class="ph">кликни глиф — на круг; тяни — размещай; клик по глифу на круге — размер; за край — стереть</span></div>
-    <div class="magrow">
-      <span class="hint" id="maghint"></span>
-      <span id="magtargetwrap" style="display:none">цель: <select id="magtarget"></select></span>
-      <button class="castbtn" id="magcast" onclick="doCast()">замкнуть круг</button>
-      <button class="gtile" onclick="clearCircle()">сброс</button>
-    </div>
-
-    <div class="magsec">стихии</div>
-    <div class="gtiles" id="magelems"></div>
-    <div class="magsec">глифы</div>
-    <div class="gtiles" id="magglyphs"></div>
-
-    <div id="magteachwrap" style="display:none">
-      <div class="magsec">наставник рядом</div>
-      <div id="magteach"></div>
-    </div>
-
-    <div class="magsec">гримуар <span id="magrimn" style="color:var(--faint)"></span></div>
-    <div id="magrim"><span class="hint">пока пусто — сотвори чистый круг, и закон впишется сюда</span></div>
   </div>
 </div>
 
@@ -609,7 +606,7 @@ let MANA=null,MANACAP=null,FAT=0;
 function setMana(v,cap,fat){
   if(v!=null)MANA=v; if(cap!=null)MANACAP=cap; if(fat!=null)FAT=fat;
   const c=$('mana');if(c&&MANA!=null)c.textContent='\u2726 '+(Math.round(MANA*10)/10)+'/'+(Math.round(MANACAP)||'?');
-  if($('magicwrap')&&!$('magicwrap').classList.contains('hidden'))renderMana();
+  if(VIEW==='magic')renderMana();
 }
 let PBMAXHP=18;
 function applyVB(){const w=BVB[2]/Z,h=BVB[3]/Z;
@@ -1380,7 +1377,7 @@ const circBudget=()=>MAG.circle.reduce((a,p)=>a+glyphCost(p),0);
 const ckey=c=>c.map(p=>p.id+'|'+szMult(p.size)+'|'+Math.floor(((p.angle+22.5)%360)/45)+'|'+(p.ring?1:0)).sort().join('//');
 const safeApi=async u=>{try{return await api(u);}catch(e){return null;}};
 async function openMagic(){
-  $('magicwrap').classList.remove('hidden');
+  setView('magic');
   // ПОСЛЕДОВАТЕЛЬНО (не Promise.all): первый запрос строит сессию, остальные берут кэш
   const g=await safeApi('/api/play/glyphs');
   if(!g||!g.elements){
@@ -1394,7 +1391,7 @@ async function openMagic(){
   const gr=await safeApi('/api/play/grimoire');renderGrimoire((gr&&gr.laws)||[]);
   const t=await safeApi('/api/play/teachers');renderTeachers((t&&t.teachers)||[]);
 }
-function closeMagic(){stopMelt();$('magicwrap').classList.add('hidden');}
+function closeMagic(){stopMelt();if(VIEW==='magic')setView('explore');}
 function resetDraw(){stopMelt();DRAW.lit=false;DRAW.mastered=false;DRAW.local=MANA;MAG.circle=[];afterChange();}
 function stopMelt(){if(DRAW.raf)cancelAnimationFrame(DRAW.raf);DRAW.raf=0;DRAW.lit=false;}
 // свеча: пока горит — бар показывает DRAW.local, иначе живую ману
@@ -1597,7 +1594,7 @@ function showFatigue(r,fatBefore){
   $('fattext').textContent=(r.narr&&r.narr.length)?r.narr[0]:'Свеча погасла, круг сорвался в руках.';
   $('fatstat').textContent=(FAT>fatBefore)?('усталость выросла до −'+FAT+' ко всем характеристикам — отдышись')
     :('усталость: −'+FAT);
-  $('magicwrap').classList.add('hidden');
+  if(VIEW==='magic')setView('explore');
   $('fatwrap').classList.remove('hidden');
 }
 async function downloadLog(){                 // подробный лог сессии → файл (для отладки)

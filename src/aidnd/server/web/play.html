@@ -164,8 +164,7 @@
     box-shadow:0 4px 14px rgba(0,0,0,.45);animation:rise .2s ease;white-space:nowrap}
   .gobtn:hover{filter:brightness(1.08)}
   .gobtn span{opacity:.72;font-weight:500}
-  #citybase{filter:brightness(.72) saturate(.86) contrast(1.03);pointer-events:none;transition:filter 1s ease}
-  #skyrect{transition:fill 1s ease,opacity 1s ease}
+  #citybase{pointer-events:none}  /* day-cycle recolors THIS group only (feColorMatrix) — labels/markers stay constant */
   #citybase .h{pointer-events:auto;cursor:pointer;transition:fill .1s}
   #citybase .h:hover{fill:#ffdf87}
   #citybase .h.sel{fill:#ffd23f}
@@ -613,34 +612,43 @@ const STEP_MS=240;                                          // реальная 
 function fmtClock(t){t=((t%1440)+1440)%1440;const h=Math.floor(t/60),m=t%60;
   const per=h<5?'ночь':h<11?'утро':h<17?'день':h<22?'вечер':'ночь';
   return per+', '+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');}
-// палитра суточного цикла: контрольные точки по часам → фильтр карты + цвет неба-подложки
+// суточный цикл = НАСТОЯЩАЯ перекраска рисунка карты (#citybase), не плёнка сверху.
+// Модель — «лунный свет»: каждый пиксель тянется к цвету часа ПО СВОЕЙ ЯРКОСТИ (родня sepia,
+// но в любой цвет). Никакого hue-rotate — синь реки не провернётся через фиолет; переход
+// янтарь→синь идёт через естественную серо-лиловую мглу. Подписи и маркеры живут вне
+// #citybase и часа не замечают.
 const SKY=[
-  {h:0, br:.46,sat:.70,ov:[10,16,46], oo:.52},   // глухая ночь — синь
-  {h:5, br:.50,sat:.72,ov:[18,24,56], oo:.46},   // предрассветье
-  {h:7, br:.80,sat:.94,ov:[74,60,84], oo:.20},   // рассвет — прохладно-розовый
-  {h:10,br:1.00,sat:1.0,ov:[255,246,214],oo:.05},// утро
-  {h:13,br:1.03,sat:1.0,ov:[255,242,206],oo:.02},// полдень — ярко и тепло
-  {h:17,br:.94,sat:1.05,ov:[176,104,44],oo:.14}, // предвечерье — золото
-  {h:19,br:.78,sat:1.07,ov:[126,60,30], oo:.26}, // закат — оранжево-тёплый
-  {h:21,br:.60,sat:.90,ov:[52,34,66],  oo:.36},  // сумерки — фиолетовый
-  {h:23,br:.50,sat:.74,ov:[14,20,56],  oo:.46},  // ночь
-  {h:24,br:.46,sat:.70,ov:[10,16,46],  oo:.52},
+  {h:0,   br:.55,sat:.85,tint:[.45,.60,.85],amt:.60},  // глухая ночь — лунная синь
+  {h:5,   br:.58,sat:.85,tint:[.48,.62,.85],amt:.55},  // предрассветье
+  {h:7.5, br:.88,sat:.95,tint:[1,.82,.72],  amt:.25},  // рассвет — розоватый
+  {h:10,  br:1.00,sat:1.00,tint:[1,.95,.85],amt:.06},  // утро
+  {h:13,  br:1.03,sat:1.02,tint:[1,.95,.85],amt:.03},  // полдень — почти без фильтра
+  {h:17,  br:.97,sat:1.05,tint:[1,.85,.60], amt:.18},  // предвечерье — золото
+  {h:19,  br:.85,sat:1.00,tint:[1,.72,.45], amt:.32},  // закат — янтарь
+  {h:21,  br:.66,sat:.85,tint:[.75,.72,.80],amt:.40},  // сумерки — серо-лиловая мгла
+  {h:22.5,br:.56,sat:.85,tint:[.50,.63,.86],amt:.55},  // синь поднимается
+  {h:24,  br:.55,sat:.85,tint:[.45,.60,.85],amt:.60},
 ];
+const _m3mul=(A,B)=>A.map((_,i)=>[0,1,2].map(j=>A[i][0]*B[0][j]+A[i][1]*B[1][j]+A[i][2]*B[2][j]));
+function _skyMatrix(br,sat,tint,amt){
+  const LW=[0.2126,0.7152,0.0722];                       // luminance weights (sRGB)
+  // tint-blend: I*(1-amt) + (столбец tint × строка LW)*amt — белое→цвет часа, чёрное→чёрное
+  const MT=[0,1,2].map(i=>[0,1,2].map(j=>(i===j?1-amt:0)+tint[i]*LW[j]*amt));
+  const MB=[[br,0,0],[0,br,0],[0,0,br]];
+  const MS=[[0.213+0.787*sat,0.715-0.715*sat,0.072-0.072*sat],
+            [0.213-0.213*sat,0.715+0.285*sat,0.072-0.072*sat],
+            [0.213-0.213*sat,0.715-0.715*sat,0.072+0.928*sat]];
+  return _m3mul(MS,_m3mul(MT,MB));                       // brightness → tint → saturate
+}
 function applySky(){const t=((GT/60)%24+24)%24;let a=SKY[0],b=SKY[SKY.length-1];
   for(let i=0;i<SKY.length-1;i++){if(t>=SKY[i].h&&t<=SKY[i+1].h){a=SKY[i];b=SKY[i+1];break;}}
   const f=(b.h-a.h)?(t-a.h)/(b.h-a.h):0,L=(x,y)=>x+(y-x)*f;
-  const br=L(a.br,b.br),sat=L(a.sat,b.sat);
-  const svg=$('mapsvg');
-  if(svg)svg.style.filter=`brightness(${br.toFixed(3)}) saturate(${sat.toFixed(3)}) contrast(1.03)`;
-  const sr=svg&&svg.querySelector('#skyrect');   // sky tint tracks the hour: near-clear at noon, blue at night
-  if(sr){const ov=[0,1,2].map(i=>Math.round(L(a.ov[i],b.ov[i])));
-    sr.setAttribute('fill',`rgb(${ov.join(',')})`);sr.setAttribute('opacity',L(a.oo,b.oo).toFixed(2));}
-  const mb=document.querySelector('.map');           // infinite ground tracks the day cycle too
-  if(mb){
-    if(mb.classList.contains('inside'))mb.style.background='';                       // building: CSS paper ground
-    else{const g=[0xa9,0xb8,0x78].map(c=>Math.round(Math.min(255,c*br)));            // world: ground green, day-tinted
-      mb.style.background=`rgb(${g.join(',')})`;}
-  }}   // subtle time tint only — never darken to black
+  const mat=document.getElementById('daymat');
+  if(!mat)return;
+  const M=_skyMatrix(L(a.br,b.br),L(a.sat,b.sat),
+                     [0,1,2].map(i=>L(a.tint[i],b.tint[i])),L(a.amt,b.amt));
+  mat.setAttribute('values',M.map(r=>r.map(v=>v.toFixed(4)).join(' ')+' 0 0').join('  ')+'  0 0 0 1 0');
+}
 function setClock(){const c=$('clock');if(c)c.textContent=fmtClock(GT);applySky();}
 function setCoins(v){if(v==null)return;const c=$('coins');if(c)c.textContent=v+' зм';}
 function setHp(v,mx){if(v==null)return;const c=$('hp');if(c)c.textContent='\u2665 '+v+'/'+(mx||PBMAXHP);}
@@ -664,8 +672,12 @@ function applyVB(){const [w,h]=viewWH();
 window.addEventListener('resize',()=>{if(MAP)applyVB();});
 function svgEl(m){
   const W=BVB[2],rpl=W*0.0092,lw=W*0.0022,fs=W*0.015;
-  let g=`<g id="citybase">${m.svg||''}</g>`;
-  g+=`<rect id="skyrect" x="0" y="0" width="${BVB[2]}" height="${BVB[3]}" fill="#0b1226" opacity="0" pointer-events="none"/>`;  /* applySky owns fill/opacity — no static film */
+  /* day-cycle = SVG-native color matrix on the map art (CSS filter on an inner <g> paints
+     unreliably in WebKit); sRGB interpolation keeps the authored palette hues honest */
+  let g=`<defs><filter id="dayfilter" color-interpolation-filters="sRGB">
+      <feColorMatrix id="daymat" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+    </filter></defs>`;
+  g+=`<g id="citybase" filter="url(#dayfilter)">${m.svg||''}</g>`;
   m.keys.forEach(k=>g+=`<text class="kmark" data-id="${k.node}" x="${k.x}" y="${k.y-rpl*1.9}" font-size="${fs.toFixed(1)}" text-anchor="middle">${k.label}</text>`);
   g+=`<g id="destmark" pointer-events="none" style="display:none">
       <circle fill="none" stroke="#e5372a" stroke-width="${lw}"><animate attributeName="r" values="${rpl*0.5};${rpl*1.9};${rpl*0.5}" dur="1.05s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0;1" dur="1.05s" repeatCount="indefinite"/></circle>

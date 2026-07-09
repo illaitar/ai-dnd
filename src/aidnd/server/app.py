@@ -123,7 +123,8 @@ async def play_page(request: Request) -> HTMLResponse:
     if not user and db_ok and not os.environ.get("AIDND_OPEN_PLAY"):
         return RedirectResponse("/login?next=/play", status_code=303)
     with open(os.path.join(WEB_DIR, "play.html"), encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+        # no-cache: the client is a single evolving file; a stale copy = "I still see the old UI"
+        return HTMLResponse(f.read(), headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 @app.get("/login")

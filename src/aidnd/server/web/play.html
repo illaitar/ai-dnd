@@ -798,9 +798,8 @@ function wirePlan(){
   box.querySelectorAll('[data-zid]').forEach(el=>el.onclick=async()=>{
     const r=await api('/api/play/zone',{zid:el.dataset.zid});
     if(r.error){push('sys',esc(r.error));return;}
-    (r.narr||[]).forEach(t=>push('narr',esc(t)));
     if(r.plan){$('planbox').innerHTML=r.plan;wirePlan();}
-    if(r.gt!=null){GT=r.gt;setClock();}
+    applyWorld(r);                          // the room now lives — narr + feed + who spoke this tick
   });
   box.querySelectorAll('.npc[data-pid]').forEach(el=>el.onclick=ev=>{
     ev.stopPropagation();const pid=el.dataset.pid;

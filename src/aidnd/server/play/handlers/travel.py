@@ -254,9 +254,12 @@ async def go_room(request: Request):
         out["narr"].append(f"Ты проходишь в: {want}.")
     _S["dlg"] = None  # moved to different room — conversation broken
     _gt_add(PB["give_min"])
+    t = _world_tick()  # the room lives — NPCs get their turn, sound surfaces (was missing: dead room)
     return {
         **out,
         **_scene_dict(city, people, crof, cr2b, loc),
+        **t,
+        "narr": (out.get("narr") or []) + (t.get("narr") or []),
         "gt": _gt(),
         "coins": _pc_coins(),
         "hp": _pc_hp(),
@@ -367,8 +370,10 @@ async def play_zone(request: Request):
     cur = _plan_payload()
     if not cur.get("plan") or zid not in (cur.get("zones") or {}):
         return {"error": "тут такого места нет"}
-    line = _zone_go(zid, cur["zones"][zid])       # move first — then fresh plan
-    return {**_plan_payload(), "narr": [line], "gt": _gt()}
+    line = _zone_go(zid, cur["zones"][zid])       # move first — then tick — then fresh plan
+    t = _world_tick()                             # walking to a table lives: NPCs speak, sound surfaces
+    return {**_plan_payload(), **t, "narr": [line, *(t.get("narr") or [])],
+            "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}
 
 
 def _zone_go(zid: str, zname: str) -> str:

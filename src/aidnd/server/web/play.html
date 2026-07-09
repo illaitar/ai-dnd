@@ -37,7 +37,7 @@
   .col{background:linear-gradient(168deg,var(--panel),var(--panel2));border:1px solid var(--line);
     border-radius:12px;min-width:0;box-shadow:inset 0 1px 0 rgba(230,220,190,.03);
     display:flex;flex-direction:column;overflow:hidden;flex:1 1 0;contain:paint;
-    transition:flex-grow .19s cubic-bezier(.2,.7,.3,1),opacity .16s ease,border-color .3s}
+    transition:opacity .16s ease,border-color .3s}  /* flex-grow snaps; motion is GPU transform (FLIP) */
   .left{flex-grow:1.15}     /* slot 1 — work column (map · inventory · magic) */
   .center{flex-grow:1.5}    /* slot 2 — chat (never moves) */
   .right{flex-grow:0.85}    /* slot 3 — conditions */
@@ -516,12 +516,44 @@ function push(cls,html){const d=document.createElement('div');d.className='msg '
 
 // ─── adaptive panels: one body-class state machine drives the 3-column morph ───
 let VIEW='explore';
+// FLIP morph: the layout snaps in ONE reflow, then columns animate old→new size via GPU
+// transform only (compositor thread → 60fps, no per-frame reflow or SVG re-raster). The left
+// work-panel is counter-scaled so its map/inventory content isn't stretched while the column scales.
+const MORPH='.26s cubic-bezier(.2,.7,.3,1)';
+function morphTo(apply){
+  const cols=[...document.querySelectorAll('.stage > .col')];
+  const first=cols.map(c=>c.getBoundingClientRect());
+  apply();                                                    // mutate layout (body class + panel swap)
+  const last=cols.map(c=>c.getBoundingClientRect());
+  cols.forEach((c,i)=>{
+    const f=first[i],l=last[i],inner=c.querySelector(':scope > .workpanel.on');
+    if(f.width<24||l.width<24){c.style.transition='';c.style.transform='';return;}  // fading panel → opacity only
+    const sx=f.width/l.width,dx=f.left-l.left;
+    c.style.transformOrigin='left center';c.style.transition='none';
+    c.style.transform=`translateX(${dx}px) scaleX(${sx})`;
+    if(inner){inner.style.transformOrigin='left center';inner.style.transition='none';inner.style.transform=`scaleX(${1/sx})`;}
+  });
+  void document.body.offsetWidth;                             // flush the inverted state before playing
+  requestAnimationFrame(()=>cols.forEach(c=>{
+    const inner=c.querySelector(':scope > .workpanel.on');
+    c.style.transition=`transform ${MORPH}`;c.style.transform='';
+    if(inner){inner.style.transition=`transform ${MORPH}`;inner.style.transform='';}
+  }));
+  clearTimeout(morphTo._t);                                   // safety: guarantee a clean identity state
+  morphTo._t=setTimeout(()=>cols.forEach(c=>{                 // after the morph, whatever the engine did
+    c.style.transition='';c.style.transform='';
+    const inner=c.querySelector(':scope > .workpanel.on');
+    if(inner){inner.style.transition='';inner.style.transform='';}
+  }),340);
+}
 function setView(name){
   if(name===VIEW&&name!=='explore'&&name!=='dialogue')name='explore';  // re-trigger a focus toggles back
-  VIEW=name;
-  document.body.className='view-'+name;
-  const wp={inv:'invpanel',magic:'magicpanel'}[name]||'mapwrap';        // which work panel fills the left column
-  ['mapwrap','invpanel','magicpanel'].forEach(id=>{const e=$(id);if(e)e.classList.toggle('on',id===wp);});
+  morphTo(()=>{
+    VIEW=name;
+    document.body.className='view-'+name;
+    const wp={inv:'invpanel',magic:'magicpanel'}[name]||'mapwrap';      // which work panel fills the left column
+    ['mapwrap','invpanel','magicpanel'].forEach(id=>{const e=$(id);if(e)e.classList.toggle('on',id===wp);});
+  });
   if(name==='inv')refreshInv();
 }
 document.addEventListener('keydown',e=>{

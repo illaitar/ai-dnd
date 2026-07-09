@@ -24,13 +24,34 @@
   .loc b{color:var(--ink);font-weight:500}
   .loc .sep{color:var(--faint)}
   .top .right{margin-left:auto;display:flex;gap:16px;color:var(--dim);font-size:12.5px}
+  /* the morph animates flex-grow only (a <number> — the most widely & smoothly animatable
+     layout property; flex-basis/grid-template sticks mid-transition in some engines). Every
+     column keeps flex-basis:0, so grow ratios alone set the split. */
   .stage{display:flex;gap:12px;padding:12px;height:calc(100vh - 46px)}
   .col{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-width:0;
-    display:flex;flex-direction:column;overflow:hidden}
-  .left{flex:0 0 480px;transition:flex-basis .35s ease}
-  .center{flex:1}
-  .right{flex:0 0 260px;transition:flex-basis .35s ease}
-  body.dialogue .right{flex-basis:300px}
+    display:flex;flex-direction:column;overflow:hidden;flex:1 1 0;
+    transition:flex-grow .46s cubic-bezier(.42,0,.16,1),opacity .32s ease,border-color .3s}
+  .left{flex-grow:1.15}
+  .center{flex-grow:1.5}
+  .right{flex-grow:0.85}
+  /* ── adaptive view states — panels replace & expand (explore = defaults above) ── */
+  body.view-map .left{flex-grow:2.7}                                  /* карта раскрывается */
+  body.view-map .center{flex-grow:1.15}                              /* текст остаётся справа */
+  body.view-map .right{flex-grow:0.0001;opacity:0;pointer-events:none} /* сумка/дела уходят */
+  body.view-bag .left{flex-grow:0.5}                                 /* карта ужимается в полоску */
+  body.view-bag .center{flex-grow:1.2}
+  body.view-bag .right{flex-grow:1.65}                               /* сумка разворачивается */
+  body.view-dialogue .left{flex-grow:0.6}
+  body.view-dialogue .center{flex-grow:2.2}                          /* повествование вперёд */
+  body.view-dialogue .right{flex-grow:0.95}
+  #viewback{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:40;display:none;
+    align-items:center;gap:8px;cursor:pointer;background:var(--panel2);border:1px solid var(--line2);
+    border-radius:22px;padding:7px 16px;color:var(--dim);font:500 12.5px var(--sans);
+    box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  #viewback:hover{color:var(--gold);border-color:var(--gold-dim)}
+  #viewback kbd{font-size:10px;color:var(--faint);border:1px solid var(--line2);border-radius:4px;
+    padding:1px 5px;font-family:var(--sans)}
+  body.view-map #viewback,body.view-bag #viewback{display:flex}
   .cap{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);padding:11px 14px 6px}
   .map{flex:1;position:relative;margin:6px 10px 10px;border:1px solid var(--line);border-radius:9px;
     background:var(--panel2);overflow:hidden}
@@ -310,7 +331,7 @@
   .fatspark{font:600 24px var(--serif);color:#c98a4a;letter-spacing:.03em}
 </style>
 </head>
-<body class="explore">
+<body class="view-explore">
 
 <div class="top">
   <span class="brand">&#10022; AI-DnD</span>
@@ -321,7 +342,7 @@
 <div class="stage">
   <div class="col left">
     <div id="mapwrap">
-      <div class="cap">карта <span id="here-lbl" style="color:var(--gold)"></span></div>
+      <div class="cap" style="cursor:pointer" onclick="setView('map')" title="развернуть карту">карта <span id="here-lbl" style="color:var(--gold)"></span></div>
       <div class="map" id="mapbox"><svg id="mapsvg"></svg>
         <div class="insidemsg">ты внутри — карта подождёт снаружи</div>
         <div class="planbox" id="planbox"></div>
@@ -353,12 +374,14 @@
   <div class="col right">
     <div class="cap" id="rightcap">сцена</div>
     <div class="amb" id="amb"></div>
-    <div class="cap" style="margin-top:4px;cursor:pointer" onclick="openInv()">🎒 сумка <span id="bagn"></span> — открыть</div>
+    <div class="cap" style="margin-top:4px;cursor:pointer" onclick="setView('bag')">🎒 сумка <span id="bagn"></span> — развернуть</div>
     <div class="bag" id="bag" style="display:none"></div>
     <div class="cap" style="margin-top:4px">дела</div>
     <div class="bag" id="jobs"></div>
   </div>
 </div>
+
+<div id="viewback" onclick="setView('explore')">&#8592; к сцене <kbd>esc</kbd></div>
 
 <div id="parchwrap" class="overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
   <div class="parch">
@@ -474,6 +497,20 @@ const byId=id=>SCENE.here.find(x=>x.id===id)||{name:id,init:'?',color:'#8a6fae'}
 const thread=()=>$('thread');
 function push(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;
   thread().appendChild(d);thread().scrollTop=thread().scrollHeight;return d;}
+
+// ─── adaptive panels: one body-class state machine drives the 3-column morph ───
+let VIEW='explore';
+function setView(name){
+  if(name===VIEW&&(name==='map'||name==='bag'))name='explore';   // re-trigger toggles back to scene
+  const wasBag=(VIEW==='bag');
+  VIEW=name;
+  document.body.className='view-'+name;
+  if(name==='bag'){$('bag').style.display='';refreshInv();}       // reveal full bag in the widened rail
+  else if(wasBag){$('bag').style.display='none';}
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&(VIEW==='map'||VIEW==='bag')){setView('explore');e.preventDefault();}
+});
 
 let MAP=null,BVB=[0,0,100,100],Z=1,CX=50,CY=50,PXY={x:50,y:50},PANNED=false;
 let CRXY={},PEND=null,SELEL=null,MINPERSTEP=1,GT=19*60+40;   // игровые минуты; +1 за шаг (густой граф)
@@ -787,7 +824,7 @@ function npcMsg(id,text,label,name){
 }
 const bar=(v,c)=>`<div class="track"><i style="width:${Math.round((+v||0)*100)}%;background:${c}"></i></div>`;
 async function talk(id){
-  cur=id;mode='dialogue';
+  cur=id;mode='dialogue';setView('dialogue');
   $('talkchip').classList.add('on');$('talkname').textContent=byId(id).name;
   $('inp').placeholder='сказать '+byId(id).name+'…';$('inp').focus();
   renderAmb();
@@ -813,7 +850,7 @@ async function talk(id){
 }
 function endTalk(){
   if(cur)push('sys','— ты отходишь от '+esc(byId(cur).name)+' —');
-  cur=null;mode='explore';OFFERS={};CARD=null;renderBag();renderAmb();
+  cur=null;mode='explore';setView('explore');OFFERS={};CARD=null;renderBag();renderAmb();
   $('talkchip').classList.remove('on');
   $('inp').placeholder='что делаешь?';
 }
@@ -1164,25 +1201,9 @@ function renderLoc(loc){
 // ─── БОЙ (BG-lite): грид, ходы кликами, сухой лог ───
 let CB=null;
 
-function openParch(){
-  const w=$('parchwrap');w.classList.remove('hidden');
-  $('ptitle').textContent=(SCENE&&SCENE.city)?SCENE.city:'Карта';
-  const svg=$('parchsvg');
-  svg.setAttribute('viewBox',BVB?BVB.join(' '):'0 0 980 700');   // ВЕСЬ город, без пан/зума
-  svg.innerHTML=$('mapsvg').innerHTML;
-  ['epulse','destmark'].forEach(id=>{const e=svg.querySelector('#'+id);if(e)e.remove();});
-}
-function openInv(){
-  $('invwrap').classList.remove('hidden');
-  $('invcoins').textContent=$('coins').textContent;
-  const g=$('invgrid');
-  if(!INV.length){g.innerHTML='<div class="bagempty">пусто — только пыль по швам</div>';return;}
-  const RC={common:'',rare:'#5f8296',epic:'#8a6fae',unique:'#d9a441'};
-  const RL={common:'',rare:'редкое',epic:'эпическое',unique:'уникальное'};
-  g.innerHTML=INV.map(it=>{const rc=RC[it.rarity||'common'];return `<div class="invcard" style="${rc?('border-color:'+rc):''}" onclick="$('invwrap').classList.add('hidden');inspectItem('${it.id}')">
-    <div class="bn">${esc(it.name)}${rc?` <span style="color:${rc};font-size:10px">◆ ${RL[it.rarity]}</span>`:''}</div>
-    <div class="bw">${esc(it.kind||'')}${it.qty>1?(' × '+it.qty):''}</div></div>`;}).join('');
-}
+// map / inventory are now panel morphs, not modal overlays
+function openParch(){setView('map');}
+function openInv(){setView('bag');}
 async function openMarket(){
   $('mktwrap').classList.remove('hidden');
   $('mktbody').innerHTML='<div style="color:var(--faint);font:italic 13px var(--serif)">…</div>';

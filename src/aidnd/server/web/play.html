@@ -113,11 +113,13 @@
   .map.inside .insidemsg{opacity:1}
   @keyframes pulseIn{0%,100%{stroke:#ffe6a8;stroke-width:2}50%{stroke:#d9615a;stroke-width:4}}
   .enterpulse{animation:pulseIn 1.2s infinite;fill:none}
-  .waybtns{display:flex;gap:8px;margin:0 10px 8px}
-  .waybtns button{flex:1;padding:8px;border-radius:9px;border:1px solid var(--gold-dim);
-    background:rgba(217,164,65,.1);color:var(--gold);font:500 12.5px var(--sans);cursor:pointer}
-  .waybtns button:hover{background:rgba(217,164,65,.2)}
-  .waybtns button.gray{border-color:var(--line2);background:transparent;color:var(--dim)}
+  /* movement/context actions now live in chat as suggestion chips (not on the map card) */
+  .suggest{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 4px}
+  .suggest:empty{display:none}
+  .suggest button{padding:6px 13px;border-radius:16px;border:1px solid var(--gold-dim);
+    background:rgba(217,164,65,.1);color:var(--gold);font:500 12.5px var(--sans);cursor:pointer;transition:.15s}
+  .suggest button:hover{background:rgba(217,164,65,.2)}
+  .suggest button.gray{border-color:var(--line2);background:transparent;color:var(--dim)}
   #dicewrap{margin:0 10px 10px;padding:10px;border:1px solid var(--line);border-radius:9px;
     background:var(--panel2);display:none;align-items:center;gap:12px}
   #dicewrap.on{display:flex}
@@ -354,7 +356,6 @@
           <button onclick="recenter()" title="к игроку" style="font-size:12px">&#9678;</button></div>
         <button id="gobtn" class="gobtn hidden" onclick="go()">&#9654; идти <span id="goeta"></span></button>
       </div>
-      <div class="waybtns" id="waybtns"></div>
       <div id="dicewrap"><div class="d20" id="d20box"></div><div class="dtxt" id="dtxt"></div></div>
       <div class="locard">
         <div class="nm">Трактир</div><div class="kd">таверна</div>
@@ -371,6 +372,7 @@
   <div class="col center">
     <div class="cap">повествование</div>
     <div class="thread" id="thread"></div>
+    <div class="suggest" id="waybtns"></div>
     <div id="talkchip">говоришь с <b id="talkname"></b> <span class="x" onclick="endTalk()">✕</span></div>
     <div class="inbar">
       <input id="inp" placeholder="что делаешь?" autocomplete="off">

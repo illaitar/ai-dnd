@@ -76,7 +76,7 @@
   body.view-map #viewback,body.view-inv #viewback,body.view-magic #viewback{display:flex}
   .cap{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);padding:11px 14px 6px}
   .map{flex:1;position:relative;margin:0;border:0;border-radius:0;
-    background:#e6d9b4;overflow:hidden}   /* borderless, parchment ground — the map bleeds to the panel edges, feels infinite */
+    background:#a9b878;overflow:hidden}   /* borderless; bg = the world-map ground green, so beyond the SVG is seamless/infinite (applySky tints it by time) */
   .map svg{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
   .map svg.drag{cursor:grabbing}
   .msg .mrow{display:flex;gap:8px;align-items:flex-start}
@@ -124,7 +124,8 @@
   .invcard .bn{font-size:13.5px;color:var(--ink)}
   .invcard .bw{font-size:11px;color:var(--faint);margin-top:3px}
   .map.inside svg#mapsvg{pointer-events:none;filter:brightness(.45) saturate(.5)}
-  .map .planbox{position:absolute;inset:0;overflow:auto;opacity:0;pointer-events:none;background:#e6d9b4;padding:0}   /* parchment fills — floorplan feels infinite, no dark box */
+  .map.inside{background:#eadfc4}   /* building view: ground = the floorplan paper (PAPER), seamless with the plan */
+  .map .planbox{position:absolute;inset:0;overflow:auto;opacity:0;pointer-events:none;background:#eadfc4;padding:0}   /* parchment = paper_svg PAPER — plan feels infinite, no dark box */
   .map.inside.hasplan .planbox{opacity:1;pointer-events:auto}
   .map.inside.hasplan .insidemsg{opacity:0}
   .planbox .zone:hover{fill:#5aa0ff22}
@@ -244,6 +245,8 @@
   .msg{max-width:88%;margin:0 0 16px;animation:rise .28s ease}
   @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   .msg.narr{font:italic 15px/1.65 var(--serif);color:#cfcabc;border-left:2px solid var(--gold-dim);padding-left:14px}
+  .msg.amb{font:italic 14px/1.6 var(--serif);color:var(--dim);border-left:2px solid var(--edge,var(--line2));padding-left:14px}
+  .snd{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;font:italic 12.5px var(--serif);color:var(--dim)}
   .msg.npc .sp{font:500 13px var(--sans);color:var(--gold);margin-bottom:2px}
   .msg.npc .tx{font:15px/1.6 var(--serif);color:var(--ink)}
   .msg.me{margin-left:auto;text-align:right;color:var(--dim)}
@@ -613,11 +616,15 @@ const SKY=[
 function applySky(){const t=((GT/60)%24+24)%24;let a=SKY[0],b=SKY[SKY.length-1];
   for(let i=0;i<SKY.length-1;i++){if(t>=SKY[i].h&&t<=SKY[i+1].h){a=SKY[i];b=SKY[i+1];break;}}
   const f=(b.h-a.h)?(t-a.h)/(b.h-a.h):0,L=(x,y)=>x+(y-x)*f;
-  const base=$('mapsvg').querySelector('#citybase');
-  if(base)base.style.filter=`brightness(${L(a.br,b.br).toFixed(3)}) saturate(${L(a.sat,b.sat).toFixed(3)}) contrast(1.03)`;
-  const rect=$('mapsvg').querySelector('#skyrect');
-  if(rect){rect.style.fill=`rgb(${[0,1,2].map(k=>Math.round(L(a.ov[k],b.ov[k]))).join(',')})`;
-    rect.style.opacity=Math.min(0.16,L(a.oo,b.oo)).toFixed(3);}}   // subtle time tint only — never darken to black
+  const br=L(a.br,b.br),sat=L(a.sat,b.sat);
+  const svg=$('mapsvg');
+  if(svg)svg.style.filter=`brightness(${br.toFixed(3)}) saturate(${sat.toFixed(3)}) contrast(1.03)`;
+  const mb=document.querySelector('.map');           // infinite ground tracks the day cycle too
+  if(mb){
+    if(mb.classList.contains('inside'))mb.style.background='';                       // building: CSS paper ground
+    else{const g=[0xa9,0xb8,0x78].map(c=>Math.round(Math.min(255,c*br)));            // world: ground green, day-tinted
+      mb.style.background=`rgb(${g.join(',')})`;}
+  }}   // subtle time tint only — never darken to black
 function setClock(){const c=$('clock');if(c)c.textContent=fmtClock(GT);applySky();}
 function setCoins(v){if(v==null)return;const c=$('coins');if(c)c.textContent=v+' зм';}
 function setHp(v,mx){if(v==null)return;const c=$('hp');if(c)c.textContent='\u2665 '+v+'/'+(mx||PBMAXHP);}
@@ -754,7 +761,9 @@ function renderAmb(){
        <div class="facegrid">${SCENE.here.map(faceHtml).join('')}${more?`<span class="face more">+${more}</span>`:''}
        ${(!SCENE.here.length)?`<span style="font:italic 12px var(--serif);color:var(--faint)">${(SCENE.looked|0)<1?'осмотрись, чтобы различить людей':'никого'}</span>`:''}</div></div>
      <div class="sceneline">${esc(sceneLine())}</div>
-     <div><div class="subcap" style="margin:2px 0 6px">вокруг</div><div class="lfeed" id="lfeed"></div></div>`;
+     <div><div class="subcap" style="margin:2px 0 6px">вокруг</div>
+       ${(a.sound&&a.sound.length)?`<div class="snd">${a.sound.map(s=>`<div>${esc(s)}</div>`).join('')}</div>`:''}
+       <div class="lfeed" id="lfeed"></div></div>`;
   renderFeed();
 }
 let LIVEF=[],LIVEBUSY=false;
@@ -775,7 +784,9 @@ function applyWorld(r){
     BOARD=r.guild_board?{jobs:r.guild_board,news:r.guild_news,status:r.guild_status}:null;
     ADS=r.board_ads?{ads:r.board_ads,news:r.board_news}:null;
     renderAmb();renderLoc(r.location);renderWays();
-    $('locname').textContent=r.location.name;}
+    $('locname').textContent=r.location.name;
+    const snd=(r.ambient&&r.ambient.sound)||[];                 // arriving: narrate what you hear
+    if(snd.length)push('amb',esc(snd.join('. ')+'.'));}
   if(r.watch)renderWatch(r.watch);
   if(r.dungeon&&!DNG)refreshDungeon();               // страницу перезагрузили в данже
   else if(r.dungeon===null&&DNG){DNG=null;renderDungeon();}

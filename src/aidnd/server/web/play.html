@@ -55,6 +55,17 @@
   .invlist{flex:1 1 auto;overflow:auto;padding:2px 12px 12px;display:flex;flex-direction:column;gap:7px}
   .magbody{flex:1 1 auto;overflow:auto;padding:10px 14px 16px}
   body.view-magic #combat{display:none}   /* drawing a circle mid-combat: reveal the panel, keep combat state */
+  #genwrap{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+    background:rgba(8,10,10,.9)}
+  #genwrap.hidden{display:none}
+  .genbox{width:min(440px,88vw);text-align:center;padding:34px 30px;
+    background:linear-gradient(168deg,var(--panel),var(--panel2));border:1px solid var(--line2);
+    border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .gentitle{font:600 20px var(--serif);color:var(--gold);letter-spacing:.04em;margin-bottom:18px}
+  .genstage{font:italic 14px var(--serif);color:var(--dim);margin-bottom:16px;min-height:20px}
+  .genbar{height:8px;border-radius:6px;background:#0e1413;overflow:hidden;border:1px solid var(--line)}
+  .genbar i{display:block;height:100%;width:0;border-radius:6px;
+    background:linear-gradient(90deg,var(--gold-dim),var(--gold));transition:width .35s ease}
   #viewback{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:40;display:none;
     align-items:center;gap:8px;cursor:pointer;background:var(--panel2);border:1px solid var(--line2);
     border-radius:22px;padding:7px 16px;color:var(--dim);font:500 12.5px var(--sans);
@@ -426,6 +437,14 @@
 </div>
 
 <div id="viewback" onclick="setView('explore')">&#8592; к сцене <kbd>esc</kbd></div>
+
+<div id="genwrap" class="hidden">
+  <div class="genbox">
+    <div class="gentitle">&#10022; Новый мир</div>
+    <div class="genstage" id="genstage">Возводим город…</div>
+    <div class="genbar"><i id="genfill"></i></div>
+  </div>
+</div>
 
 <div id="parchwrap" class="overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
   <div class="parch">
@@ -826,7 +845,23 @@ async function enterB(){applyWorld(await api('/api/play/enter',{}));}
 async function exitB(){applyWorld(await api('/api/play/exit',{}));}
 async function waitTurn(){applyWorld(await api('/api/play/live',{}));}
 async function lookAround(){applyWorld(await api('/api/play/look',{}));}
-async function newWorld(){if(!confirm('Начать НОВЫЙ мир? Текущий прогресс будет стёрт — город и жители сгенерируются заново (из тех же пулов).'))return;const d=await api('/api/play/newworld',{});if(d&&d.reload)location.reload();}
+const GEN_STAGES=['Возводим город…','Заселяем дома…','Плетём связи…','Открываем лавки…','Будим горожан…'];
+async function newWorld(){
+  if(!confirm('Начать НОВЫЙ мир? Текущий прогресс будет стёрт — город и жители сгенерируются заново (из тех же пулов).'))return;
+  const wrap=$('genwrap'),fill=$('genfill'),stage=$('genstage');
+  wrap.classList.remove('hidden');fill.style.width='0%';stage.textContent=GEN_STAGES[0];
+  let p=0,si=0;                                   // bar climbs to ~92% on estimate, snaps to 100% when the build returns
+  const t=setInterval(()=>{p=Math.min(92,p+Math.random()*7+2);fill.style.width=p+'%';
+    const ns=Math.min(GEN_STAGES.length-1,Math.floor(p/(93/GEN_STAGES.length)));
+    if(ns!==si){si=ns;stage.textContent=GEN_STAGES[si];}},260);
+  try{
+    await api('/api/play/newworld',{});           // wipe runtime
+    await api('/api/play/scene');                  // trigger the real rebuild (the expensive assembly)
+  }finally{
+    clearInterval(t);fill.style.width='100%';stage.textContent='Готово';
+    setTimeout(()=>location.reload(),400);        // world now built + cached → reload is instant
+  }
+}
 function showDice(d){
   const box=$('d20box'),txt=$('dtxt'),wrap=$('dicewrap');
   wrap.classList.add('on');

@@ -8,14 +8,29 @@ _person_from_row(row, home, work) -> Townsperson : Ready NPC from bank → Towns
 
 from __future__ import annotations
 
+import os
 import random
 
 from aidnd.mind import NpcConfig, NpcState
 from aidnd.worldgen.population import Townsperson
 
+from ..core import _PORT_DIR
 from ..session.persist import _store
 from ..session.state import _wid
 from .building import _building_keys
+
+
+def _portraits_of(row: dict) -> dict:
+    """Portrait map {emotion: rel-path} for a pool row. The bank predates the portraits
+    column (rows hold {}), but the rendered files ARE on disk — data/portraits/<id>/<эмоция>.png —
+    so derive the map from the directory when the row is empty."""
+    ports = row.get("portraits") or {}
+    if ports:
+        return ports
+    pdir = os.path.join(_PORT_DIR, row["id"])
+    if not os.path.isdir(pdir):
+        return {}
+    return {f[:-4]: f"{row['id']}/{f}" for f in sorted(os.listdir(pdir)) if f.endswith(".png")}
 
 
 def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
@@ -55,7 +70,7 @@ def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
         appearance=row["appearance"],
         state=st,
         persona=row.get("persona"),
-        portraits=row.get("portraits") or {},
+        portraits=_portraits_of(row),
     )
     if work:  # building owner → keys to his locked containers
         tp.keys = _building_keys(work)

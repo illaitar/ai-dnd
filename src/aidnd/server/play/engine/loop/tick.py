@@ -40,3 +40,18 @@ def _world_tick() -> dict:
         logging.getLogger("aidnd").warning("live tick failed", exc_info=True)
         return {"feed": [], "address": []}
     return {"feed": feed, "address": address}
+
+
+def _world_tick_fast() -> dict:
+    """FAST half of the tick: sync the passive world and build the live scene POSITIONS
+    (who's near, where they sit — NO LLM), so a move/enter shows the room instantly. The slow
+    half — NPCs think/talk (_live_tick, many LLM calls) — is streamed afterwards by the client
+    calling /api/play/live, so entering a crowded tavern never blocks. `live_pending` tells the
+    client to fetch that reaction."""
+    from ..world import _here, _live_build
+
+    city, people, crof, cr2b, loc = _play()
+    lv = _S.get("live")
+    if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
+        _live_build(city, people, crof, cr2b, loc)
+    return {"feed": [], "address": [], "live_pending": True}

@@ -256,7 +256,9 @@ def _emo(st) -> str:
     }.get(dom, "ровное")
 
 
-_PORT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "portraits")
+_PORT_DIR = os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "..", "..", "data", "portraits"
+)  # repo-root data/portraits — the same dir app.py mounts at /portraits
 
 
 def _portrait_url(p, emo: str | None = None) -> str | None:

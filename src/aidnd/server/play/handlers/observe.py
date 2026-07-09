@@ -22,12 +22,12 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
+from aidnd.server.play.engine.loop.tick import _world_tick_fast
 from aidnd.server.play.engine.world import (
     _look_key,
     _looked_level,
     _play,
     _scene_dict,
-    _world_tick,
 )
 from aidnd.server.play.mechanics.items import _pc_coins
 
@@ -49,7 +49,7 @@ async def look(request: Request):
     keen = total >= PB["look_good"]
     _S.setdefault("looked", {})[key] = max(_looked_level(loc, inside), 2 if keen else 1)
     _gt_add(PB["give_min"])
-    t = _world_tick()                                    # a beat passes — the room lives while you look
+    t = _world_tick_fast()                               # the look lands instantly; the room's beat streams via /live
     sc = _scene_dict(city, people, crof, cr2b, loc)
     dice = {
         "die": 20,

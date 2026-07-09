@@ -83,6 +83,10 @@ def _scene_soundscape() -> list[str]:
     a zoned scene or before any zone is placed (no centroid — stale/legacy building data)."""
     lv = _S.get("live") or {}
     zones = lv.get("zones") or []
+    if lv.get("bid") and not _S.get("inside"):
+        # standing at the door, not inside: walls muffle everything — at most a hum seeps out
+        folk_in = sum(1 for pid in (lv.get("zonemap") or {}) if pid != PLAYER)
+        return ["из-за двери доносится приглушённый гул голосов"] if folk_in >= 2 else []
     if not zones:
         return []
     zonemap = lv.get("zonemap") or {}
@@ -166,7 +170,10 @@ def _scene_dict(city, people, crof, cr2b, loc):
     here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
     lvl = _looked_level(loc, inside)
     more = 0  # no cap — the scene shows everyone present
-    vis_here = here  # basic vision: who is in the room is ALWAYS visible; a keen look reveals HIDDEN things
+    # basic vision: who is in the room is ALWAYS visible; a keen look reveals HIDDEN things.
+    # But at a building's door WITHOUT entering, the folk are indoors behind walls — unseen.
+    at_door = bool(bid and not inside)
+    vis_here = [] if at_door else here
     room = _S.get("room") if inside else None
     rooms = _scene_rooms(inside, lvl)
     if inside and room:
@@ -192,7 +199,7 @@ def _scene_dict(city, people, crof, cr2b, loc):
         "dungeon": ({"name": (_S.get("dungeon") or {}).get("d", {}).get("name"),
                      "room": (_S.get("dungeon") or {}).get("room")}
                     if _S.get("dungeon") else None),
-        "ambient": _scene_ambient(here, lvl),
+        "ambient": _scene_ambient(vis_here, lvl),
         "here": _scene_folk(vis_here, people),
     }
     _scene_extras(d, bid, loc, inside, plaza, people, crof)

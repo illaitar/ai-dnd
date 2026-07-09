@@ -39,6 +39,7 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
+from aidnd.server.play.engine.loop.tick import _world_tick_fast
 from aidnd.server.play.engine.world import (
     _apply_routine,
     _building_rooms,
@@ -132,8 +133,8 @@ async def move(request: Request):
     _gt_add(PB["step_min"] * max(1, len(seg) - 1))  # travel time: minutes per step taken
     _apply_routine()  # world may shift phases during travel
     ct_done = _contract_on_move(dest)  # visit-contract: reached — fulfilled
-    t = _world_tick()  # world gets turn (turn-based) — rebuilds the live scene at `dest` FIRST,
-    sc = _scene_dict(city, people, crof, cr2b, dest)  # so scene/ambient reflect the arrival, not the old spot
+    t = _world_tick_fast()  # arrive instantly; NPC reactions stream via /live (client follow-up)
+    sc = _scene_dict(city, people, crof, cr2b, dest)  # scene/ambient reflect the arrival
     extra = {}
     if stop:
         extra["stopped"] = stop["kind"]
@@ -180,7 +181,7 @@ async def enter(request: Request):
     _S["dlg"] = None  # entered — street conversation interrupted
     _gt_add(PB["give_min"])
     _pc_remember(f"вошёл в {_binfo(bid)['name']}", 0.25)
-    t = _world_tick()
+    t = _world_tick_fast()  # enter instantly; NPC chatter streams via /live
     return {
         **_scene_dict(city, people, crof, cr2b, loc),
         **t,
@@ -254,7 +255,7 @@ async def go_room(request: Request):
         out["narr"].append(f"Ты проходишь в: {want}.")
     _S["dlg"] = None  # moved to different room — conversation broken
     _gt_add(PB["give_min"])
-    t = _world_tick()  # the room lives — NPCs get their turn, sound surfaces (was missing: dead room)
+    t = _world_tick_fast()  # room shows instantly; NPC reactions stream via /live
     return {
         **out,
         **_scene_dict(city, people, crof, cr2b, loc),
@@ -273,7 +274,7 @@ async def exit_building(request: Request):
     _S["zone"] = None
     _S["dlg"] = None  # exited — hall conversation interrupted
     _gt_add(PB["give_min"])
-    t = _world_tick()
+    t = _world_tick_fast()  # step out instantly; street reactions stream via /live
     return {
         **_scene_dict(city, people, crof, cr2b, loc),
         **t,
@@ -371,7 +372,7 @@ async def play_zone(request: Request):
     if not cur.get("plan") or zid not in (cur.get("zones") or {}):
         return {"error": "тут такого места нет"}
     line = _zone_go(zid, cur["zones"][zid])       # move first — then tick — then fresh plan
-    t = _world_tick()                             # walking to a table lives: NPCs speak, sound surfaces
+    t = _world_tick_fast()                        # walking to a table is instant; reactions stream via /live
     return {**_plan_payload(), **t, "narr": [line, *(t.get("narr") or [])],
             "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}
 

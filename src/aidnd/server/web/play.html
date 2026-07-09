@@ -247,6 +247,19 @@
   .msg.narr{font:italic 15px/1.65 var(--serif);color:#cfcabc;border-left:2px solid var(--gold-dim);padding-left:14px}
   .msg.amb{font:italic 14px/1.6 var(--serif);color:var(--dim);border-left:2px solid var(--edge,var(--line2));padding-left:14px}
   .snd{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;font:italic 12.5px var(--serif);color:var(--dim)}
+  .dots{color:var(--dim);letter-spacing:3px;animation:dotpulse 1.1s ease-in-out infinite}
+  @keyframes dotpulse{0%,100%{opacity:.3}50%{opacity:1}}
+  /* text-sounds in the thread: overheard speech & деяния — deliberately SMALLER than narration */
+  .msg.sndline{font:italic 12px/1.5 var(--serif);color:var(--dim);margin:0 0 10px;
+    padding-left:14px;border-left:2px solid var(--line)}
+  .msg.sndline b{color:var(--ink);font-weight:500}
+  .msg.sndline .lfto{color:var(--faint);font-size:11px}
+  .msg.sndline.t2{color:var(--dim)}
+  .msg.sndline.t3{color:var(--faint)}
+  /* turn in flight: world actions blocked until the tick resolves (typing stays free) */
+  body.busy .suggest button,body.busy .gobtn,body.busy .facegrid .face,
+  body.busy .planbox [data-zid],body.busy .kmark,body.busy #citybase .h{pointer-events:none;opacity:.55}
+  body.busy .inbar button{opacity:.45;pointer-events:none}
   .msg.npc .sp{font:500 13px var(--sans);color:var(--gold);margin-bottom:2px}
   .msg.npc .tx{font:15px/1.6 var(--serif);color:var(--ink)}
   .msg.me{margin-left:auto;text-align:right;color:var(--dim)}
@@ -619,6 +632,9 @@ function applySky(){const t=((GT/60)%24+24)%24;let a=SKY[0],b=SKY[SKY.length-1];
   const br=L(a.br,b.br),sat=L(a.sat,b.sat);
   const svg=$('mapsvg');
   if(svg)svg.style.filter=`brightness(${br.toFixed(3)}) saturate(${sat.toFixed(3)}) contrast(1.03)`;
+  const sr=svg&&svg.querySelector('#skyrect');   // sky tint tracks the hour: near-clear at noon, blue at night
+  if(sr){const ov=[0,1,2].map(i=>Math.round(L(a.ov[i],b.ov[i])));
+    sr.setAttribute('fill',`rgb(${ov.join(',')})`);sr.setAttribute('opacity',L(a.oo,b.oo).toFixed(2));}
   const mb=document.querySelector('.map');           // infinite ground tracks the day cycle too
   if(mb){
     if(mb.classList.contains('inside'))mb.style.background='';                       // building: CSS paper ground
@@ -635,13 +651,21 @@ function setMana(v,cap,fat){
   if(VIEW==='magic')renderMana();
 }
 let PBMAXHP=18;
-function applyVB(){const w=BVB[2]/Z,h=BVB[3]/Z;
+// view window = container-aspect rect INSIDE the map bounds: no letterbox voids, and at
+// Z=1 the window touches the map edge — you can never zoom/pan out of the city
+function viewWH(){const b=$('mapsvg').getBoundingClientRect();
+  const ar=(b.width>2&&b.height>2)?b.width/b.height:BVB[2]/BVB[3];
+  const w=Math.min(BVB[2],BVB[3]*ar)/Z;return [w,w/ar];}
+function applyVB(){const [w,h]=viewWH();
+  CX=Math.max(BVB[0]+w/2,Math.min(BVB[0]+BVB[2]-w/2,CX));   // pan clamped —
+  CY=Math.max(BVB[1]+h/2,Math.min(BVB[1]+BVB[3]-h/2,CY));   // the view never leaves the city
   $('mapsvg').setAttribute('viewBox',`${(CX-w/2).toFixed(1)} ${(CY-h/2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`);
   $('zlvl').textContent=Math.round(Z*100)+'%';}
+window.addEventListener('resize',()=>{if(MAP)applyVB();});
 function svgEl(m){
   const W=BVB[2],rpl=W*0.0092,lw=W*0.0022,fs=W*0.015;
   let g=`<g id="citybase">${m.svg||''}</g>`;
-  g+=`<rect id="skyrect" x="0" y="0" width="${BVB[2]}" height="${BVB[3]}" fill="#0b1226" opacity=".22" pointer-events="none"/>`;
+  g+=`<rect id="skyrect" x="0" y="0" width="${BVB[2]}" height="${BVB[3]}" fill="#0b1226" opacity="0" pointer-events="none"/>`;  /* applySky owns fill/opacity — no static film */
   m.keys.forEach(k=>g+=`<text class="kmark" data-id="${k.node}" x="${k.x}" y="${k.y-rpl*1.9}" font-size="${fs.toFixed(1)}" text-anchor="middle">${k.label}</text>`);
   g+=`<g id="destmark" pointer-events="none" style="display:none">
       <circle fill="none" stroke="#e5372a" stroke-width="${lw}"><animate attributeName="r" values="${rpl*0.5};${rpl*1.9};${rpl*0.5}" dur="1.05s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0;1" dur="1.05s" repeatCount="indefinite"/></circle>
@@ -663,9 +687,9 @@ function renderMap(){const s=$('mapsvg');s.innerHTML=svgEl(MAP);applyVB();
 async function loadMap(){MAP=await api('/api/play/map');if(!MAP||!MAP.viewBox)return;
   BVB=MAP.viewBox;PXY=MAP.player;CX=PXY.x;CY=PXY.y;Z=Math.max(1.5,BVB[2]/560);
   CRXY={};(MAP.points||[]).forEach(p=>CRXY[p.id]=[p.x,p.y]);setClock();renderMap();}
-function zoomBy(f){Z=Math.min(20,Math.max(0.85,Z*f));applyVB();}
+function zoomBy(f){Z=Math.min(20,Math.max(1,Z*f));applyVB();}   // Z=1 — the whole city fills the frame; never further out
 function recenter(){CX=PXY.x;CY=PXY.y;Z=Math.max(Z,BVB[2]/560);applyVB();}
-function clientToWorld(cx,cy){const s=$('mapsvg'),r=s.getBoundingClientRect(),w=BVB[2]/Z,h=BVB[3]/Z;
+function clientToWorld(cx,cy){const s=$('mapsvg'),r=s.getBoundingClientRect(),[w,h]=viewWH();
   return [CX-w/2+(cx-r.left)/r.width*w, CY-h/2+(cy-r.top)/r.height*h];}
 function nearestCr(x,y){let best=null,bd=1e18;(MAP.points||[]).forEach(p=>{
   const d=(p.x-x)**2+(p.y-y)**2;if(d<bd){bd=d;best=p;}});return best;}
@@ -686,7 +710,8 @@ function walk(path){return new Promise(res=>{if(!path||!path.length){res();retur
     CX=p[0];CY=p[1];applyVB();GT+=MINPERSTEP;setClock();
     i++;if(i<path.length)setTimeout(step,STEP_MS);else res();};
   setTimeout(step,STEP_MS);});}
-async function go(){
+async function go(){await asTurn(goNow);}
+async function goNow(){
   if(PEND==null)return;const id=PEND;
   if(mode==='dialogue')endTalk();
   $('gobtn').classList.add('hidden');
@@ -699,9 +724,9 @@ async function go(){
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
-  (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
+  pushFeed(r.feed);
   (r.address||[]).forEach(a=>{const el=npcMsg(a.npc,a.text,'— тебе',a.who);el.style.cursor='pointer';el.onclick=()=>talk(a.npc);});
-  MAP.loc=r.loc;SCENE=r;LIVEF=[];BOARD=null;renderAmb();renderWays();
+  MAP.loc=r.loc;SCENE=r;BOARD=null;renderAmb();renderWays();
   api('/api/play/scene').then(s2=>{SCENE=s2;if(s2.guild_board)BOARD={jobs:s2.guild_board,news:s2.guild_news};renderLoc(s2.location);renderWays();setHp(s2.hp,s2.max_hp);setMana(s2.mana,s2.mana_cap,s2.fatigue);});
   $('locname').textContent=r.location.name;$('here-lbl').textContent='· '+(r.moved||r.location.name);
   renderLoc(r.location);
@@ -719,22 +744,23 @@ async function go(){
   }else{
     push('narr','Ты доходишь до «'+(r.moved||r.location.name)+'» ('+fmtClock(GT).split(', ')[1]+').');
   }
+  if(r.live_pending)reactLive();   // arrived — the spot is already on screen; NPC reactions stream in
 }
 async function signAck(bid,record,to){await api('/api/play/sign_ack',{bid,record});contMove(to);}
 async function contMove(to){PEND=to;await go();}
 (function(){const s=$('mapsvg');let drag=null;
   s.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,cx:CX,cy:CY};PANNED=false;s.classList.add('drag');});
-  window.addEventListener('mousemove',e=>{if(!drag)return;const r=s.getBoundingClientRect();
+  window.addEventListener('mousemove',e=>{if(!drag)return;const r=s.getBoundingClientRect(),[w,h]=viewWH();
     if(Math.abs(e.clientX-drag.x)+Math.abs(e.clientY-drag.y)>3)PANNED=true;
-    CX=drag.cx-(e.clientX-drag.x)*(BVB[2]/Z)/r.width;CY=drag.cy-(e.clientY-drag.y)*(BVB[3]/Z)/r.height;applyVB();});
+    CX=drag.cx-(e.clientX-drag.x)*w/r.width;CY=drag.cy-(e.clientY-drag.y)*h/r.height;applyVB();});
   window.addEventListener('mouseup',()=>{if(drag){drag=null;s.classList.remove('drag');}});
   s.addEventListener('click',e=>{                       // клик по дороге/фону → ближайшая точка
     if(PANNED||e.target.closest('.h,.kmark'))return;
     const [wx,wy]=clientToWorld(e.clientX,e.clientY);const p=nearestCr(wx,wy);
     if(p)selectDest(p.id,null);});
-  s.addEventListener('wheel',e=>{e.preventDefault();const r=s.getBoundingClientRect(),w=BVB[2]/Z,h=BVB[3]/Z;
-    const mx=CX-w/2+(e.clientX-r.left)/r.width*w,my=CY-h/2+(e.clientY-r.top)/r.height*h;
-    const nz=Math.min(20,Math.max(0.85,Z*(e.deltaY<0?1.2:1/1.2)));
+  s.addEventListener('wheel',e=>{e.preventDefault();
+    const [mx,my]=clientToWorld(e.clientX,e.clientY);
+    const nz=Math.min(20,Math.max(1,Z*(e.deltaY<0?1.2:1/1.2)));
     CX=mx+(CX-mx)*(Z/nz);CY=my+(CY-my)*(Z/nz);Z=nz;applyVB();},{passive:false});
 })();
 
@@ -755,26 +781,41 @@ function sceneLine(){
 function renderAmb(){
   const a=SCENE.ambient||{};
   const more=SCENE.here_more|0;
+  const noneTx=(SCENE.looked|0)<1?'осмотрись, чтобы различить людей'
+    :(SCENE.enterable&&!SCENE.inside)?'люди — под крышей; войди, чтобы увидеть':'никого';
   $('amb').innerHTML=
     `<div class="amchips">${[a.time,a.weather,a.mood].filter(Boolean).map(x=>`<span class="amchip">${esc(x)}</span>`).join('')}</div>
      <div><div class="subcap" style="margin:2px 0 6px">кто здесь</div>
        <div class="facegrid">${SCENE.here.map(faceHtml).join('')}${more?`<span class="face more">+${more}</span>`:''}
-       ${(!SCENE.here.length)?`<span style="font:italic 12px var(--serif);color:var(--faint)">${(SCENE.looked|0)<1?'осмотрись, чтобы различить людей':'никого'}</span>`:''}</div></div>
+       ${(!SCENE.here.length)?`<span style="font:italic 12px var(--serif);color:var(--faint)">${noneTx}</span>`:''}</div></div>
      <div class="sceneline">${esc(sceneLine())}</div>
-     <div><div class="subcap" style="margin:2px 0 6px">вокруг</div>
-       ${(a.sound&&a.sound.length)?`<div class="snd">${a.sound.map(s=>`<div>${esc(s)}</div>`).join('')}</div>`:''}
-       <div class="lfeed" id="lfeed"></div></div>`;
-  renderFeed();
+     <div><div class="subcap" style="margin:2px 0 6px">звуки</div>
+       ${(a.sound&&a.sound.length)?`<div class="snd">${a.sound.map(s=>`<div>${esc(s)}</div>`).join('')}</div>`
+         :'<div class="snd"><div>тихо — лишь погода за стенами</div></div>'}</div>`;
 }
-let LIVEF=[],LIVEBUSY=false;
+let LIVEBUSY=false;
+// ─── turn lock: while the world resolves a turn, further world actions are blocked ───
+let TURNS=0;
+function busyOn(){if(!TURNS++)document.body.classList.add('busy');}
+function busyOff(){TURNS=Math.max(0,TURNS-1);if(!TURNS)document.body.classList.remove('busy');}
+const isBusy=()=>TURNS>0;
+async function asTurn(fn){          // one player action = one turn; re-entry ignored, not queued
+  if(isBusy())return;
+  busyOn();try{return await fn();}finally{busyOff();}
+}
+// text-sounds (overheard speech, деяния) live in the THREAD, small type — not on the scene card
+function pushFeed(fs){(fs||[]).forEach(f=>{
+  const h=f.k==='speech'
+    ?`<b>${esc(f.who)}</b> <span class="lfto">&#8594; ${esc(f.to)}</span>: «${esc(f.text)}»`
+    :`${esc(f.who)} · <i>${esc(f.text)}</i>`;
+  push('sndline'+(f.k==='speech'?(' t'+(f.tier||1)):''),h);});}
 // ─── пошаговый мир: единый обработчик ответа действия ───
 function applyWorld(r){
   if(!r)return;
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);if(r.hp!=null)setHp(r.hp);
   (r.narr||[]).forEach(t=>push('narr',esc(t)));
-  (r.feed||[]).forEach(f=>LIVEF.push(f));
-  if(r.feed&&r.feed.length)renderFeed();
+  pushFeed(r.feed);
   (r.address||[]).forEach(a=>{
     const el=npcMsg(a.npc,a.text,'— тебе',a.who);
     el.style.cursor='pointer';el.title='ответить';el.onclick=()=>talk(a.npc);});
@@ -784,12 +825,21 @@ function applyWorld(r){
     BOARD=r.guild_board?{jobs:r.guild_board,news:r.guild_news,status:r.guild_status}:null;
     ADS=r.board_ads?{ads:r.board_ads,news:r.board_news}:null;
     renderAmb();renderLoc(r.location);renderWays();
-    $('locname').textContent=r.location.name;
-    const snd=(r.ambient&&r.ambient.sound)||[];                 // arriving: narrate what you hear
-    if(snd.length)push('amb',esc(snd.join('. ')+'.'));}
+    $('locname').textContent=r.location.name;}
   if(r.watch)renderWatch(r.watch);
   if(r.dungeon&&!DNG)refreshDungeon();               // страницу перезагрузили в данже
   else if(r.dungeon===null&&DNG){DNG=null;renderDungeon();}
+  if(r.live_pending)reactLive();                     // room shown instantly — now stream NPC reactions
+}
+// the slow half of a move: NPCs think/talk. Runs async so entering never blocks rendering,
+// but it IS still the same turn — busyOn keeps other actions locked until the world settles.
+async function reactLive(){
+  if(mode!=='explore'||LIVEBUSY)return;
+  LIVEBUSY=true;busyOn();
+  const el=push('sys','<span class="dots">…</span>');
+  try{const r=await api('/api/play/live',{});el.remove();applyWorld(r);}
+  catch(e){el.remove();}
+  finally{LIVEBUSY=false;busyOff();}
 }
 const ROOM_KD={cellar:'подвал',backroom:'задняя комната',attic:'чердак',quarters:'жильё',hidden:'тайник'};
 function renderWays(){
@@ -825,24 +875,24 @@ async function loadPlan(){
 }
 function wirePlan(){
   const box=$('planbox');
-  box.querySelectorAll('[data-zid]').forEach(el=>el.onclick=async()=>{
+  box.querySelectorAll('[data-zid]').forEach(el=>el.onclick=()=>asTurn(async()=>{
     const r=await api('/api/play/zone',{zid:el.dataset.zid});
     if(r.error){push('sys',esc(r.error));return;}
     if(r.plan){$('planbox').innerHTML=r.plan;wirePlan();}
     applyWorld(r);                          // the room now lives — narr + feed + who spoke this tick
-  });
+  }));
   box.querySelectorAll('.npc[data-pid]').forEach(el=>el.onclick=ev=>{
     ev.stopPropagation();const pid=el.dataset.pid;
     if(pid&&pid!=='pc')talk(pid);
   });
 }
-async function goRoom(room){
+async function goRoom(room){await asTurn(async()=>{
   const r=await api('/api/play/room',{room});
   if(r.error){push('sys',esc(r.error));return;}
   if(r.dice)showDice(r.dice);
   (r.narr||[]).forEach(t=>push('narr',esc(t)));
   applyWorld(r);
-}
+});}
 function renderEnterPulse(){
   const old=document.getElementById('epulse');if(old)old.remove();
   if(SCENE.inside||!SCENE.enterable||!MAP)return;
@@ -852,10 +902,13 @@ function renderEnterPulse(){
     c.setAttribute('id','epulse');c.setAttribute('cx',k.x);c.setAttribute('cy',k.y);
     c.setAttribute('r',10);c.setAttribute('class','enterpulse');svg.appendChild(c);}
 }
-async function enterB(){applyWorld(await api('/api/play/enter',{}));}
-async function exitB(){applyWorld(await api('/api/play/exit',{}));}
-async function waitTurn(){applyWorld(await api('/api/play/live',{}));}
-async function lookAround(){applyWorld(await api('/api/play/look',{}));}
+async function enterB(){await asTurn(async()=>applyWorld(await api('/api/play/enter',{})));}
+async function exitB(){await asTurn(async()=>applyWorld(await api('/api/play/exit',{})));}
+async function waitTurn(){await asTurn(async()=>{
+  const el=push('sys','<span class="dots">…</span>');
+  try{applyWorld(await api('/api/play/live',{}));}finally{el.remove();}
+});}
+async function lookAround(){await asTurn(async()=>applyWorld(await api('/api/play/look',{})));}
 const GEN_STAGES=['Возводим город…','Заселяем дома…','Плетём связи…','Открываем лавки…','Будим горожан…'];
 async function newWorld(){
   if(!confirm('Начать НОВЫЙ мир? Текущий прогресс будет стёрт — город и жители сгенерируются заново (из тех же пулов).'))return;
@@ -891,24 +944,6 @@ function showDice(d){
   },110);
 }
 
-function renderFeed(){const el=$('lfeed');if(!el)return;
-  el.innerHTML=LIVEF.length?LIVEF.slice(-14).map(f=>
-    f.k==='speech'?`<div class="lf t${f.tier||1}"><b>${esc(f.who)}</b> <span class="lfto">→ ${esc(f.to)}</span>: «${esc(f.text)}»</div>`
-                  :`<div class="lf lfd">${esc(f.who)} · <i>${esc(f.text)}</i></div>`).join('')
-    :'<div class="lf lfq">тихо — слышен лишь шум места</div>';
-  el.scrollTop=el.scrollHeight;}
-async function pollLive(){
-  if(mode!=='explore'||LIVEBUSY)return;
-  LIVEBUSY=true;
-  try{const r=await api('/api/play/live',{});
-    if(r.gt!=null){GT=r.gt;setClock();}
-    (r.feed||[]).forEach(f=>LIVEF.push(f));
-    if(r.feed&&r.feed.length)renderFeed();
-    (r.address||[]).forEach(a=>{
-      const el=push('npc',`<div class="sp">${esc(a.who)} — тебе</div><div class="tx">${esc(a.text)}</div>`);
-      el.style.cursor='pointer';el.title='ответить — начать разговор';el.onclick=()=>talk(a.npc);});
-  }catch(e){}finally{LIVEBUSY=false;}
-}
 
 const av=n=>n.portrait?`<img src="${encodeURI(n.portrait)}" alt="">`:esc(n.init);
 function npcMsg(id,text,label,name){
@@ -928,12 +963,15 @@ function npcMsg(id,text,label,name){
   return el;
 }
 const bar=(v,c)=>`<div class="track"><i style="width:${Math.round((+v||0)*100)}%;background:${c}"></i></div>`;
-async function talk(id){
+async function talk(id){await asTurn(()=>talkNow(id));}
+async function talkNow(id){
   cur=id;mode='dialogue';setView('dialogue');
   $('talkchip').classList.add('on');$('talkname').textContent=byId(id).name;
   $('inp').placeholder='сказать '+byId(id).name+'…';$('inp').focus();
   renderAmb();
+  const wt=push('sys','<span class="dots">…</span>');
   const n=await api('/api/play/talk',{npc:id});
+  wt.remove();
   if(n.error){push('sys',esc(n.error));endTalk();return;}
   if(n.gt!=null){GT=n.gt;setClock();}
   CARD=n;renderBag();
@@ -959,15 +997,17 @@ function endTalk(){
   $('talkchip').classList.remove('on');
   $('inp').placeholder='что делаешь?';
 }
-async function converse(text){
+async function converse(text){await asTurn(()=>converseNow(text));}
+async function converseNow(text){
   const id=cur;
   const el=npcMsg(id,'…');
+  el.querySelector('.tx').innerHTML='<span class="dots">…</span>';
   const r=await api('/api/play/say',{npc:id,text});
   if(r.error){el.querySelector('.tx').textContent=r.error;return;}
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
-  (r.feed||[]).forEach(f=>LIVEF.push(f));if(r.feed&&r.feed.length)renderFeed();
+  pushFeed(r.feed);
   (r.address||[]).forEach(a=>{const e2=npcMsg(a.npc,a.text,'— тебе',a.who);e2.style.cursor='pointer';e2.onclick=()=>talk(a.npc);});
   el.querySelector('.tx').textContent=r.line;
   if(CARD)Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
@@ -975,17 +1015,20 @@ async function converse(text){
 }
 function say(t){push('me',`<div class="tx">${esc(t)}</div>`);converse(t);}
 function submit(){
-  const v=$('inp').value.trim();if(!v)return;$('inp').value='';
+  const v=$('inp').value.trim();if(!v)return;
   if(mode!=='dialogue'){                             // pure UI-view intent: morph, no tick, no LLM
     const vi=viewIntent(v);
-    if(vi){setView(vi.v);push('sys',`<span style="color:var(--faint)">— ${esc(vi.ack)}, не тратя времени —</span>`);return;}
+    if(vi){$('inp').value='';setView(vi.v);push('sys',`<span style="color:var(--faint)">— ${esc(vi.ack)}, не тратя времени —</span>`);return;}
   }
+  if(isBusy())return;                                // turn in flight — one action at a time (text stays put)
+  $('inp').value='';
   push('me',`<div class="tx">${esc(v)}</div>`);
   if(mode==='dialogue')converse(v);
   else freeAct(v);
 }
-async function freeAct(v){
-  const el=push('sys','<span style="color:var(--faint)">…мир отвечает</span>');
+async function freeAct(v){await asTurn(()=>freeActNow(v));}
+async function freeActNow(v){
+  const el=push('sys','<span class="dots">…</span>');
   const r=await api('/api/play/act',{text:v});
   el.remove();
   if(r.gt!=null){GT=r.gt;setClock();}
@@ -995,9 +1038,9 @@ async function freeAct(v){
     if(pid)npcMsg(pid,r.line.text);else push('npc',`<div class="sp">${esc(r.line.who)}</div><div class="tx">${esc(r.line.text)}</div>`);}
   if(r.loot)await loot(r.loot);
   if(r.inspect)await inspectItem(r.inspect);
-  if(r.goto!=null){selectDest(r.goto,null);await go();}
-  if(r.open_talk){await talk(r.open_talk);
-    if(r.say_first){push('me',`<div class="tx">${esc(r.say_first)}</div>`);converse(r.say_first);}}
+  if(r.goto!=null){selectDest(r.goto,null);await goNow();}
+  if(r.open_talk){await talkNow(r.open_talk);
+    if(r.say_first){push('me',`<div class="tx">${esc(r.say_first)}</div>`);await converseNow(r.say_first);}}
   if(r.combat){const st=await api('/api/play/combat');if(st.active)openCombat(st.combat,st.head);}
   if(r.map_open)openParch();
   if(r.refresh)await refreshInv();
@@ -1274,7 +1317,8 @@ async function refreshDungeon(){
   const r=await api('/api/play/dungeon');
   DNG=r&&r.dungeon||null;renderDungeon();
 }
-async function dmove(room){
+async function dmove(room){await asTurn(()=>dmoveNow(room));}
+async function dmoveNow(room){
   const r=await api('/api/play/dungeon_move',{room});
   if(r.error){push('sys',esc(r.error));return;}
   if(r.dice)showDice(r.dice);
@@ -1285,7 +1329,8 @@ async function dmove(room){
   if(r.combat){openCombat(r.combat,{name:(DNG&&DNG.name)||'бой',sub:'подземелье'});if(r.over)handleOver(r.over);return;}
   if(r.dungeon){DNG=r.dungeon;dngHints(r.dungeon);renderDungeon();}
 }
-async function dloot(){
+async function dloot(){await asTurn(dlootNow);}
+async function dlootNow(){
   const r=await api('/api/play/dungeon_loot',{});
   if(r.error){push('sys',esc(r.error));return;}
   if(r.dice)showDice(r.dice);
@@ -1294,7 +1339,8 @@ async function dloot(){
   if(r.combat){openCombat(r.combat,{name:(DNG&&DNG.name)||'бой',sub:'потревожил'});if(r.over)handleOver(r.over);return;}
   if(r.dungeon){DNG=r.dungeon;renderDungeon();}
 }
-async function dexit(){
+async function dexit(){await asTurn(dexitNow);}
+async function dexitNow(){
   const r=await api('/api/play/dungeon_exit',{});
   if(r.error){push('sys',esc(r.error));return;}
   (r.narr||[]).forEach(t=>push('narr',esc(t)));

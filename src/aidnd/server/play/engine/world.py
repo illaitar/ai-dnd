@@ -112,8 +112,10 @@ def _player_in_scene(zones_l, pid, w, lv) -> bool:
         return True  # no sub-zones (single-room venue/street) — one conversational space
     zn_by_place = {z["name"]: z for z in zones_l}
     p_place, s_place = w.bodies[PLAYER].place, w.bodies[pid].place
-    tier = audibility(zn_by_place.get(p_place, {"id": p_place}),
-                       zn_by_place.get(s_place, {"id": s_place}), PB["sound_voice"])
+    pz = zn_by_place.get(p_place)
+    if pz is None:  # no spot picked yet (still at the door) — acoustically at the room's edge,
+        pz = room_center(zones_l) or {"id": p_place}  # not in a void: the host CAN come greet
+    tier = audibility(pz, zn_by_place.get(s_place, {"id": s_place}), PB["sound_voice"])
     return tier == "L1"
 
 
@@ -686,7 +688,10 @@ def _live_tick(people) -> tuple:
             if not isinstance(a, dict):
                 continue
             if a.get("tool") == "say" and a.get("text"):
-                bits.append(f"говорит: «{str(a['text'])[:48]}…»")
+                tgt = str(a.get("to") or "").strip()
+                tid = (w.aliases or {}).get(tgt.lower(), tgt)
+                tname = "гостю" if tid == PLAYER else lv["names"].get(tid, tgt)
+                bits.append(f"говорит{(' — ' + tname) if tname else ''}: «{str(a['text'])[:48]}…»")
             elif a.get("tool") == "use" and a.get("item"):
                 bits.append(f"занят: {a['item']}")
             elif a.get("tool") == "move" and a.get("to"):
@@ -699,9 +704,10 @@ def _live_tick(people) -> tuple:
     from aidnd import config
 
     # ANTI-CHORUS: decision waves — leader (highest impulse) first, retinue sees their claim.
-    # Wave 2 (the retinue) runs concurrently, LIVE_CONCURRENCY calls in flight (no client lock).
+    # Three waves so the bulk of the hall sees whether someone ALREADY engaged the newcomer
+    # (attention is a scene fact fed into the prompt — never a cap on who may speak).
     decisions: dict = {}
-    waves = [actors[:1], actors[1:]] if len(actors) > 1 else [actors]
+    waves = [actors[:1], actors[1:3], actors[3:]]
     with ThreadPoolExecutor(max_workers=config.LIVE_CONCURRENCY) as ex:
         for wave in waves:
             if not wave:
@@ -887,11 +893,14 @@ def _live_tick(people) -> tuple:
                     zn_by_place = {z["name"]: z for z in zones_l}
                     sp_place = w.bodies[pid].place
                     pl_place = w.bodies[PLAYER].place if PLAYER in w.bodies else sp_place
+                    plz = zn_by_place.get(pl_place)
+                    if plz is None and _S.get("inside"):
+                        plz = room_center(zones_l)  # just inside the door — hall audible from its edge
                     ev = _S.get("eaves") or {}
                     boost = 1 if (ev.get("place") == sp_place
                                   and lv["clock"] <= ev.get("until", -1)) else 0
                     tier, disp, mw = _overheard(
-                        txt, zn_by_place.get(pl_place, {"id": pl_place}),
+                        txt, plz or {"id": pl_place},
                         zn_by_place.get(sp_place, {"id": sp_place}),
                         sp_place, f"hear|{lv['clock']}|{pid}", boost=boost)
                     if tier is None:

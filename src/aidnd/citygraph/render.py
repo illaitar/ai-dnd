@@ -1027,9 +1027,8 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
             e.append(f'<circle cx="{x+8:.1f}" cy="{y-8:.1f}" r="5.5" fill="{bs}"/>'
                      f'<text x="{x+8:.1f}" y="{y-7.3:.1f}" fill="#fff" font-weight="bold" font-size="9">{_ST_GLYPH[st]}</text>')
     e.append('</g>')
-    # frame
+    # subtle edge vignette only — no hard frame, so the map reads as borderless/infinite
     e.append(f'<rect width="{W}" height="{H}" fill="url(#vg)"/>')
-    e.append(f'<rect x="5" y="5" width="{W-10}" height="{H-10}" fill="none" stroke="#4a3415" stroke-width="5"/>')
     if chrome:                                              # compass (no city name label)
         e.append(f'<g transform="translate({W-40},46)"><circle r="18" fill="rgba(233,216,175,.85)" stroke="#4a3415" stroke-width="1"/>'
                  f'<path d="M0 -20 L4 -3 L-4 -3 Z" fill="#4a3415"/>'

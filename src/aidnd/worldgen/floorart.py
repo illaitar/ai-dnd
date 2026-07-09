@@ -412,8 +412,7 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
            f'<rect width="{W}" height="{H}" fill="{PAPER}"/>',
            f'<rect width="{W}" height="{H}" fill="{PAPER}" filter="url(#stains)"/>',
            f'<rect width="{W}" height="{H}" fill="none" filter="url(#grain)"/>']
-    # sheet frame
-    _wrect(out, 6, 6, W - 12, H - 12, rng, width=1.0, wob=0.7, opacity=0.5)
+    # no sheet frame — the plan reads as a borderless drawing on infinite paper
     # title
     name = data.get("name") or plan.get("name") or ""
     out.append(f'<text x="{W / 2}" y="{pad - 6 + 14}" text-anchor="middle" font-size="14" '

@@ -90,7 +90,6 @@ def _play():
         city = generate(params)
         _assign_key_buildings(city)  # user's world: buildings from POOL, no LLM
         _seed_item_pool()  # world items pool (seed-set, data)
-        vis = visual(params, interactive=True)  # rich visual + clickable houses
         xy = {n.id: (n.x, n.y) for n in city.nodes()}
         keynode = {
             bid: kb.node for bid, kb in city.key_buildings.items()
@@ -115,13 +114,30 @@ def _play():
         saved_loc = row.get("loc")
         if saved_loc in xy:
             start = saved_loc
+        # cache the geom (the ~1s visual() SVG render) in live.db — deterministic by seed, so a
+        # server restart / cold start reads it back instead of re-rendering 5k+ SVG elements.
+        import json as _json
+
+        _wg = _wid()
+        _gc = (
+            _store().flag_get(_wg, "geom")
+            if _store().flag_get(_wg, "geom_seed") == str(_S["seed"])
+            else None
+        )
+        if _gc:
+            geom = _json.loads(_gc)
+            geom["_xy"] = {int(k): v for k, v in geom["_xy"].items()}  # JSON stringified int node-ids
+        else:
+            geom = _build_geom(city, xy, n2b, visual(params, interactive=True))
+            _store().flag_set(_wg, "geom_seed", str(_S["seed"]))
+            _store().flag_set(_wg, "geom", _json.dumps(geom))
         _S.update(
             city=city,
             people=people,
             crof=spot,
             cr2b=n2b,
             loc=start,
-            geom=_build_geom(city, xy, n2b, vis),
+            geom=geom,
             keynode=keynode,
             kps=kps,
         )

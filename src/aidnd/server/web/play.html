@@ -75,8 +75,8 @@
     padding:1px 5px;font-family:var(--sans)}
   body.view-map #viewback,body.view-inv #viewback,body.view-magic #viewback{display:flex}
   .cap{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);padding:11px 14px 6px}
-  .map{flex:1;position:relative;margin:6px 10px 10px;border:1px solid var(--line);border-radius:9px;
-    background:var(--panel2);overflow:hidden}
+  .map{flex:1;position:relative;margin:0;border:0;border-radius:0;
+    background:#e6d9b4;overflow:hidden}   /* borderless, parchment ground — the map bleeds to the panel edges, feels infinite */
   .map svg{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
   .map svg.drag{cursor:grabbing}
   .msg .mrow{display:flex;gap:8px;align-items:flex-start}
@@ -124,7 +124,7 @@
   .invcard .bn{font-size:13.5px;color:var(--ink)}
   .invcard .bw{font-size:11px;color:var(--faint);margin-top:3px}
   .map.inside svg#mapsvg{pointer-events:none;filter:brightness(.45) saturate(.5)}
-  .map .planbox{position:absolute;inset:0;overflow:auto;opacity:0;pointer-events:none;background:#151009;padding:6px}
+  .map .planbox{position:absolute;inset:0;overflow:auto;opacity:0;pointer-events:none;background:#e6d9b4;padding:0}   /* parchment fills — floorplan feels infinite, no dark box */
   .map.inside.hasplan .planbox{opacity:1;pointer-events:auto}
   .map.inside.hasplan .insidemsg{opacity:0}
   .planbox .zone:hover{fill:#5aa0ff22}
@@ -617,7 +617,7 @@ function applySky(){const t=((GT/60)%24+24)%24;let a=SKY[0],b=SKY[SKY.length-1];
   if(base)base.style.filter=`brightness(${L(a.br,b.br).toFixed(3)}) saturate(${L(a.sat,b.sat).toFixed(3)}) contrast(1.03)`;
   const rect=$('mapsvg').querySelector('#skyrect');
   if(rect){rect.style.fill=`rgb(${[0,1,2].map(k=>Math.round(L(a.ov[k],b.ov[k]))).join(',')})`;
-    rect.style.opacity=L(a.oo,b.oo).toFixed(3);}}
+    rect.style.opacity=Math.min(0.16,L(a.oo,b.oo)).toFixed(3);}}   // subtle time tint only — never darken to black
 function setClock(){const c=$('clock');if(c)c.textContent=fmtClock(GT);applySky();}
 function setCoins(v){if(v==null)return;const c=$('coins');if(c)c.textContent=v+' зм';}
 function setHp(v,mx){if(v==null)return;const c=$('hp');if(c)c.textContent='\u2665 '+v+'/'+(mx||PBMAXHP);}

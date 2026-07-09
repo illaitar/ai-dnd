@@ -511,6 +511,21 @@ function setView(name){
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&(VIEW==='map'||VIEW==='bag')){setView('explore');e.preventDefault();}
 });
+// freeform → view: a pure "show me my …" is UI navigation — morph instantly, no world tick,
+// no LLM round-trip. Any real action verb wins and falls through to the arbiter (which ticks).
+const VIEW_INTENTS=[
+  {re:/(сумк|инвентар|рюкзак|карман|припас|пожитк|мешок|что у меня|чем я)/i, v:'bag', ack:'заглядываешь в сумку'},
+  {re:/(карт[ауые]|план\s*город|где я|окрестност|местност)/i, v:'map', ack:'разворачиваешь карту'},
+];
+// manipulation verbs (take-from / put-in / hand-over) anchored to word start, so a line that
+// operates ON the bag ("достаю меч из сумки") routes to the arbiter — but "посмотреть сумку"
+// (contains substring "осмотр"!) does not. Cyrillic \b is unavailable in JS, hence (?:^|\s).
+const ACTION_VERBS=/(?:^|\s)(достан|достаю|доста[её]|вынь|вын[уи]|вытащ|возьм|беру|полож|клад|убер|убир|отда|запихн|перелож|спрята|дай)/i;
+function viewIntent(t){
+  if(ACTION_VERBS.test(t))return null;              // an action that merely mentions the bag/map → arbiter
+  const m=VIEW_INTENTS.find(x=>x.re.test(t));
+  return m||null;
+}
 
 let MAP=null,BVB=[0,0,100,100],Z=1,CX=50,CY=50,PXY={x:50,y:50},PANNED=false;
 let CRXY={},PEND=null,SELEL=null,MINPERSTEP=1,GT=19*60+40;   // игровые минуты; +1 за шаг (густой граф)
@@ -871,6 +886,10 @@ async function converse(text){
 function say(t){push('me',`<div class="tx">${esc(t)}</div>`);converse(t);}
 function submit(){
   const v=$('inp').value.trim();if(!v)return;$('inp').value='';
+  if(mode!=='dialogue'){                             // pure UI-view intent: morph, no tick, no LLM
+    const vi=viewIntent(v);
+    if(vi){setView(vi.v);push('sys',`<span style="color:var(--faint)">— ${esc(vi.ack)}, не тратя времени —</span>`);return;}
+  }
   push('me',`<div class="tx">${esc(v)}</div>`);
   if(mode==='dialogue')converse(v);
   else freeAct(v);

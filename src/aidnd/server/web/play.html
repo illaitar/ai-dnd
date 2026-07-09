@@ -31,19 +31,21 @@
   .col{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-width:0;
     display:flex;flex-direction:column;overflow:hidden;flex:1 1 0;
     transition:flex-grow .46s cubic-bezier(.42,0,.16,1),opacity .32s ease,border-color .3s}
-  .left{flex-grow:1.15}
-  .center{flex-grow:1.5}
-  .right{flex-grow:0.85}
-  /* ── adaptive view states — panels replace & expand (explore = defaults above) ── */
-  body.view-map .left{flex-grow:2.7}                                  /* карта раскрывается */
-  body.view-map .center{flex-grow:1.15}                              /* текст остаётся справа */
-  body.view-map .right{flex-grow:0.0001;opacity:0;pointer-events:none} /* сумка/дела уходят */
-  body.view-bag .left{flex-grow:0.5}                                 /* карта ужимается в полоску */
-  body.view-bag .center{flex-grow:1.2}
-  body.view-bag .right{flex-grow:1.65}                               /* сумка разворачивается */
+  .left{flex-grow:1.15}     /* slot 1 — work column (map · inventory · magic) */
+  .center{flex-grow:1.5}    /* slot 2 — chat (never moves) */
+  .right{flex-grow:0.85}    /* slot 3 — conditions */
+  /* work panels share the left column; one is shown at a time */
+  .workpanel{display:none;flex:1 1 auto;min-height:0;flex-direction:column;overflow:hidden}
+  .workpanel.on{display:flex}
+  /* ── focus modes: the active work panel spans the two left slots, chat keeps the right
+        slot, conditions tucks away. explore & dialogue keep all three visible. ── */
+  body.view-map .left,body.view-inv .left,body.view-magic .left{flex-grow:2}
+  body.view-map .center,body.view-inv .center,body.view-magic .center{flex-grow:1}
+  body.view-map .right,body.view-inv .right,body.view-magic .right{flex-grow:0.0001;opacity:0;pointer-events:none}
   body.view-dialogue .left{flex-grow:0.6}
   body.view-dialogue .center{flex-grow:2.2}                          /* повествование вперёд */
   body.view-dialogue .right{flex-grow:0.95}
+  .invlist{flex:1 1 auto;overflow:auto;padding:2px 12px 12px;display:flex;flex-direction:column;gap:7px}
   #viewback{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:40;display:none;
     align-items:center;gap:8px;cursor:pointer;background:var(--panel2);border:1px solid var(--line2);
     border-radius:22px;padding:7px 16px;color:var(--dim);font:500 12.5px var(--sans);
@@ -51,7 +53,7 @@
   #viewback:hover{color:var(--gold);border-color:var(--gold-dim)}
   #viewback kbd{font-size:10px;color:var(--faint);border:1px solid var(--line2);border-radius:4px;
     padding:1px 5px;font-family:var(--sans)}
-  body.view-map #viewback,body.view-bag #viewback{display:flex}
+  body.view-map #viewback,body.view-inv #viewback,body.view-magic #viewback{display:flex}
   .cap{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);padding:11px 14px 6px}
   .map{flex:1;position:relative;margin:6px 10px 10px;border:1px solid var(--line);border-radius:9px;
     background:var(--panel2);overflow:hidden}
@@ -341,7 +343,7 @@
 
 <div class="stage">
   <div class="col left">
-    <div id="mapwrap">
+    <div id="mapwrap" class="workpanel on">
       <div class="cap" style="cursor:pointer" onclick="setView('map')" title="развернуть карту">карта <span id="here-lbl" style="color:var(--gold)"></span></div>
       <div class="map" id="mapbox"><svg id="mapsvg"></svg>
         <div class="insidemsg">ты внутри — карта подождёт снаружи</div>
@@ -359,6 +361,11 @@
         <div class="desc">…</div>
       </div>
     </div>
+    <div id="invpanel" class="workpanel">
+      <div class="cap">🎒 сумка <span id="invn" style="color:var(--gold)"></span></div>
+      <div class="invlist" id="invlist"></div>
+    </div>
+    <div id="magicpanel" class="workpanel"></div>
   </div>
 
   <div class="col center">
@@ -374,7 +381,7 @@
   <div class="col right">
     <div class="cap" id="rightcap">сцена</div>
     <div class="amb" id="amb"></div>
-    <div class="cap" style="margin-top:4px;cursor:pointer" onclick="setView('bag')">🎒 сумка <span id="bagn"></span> — развернуть</div>
+    <div class="cap" style="margin-top:4px;cursor:pointer" onclick="setView('inv')">🎒 сумка <span id="bagn"></span> — развернуть</div>
     <div class="bag" id="bag" style="display:none"></div>
     <div class="cap" style="margin-top:4px">дела</div>
     <div class="bag" id="jobs"></div>
@@ -501,20 +508,20 @@ function push(cls,html){const d=document.createElement('div');d.className='msg '
 // ─── adaptive panels: one body-class state machine drives the 3-column morph ───
 let VIEW='explore';
 function setView(name){
-  if(name===VIEW&&(name==='map'||name==='bag'))name='explore';   // re-trigger toggles back to scene
-  const wasBag=(VIEW==='bag');
+  if(name===VIEW&&name!=='explore'&&name!=='dialogue')name='explore';  // re-trigger a focus toggles back
   VIEW=name;
   document.body.className='view-'+name;
-  if(name==='bag'){$('bag').style.display='';refreshInv();}       // reveal full bag in the widened rail
-  else if(wasBag){$('bag').style.display='none';}
+  const wp={inv:'invpanel',magic:'magicpanel'}[name]||'mapwrap';        // which work panel fills the left column
+  ['mapwrap','invpanel','magicpanel'].forEach(id=>{const e=$(id);if(e)e.classList.toggle('on',id===wp);});
+  if(name==='inv')refreshInv();
 }
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'&&(VIEW==='map'||VIEW==='bag')){setView('explore');e.preventDefault();}
+  if(e.key==='Escape'&&(VIEW==='map'||VIEW==='inv'||VIEW==='magic')){setView('explore');e.preventDefault();}
 });
 // freeform → view: a pure "show me my …" is UI navigation — morph instantly, no world tick,
 // no LLM round-trip. Any real action verb wins and falls through to the arbiter (which ticks).
 const VIEW_INTENTS=[
-  {re:/(сумк|инвентар|рюкзак|карман|припас|пожитк|мешок|что у меня|чем я)/i, v:'bag', ack:'заглядываешь в сумку'},
+  {re:/(сумк|инвентар|рюкзак|карман|припас|пожитк|мешок|что у меня|чем я)/i, v:'inv', ack:'заглядываешь в сумку'},
   {re:/(карт[ауые]|план\s*город|где я|окрестност|местност)/i, v:'map', ack:'разворачиваешь карту'},
 ];
 // manipulation verbs (take-from / put-in / hand-over) anchored to word start, so a line that
@@ -934,7 +941,12 @@ api('/api/play/scene').then(s=>{
 });
 refreshInv();renderJobs();
 let INV=[];
-async function refreshInv(){const r=await api('/api/play/inventory');INV=(r&&r.items)||[];renderBag();}
+async function refreshInv(){const r=await api('/api/play/inventory');INV=(r&&r.items)||[];renderBag();renderInv();}
+function renderInv(){                                   // full inventory in the left work-panel
+  const el=$('invlist');if(!el)return;
+  $('invn').textContent=INV.length?('· '+INV.length):'';
+  el.innerHTML=INV.length?INV.map(bagItem).join(''):'<div class="bagempty">пусто — обшарь ёмкости или закажи у мастера</div>';
+}
 const condCls=c=>c.broken?'br':c.ratio<0.34?'lo':c.ratio<0.7?'mid':'ok';
 const qRU=q=>({crude:'грубый',plain:'простой',fine:'добротный',exquisite:'искусный'}[q]||q);
 function renderBag(){
@@ -1222,7 +1234,7 @@ let CB=null;
 
 // map / inventory are now panel morphs, not modal overlays
 function openParch(){setView('map');}
-function openInv(){setView('bag');}
+function openInv(){setView('inv');}
 async function openMarket(){
   $('mktwrap').classList.remove('hidden');
   $('mktbody').innerHTML='<div style="color:var(--faint);font:italic 13px var(--serif)">…</div>';

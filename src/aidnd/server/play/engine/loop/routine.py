@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import random
 
-from aidnd.server.play.engine.core import _S, PB, _gt, _phase, _wanted, _wanted_add, _wid
+from aidnd.server.play.engine.core import _S, PB, _gt, _phase, _store, _wanted, _wanted_add, _wid
 from aidnd.server.play.engine.worldsim import routine_step
 from aidnd.server.play.mechanics.combat import _npc_delves
 from aidnd.server.play.mechanics.contracts import _board_npc_fulfill, _board_publish
@@ -56,9 +56,15 @@ def _apply_routine() -> None:
         return
     _S["routine_key"] = key
     mkey = (_phase(), _gt() // 1440)                 # daily events — once at morning
-    if mkey[0] == "morning" and _S.get("events_key") != mkey:
+    ekey = f"{mkey[0]}|{mkey[1]}"
+    if (
+        mkey[0] == "morning"
+        and _S.get("events_key") != mkey
+        and _store().flag_get(_wid(), "events_key") != ekey
+    ):
         _S["events_key"] = mkey
-        _world_events()
+        _store().flag_set(_wid(), "events_key", ekey)  # persist: a restart must not replay the
+        _world_events()                                # day's ~8s LLM board-publish ("slow refresh")
     try:  # E1: economy — lazy catch-up for EVERY skipped day (not just 'morning')
         from aidnd.server.play.engine.economy import economy_catchup
         en = economy_catchup()

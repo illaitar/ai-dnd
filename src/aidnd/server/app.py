@@ -32,6 +32,11 @@ from .routes_usage import router as _usage_router
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 app = FastAPI(title="AI-DnD Engine")
 
+# Compress responses — the city map SVG alone is ~650KB uncompressed; gzip cuts it ~85%.
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 # Detailed session file log (for debugging, downloaded from /api/play/debuglog)
 from . import debuglog  # noqa: E402
 from .play.engine.core import current_world_id  # noqa: E402

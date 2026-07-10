@@ -2,8 +2,9 @@
 
 Key functions
 -------------
-_voice(p, rel, kind, player_text=None) -> str : NPC speaks in-character (LLM narrator) — folds in
-    persona, memory of the player, grudges and world-lookup facts; records the player's tone.
+_voice(p, rel, kind, player_text=None, has_offer=False) -> str : NPC speaks in-character (LLM
+    narrator) — folds in persona, memory of the player, grudges and world-lookup facts; records
+    the player's tone. has_offer hints (greet only) that the NPC has a pending errand to mention.
 _topics_for(p) -> list : Conversation topics — from PERSONA (rumors/wants), not from role table.
 _spurns(p) -> bool : Doesn't want to deal with you: enmity or fresh targeted anger.
 _DM_SYS : System prompt for the DM-narrator fallback (non-mechanical player actions).
@@ -38,7 +39,7 @@ _STANCE = {
 }
 
 
-def _voice(p, rel, kind, player_text=None) -> str:
+def _voice(p, rel, kind, player_text=None, has_offer: bool = False) -> str:
     from ..core import (  # lazy: core.py imports narrator.voice at module top
         _binfo,
         _city_name,
@@ -122,6 +123,11 @@ def _voice(p, rel, kind, player_text=None) -> str:
         if kind == "greet"
         else f"Он говорит: «{player_text}». Ответь."
     )
+    if kind == "greet" and has_offer:  # a pending errand — hint it, don't dump it (player must ask)
+        user += (
+            " У тебя есть к нему дело/просьба — дай это понять между делом, полунамёком, "
+            "не выкладывая суть и не называя награду: подробности только если сам спросит о работе."
+        )
     msgs = [{"role": "system", "content": " ".join(bits)}, {"role": "user", "content": user}]
     resp = mgr.call("narrator", msgs, options={"temperature": 0.85})
     content = (resp.get("content") if resp else "").strip()

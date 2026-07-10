@@ -6,15 +6,19 @@ Key functions
 talk(request)  [POST /api/play/talk] : the player walks up to an NPC — first contact reveals the
     name, marks the NPC as busy in this conversation, seeds a 'social' need bump, writes the
     introduction into both memories, materializes the NPC's visible gear, and returns the portrait
-    + relationship + topic snapshot. Advances the world by PB['talk_min'].
+    + relationship + topic snapshot. Advances the world by PB['talk_min']. Greeting only — no
+    contract card; if the NPC has a pending errand it's stashed (_S['pending_offer']) and merely
+    HINTED at in the greeting (voice._voice has_offer=True).
 say(request)   [POST /api/play/say] : one spoken line to the current NPC — tone of the player's
     words shifts affinity/trust/fear/emotion; the NPC answers in its own voice (world._voice) and
-    both sides remember it. Contract offers/acceptance ride on the same line (mechanics.contracts).
+    both sides remember it. If the player's words show interest in work (_WORK_INTEREST_RE) AND an
+    errand is stashed for this NPC, the «Уговор» contract card is attached here instead.
 """
 
 from __future__ import annotations
 
 import os
+import re
 
 from fastapi import Request
 
@@ -41,6 +45,12 @@ from aidnd.server.play.engine.resolve import _voice
 from aidnd.server.play.engine.world import _play, _world_tick
 from aidnd.server.play.mechanics.contracts import _contract_offer, _contract_on_talk
 from aidnd.server.play.mechanics.items import _CRAFT, _materialize_npc, _pc_coins
+
+# Player's words signal interest in work/errands — gates the «Уговор» card reveal in say().
+_WORK_INTEREST_RE = re.compile(
+    r"работ|дел[оа]|заработ|подработ|на[её]м|поручен|задани|помо[гч]|нужен ли|есть ли работа|чем помочь",
+    re.IGNORECASE,
+)
 
 
 @router.post("/api/play/talk")
@@ -84,17 +94,20 @@ async def talk(request: Request):
         if npc in (m.about or [])
     ]  # what the player KNOWS about this person
     try:
-        contract = _contract_offer(npc)  # he might have business with you (from agenda)
+        offer = _contract_offer(npc)  # he might have business with you (from agenda) — not shown yet
     except (LLMUnavailable, LLMBadOutput):  # without the model, we don't pretend (principle 1)
         raise
     except Exception:  # noqa: BLE001 — other request failures don't break dialogue
-        contract = None
+        offer = None
+    pending = _S.setdefault("pending_offer", {})
+    if offer:
+        pending[npc] = offer  # stashed — say() reveals it once the player asks about work
+    has_offer = bool(pending.get(npc))
     return {
         "name": p.name,
         "role": p.role,
         "init": p.name[0],
         "color": "#8a6fae",
-        "contract": contract,
         "aff": round(rel.get("affinity", 0), 2),
         "trust": round(rel.get("trust", 0), 2),
         "fear": round(rel.get("fear", 0), 2),
@@ -111,7 +124,7 @@ async def talk(request: Request):
         "known": known,
         "gt": _gt(),
         "topics": _topics_for(p),
-        "line": _voice(p, rel, "greet"),
+        "line": _voice(p, rel, "greet", has_offer=has_offer),
     }
 
 
@@ -160,6 +173,9 @@ async def say(request: Request):
     _npc_save(npc)
     emo = _emo(p.state)
     ct_done = _contract_on_talk(npc)  # befriend-contract: target bought in
+    contract = None
+    if _WORK_INTEREST_RE.search(text):  # player asked about work — reveal the stashed errand, if any
+        contract = (_S.get("pending_offer") or {}).pop(npc, None)
     t = _world_tick()  # line = world turn (turn-based)
     return {
         **t,
@@ -170,6 +186,7 @@ async def say(request: Request):
         "emotion": emo,
         "portrait": _portrait_url(p, emo),
         "gt": _gt(),
+        "contract": contract,
         "contract_done": ct_done,
         "coins": _pc_coins(),
     }

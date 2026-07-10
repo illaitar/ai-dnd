@@ -526,6 +526,37 @@ def _gossip(actor_st, actor_name: str, target_st) -> None:
     target_st.memory.add(tale, _mt(), max(0.25, m.importance - 0.15), kind="gossip", about=m.about)
 
 
+def _active_budget(present: int) -> int:
+    """LOD: how many NPCs get an LLM decision this tick, by crowd size.
+    ≤ live_full_upto → everyone; else ~ratio of the crowd, capped. (Salient actors bypass this.)"""
+    import math
+    if present <= PB["live_full_upto"]:
+        return present
+    return max(PB["live_full_upto"],
+               min(PB["live_active_cap"], int(math.ceil(present * PB["live_active_ratio"]))))
+
+
+def _select_actors(ranked_imp: list, impulses: dict, lv: dict) -> list:
+    """Pick this tick's LLM actors (LOD layers, docs/sound-attention.md). Salient NPCs
+    (impulse ≥ live_must_impulse) ALWAYS think; the low-impulse background crowd is staggered
+    round-robin via lv['rot_cursor'] so nobody starves. Returns actors in impulse order."""
+    present = len(ranked_imp)
+    budget = _active_budget(present)
+    if present <= budget:
+        return ranked_imp
+    must = {p for p in ranked_imp if impulses[p][0] >= PB["live_must_impulse"]}
+    bg = sorted((p for p in ranked_imp if p not in must), key=str)  # stable order for fair rotation
+    slots = max(0, budget - len(must))
+    if bg and slots < len(bg):
+        cur = lv.get("rot_cursor", 0) % len(bg)
+        picked = {bg[(cur + i) % len(bg)] for i in range(slots)}
+        lv["rot_cursor"] = (cur + slots) % len(bg)                 # advance — next tick rotates onward
+    else:
+        picked = set(bg)
+    keep = must | picked
+    return [p for p in ranked_imp if p in keep]                    # impulse order preserved for waves
+
+
 def _live_tick(people) -> tuple:
     from aidnd.server.play.engine import deeds as _deeds
 
@@ -669,9 +700,16 @@ def _live_tick(people) -> tuple:
         imp += (st.config.traits.get("sociability", 0.5) - 0.5) * 0.5
         impulses[pid] = (round(imp, 2), why)
     ranked_imp = sorted(order, key=lambda p: -impulses[p][0])
-    # AUTHOR DECISION (2026-07-07): ALL present go through LLM, latency
-    # unimportant yet. Conductor stays ORDERED (impulse → anti-chorus waves), not selection/cap.
-    actors = ranked_imp
+    # LOD LAYERS: not everyone thinks each tick. Small scenes — all; crowds — a rotating subset,
+    # salient actors always (see _select_actors). Cost stays bounded; nobody starves.
+    actors = _select_actors(ranked_imp, impulses, lv)
+    actor_set = set(actors)
+    for pid in order:  # background crowd: keep inner clock alive cheaply (NO LLM) so a
+        if pid not in actor_set:  # rotated-in NPC resumes coherently next tick
+            st_bg = w.npc_minds[pid]
+            _decay_needs(st_bg)
+            _decay_emotion(st_bg)
+            advance_agendas(st_bg, w)
     ctx["convs"] = {pid: b for pid in actors
                     if (b := conv_block(lv, pid, lv["names"]))}
     if salient:

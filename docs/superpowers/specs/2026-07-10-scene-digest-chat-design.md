@@ -133,7 +133,10 @@ normal `act()` intent; the addressed NPC's reply comes back as a `near` event in
    turn most-hearable→least (narr → address → feed speech tier 1→3 → deeds/ambient last), breathing
    processing indicator, reduced-motion. Driven by the *existing* response (no backend change).
    Verify: serve play.html with a mocked `/api/play/act` response, drive it, screenshot.
-2. **Scene narrator + `does` gating.** Structured event model in a shared tick helper; end-of-tick
+2. **Scene narrator + `does` gating — ✔ on prod.** `engine/narrator/scene_digest.py` weaves the
+   tick feed into one observable third-person account (Together); frontend renders `digest` and drops
+   the raw feed; raw first-person `does`/intent no longer surfaces. NOTE: the digest currently weaves
+   the ambient/overheard/deeds feed; direct address + player result stay separate. Structured event model in a shared tick helper; end-of-tick
    scene-narrator weaving (Together); Split rendered from `events`. Unit-test event assembly +
    ordering with a stub LLM. New `digest`/`events` fields; legacy fields kept.
 3. **True token streaming.** SSE endpoint + threadpool/queue bridge; client reader with caret + stop;

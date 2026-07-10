@@ -75,19 +75,28 @@ Three node types; edges carry attribute contributions/deltas.
   `дуб → {прочность:55, вес:45, гибкость:30}`; `кожа → {гибкость:70, прочность:40, вес:20}`;
   `лунный камень → {чара:70, мана:60, краса:65}`; `целебные травы → {скверна:0, …}` (potency for
   consumables). Numbers are authored data, tuned later.
-- **forms** (archetype: `клинок`, `древко`, `щит`, `оправа`, `сосуд`, `подошва`, `навершие`…) —
-  declare **which attributes express and as which effect**. The form is the gate that keeps a sharp
-  `щит` from yielding +attack. A form maps expressed-attributes → effect-rule keys (U4).
+- **forms** (archetype: `клинок`, `топор`, `щит`, `доспех`, `оправа`, `сосуд`…) — declare **which
+  attributes express as which effect, and with what weight**: `expresses` maps an effect key
+  (`attack`/`defense`) → `{attr: weight}`. This is the gate that keeps a sharp `щит` from yielding
+  +attack, *and* the reason an `топор` weighs `вес`/`твёрдость` while a `клинок` weighs `острота`. The
+  weights live on the form (not in the effect table) so per-form character is real, not inert (U4).
 - **treatments** (process: `закалка → +твёрдость −гибкость`, `заточка → +острота`,
   `золочение → +краса +ценность`, `зачарование → +чара, grants:<effect>` (needs `чара` headroom),
   `отрава → +скверна (hidden)`, `освящение → +святость`, `зарядка → +мана`) — each is an
   attribute-delta op. This is how hone/temper/enchant/poison/charge/repair all become *one verb:
   mutate an attribute*.
 
-Composition math (code, deterministic): `attrs = Σ material contributions (by part) → gated/weighted
-by form → treatment deltas applied → clamped 0–100`, then scaled by craftsmanship `quality`
-(crude/plain/fine/exquisite as a multiplier band). Surface := true for honest items; forgeries and
-flaws set surface ≠ true.
+Composition math (code, deterministic): **attributes are intrinsic** — `attrs = per-attribute max of
+material contributions across parts → treatment deltas applied → clamped 0–100`, then scaled by
+craftsmanship `quality` (crude/plain/fine/exquisite as a multiplier band). Form does **not** enter
+composition (a steel blade's `твёрдость` is the same metal whether mounted as a sword or a shield);
+form gates only *effect expression* (U4). Surface := true for honest items; forgeries and flaws set
+surface ≠ true.
+
+> **Phase-1 note (shipped):** subsystem 1 lands the model + graph + `compose` + `derive_effects`,
+> pure and unit-tested, no consumer touched. `derive_effects` reads **true** values; the
+> surface-layer reader that `view()` needs ("show surface worth until revealed") is added in Phase 2
+> as a `layer` argument, so consumers aren't rewritten twice.
 
 ### U3 — the item model (canonical = composition + attributes)
 

@@ -89,3 +89,17 @@ def test_quality_scales_the_vector():
 def test_clamp_ceiling_at_100():
     a = compose([{"role": "оправа", "material": "золото", "treatments": ["золочение"]}], "exquisite")
     assert a["ценность"] <= 100
+
+
+def test_axe_weights_heft_where_blade_does_not():
+    heavy = {"вес": 80, "твёрдость": 60, "острота": 20}
+    axe = derive_effects(_item(heavy, "топор", "weapon"))
+    blade = derive_effects(_item(heavy, "клинок", "weapon"))
+    assert [m for m in axe["mods"] if m["target"] == "attack"]          # heft carries the axe
+    assert not [m for m in blade["mods"] if m["target"] == "attack"]    # same attrs, blade needs острота
+
+
+def test_precision_is_producible_and_feeds_attack():
+    from aidnd.items.attrs import compose
+    vec = compose([{"role": "клинок", "material": "сталь", "treatments": ["правка"]}], "plain")
+    assert vec.get("точность", 0) > 0                                    # сталь + правка produce it

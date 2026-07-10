@@ -54,10 +54,8 @@ def compose(parts, quality: str = "plain", graph: dict | None = None) -> dict:
 
 # Effect-rule coefficients — code owns the math (pure module; PB override seam lands in Phase 3).
 DEFAULT_RULES = {
-    "attack":     {"w": {"острота": 0.5, "твёрдость": 0.3, "точность": 0.2},
-                   "bands": [(80, 3), (60, 2), (40, 1)], "when": "equipped"},
-    "defense":    {"w": {"твёрдость": 0.6, "прочность": 0.4},
-                   "bands": [(80, 3), (60, 2), (40, 1)], "when": "equipped"},
+    "attack":     {"bands": [(80, 3), (60, 2), (40, 1)], "when": "equipped"},
+    "defense":    {"bands": [(80, 3), (60, 2), (40, 1)], "when": "equipped"},
     "appearance": {"attr": "краса", "bands": [(88, 3), (70, 2), (45, 1)],
                    "target": "social:appearance", "when": "worn"},
     "poison":     {"attr": "скверна", "bands": [(75, 3), (50, 2), (20, 1)],
@@ -92,9 +90,10 @@ def derive_effects(item: dict, rules: dict | None = None) -> dict:
     kind = item.get("kind") or ""
     expresses = ((attr_graph()["forms"].get(form) or {}).get("expresses")) or {}
     mods: list = []
-    for key in ("attack", "defense"):                      # form-gated combat effects
-        if key in expresses:
-            amt = _band(_score(attrs, r[key]["w"]), r[key]["bands"])
+    for key in ("attack", "defense"):                      # form-gated: weights come from the form
+        w = expresses.get(key)
+        if w:
+            amt = _band(_score(attrs, w), r[key]["bands"])
             if amt:
                 mods.append({"target": key, "op": "add", "amount": amt, "when": r[key]["when"]})
     ap = r["appearance"]                                    # universal: appearance

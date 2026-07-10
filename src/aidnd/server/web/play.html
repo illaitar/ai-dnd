@@ -200,11 +200,6 @@
   .locard .nm{font:500 14px var(--serif);color:var(--gold)}
   .locard .kd{font-size:12px;color:var(--dim);margin-top:1px}
   .locard .desc{font-size:12.5px;color:var(--dim);margin-top:7px;line-height:1.55}
-  .conts{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
-  .cont{font-size:11px;padding:2px 8px;border-radius:6px;background:#171a22;border:1px solid var(--line2);color:var(--dim)}
-  .cont.lk{color:var(--gold-dim);border-color:var(--gold-dim)}
-  .cont.op{cursor:pointer}
-  .cont.op:hover{border-color:var(--gold);color:var(--gold)}
   .bag{padding:2px 12px 12px;display:flex;flex-direction:column;gap:7px;overflow:auto;max-height:32vh}
   .bagempty{font-size:12px;color:var(--faint);font-style:italic;padding:0 2px}
   .bagitem2{padding:8px 10px;border:1px solid var(--line2);border-radius:9px;background:var(--panel2)}
@@ -512,6 +507,11 @@
     <h3>Сумка <span id="invcoins" style="font-size:13px;color:var(--dim)"></span>
       <button onclick="$('invwrap').classList.add('hidden')">✕</button></h3>
     <div class="invgrid" id="invgrid"></div>
+  </div>
+</div>
+<div id="npcwrap" class="overlay hidden" onclick="if(event.target===this)closeNpcCard()">
+  <div class="invwin" style="width:min(420px,92vw)">
+    <div class="npc" id="npccard"></div>
   </div>
 </div>
 <div id="mktwrap" class="overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
@@ -897,7 +897,7 @@ function faceHtml(n){
   const cls='face'+((n.portrait||known)?'':' unk')+(cur===n.id?' cur':'');
   const st=(n.portrait||!known)?'':` style="background:${n.color}"`;
   return `<span class="${cls}"${st} title="${esc(n.name)}${known?(' · '+esc(n.role)):''}"
-    onclick="talk('${n.id}')">${inner}</span>`;
+    onclick="openNpcCard('${n.id}')">${inner}</span>`;
 }
 function renderAmb(){
   const a=SCENE.ambient||{};
@@ -996,7 +996,7 @@ function wirePlan(){
   }));
   box.querySelectorAll('.npc[data-pid]').forEach(el=>el.onclick=ev=>{
     ev.stopPropagation();const pid=el.dataset.pid;
-    if(pid&&pid!=='pc')talk(pid);
+    if(pid&&pid!=='pc')openNpcCard(pid);
   });
 }
 async function goRoom(room){await asTurn(async()=>{
@@ -1060,6 +1060,34 @@ function npcMsg(id,text,label,name){
   return el;
 }
 const bar=(v,c)=>`<div class="track"><i style="width:${Math.round((+v||0)*100)}%;background:${c}"></i></div>`;
+// ─── NPC card: view-only portrait/relationship/history overlay (portrait & map clicks open this, not talk()) ───
+async function openNpcCard(id){
+  const d=await api('/api/play/npc',{npc:id});
+  if(!d||d.error)return;
+  renderNpcCard(d);
+  $('npcwrap').classList.remove('hidden');
+}
+function closeNpcCard(){$('npcwrap').classList.add('hidden');}
+function renderNpcCard(d){
+  const known=d.role&&d.role!=='кто-то из горожан';
+  const initial=esc((d.name||'').trim().charAt(0)||'?');
+  const portrait=d.portrait?`<img src="${encodeURI(d.portrait)}" alt="">`
+    :`<span style="font:600 72px var(--serif);color:var(--faint)">${known?initial:'?'}</span>`;
+  const rel=d.rel||{};
+  const affF=((+rel.affinity||0)+1)/2,trustF=(+rel.trust||0),fearF=((+rel.fear||0)+1)/2;
+  const hasHist=d.acquainted&&d.history&&d.history.length;
+  const hist=hasHist
+    ?`<div class="known">${d.history.map(h=>`<div class="kn">${esc(h)}</div>`).join('')}</div>`
+    :`<div class="kn" style="font-style:italic;color:var(--faint)">${d.acquainted?'пока нечего вспомнить':'ты ещё не знаком с этим человеком'}</div>`;
+  $('npccard').innerHTML=`<div class="portrait">${portrait}<div class="frame"></div></div>
+    <div class="who"><span class="name">${esc(d.name||'?')}</span>${known?`<span class="role">· ${esc(d.role)}</span>`:''}</div>
+    <div class="meter"><span class="ml">тепло</span>${bar(affF,'var(--gold)')}<span class="mv">${Math.round(affF*100)}%</span></div>
+    <div class="meter"><span class="ml">доверие</span>${bar(trustF,'var(--green)')}<span class="mv">${Math.round(trustF*100)}%</span></div>
+    <div class="meter"><span class="ml">страх</span>${bar(fearF,'var(--red)')}<span class="mv">${Math.round(fearF*100)}%</span></div>
+    <div class="subcap">известно</div>
+    ${hist}
+    <button class="end" onclick="closeNpcCard()">&#8592; назад</button>`;
+}
 async function talk(id){await asTurn(()=>talkNow(id));}
 async function talkNow(id){
   cur=id;mode='dialogue';setView('dialogue');
@@ -1449,9 +1477,7 @@ async function dexitNow(){
 function renderLoc(loc){
   document.querySelector('.locard .nm').textContent=loc.name;
   document.querySelector('.locard .kd').textContent=loc.kind;
-  const cs=(loc.containers||[]);
-  document.querySelector('.locard .desc').innerHTML=esc(loc.desc||'')+(cs.length?
-    `<div class="conts">${cs.map(c=>`<span class="cont op${c.locked?' lk':''}" data-n="${esc(c.name)}" onclick="loot(this.dataset.n)" title="${esc(c.where||'')}${c.locked?' · заперто (нужен ключ)':' · обшарить'}">&#9642; ${esc(c.name)}${c.locked?' (заперто)':''}</span>`).join('')}</div>`:'');
+  document.querySelector('.locard .desc').innerHTML=esc(loc.desc||'');
   renderBoard();
   renderAds();
 }

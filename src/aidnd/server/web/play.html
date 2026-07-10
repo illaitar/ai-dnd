@@ -1074,7 +1074,7 @@ function renderNpcCard(d){
   const portrait=d.portrait?`<img src="${encodeURI(d.portrait)}" alt="">`
     :`<span style="font:600 72px var(--serif);color:var(--faint)">${known?initial:'?'}</span>`;
   const rel=d.rel||{};
-  const affF=((+rel.affinity||0)+1)/2,trustF=(+rel.trust||0),fearF=((+rel.fear||0)+1)/2;
+  const affF=((+rel.affinity||0)+1)/2,trustF=(+rel.trust||0),fearF=(+rel.fear||0);  // affinity −1..1→0..1; trust/fear already 0..1
   const hasHist=d.acquainted&&d.history&&d.history.length;
   const hist=hasHist
     ?`<div class="known">${d.history.map(h=>`<div class="kn">${esc(h)}</div>`).join('')}</div>`
@@ -1135,6 +1135,13 @@ async function converseNow(text){
   pushFeed(r.feed);
   (r.address||[]).forEach(a=>{const e2=npcMsg(a.npc,a.text,'— тебе',a.who);e2.style.cursor='pointer';e2.onclick=()=>talk(a.npc);});
   el.querySelector('.tx').textContent=r.line;
+  if(r.contract){                                    // errand offered once the player asked about work
+    const ct=r.contract;
+    const kd={bring:'добыть',deliver:'отнести',visit:'наведаться',befriend:'расположить к себе',dead:'покончить с'};
+    const rw=ct.reward_name?('вещь: '+esc(ct.reward_name)):(ct.reward+' зм');
+    push('sys',`<div class="ctcard"><b>Уговор:</b> ${kd[ct.kind]||'сделать'} «${esc(ct.want||ct.target_name)}» <span class="ctw">(${esc(ct.where)})</span> · награда ${rw}
+      <div class="acts" style="justify-content:center;margin-top:6px"><button onclick="acceptContract('${ct.id}',this)">взяться</button></div></div>`);
+  }
   if(CARD)Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
   if(r.portrait&&byId(id)){byId(id).portrait=r.portrait;}
 }

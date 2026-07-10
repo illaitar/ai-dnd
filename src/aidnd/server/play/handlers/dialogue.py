@@ -50,7 +50,9 @@ from aidnd.server.play.mechanics.items import _CRAFT, _materialize_npc, _pc_coin
 
 # Player's words signal interest in work/errands — gates the «Уговор» card reveal in say().
 _WORK_INTEREST_RE = re.compile(
-    r"работ|дел[оа]|заработ|подработ|на[её]м|поручен|задани|помо[гч]|нужен ли|есть ли работа|чем помочь",
+    # asking about WORK/business — deliberately NOT bare "дел[оа]" (that matches the greeting "как дела")
+    r"работ|заработ|подработ|на[её]м|поручен|задани|дельц"
+    r"|(?:по|за|о|какое|что за)\s+дел|помо(?:чь|гу|жешь|щь)|ищу зара",
     re.IGNORECASE,
 )
 

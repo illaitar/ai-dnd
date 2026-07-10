@@ -262,6 +262,16 @@ def _npc_surface(p) -> dict:
     }
 
 
+def _work_lift(pid, workers, info: str, gt: int) -> float:
+    """On-shift 'keep working' lift: a worker at their workplace during open hours (docs/sound-attention.md
+    Increment 6). Returns the purpose lift magnitude, else 0.0."""
+    from aidnd.server.play.engine import open_hours
+
+    if pid in workers and open_hours.is_open(info or "", gt):
+        return PB["workplace_purpose_lift"]
+    return 0.0
+
+
 def _live_build(city, people, crof, cr2b, loc) -> None:
     bid = cr2b.get(loc)
     place = _binfo(bid)["name"] if bid else "улица"
@@ -331,9 +341,12 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     npc_map: dict = {}  # pid → {thing name: item_id} (thefts real)
     here_all = _here(loc, crof)  # everyone present — no LOD cap (buildings bounded by _building_cap)
     leisure = PB["leisure_social_lift"] if "tavern" in society.kinds_of(data or {}) else 0.0
+    workers = {pid for pid in here_all if people[pid].work == bid}
+    _bname = (data or {}).get("name", "")             # 'Кузница «…»' — matches open_hours by type substring
+    _now_gt = _gt()
     for _pid in here_all:                            # leisure venue lifts converse toward acquaintances
         people[_pid].state.venue_social = leisure
-    workers = {pid for pid in here_all if people[pid].work == bid}
+        people[_pid].state.on_shift = _work_lift(_pid, workers, _bname, _now_gt)
     zonemap = assign_zones({pid: people[pid].state for pid in here_all}, zones,
                            f"zones|{_wid()}|{bid}|{_phase()}",
                            roles={pid: people[pid].role for pid in here_all},

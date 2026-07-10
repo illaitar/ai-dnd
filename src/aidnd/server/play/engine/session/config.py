@@ -100,6 +100,7 @@ PB = {
     # LEISURE (tavern playtest): a leisure venue lifts converse toward ACQUAINTANCES only (aff>0),
     # so regulars talk instead of idly eating; strangers get no lift. Set on present states in _live_build.
     "leisure_social_lift": 3.0,
+    "workplace_purpose_lift": 0.6,   # on-shift worker's purpose lift (additive to purpose goal; tune in playtest)
     # gift: affinity gain = min(cap, base + worth/div)
     "gift_aff_base": 0.05,
     "gift_aff_div": 100,

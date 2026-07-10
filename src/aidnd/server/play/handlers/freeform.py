@@ -370,6 +370,10 @@ def _attempt(intent: dict, sc: dict) -> dict:
     mgr = _model()  # non-action: DM response BASED ON FACTS of live scene (snapshot, not invention)
     text = str(intent.get("_text") or detail or "")
     if text:
+        _lv = _S.get("live")
+        if _lv is not None and text:
+            _lv["pc_said"] = text
+            _lv["pc_spoke"] = True
         resp = mgr.call(
             "narrator",
             [

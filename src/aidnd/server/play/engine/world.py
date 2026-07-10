@@ -282,6 +282,21 @@ def _pc_said_impulse(tier: str) -> float:
     return round(PB["pc_said_impulse"] * _PC_SAID_TIER.get(tier, 0.0), 2)
 
 
+def _pc_heard(pz, order, place_of, zn_by_place, zones_l) -> dict:
+    """Present NPCs who hear the player's spoken line, tier by audibility. Zoneless venue (single
+    conversational space) → everyone hears at 'L1'."""
+    heard = {}
+    for pid in order:
+        if not zones_l:
+            heard[pid] = "L1"
+            continue
+        nz = zn_by_place.get(place_of(pid), {"id": place_of(pid)})
+        t = audibility(pz, nz, PB["sound_voice"]) if pz else None
+        if t:
+            heard[pid] = t
+    return heard
+
+
 def _pick_rumor(pool, seed_key, heat: dict, hot: float):
     """Rotated pick from the NON-hot subset of `pool` (a subject the room has chewed drops out).
     None if the pool is empty or every subject is hot."""
@@ -728,6 +743,13 @@ def _live_tick(people) -> tuple:
 
     conv_tick(lv, lambda m: w.bodies[m].place if m in w.bodies else None)
     salient = lv.pop("salient", None)
+    pc_said = lv.pop("pc_said", None)
+    pc_heard: dict = {}
+    if pc_said and PLAYER in w.bodies:
+        zn_by_place = {z["name"]: z for z in zones_l} if zones_l else {}
+        pz = (zn_by_place.get(w.bodies[PLAYER].place)
+              or (room_center(zones_l) if zones_l else None))
+        pc_heard = _pc_heard(pz, order, lambda p: w.bodies[p].place, zn_by_place, zones_l)
     oaths, oaths_due = {}, set()
     for d_ in _deeds.promises_active():
         if d_["actor"] in w.npc_minds:
@@ -756,6 +778,9 @@ def _live_tick(people) -> tuple:
             elif st.agendas:
                 jit = random.Random(f"agimp|{pid}|{lv['clock']}").random()
                 imp, why = 0.6 + 0.7 * jit, "агенда"
+        ph = _pc_said_impulse(pc_heard.get(pid, ""))
+        if ph > imp:
+            imp, why = ph, "услышал чужака"
         imp += (st.config.traits.get("sociability", 0.5) - 0.5) * 0.5
         impulses[pid] = (round(imp, 2), why)
     ranked_imp = sorted(order, key=lambda p: -impulses[p][0])
@@ -774,6 +799,7 @@ def _live_tick(people) -> tuple:
     if salient:
         ctx["event"] = salient
     ctx["oaths"] = oaths
+    ctx["pc_said"] = {pid: pc_said for pid in pc_heard} if pc_said else {}
 
     def think_one(pid):  # inside wave — parallel; waves see previous claims
         st = w.npc_minds[pid]

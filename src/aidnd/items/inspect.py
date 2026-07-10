@@ -86,9 +86,31 @@ def inspect(item: dict, cap: Capability, via: str, *, tool=None, context=None,
     return {"revealed": revealed, "hints": hints, "via": via, "attr_groups": attr_groups}
 
 
+def _view_attrs(item: dict, known: set) -> dict:
+    """View for attribute-driven items: surface values until the group is revealed; worth/mods
+    derived from the effective vector."""
+    from .attrs import ATTR_GROUPS, attr_group, derive_effects
+
+    eff = derive_effects(item, known=known)
+    shown = {}
+    for a, v in item["attrs"].items():
+        grp_known = attr_group(a) in known
+        shown[a] = {"value": int(v["true"] if grp_known else v["surface"]), "true_known": grp_known}
+    return {"name": item["name"], "kind": item["kind"], "slot": item["slot"],
+            "material": item["material"], "quality": item["quality"], "weight": item["weight"],
+            "worth": eff["worth"], "worth_known": ("attr:value" in known),
+            "tags": item["tags"], "mods": eff["mods"], "attrs": shown,
+            "facts": [h["fact"] for h in item.get("hidden", []) if h["prop"] in known and h.get("fact")],
+            "unknown": sum(1 for g in ATTR_GROUPS if g not in known),
+            "durability": item.get("durability")}
+
+
 def view(item: dict, known=None) -> dict:
     """What observer KNOWS about the item (for UI/negotiation)."""
     known = set(known or [])
+    if item.get("attrs"):
+        return _view_attrs(item, known)
+    # ---- legacy factsheet path (items without an attribute vector) ----
     worth_known = any((h["prop"] in ("true_worth", "forgery"))
                       or any(m["target"] == "worth" for m in h.get("mods", []))
                       for h in item.get("hidden", []) if h["prop"] in known)

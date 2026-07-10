@@ -29,6 +29,7 @@ PB = {
     "live_active_ratio": 0.5,   # else ~this fraction of the crowd thinks per tick
     "live_active_cap": 6,       # hard ceiling on LLM actors per tick (latency)
     "live_must_impulse": 1.5,   # impulse ≥ this = real reason to act → always thinks (never rotated)
+    "pc_said_impulse": 2.2,   # near hearer's pull to react when the player speaks aloud (L1; tier-scaled)
     "give_min": 1,
     # prices: sell to trader / buy from them (from THEIR vision of worth)
     "sell_base": 0.55,

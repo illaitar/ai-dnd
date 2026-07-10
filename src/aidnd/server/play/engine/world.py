@@ -273,6 +273,15 @@ def _work_lift(pid, workers, info: str, gt: int) -> float:
     return 0.0
 
 
+_PC_SAID_TIER = {"L1": 1.0, "L2": 0.65, "L3": 0.4}
+
+
+def _pc_said_impulse(tier: str) -> float:
+    """Tier-scaled pull to react to the player's spoken line — near louder than far, and never
+    above a real event/debt (so a busy NPC keeps to its business). 0.0 if unheard/unknown tier."""
+    return round(PB["pc_said_impulse"] * _PC_SAID_TIER.get(tier, 0.0), 2)
+
+
 def _pick_rumor(pool, seed_key, heat: dict, hot: float):
     """Rotated pick from the NON-hot subset of `pool` (a subject the room has chewed drops out).
     None if the pool is empty or every subject is hot."""

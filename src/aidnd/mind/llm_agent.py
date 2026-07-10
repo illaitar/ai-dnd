@@ -163,6 +163,10 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     if my_topics:
         lines.append("  ТВОИ ТЕМЫ (о чём тебе есть что сказать): "
                      + "; ".join(f"«{t}»" for t in my_topics[:3]) + " — заведи, к слову.")
+    said = (ctx.get("pc_said") or {}).get(cfg.id)
+    if said:
+        lines.append(f"  ⚑ Чужак рядом только что сказал вслух: «{said}» — ответь, если тебе есть "
+                     "что сказать, или занимайся своим.")
     ev = ctx.get("event")
     if ev:
         lines.append(f"  ⚡ ТОЛЬКО ЧТО: {ev} — отреагируй по своему характеру (страх/любопытство/"

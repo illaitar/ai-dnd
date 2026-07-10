@@ -1145,7 +1145,9 @@ $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
 loadMap();
 (async()=>{const hn=(localStorage.getItem('hero_name')||'').trim();
   if(hn)await api('/api/play/hero',{name:hn});})();   // имя героя с лендинга — раз на новый мир
+const boot0=thinkingMsg();                             // сцена собирается — indicator from the first frame
 api('/api/play/scene').then(s=>{
+  boot0.remove();
   SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}setCoins(s.coins);
   if(s.hero&&s.hero!=='Странник')document.title=(s.city||'AI-DnD')+' · '+s.hero;
   if(s.max_hp)PBMAXHP=s.max_hp;setHp(s.hp,s.max_hp);setMana(s.mana,s.mana_cap,s.fatigue);
@@ -1157,6 +1159,7 @@ api('/api/play/scene').then(s=>{
   push('narr',s.location.name+'. '+[a0.time,a0.weather,a0.mood].filter(Boolean).join(', ')+'. '
     +((s.here&&s.here.length)?('Здесь: '+s.here.length+' чел.'):'Никого.'));
   if(s.watch)renderWatch(s.watch);
+  if(s.here&&s.here.length)reactLive();                // wake the scene on arrival: indicator + one live tick
 });
 refreshInv();renderJobs();
 let INV=[];

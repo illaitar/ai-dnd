@@ -26,6 +26,7 @@ from aidnd.server.play.engine.core import (
     PLAYER,
     _binfo,
     _city_name,
+    _emo,
     _gt,
     _gt_add,
     _here,
@@ -33,6 +34,7 @@ from aidnd.server.play.engine.core import (
     _mt,
     _pc_hp,
     _pc_remember,
+    _portrait_url,
     _seen,
     _store,
     _tokens_ru,
@@ -350,7 +352,8 @@ def _plan_payload() -> dict:
         seats = _zone_seats(people, here, zones, f"seats|{_wid()}|{bid}")
     npcs = [{"id": pid, "name": people[pid].name, "init": people[pid].name[:1],
              "zone": seats.get(pid),
-             "color": f"hsl({(hash(pid) % 360)} 55% 45%)"} for pid in here]
+             "color": f"hsl({(hash(pid) % 360)} 55% 45%)",
+             "portrait": _portrait_url(people[pid], _emo(people[pid].state))} for pid in here]
     npcs.append({"id": "pc", "name": _S.get("pc_name") or "ты", "init": "☉",
                  "zone": _S.get("zone"), "color": "#b08a2e", "is_player": True})
     hidden = [z["id"] for z in zones if z.get("lockable")]  # guest rooms: until uncovered — fog

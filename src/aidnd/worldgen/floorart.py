@@ -344,14 +344,15 @@ def _fillers(out, fl, rng, ox, hall_oy):
 
 
 def _npc_markers(out, fl, game, ox, oy, hall_oy):
-    """People markers on the plan: circle-initial at their zone; player is bold ring.
-    Hall zones drawn from hall_oy, extension rooms from oy (top stripe)."""
+    """People markers on the plan: portrait (or circle-initial when none) at their zone;
+    player is bold ring. Hall zones drawn from hall_oy, extension rooms from oy (top stripe)."""
     back_ids = {r["id"] for r in fl.get("back", {}).get("rooms", [])}
     zid2rect = {r["id"]: r for r in fl["zones"]}
     zid2rect.update({r["id"]: r for r in fl.get("back", {}).get("rooms", [])})
     by_zone: dict = {}
     for p in game.get("npcs") or []:
         by_zone.setdefault(p.get("zone"), []).append(p)
+    marker_idx = 0  # unique clip-path id per marker, across all zones
     for zid, ps in by_zone.items():
         r = zid2rect.get(zid)
         for i, p in enumerate(ps):
@@ -365,12 +366,25 @@ def _npc_markers(out, fl, game, ox, oy, hall_oy):
                 cy = hall_oy + (fl["h"] - 2.2) * CELL
             col = p.get("color") or "#7a5a3a"
             sw = 2.4 if p.get("is_player") else 1.1
+            portrait = p.get("portrait")
+            if portrait:                                     # real face — clipped to the marker circle
+                clip_id = f"npcclip{marker_idx}"
+                face = (
+                    f'<clipPath id="{clip_id}"><circle cx="{cx:.0f}" cy="{cy:.0f}" r="7.5"/></clipPath>'
+                    f'<image href="{portrait}" x="{cx - 7.5:.0f}" y="{cy - 7.5:.0f}" width="15" '
+                    f'height="15" clip-path="url(#{clip_id})" preserveAspectRatio="xMidYMid slice"/>'
+                )
+            else:                                            # fallback — letter initial
+                face = (
+                    f'<text x="{cx:.0f}" y="{cy + 3:.0f}" text-anchor="middle" font-size="8" '
+                    f'font-family="Georgia, serif" fill="{INK}">{p.get("init", "?")}</text>'
+                )
             out.append(f'<g class="npc" data-pid="{p.get("id", "")}" style="cursor:pointer">'
                        f'<circle cx="{cx:.0f}" cy="{cy:.0f}" r="7.5" fill="{PAPER}" '
                        f'stroke="{col}" stroke-width="{sw}"/>'
-                       f'<text x="{cx:.0f}" y="{cy + 3:.0f}" text-anchor="middle" font-size="8" '
-                       f'font-family="Georgia, serif" fill="{INK}">{p.get("init", "?")}</text>'
+                       f'{face}'
                        f'<title>{p.get("name", "")}</title></g>')
+            marker_idx += 1
 
 
 def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = None,

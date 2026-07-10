@@ -647,7 +647,8 @@ def _live_tick(people) -> tuple:
             list(ex.map(_plan_one, todo))
     # SILENCE — also signal: hailed stranger, they didn't respond → this is world fact, NPC remembers
     awaiting = lv.get("awaiting") or []
-    if awaiting and not lv.pop("pc_spoke", False):
+    spoke = lv.pop("pc_spoke", False)  # consume every tick — short-circuit `and` used to leave it stale
+    if awaiting and not spoke:
         for pid in awaiting:
             if pid in w.npc_minds:  # kind=note → goes into 'YOUR THOUGHTS' of decisions
                 w.npc_minds[pid].memory.add(

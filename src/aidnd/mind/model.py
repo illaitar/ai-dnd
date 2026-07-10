@@ -70,6 +70,7 @@ class NpcState:
     plan: Plan | None = None                           # active plan (routine mode)
     engagement: float = 0.0                              # dialogue engagement (hold for converse)
     venue_social: float = 0.0                            # leisure-venue converse lift for acquaintances (set by live scene)
+    on_shift: float = 0.0                                # workplace 'keep working' purpose lift (set by live scene)
     mode_history: list = field(default_factory=list)     # [(tick, mode, switched, reason)] — history
     agendas: list = field(default_factory=list)          # long-term goals (LLM scheduler, mind/agenda)
 

@@ -43,6 +43,8 @@ def standing_needs(state) -> list:
     for nd, lvl in state.needs.items():
         w = state.config.traits.get(NEED_WEIGHT[nd], 0.5) + 0.5 if nd in NEED_WEIGHT else 1.0
         val = lvl * w
+        if nd == "purpose":
+            val += getattr(state, "on_shift", 0.0)       # on the clock → work out-competes idle needs
         if val > 0.08:
             meta = dict(state.needs_sources.get(nd, {})) if hasattr(state, "needs_sources") else {}
             out.append(Goal("need", nd, val, meta))

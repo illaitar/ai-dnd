@@ -992,7 +992,7 @@ def render_svg(m, chrome=True, interactive=False, marks=True):
         e.append(f'<line x1="{c2[0]:.1f}" y1="{c2[1]:.1f}" x2="{c3[0]:.1f}" y2="{c3[1]:.1f}" stroke="#2c2113" stroke-width="1.4"/>')
     # megablock names — path = available district width, font size chosen so text fits (center → no crop)
     specials = [mk['c'] for mk in m['marks'] if mk.get('kind') in ('townhall', 'castle')]
-    for li, lb in enumerate(m.get('dist_labels', [])):
+    for li, lb in enumerate(m.get('dist_labels', []) if marks else []):   # game map: no district names
         C, nm = lb['c'], lb['name']
         avail = lb['w'] * 0.80                              # how much district width to allocate for label
         fs = min(18.0, avail / (len(nm) * 0.64), lb['h'] * 0.5)

@@ -75,10 +75,24 @@
     padding:1px 5px;font-family:var(--sans)}
   body.view-map #viewback,body.view-inv #viewback,body.view-magic #viewback{display:flex}
   .cap{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);padding:11px 14px 6px}
-  .map{flex:1;position:relative;margin:0;border:0;border-radius:0;
-    background:#a9b878;overflow:hidden}   /* borderless; bg = the world-map ground green, so beyond the SVG is seamless/infinite (applySky tints it by time) */
+  /* the map is an INSET viewport — a framed pane inside the card, not a full-bleed element */
+  .map{flex:1;position:relative;margin:4px 12px 8px;border:1px solid var(--line2);border-radius:10px;
+    background:#a9b878;overflow:hidden;
+    box-shadow:inset 0 0 0 1px rgba(20,14,4,.35),inset 0 0 22px rgba(20,14,4,.28)}
   .map svg{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
   .map svg.drag{cursor:grabbing}
+  .knum{cursor:pointer}
+  .knum circle{fill:rgba(245,236,212,.95);stroke:#3a2c14;stroke-width:1.1}
+  .knum:hover circle{fill:#ffe6a8}
+  .knum text{fill:#2c2113;font-weight:700;text-anchor:middle;pointer-events:none;font-family:var(--sans)}
+  .legend{padding:2px 14px 8px;display:flex;flex-wrap:wrap;gap:4px 10px}
+  .legend .lrow{font-size:11.5px;color:var(--dim);cursor:pointer;white-space:nowrap}
+  .legend .lrow b{color:var(--gold);font-weight:600;margin-right:3px}
+  .legend .lrow:hover{color:var(--gold)}
+  .legend .lempty{font:italic 11.5px var(--serif);color:var(--faint)}
+  /* right card: each block is its own sub-card, not a line in a flat list */
+  .sub{border:1px solid var(--line);border-radius:10px;background:var(--panel2);padding:9px 11px}
+  .amb .sub{margin:0}
   .msg .mrow{display:flex;gap:8px;align-items:flex-start}
   .msg .mav{width:26px;height:26px;border-radius:50%;flex:0 0 26px;overflow:hidden;display:flex;
     align-items:center;justify-content:center;font:500 11px var(--sans);color:#241a0c;margin-top:2px}
@@ -391,6 +405,7 @@
           <button onclick="recenter()" title="к игроку" style="font-size:12px">&#9678;</button></div>
         <button id="gobtn" class="gobtn hidden" onclick="go()">&#9654; идти <span id="goeta"></span></button>
       </div>
+      <div class="legend" id="maplegend"></div>
       <div id="dicewrap"><div class="d20" id="d20box"></div><div class="dtxt" id="dtxt"></div></div>
       <div class="locard">
         <div class="nm">Трактир</div><div class="kd">таверна</div>
@@ -398,7 +413,7 @@
       </div>
     </div>
     <div id="invpanel" class="workpanel">
-      <div class="cap">🎒 сумка <span id="invn" style="color:var(--gold)"></span></div>
+      <div class="cap">сумка <span id="invn" style="color:var(--gold)"></span></div>
       <div class="invlist" id="invlist"></div>
     </div>
     <div id="magicpanel" class="workpanel">
@@ -444,10 +459,10 @@
   <div class="col right">
     <div class="cap" id="rightcap">сцена</div>
     <div class="amb" id="amb"></div>
-    <div class="cap" style="margin-top:4px;cursor:pointer" onclick="setView('inv')">🎒 сумка <span id="bagn"></span> — развернуть</div>
-    <div class="bag" id="bag" style="display:none"></div>
+    <div class="cap" style="margin-top:4px;cursor:pointer" onclick="setView('inv')">сумка <span id="bagn"></span> — развернуть</div>
+    <div class="bag sub" id="bag" style="display:none;margin:0 12px"></div>
     <div class="cap" style="margin-top:4px">дела</div>
-    <div class="bag" id="jobs"></div>
+    <div class="bag sub" id="jobs" style="margin:0 12px 12px"></div>
   </div>
 </div>
 
@@ -477,7 +492,7 @@
 </div>
 <div id="mktwrap" class="overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
   <div class="magwin" style="width:min(520px,94vw)">
-    <h3>&#127974; Прилавок <span id="mktcoins" style="font:400 13px var(--serif);color:var(--dim);margin-left:6px"></span>
+    <h3>Прилавок <span id="mktcoins" style="font:400 13px var(--serif);color:var(--dim);margin-left:6px"></span>
       <span class="x" onclick="$('mktwrap').classList.add('hidden')">✕</span></h3>
     <div id="mktbody" style="margin-top:6px"></div>
   </div>
@@ -585,6 +600,8 @@ function setView(name){
     const wp={inv:'invpanel',magic:'magicpanel'}[name]||'mapwrap';      // which work panel fills the left column
     ['mapwrap','invpanel','magicpanel'].forEach(id=>{const e=$(id);if(e)e.classList.toggle('on',id===wp);});
   });
+  if(MAP){Z=Math.min(MAXZ,Math.max(minZ(),Z));applyVB();      // режим сменил границы зума и аспект окна —
+    setTimeout(()=>{if(MAP)applyVB();},370);}                 // пере-клампим сразу и после морфа
   if(name==='inv')refreshInv();
 }
 document.addEventListener('keydown',e=>{
@@ -612,42 +629,18 @@ const STEP_MS=240;                                          // реальная 
 function fmtClock(t){t=((t%1440)+1440)%1440;const h=Math.floor(t/60),m=t%60;
   const per=h<5?'ночь':h<11?'утро':h<17?'день':h<22?'вечер':'ночь';
   return per+', '+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');}
-// суточный цикл = НАСТОЯЩАЯ перекраска рисунка карты (#citybase), не плёнка сверху.
-// Модель — «лунный свет»: каждый пиксель тянется к цвету часа ПО СВОЕЙ ЯРКОСТИ (родня sepia,
-// но в любой цвет). Никакого hue-rotate — синь реки не провернётся через фиолет; переход
-// янтарь→синь идёт через естественную серо-лиловую мглу. Подписи и маркеры живут вне
-// #citybase и часа не замечают.
-const SKY=[
-  {h:0,   br:.55,sat:.85,tint:[.45,.60,.85],amt:.60},  // глухая ночь — лунная синь
-  {h:5,   br:.58,sat:.85,tint:[.48,.62,.85],amt:.55},  // предрассветье
-  {h:7.5, br:.88,sat:.95,tint:[1,.82,.72],  amt:.25},  // рассвет — розоватый
-  {h:10,  br:1.00,sat:1.00,tint:[1,.95,.85],amt:.06},  // утро
-  {h:13,  br:1.03,sat:1.02,tint:[1,.95,.85],amt:.03},  // полдень — почти без фильтра
-  {h:17,  br:.97,sat:1.05,tint:[1,.85,.60], amt:.18},  // предвечерье — золото
-  {h:19,  br:.85,sat:1.00,tint:[1,.72,.45], amt:.32},  // закат — янтарь
-  {h:21,  br:.66,sat:.85,tint:[.75,.72,.80],amt:.40},  // сумерки — серо-лиловая мгла
-  {h:22.5,br:.56,sat:.85,tint:[.50,.63,.86],amt:.55},  // синь поднимается
-  {h:24,  br:.55,sat:.85,tint:[.45,.60,.85],amt:.60},
-];
-const _m3mul=(A,B)=>A.map((_,i)=>[0,1,2].map(j=>A[i][0]*B[0][j]+A[i][1]*B[1][j]+A[i][2]*B[2][j]));
-function _skyMatrix(br,sat,tint,amt){
-  const LW=[0.2126,0.7152,0.0722];                       // luminance weights (sRGB)
-  // tint-blend: I*(1-amt) + (столбец tint × строка LW)*amt — белое→цвет часа, чёрное→чёрное
-  const MT=[0,1,2].map(i=>[0,1,2].map(j=>(i===j?1-amt:0)+tint[i]*LW[j]*amt));
-  const MB=[[br,0,0],[0,br,0],[0,0,br]];
-  const MS=[[0.213+0.787*sat,0.715-0.715*sat,0.072-0.072*sat],
-            [0.213-0.213*sat,0.715+0.285*sat,0.072-0.072*sat],
-            [0.213-0.213*sat,0.715-0.715*sat,0.072+0.928*sat]];
-  return _m3mul(MS,_m3mul(MT,MB));                       // brightness → tint → saturate
-}
-function applySky(){const t=((GT/60)%24+24)%24;let a=SKY[0],b=SKY[SKY.length-1];
-  for(let i=0;i<SKY.length-1;i++){if(t>=SKY[i].h&&t<=SKY[i+1].h){a=SKY[i];b=SKY[i+1];break;}}
-  const f=(b.h-a.h)?(t-a.h)/(b.h-a.h):0,L=(x,y)=>x+(y-x)*f;
-  const mat=document.getElementById('daymat');
-  if(!mat)return;
-  const M=_skyMatrix(L(a.br,b.br),L(a.sat,b.sat),
-                     [0,1,2].map(i=>L(a.tint[i],b.tint[i])),L(a.amt,b.amt));
-  mat.setAttribute('values',M.map(r=>r.map(v=>v.toFixed(4)).join(' ')+' 0 0').join('  ')+'  0 0 0 1 0');
+// суточный цикл = смена ЗАПЕЧЁННОЙ палитры: 4 PNG (утро/день/вечер/ночь) отрисованы при
+// генерации города (mappng.py); границы домов и стены во всех палитрах одинаковы. Клиент
+// лишь меняет href картинки — никаких перекрасок на лету.
+const phaseOf=()=>{const h=Math.floor(((GT/60)%24+24)%24);
+  return (h<5||h>=22)?'night':h<10?'morning':h<17?'day':'evening';};
+let PHASE=null;
+function applySky(){
+  if(!MAP||!MAP.map)return;
+  const ph=phaseOf();
+  if(ph===PHASE)return;PHASE=ph;
+  const im=document.getElementById('cityimg');
+  if(im)im.setAttribute('href',MAP.map.png[ph]);
 }
 function setClock(){const c=$('clock');if(c)c.textContent=fmtClock(GT);applySky();}
 function setCoins(v){if(v==null)return;const c=$('coins');if(c)c.textContent=v+' зм';}
@@ -667,51 +660,93 @@ function viewWH(){const b=$('mapsvg').getBoundingClientRect();
 function applyVB(){const [w,h]=viewWH();
   CX=Math.max(BVB[0]+w/2,Math.min(BVB[0]+BVB[2]-w/2,CX));   // pan clamped —
   CY=Math.max(BVB[1]+h/2,Math.min(BVB[1]+BVB[3]-h/2,CY));   // the view never leaves the city
-  $('mapsvg').setAttribute('viewBox',`${(CX-w/2).toFixed(1)} ${(CY-h/2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`);
+  const s=$('mapsvg');
+  s.setAttribute('viewBox',`${(CX-w/2).toFixed(1)} ${(CY-h/2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`);
+  const bw=s.getBoundingClientRect().width;
+  if(bw>2){const upp=w/bw;                                  // units per screen px — markers stay pixel-sized
+    const set=(id,px)=>{const el=document.getElementById(id);
+      if(el)el.setAttribute('transform',`scale(${(px*upp).toFixed(3)})`);};
+    set('pmarki',7);set('dmarki',7);
+    const ep=document.getElementById('epulse');if(ep)ep.setAttribute('r',(11*upp).toFixed(1));}
   $('zlvl').textContent=Math.round(Z*100)+'%';}
 window.addEventListener('resize',()=>{if(MAP)applyVB();});
 function svgEl(m){
-  const W=BVB[2],rpl=W*0.0092,lw=W*0.0022,fs=W*0.015;
-  /* day-cycle = SVG-native color matrix on the map art (CSS filter on an inner <g> paints
-     unreliably in WebKit); sRGB interpolation keeps the authored palette hues honest */
-  let g=`<defs><filter id="dayfilter" color-interpolation-filters="sRGB">
-      <feColorMatrix id="daymat" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
-    </filter></defs>`;
-  g+=`<g id="citybase" filter="url(#dayfilter)">${m.svg||''}</g>`;
-  m.keys.forEach(k=>g+=`<text class="kmark" data-id="${k.node}" x="${k.x}" y="${k.y-rpl*1.9}" font-size="${fs.toFixed(1)}" text-anchor="middle">${k.label}</text>`);
-  g+=`<g id="destmark" pointer-events="none" style="display:none">
-      <circle fill="none" stroke="#e5372a" stroke-width="${lw}"><animate attributeName="r" values="${rpl*0.5};${rpl*1.9};${rpl*0.5}" dur="1.05s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0;1" dur="1.05s" repeatCount="indefinite"/></circle>
-      <circle r="${rpl*0.5}" fill="#e5372a" stroke="#3a0d08" stroke-width="${lw*0.5}"><animate attributeName="r" values="${rpl*0.42};${rpl*0.58};${rpl*0.42}" dur="1.05s" repeatCount="indefinite"/></circle></g>`;
-  g+=`<g id="pmark" transform="translate(${PXY.x},${PXY.y})" pointer-events="none">
-      <circle r="${rpl}" fill="#d9a441" stroke="#241a08" stroke-width="${lw}"/>
-      <circle r="${rpl}" fill="none" stroke="#ffe6a8" opacity=".55"><animate attributeName="r" values="${rpl};${rpl*2.6};${rpl}" dur="2.2s" repeatCount="indefinite"/><animate attributeName="opacity" values=".7;0;.7" dur="2.2s" repeatCount="indefinite"/></circle></g>`;
+  const W=BVB[2],rpl=W*0.0092,lw=W*0.0022;
+  // the city is ONE baked raster (current phase palette); knowledge-gated key numbers and
+  // the player/destination markers are a thin vector overlay on top
+  PHASE=phaseOf();
+  let g=`<image id="cityimg" href="${m.map.png[PHASE]}" x="${BVB[0]}" y="${BVB[1]}" width="${BVB[2]}" height="${BVB[3]}"/>`;
+  g+=`<g id="keynums">`+m.keys.map(k=>{
+    const rr=Math.max(4.5,Math.min((k.r||9)*0.75,11));   // badge strictly inside the building polygon
+    return `<g class="knum" data-node="${k.node}" data-bid="${k.bid}" transform="translate(${k.x},${k.y})">`
+      +`<circle r="${rr.toFixed(1)}"/><text y="${(rr*0.4).toFixed(1)}" font-size="${(rr*1.2).toFixed(1)}">${k.num==null?'Д':k.num}</text></g>`;
+  }).join('')+`</g>`;
+  // markers keep a CONSTANT SCREEN size: inner groups are drawn at r=1 and applyVB scales
+  // them by units-per-pixel, so street zoom doesn't blow them up
+  g+=`<g id="destmark" pointer-events="none" style="display:none"><g id="dmarki">
+      <circle fill="none" stroke="#e5372a" stroke-width=".24"><animate attributeName="r" values="0.5;1.9;0.5" dur="1.05s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0;1" dur="1.05s" repeatCount="indefinite"/></circle>
+      <circle r="0.5" fill="#e5372a" stroke="#3a0d08" stroke-width=".12"><animate attributeName="r" values="0.42;0.58;0.42" dur="1.05s" repeatCount="indefinite"/></circle></g></g>`;
+  g+=`<g id="pmark" transform="translate(${PXY.x},${PXY.y})" pointer-events="none"><g id="pmarki">
+      <circle r="1" fill="#d9a441" stroke="#241a08" stroke-width=".24"/>
+      <circle r="1" fill="none" stroke="#ffe6a8" opacity=".55" stroke-width=".18"><animate attributeName="r" values="1;2.6;1" dur="2.2s" repeatCount="indefinite"/><animate attributeName="opacity" values=".7;0;.7" dur="2.2s" repeatCount="indefinite"/></circle></g></g>`;
   return g;
 }
 function showDest(x,y){const d=$('mapsvg').querySelector('#destmark');
   if(d){d.setAttribute('transform','translate('+x+','+y+')');d.style.display='';}}
 function hideDest(){const d=$('mapsvg').querySelector('#destmark');if(d)d.style.display='none';}
 function renderMap(){const s=$('mapsvg');s.innerHTML=svgEl(MAP);applyVB();
-  s.querySelectorAll('.kmark').forEach(e=>e.addEventListener('click',ev=>{
-    ev.stopPropagation();if(!PANNED)selectDest(+e.dataset.id,null);}));
-  s.querySelectorAll('#citybase .h').forEach(e=>e.addEventListener('click',ev=>{
-    ev.stopPropagation();if(PANNED)return;const nd=MAP.h2n[e.dataset.id];if(nd!=null)selectDest(nd,e);}));
-  applySky();}
+  s.querySelectorAll('.knum').forEach(e=>e.addEventListener('click',ev=>{
+    ev.stopPropagation();if(!PANNED)selectDest(+e.dataset.node,null);}));
+  renderLegend();}
+function renderLegend(){
+  const el=$('maplegend');if(!el||!MAP)return;
+  el.innerHTML=(MAP.keys||[]).map(k=>
+    `<span class="lrow" data-node="${k.node}"><b>${k.num==null?'Д':k.num}</b>${esc(k.label)}</span>`).join('')
+    ||'<span class="lempty">мест ты пока не знаешь — заходи в дома, читай вывески</span>';
+  el.querySelectorAll('.lrow').forEach(e=>e.onclick=()=>{
+    const nd=+e.dataset.node;selectDest(nd,null);
+    const c=CRXY[nd];if(c){CX=c[0];CY=c[1];applyVB();}});
+}
+// PNG-мир: клик по дому решает растровая ID-карта (цвет пикселя = индекс полигона)
+let IDMAP=null;
+function loadIdmap(){
+  if(!MAP||!MAP.map)return;
+  const im=new Image();
+  im.onload=()=>{const c=document.createElement('canvas');
+    c.width=im.naturalWidth;c.height=im.naturalHeight;
+    const x=c.getContext('2d',{willReadFrequently:true});
+    x.drawImage(im,0,0);
+    IDMAP={ctx:x,sx:im.naturalWidth/BVB[2],sy:im.naturalHeight/BVB[3]};};
+  im.src=MAP.map.idmap;
+}
+function houseAt(wx,wy){
+  if(!IDMAP)return null;
+  const px=Math.round((wx-BVB[0])*IDMAP.sx),py=Math.round((wy-BVB[1])*IDMAP.sy);
+  if(px<0||py<0||px>=IDMAP.ctx.canvas.width||py>=IDMAP.ctx.canvas.height)return null;
+  const d=IDMAP.ctx.getImageData(px,py,1,1).data;
+  if(d[2]>40)return null;                         // b-канал не нулевой → фон/кромка сглаживания
+  const idx=d[0]+(d[1]<<8);
+  return (idx&&idx<=MAP.map.ids.length)?MAP.map.ids[idx-1]:null;
+}
 async function loadMap(){MAP=await api('/api/play/map');if(!MAP||!MAP.viewBox)return;
-  BVB=MAP.viewBox;PXY=MAP.player;CX=PXY.x;CY=PXY.y;Z=Math.max(1.5,BVB[2]/560);
-  CRXY={};(MAP.points||[]).forEach(p=>CRXY[p.id]=[p.x,p.y]);setClock();renderMap();}
-function zoomBy(f){Z=Math.min(20,Math.max(1,Z*f));applyVB();}   // Z=1 — the whole city fills the frame; never further out
-function recenter(){CX=PXY.x;CY=PXY.y;Z=Math.max(Z,BVB[2]/560);applyVB();}
+  BVB=MAP.viewBox;PXY=MAP.player;CX=PXY.x;CY=PXY.y;Z=DEFZ();
+  CRXY={};(MAP.points||[]).forEach(p=>CRXY[p.id]=[p.x,p.y]);setClock();renderMap();loadIdmap();}
+async function refreshKeys(){                      // знание мест изменилось (вошёл/вывеска)
+  const m=await api('/api/play/map');
+  if(m&&m.keys&&MAP){MAP.keys=m.keys;renderMap();}
+}
+// зум: в узкой карточке — не дальше «трети города»; в развороте — весь город
+const MAXZ=10, minZ=()=>VIEW==='map'?1:3, DEFZ=()=>4;
+function zoomBy(f){Z=Math.min(MAXZ,Math.max(minZ(),Z*f));applyVB();}
+function recenter(){CX=PXY.x;CY=PXY.y;Z=Math.max(Z,DEFZ());applyVB();}
 function clientToWorld(cx,cy){const s=$('mapsvg'),r=s.getBoundingClientRect(),[w,h]=viewWH();
   return [CX-w/2+(cx-r.left)/r.width*w, CY-h/2+(cy-r.top)/r.height*h];}
 function nearestCr(x,y){let best=null,bd=1e18;(MAP.points||[]).forEach(p=>{
   const d=(p.x-x)**2+(p.y-y)**2;if(d<bd){bd=d;best=p;}});return best;}
-function clearSel(){const b=$('mapsvg').querySelector('#citybase');
-  if(b)b.querySelectorAll('.h.sel').forEach(x=>x.classList.remove('sel'));SELEL=null;PEND=null;hideDest();$('gobtn').classList.add('hidden');}
+function clearSel(){SELEL=null;PEND=null;hideDest();$('gobtn').classList.add('hidden');}
 function selectDest(cr,houseEl){
   if(cr==null)return;
-  const b=$('mapsvg').querySelector('#citybase');
-  if(b)b.querySelectorAll('.h.sel').forEach(x=>x.classList.remove('sel'));
-  SELEL=houseEl||null;if(houseEl)houseEl.classList.add('sel');
+  SELEL=null;
   PEND=cr;const c=CRXY[cr];if(c)showDest(c[0],c[1]);
   $('goeta').textContent='';$('gobtn').classList.remove('hidden');
 }
@@ -758,7 +793,7 @@ async function goNow(){
   }
   if(r.live_pending)reactLive();   // arrived — the spot is already on screen; NPC reactions stream in
 }
-async function signAck(bid,record,to){await api('/api/play/sign_ack',{bid,record});contMove(to);}
+async function signAck(bid,record,to){await api('/api/play/sign_ack',{bid,record});if(record)refreshKeys();contMove(to);}
 async function contMove(to){PEND=to;await go();}
 (function(){const s=$('mapsvg');let drag=null;
   s.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,cx:CX,cy:CY};PANNED=false;s.classList.add('drag');});
@@ -766,13 +801,16 @@ async function contMove(to){PEND=to;await go();}
     if(Math.abs(e.clientX-drag.x)+Math.abs(e.clientY-drag.y)>3)PANNED=true;
     CX=drag.cx-(e.clientX-drag.x)*w/r.width;CY=drag.cy-(e.clientY-drag.y)*h/r.height;applyVB();});
   window.addEventListener('mouseup',()=>{if(drag){drag=null;s.classList.remove('drag');}});
-  s.addEventListener('click',e=>{                       // клик по дороге/фону → ближайшая точка
-    if(PANNED||e.target.closest('.h,.kmark'))return;
-    const [wx,wy]=clientToWorld(e.clientX,e.clientY);const p=nearestCr(wx,wy);
+  s.addEventListener('click',e=>{                       // клик: дом (по ID-карте) → его дверь; иначе дорога
+    if(PANNED||e.target.closest('.knum'))return;
+    const [wx,wy]=clientToWorld(e.clientX,e.clientY);
+    const hid=houseAt(wx,wy);
+    if(hid&&MAP.h2n[hid]!=null){selectDest(MAP.h2n[hid],null);return;}
+    const p=nearestCr(wx,wy);
     if(p)selectDest(p.id,null);});
   s.addEventListener('wheel',e=>{e.preventDefault();
     const [mx,my]=clientToWorld(e.clientX,e.clientY);
-    const nz=Math.min(20,Math.max(1,Z*(e.deltaY<0?1.2:1/1.2)));
+    const nz=Math.min(MAXZ,Math.max(minZ(),Z*(e.deltaY<0?1.2:1/1.2)));
     CX=mx+(CX-mx)*(Z/nz);CY=my+(CY-my)*(Z/nz);Z=nz;applyVB();},{passive:false});
 })();
 
@@ -784,26 +822,19 @@ function faceHtml(n){
   return `<span class="${cls}"${st} title="${esc(n.name)}${known?(' · '+esc(n.role)):''}"
     onclick="talk('${n.id}')">${inner}</span>`;
 }
-function sceneLine(){
-  const looked=(SCENE.looked|0)>=1;
-  if(!looked)return 'ты ещё не осмотрелся здесь';
-  const k=(SCENE.location&&SCENE.location.kind)||'';
-  return k;
-}
 function renderAmb(){
   const a=SCENE.ambient||{};
   const more=SCENE.here_more|0;
-  const noneTx=(SCENE.looked|0)<1?'осмотрись, чтобы различить людей'
-    :(SCENE.enterable&&!SCENE.inside)?'люди — под крышей; войди, чтобы увидеть':'никого';
+  const noneTx=(SCENE.enterable&&!SCENE.inside)?'люди — под крышей; войди, чтобы увидеть':'никого';
   $('amb').innerHTML=
-    `<div class="amchips">${[a.time,a.weather,a.mood].filter(Boolean).map(x=>`<span class="amchip">${esc(x)}</span>`).join('')}</div>
-     <div><div class="subcap" style="margin:2px 0 6px">кто здесь</div>
-       <div class="facegrid">${SCENE.here.map(faceHtml).join('')}${more?`<span class="face more">+${more}</span>`:''}
+    `<div class="sub"><div class="amchips">${[a.time,a.weather,a.mood].filter(Boolean).map(x=>`<span class="amchip">${esc(x)}</span>`).join('')}</div>
+       <div class="sceneline" style="padding:6px 0 0">${esc((SCENE.location&&SCENE.location.kind)||'')}</div></div>
+     <div class="sub"><div class="subcap" style="margin:0 0 6px">кто здесь</div>
+       <div class="facegrid" style="padding:0">${SCENE.here.map(faceHtml).join('')}${more?`<span class="face more">+${more}</span>`:''}
        ${(!SCENE.here.length)?`<span style="font:italic 12px var(--serif);color:var(--faint)">${noneTx}</span>`:''}</div></div>
-     <div class="sceneline">${esc(sceneLine())}</div>
-     <div><div class="subcap" style="margin:2px 0 6px">звуки</div>
-       ${(a.sound&&a.sound.length)?`<div class="snd">${a.sound.map(s=>`<div>${esc(s)}</div>`).join('')}</div>`
-         :'<div class="snd"><div>тихо — лишь погода за стенами</div></div>'}</div>`;
+     <div class="sub"><div class="subcap" style="margin:0 0 6px">звуки</div>
+       ${(a.sound&&a.sound.length)?`<div class="snd" style="margin:0">${a.sound.map(s=>`<div>${esc(s)}</div>`).join('')}</div>`
+         :'<div class="snd" style="margin:0"><div>тихо — лишь погода за стенами</div></div>'}</div>`;
 }
 let LIVEBUSY=false;
 // ─── turn lock: while the world resolves a turn, further world actions are blocked ───
@@ -857,20 +888,12 @@ const ROOM_KD={cellar:'подвал',backroom:'задняя комната',atti
 function renderWays(){
   const el=$('waybtns');if(!el)return;
   if(typeof DNG!=='undefined'&&DNG){
-    el.innerHTML=`<button onclick="dloot()">&#128269; обыскать</button>`+
+    el.innerHTML=`<button onclick="dloot()">обыскать</button>`+
       `<button class="gray" onclick="dexit()">&#8593; наружу</button>`;
     return;}
-  const b=[];
+  const b=[];  // debug-минимализм: только вход/выход — всё остальное словами или кликами по карте
   if(SCENE.inside)b.push(`<button onclick="exitB()">&#8592; выйти наружу</button>`);
   else if(SCENE.enterable)b.push(`<button onclick="enterB()">войти: ${esc(SCENE.enterable.name)}</button>`);
-  if((SCENE.looked|0)<1)b.push(`<button onclick="lookAround()">&#128065; осмотреться</button>`);
-  if(SCENE.inside)b.push(`<button onclick="openMarket()">&#127974; прилавок</button>`);
-  if(SCENE.inside&&SCENE.room)b.push(`<button onclick="goRoom(null)">&#8598; в общий зал</button>`);
-  (SCENE.inside?(SCENE.rooms||[]):[]).forEach(rm=>{if(rm.name!==SCENE.room){
-    const lk=rm.access==='locked'?' &#128274;':(rm.access==='staff'?' (служебное)':'');
-    b.push(`<button data-r="${esc(rm.name)}" onclick="goRoom(this.dataset.r)">&#8600; ${esc(rm.name)}${lk}</button>`);}});
-  b.push(`<button class="gray" onclick="openParch()">&#128506; карта</button>`);
-  b.push(`<button class="gray" onclick="waitTurn()">&#8987; ждать</button>`);
   el.innerHTML=b.join('');
   $('mapbox').classList.toggle('inside',!!SCENE.inside);
   loadPlan();
@@ -914,13 +937,12 @@ function renderEnterPulse(){
     c.setAttribute('id','epulse');c.setAttribute('cx',k.x);c.setAttribute('cy',k.y);
     c.setAttribute('r',10);c.setAttribute('class','enterpulse');svg.appendChild(c);}
 }
-async function enterB(){await asTurn(async()=>applyWorld(await api('/api/play/enter',{})));}
+async function enterB(){await asTurn(async()=>{applyWorld(await api('/api/play/enter',{}));refreshKeys();});}
 async function exitB(){await asTurn(async()=>applyWorld(await api('/api/play/exit',{})));}
 async function waitTurn(){await asTurn(async()=>{
   const el=push('sys','<span class="dots">…</span>');
   try{applyWorld(await api('/api/play/live',{}));}finally{el.remove();}
 });}
-async function lookAround(){await asTurn(async()=>applyWorld(await api('/api/play/look',{})));}
 const GEN_STAGES=['Возводим город…','Заселяем дома…','Плетём связи…','Открываем лавки…','Будим горожан…'];
 async function newWorld(){
   if(!confirm('Начать НОВЫЙ мир? Текущий прогресс будет стёрт — город и жители сгенерируются заново (из тех же пулов).'))return;
@@ -999,7 +1021,7 @@ async function talkNow(id){
   npcMsg(id,n.line);
   const extras=[];
   if(n.crafter)extras.push(`<button onclick="commission()">&#9874; заказать: ${esc(n.recipe)}</button>`);
-  (n.keys||[]).forEach(k=>extras.push(`<button data-k="${esc(k)}" onclick="askKey(this.dataset.k)">&#128273; ${esc(k)}</button>`));
+  (n.keys||[]).forEach(k=>extras.push(`<button data-k="${esc(k)}" onclick="askKey(this.dataset.k)">ключ: ${esc(k)}</button>`));
   if(extras.length)push('sys',`<div class="acts" style="justify-content:flex-start">${extras.join('')}</div>`);
   if(n.crafter)loadWares();
 }
@@ -1074,7 +1096,7 @@ api('/api/play/scene').then(s=>{
   if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
   const a0=s.ambient||{};
   push('narr',s.location.name+'. '+[a0.time,a0.weather,a0.mood].filter(Boolean).join(', ')+'. '
-    +((s.looked|0)<1?'Стоит осмотреться.':(s.here&&s.here.length?('Здесь: '+s.here.length+' чел.'):'Никого.')));
+    +((s.here&&s.here.length)?('Здесь: '+s.here.length+' чел.'):'Никого.'));
   if(s.watch)renderWatch(s.watch);
 });
 refreshInv();renderJobs();
@@ -1315,7 +1337,7 @@ function openDungeon(r){
   renderDungeon();
 }
 function dngHints(dg){
-  (dg&&dg.exits||[]).forEach(x=>{if(x.hint&&!x.known)push('sys','&#128066; '+esc(x.hint));});
+  (dg&&dg.exits||[]).forEach(x=>{if(x.hint&&!x.known)push('sys','слух: '+esc(x.hint));});
 }
 function renderDungeon(){
   const box=$('planbox');
@@ -1365,7 +1387,7 @@ function renderLoc(loc){
   document.querySelector('.locard .kd').textContent=loc.kind;
   const cs=(loc.containers||[]);
   document.querySelector('.locard .desc').innerHTML=esc(loc.desc||'')+(cs.length?
-    `<div class="conts">${cs.map(c=>`<span class="cont op${c.locked?' lk':''}" data-n="${esc(c.name)}" onclick="loot(this.dataset.n)" title="${esc(c.where||'')}${c.locked?' · заперто (нужен ключ)':' · обшарить'}">${c.locked?'&#128274;':'&#9642;'} ${esc(c.name)}</span>`).join('')}</div>`:'');
+    `<div class="conts">${cs.map(c=>`<span class="cont op${c.locked?' lk':''}" data-n="${esc(c.name)}" onclick="loot(this.dataset.n)" title="${esc(c.where||'')}${c.locked?' · заперто (нужен ключ)':' · обшарить'}">&#9642; ${esc(c.name)}${c.locked?' (заперто)':''}</span>`).join('')}</div>`:'');
   renderBoard();
   renderAds();
 }
@@ -1387,7 +1409,7 @@ function renderMarket(d){
   const g=d.goods||[];
   if(!g.length){$('mktbody').innerHTML='<div style="color:var(--faint);font:italic 13px var(--serif);padding:6px 2px">здесь ничем не торгуют</div>';return;}
   const shut=d.open===false;
-  const banner=shut?`<div style="color:#c98a3a;font:italic 12.5px var(--serif);padding:4px 2px 8px;border-bottom:1px solid var(--line)">🔒 закрыто${d.opens_at!=null?(' — откроется в '+d.opens_at+':00'):''}</div>`:'';
+  const banner=shut?`<div style="color:#c98a3a;font:italic 12.5px var(--serif);padding:4px 2px 8px;border-bottom:1px solid var(--line)">закрыто${d.opens_at!=null?(' — откроется в '+d.opens_at+':00'):''}</div>`:'';
   $('mktbody').innerHTML=banner+g.map(x=>{
     const out=x.broken?' <span style="color:#a55;font-size:11px">— нет производителя</span>':'';
     const canB=!shut&&!x.broken&&x.stock>0&&(d.coins|0)>=x.price;
@@ -1523,7 +1545,7 @@ function melt(){
 function renderPalette(g){
   const tile=x=>`<div class="gtile ${x.axis==='element'?'elem':''} ${x.known?'':'locked'}" `
     +`${x.known?`data-pal="${x.id}"`:''} title="${esc(x.flavor||x.axis)} · вес ${x.weight||1}">`
-    +`${esc(x.ru)}${x.known?'':' 🔒'}</div>`;
+    +`${esc(x.ru)}${x.known?'':' ·не изучен'}</div>`;
   $('magelems').innerHTML=(g.elements||[]).map(tile).join('');
   $('magglyphs').innerHTML=(g.glyphs||[]).map(tile).join('');
 }

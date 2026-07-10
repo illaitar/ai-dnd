@@ -93,7 +93,7 @@ def game_map():
     pxy = g["_xy"].get(loc, [0, 0])
     return {
         "viewBox": g["viewBox"],
-        "svg": g["svg"],
+        "map": g["map"],  # phase PNGs + click ID-map — no SVG leaves the server
         "h2n": g["h2n"],
         "points": g["points"],
         "keys": [
@@ -104,6 +104,21 @@ def game_map():
         "loc": loc,
         "player": {"x": pxy[0], "y": pxy[1]},
     }
+
+
+@router.get("/api/play/mapimg/{name}")
+def map_img(name: str):
+    """Phase PNGs / click ID-map of the current world (rendered once at world build)."""
+    from fastapi.responses import FileResponse
+
+    from aidnd.server.play.engine.worldbuild.mappng import map_file
+
+    _play()  # ensure the world (and its rasters) exist
+    path = map_file(_wid(), name)
+    if path is None:
+        return {"error": "нет такой карты"}
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.post("/api/play/move")
@@ -179,6 +194,7 @@ async def enter(request: Request):
     _S["room"] = None
     _S["zone"] = None
     _S["dlg"] = None  # entered — street conversation interrupted
+    _mark_seen(bid)  # NOW the place is known (fog lifts on entering, not on walking past)
     _gt_add(PB["give_min"])
     _pc_remember(f"вошёл в {_binfo(bid)['name']}", 0.25)
     t = _world_tick_fast()  # enter instantly; NPC chatter streams via /live

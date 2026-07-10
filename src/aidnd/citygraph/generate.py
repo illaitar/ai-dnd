@@ -96,4 +96,22 @@ def visual(params: CityParams, chrome: bool = True, interactive: bool = False) -
         se = full.find("</script>", si)
         full = full[:si] + (full[se + 9:] if se != -1 else full[si:])
     inner = full[full.index(">", full.index("<svg")) + 1: full.rindex("</svg>")]
-    return {"inner": inner, "W": int(m["W"]), "H": int(m["H"])}
+    # clickable polygons (houses + townhall/castle keep) — the raster ID-map is painted from
+    # these, so PNG-map clicks resolve to the same ids the old interactive .h layer used
+    polys = []
+    for w_ in m["wards"]:
+        if w_.get("special") == "townhall":
+            hid = next((h_["id"] for h_ in m["hits"] if h_.get("kind") == "townhall"), None)
+            if hid:
+                polys.append({"id": hid, "poly": w_["building"]})
+            continue
+        if w_.get("special") == "castle":
+            hid = next((h_["id"] for h_ in m["hits"] if h_.get("kind") == "castle"), None)
+            if hid:
+                polys.append({"id": hid, "poly": w_["keep"]})
+            continue
+        for h_ in w_.get("houses", []):
+            if not h_.get("garden"):
+                polys.append({"id": h_["id"], "poly": h_["poly"]})
+    return {"inner": inner, "W": int(m["W"]), "H": int(m["H"]),
+            "hits": m["hits"], "polys": polys}

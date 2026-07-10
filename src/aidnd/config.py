@@ -61,6 +61,10 @@ DEEPSEEK_CONCURRENCY: int = int(os.environ.get("AIDND_DEEPSEEK_CONCURRENCY", "8"
 # (too high → 429s → LLMUnavailable). Raise via env for bigger crowds if the account allows.
 LIVE_CONCURRENCY: int = int(os.environ.get("AIDND_LIVE_CONCURRENCY", "64"))
 
+# Debug: silence the NPC live layer (no decide/plan LLM calls — the hall just stays quiet).
+# Player-initiated LLM paths (/act, dialogue) are NOT affected. Dev-only flag.
+NO_LLM_TICKS: bool = os.environ.get("AIDND_NO_LLM", "") == "1"
+
 # --- service: user/session/game DB (Postgres, async) + auth ---
 DATABASE_URL: str = os.environ.get("AIDND_DATABASE_URL", "postgresql+asyncpg://localhost/aidnd_dev")
 SESSION_TTL_DAYS: int = int(os.environ.get("AIDND_SESSION_TTL_DAYS", "30"))

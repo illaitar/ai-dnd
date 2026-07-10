@@ -32,6 +32,7 @@ docs/_build/
 
 # портреты NPC (Flux, тяжёлые — на прод через rsync, НЕ в гит)
 data/portraits/
+data/maps/
 
 # артефакты симуляции города
 citysim.gif

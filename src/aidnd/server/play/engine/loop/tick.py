@@ -24,12 +24,16 @@ def _world_tick() -> dict:
     GAME CYCLE (each @router.post /api/play/*):
         player action → _gt_add(action time) → world mutation → _world_tick() → scene response.
     """
+    from aidnd import config
+
     from ..world import _here, _live_build, _live_tick
 
     city, people, crof, cr2b, loc = _play()  # _play → _apply_routine: passive world synced
     lv = _S.get("live")
     if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
         _live_build(city, people, crof, cr2b, loc)
+    if config.NO_LLM_TICKS:  # debug: the hall stays quiet — no NPC decisions this turn
+        return {"feed": [], "address": []}
     try:
         feed, address = _live_tick(people)  # live scene: those nearby
     except (LLMUnavailable, LLMBadOutput):  # no model won't pretend — honest error to player

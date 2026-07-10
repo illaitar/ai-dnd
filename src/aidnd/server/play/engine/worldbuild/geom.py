@@ -32,7 +32,12 @@ def _build_geom(city, xy, n2b, vis) -> dict:
         if city.node_kind(n) in road
     ]
     keys = []
+    hit_r = {h["id"]: h["r"] for h in vis.get("hits", []) if h.get("id")}
     for bid, kb in sorted(city.key_buildings.items()):
+        try:
+            num = int(bid.split(":", 1)[1])  # key:N — the number IS assigned at generation
+        except (IndexError, ValueError):
+            num = None
         keys.append(
             {
                 "node": kb.node,
@@ -40,6 +45,8 @@ def _build_geom(city, xy, n2b, vis) -> dict:
                 "y": round(kb.y, 1),
                 "label": _binfo(bid)["label"],
                 "bid": bid,
+                "num": num,
+                "r": round(hit_r.get(kb.house, 9.0), 1),  # inradius-ish — the badge must FIT the polygon
             }
         )
     cx, cy = vis["W"] / 2, vis["H"] / 2  # BOARD-POST: crossroad closest to center
@@ -53,6 +60,8 @@ def _build_geom(city, xy, n2b, vis) -> dict:
                 "y": round(xy[plaza][1], 1),
                 "label": "Доска",
                 "bid": "board:plaza",
+                "num": None,  # the post is lettered «Д», not numbered
+                "r": 8.0,
             }
         )
     return {

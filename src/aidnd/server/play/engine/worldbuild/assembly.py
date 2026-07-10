@@ -101,13 +101,12 @@ def _play():
             n2b.setdefault(kb.node, bid)
         for hid, ho in city.houses.items():  # residential houses also enterable (fact sheet from pool)
             n2b.setdefault(ho.node, hid)
-        start = (
-            next(
-                (keynode.get(p.work) for p in people.values() if p.role == "трактирщик" and p.work),
-                None,
-            )
-            or kps[0]
+        start_bid = next(
+            (p.work for p in people.values() if p.role == "трактирщик" and p.work), None
         )
+        start = keynode.get(start_bid) or kps[0]
+        if start_bid and not _store().flag_get(_wid(), f"seen|{start_bid}"):
+            _store().flag_set(_wid(), f"seen|{start_bid}")  # only the STARTING tavern is pre-known
         _weave_ties(people)  # person ties → real pool people
         _weave_locals(people)  # local-tavern regulars → mild mutual acquaintance
         row = _store().get_pc(_wid()) or {}  # player position SURVIVES restart/deploy
@@ -116,20 +115,29 @@ def _play():
             start = saved_loc
         # cache the geom (the ~1s visual() SVG render) in live.db — deterministic by seed, so a
         # server restart / cold start reads it back instead of re-rendering 5k+ SVG elements.
+        # v3: the client never gets the 5k-element SVG — the visual ships as phase PNGs + ID-map.
         import json as _json
+
+        from .mappng import build_map_rasters, map_file
 
         _wg = _wid()
         _gc = (
             _store().flag_get(_wg, "geom")
-            if _store().flag_get(_wg, "geom_seed") == str(_S["seed"])
+            if _store().flag_get(_wg, "geom_seed") == f"{_S['seed']}|v3"
             else None
         )
         if _gc:
             geom = _json.loads(_gc)
             geom["_xy"] = {int(k): v for k, v in geom["_xy"].items()}  # JSON stringified int node-ids
+            if map_file(_wg, "day.png") is None:  # raster files lost (fresh checkout) — re-render
+                geom["map"] = build_map_rasters(_wg, visual(params), ver=str(_S["seed"]))
+                _store().flag_set(_wg, "geom", _json.dumps(geom))
         else:
-            geom = _build_geom(city, xy, n2b, visual(params, interactive=True))
-            _store().flag_set(_wg, "geom_seed", str(_S["seed"]))
+            vis = visual(params)
+            geom = _build_geom(city, xy, n2b, vis)
+            geom.pop("svg", None)  # raster world: SVG stays a build-time artifact
+            geom["map"] = build_map_rasters(_wg, vis, fresh=True, ver=str(_S["seed"]))
+            _store().flag_set(_wg, "geom_seed", f"{_S['seed']}|v3")
             _store().flag_set(_wg, "geom", _json.dumps(geom))
         _S.update(
             city=city,

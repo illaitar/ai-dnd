@@ -449,8 +449,11 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                 if note:
                     x.state.memory.add(note.format(y.name), _mt(), 0.5, kind="fact",
                                        about=[yid])
+    from aidnd import config as _config
+
     mgr = _model()
-    todo = [pid for pid in here_all if not (people[pid].state.agendas or [])]
+    todo = ([] if _config.NO_LLM_TICKS
+            else [pid for pid in here_all if not (people[pid].state.agendas or [])])
     if todo:  # long-term goal for placed NPC (rare call)
 
         def plan_one(pid):

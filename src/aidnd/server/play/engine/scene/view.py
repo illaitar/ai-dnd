@@ -31,13 +31,11 @@ from aidnd.server.play.engine.core import (
     _here,
     _mana,
     _mana_cap,
-    _mark_seen,
     _met,
     _pc_hp,
     _pc_name,
     _phase,
     _portrait_url,
-    _role_at,
     _store,
     _wid,
     router,
@@ -149,22 +147,23 @@ def _scene_extras(d, bid, loc, inside, plaza, people, crof):
 
 
 def _scene_rooms(inside, lvl):
-    """Rooms of the building the player is in; hidden ones show only on a keen look (lvl 2)."""
+    """Rooms of the building the player is in. Vision is unconditional — no 'keen look' gate;
+    hidden rooms are simply rooms (locks/keys still gate ENTRY, not sight)."""
     if not inside:
         return []
-    return [r for r in _building_rooms(inside) if not (r["access"] == "hidden" and lvl < 2)]
+    return list(_building_rooms(inside))
 
 
 def _scene_dict(city, people, crof, cr2b, loc):
     """Assemble the full scene dict the client renders: place name/kind, fog level, rooms, the
     location block, ambient, the visible folk, and any guild/board/watch extras."""
-    role = _role_at(loc, people, crof, cr2b)
     bid = cr2b.get(loc)
     inside = _S.get("inside")
     if inside and inside != bid:  # stepped away from the building → left it
         inside = _S["inside"] = None
         _S["room"] = None
-    _mark_seen(bid)  # arrived — learned the place
+    # NB: standing at the door does NOT reveal the place — knowledge comes from entering
+    # or from reading its sign (sign_ack); the map/legend show only what the player KNOWS.
     plaza = (_S.get("geom") or {}).get("plaza")
     name, kind = _scene_locinfo(city, loc, bid, inside, plaza)
     here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
@@ -189,12 +188,8 @@ def _scene_dict(city, people, crof, cr2b, loc):
         "location": {
             "name": name,
             "kind": kind,
-            "desc": (
-                "Обычное место фронтирного городка — идёт своя жизнь."
-                if role
-                else "Мимо спешат редкие прохожие; в лужах дрожит свет окон."
-            ),
-            "containers": (_building_containers(inside, room) if (inside and lvl >= 1) else []),
+            "desc": "",  # no filler prose — the scene card carries the facts
+            "containers": (_building_containers(inside, room) if inside else []),
         },
         "dungeon": ({"name": (_S.get("dungeon") or {}).get("d", {}).get("name"),
                      "room": (_S.get("dungeon") or {}).get("room")}

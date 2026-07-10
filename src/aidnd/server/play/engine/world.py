@@ -272,6 +272,13 @@ def _work_lift(pid, workers, info: str, gt: int) -> float:
     return 0.0
 
 
+def _pick_rumor(pool, seed_key, heat: dict, hot: float):
+    """Rotated pick from the NON-hot subset of `pool` (a subject the room has chewed drops out).
+    None if the pool is empty or every subject is hot."""
+    avail = [r for r in pool if heat.get(r, 0.0) < hot]
+    return avail[hash(seed_key) % len(avail)] if avail else None
+
+
 def _afford_need(afford: dict, zone_kind: str, is_post: bool) -> tuple[str | None, float]:
     """(need, rate) a zone object should satisfy: at a worker's post, purpose wins over
     comfort/etc (so a hot forge surfaces WORK, not just warmth) — rate is purpose's OWN
@@ -665,8 +672,20 @@ def _live_tick(people) -> tuple:
     news = [str(x) for x in ((_S.get("guild_news") or []) + (_S.get("board_news") or []))[-2:]]
     news += _deeds.town_talk(lv["names"], limit=2)     # fresh TOWN ACTS — into gossip
     rums = lv.get("rumors") or []
-    rumor_of = ({pid: rums[hash((pid, _gt() // 1440)) % len(rums)] for pid in order}
-                if rums else {})
+    heat = lv.setdefault("rumor_heat", {})
+    for _k in list(heat):                                  # cool every subject each tick
+        heat[_k] = max(0.0, heat[_k] - PB["rumor_cool"])
+        if heat[_k] <= 0.0:
+            del heat[_k]
+    _rot = _gt() // PB["rumor_rot_min"]
+    rumor_of = {}
+    for _pid in order:
+        _r = _pick_rumor(rums, (_pid, _rot), heat, PB["rumor_hot"])
+        if _r:
+            rumor_of[_pid] = _r
+    news = [n for n in news if heat.get(n, 0.0) < PB["rumor_hot"]]   # hot town-talk drops out too
+    for _s in set(rumor_of.values()) | set(news):          # warm every subject offered this tick
+        heat[_s] = heat.get(_s, 0.0) + PB["rumor_warm"]
     ctx = {
         "roles": roles,
         "names": lv["names"],

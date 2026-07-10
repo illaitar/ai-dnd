@@ -101,6 +101,11 @@ PB = {
     # so regulars talk instead of idly eating; strangers get no lift. Set on present states in _live_build.
     "leisure_social_lift": 3.0,
     "workplace_purpose_lift": 0.6,   # on-shift worker's purpose lift (additive to purpose goal; tune in playtest)
+    # RUMOR SATURATION (docs/.../npc-topic-diversity-design.md): a room tires of a chewed subject
+    "rumor_rot_min": 90,     # rotate a location rumor every ~this many game-minutes (was: whole day)
+    "rumor_warm": 0.34,      # heat added each time a subject is offered
+    "rumor_hot": 1.0,        # heat ≥ this → subject drops out of offered topics (~3 offers)
+    "rumor_cool": 0.15,      # heat decay per tick (cools back over ~7 ticks)
     # gift: affinity gain = min(cap, base + worth/div)
     "gift_aff_base": 0.05,
     "gift_aff_div": 100,

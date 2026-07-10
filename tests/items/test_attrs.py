@@ -44,9 +44,10 @@ def test_durability_from_integrity():
     assert eff["durability"] and eff["durability"]["max"] >= 4
 
 
-def test_attrs_vocabulary_is_13():
-    assert len(ATTRS) == 13
+def test_attrs_vocabulary():
+    assert len(ATTRS) == 18                                # 13 core + 5 elemental (physics)
     assert "мана" in ATTRS and "чара" in ATTRS and "острота" in ATTRS
+    assert "горючесть" in ATTRS and "взрывчатость" in ATTRS
 
 
 def test_graph_loads_and_references_only_known_attrs():

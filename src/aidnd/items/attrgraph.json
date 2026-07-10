@@ -18,7 +18,13 @@
     "щит":     {"kind": "armor",      "expresses": {"defense": {"твёрдость": 0.6, "прочность": 0.4}}},
     "доспех":  {"kind": "armor",      "expresses": {"defense": {"твёрдость": 0.5, "прочность": 0.3, "гибкость": 0.2}}},
     "оправа":  {"kind": "trinket",    "expresses": {}},
-    "сосуд":   {"kind": "consumable", "expresses": {}}
+    "амулет":  {"kind": "trinket",    "expresses": {}},
+    "сосуд":   {"kind": "consumable", "expresses": {}},
+    "лук":     {"kind": "weapon",     "expresses": {"attack": {"гибкость": 0.5, "прочность": 0.3, "точность": 0.2}}},
+    "стрела":  {"kind": "weapon",     "expresses": {"attack": {"острота": 0.7, "точность": 0.3}}},
+    "сапог":   {"kind": "armor",      "expresses": {"defense": {"прочность": 0.6, "гибкость": 0.4}}},
+    "рубаха":  {"kind": "armor",      "expresses": {"defense": {"прочность": 0.5, "гибкость": 0.5}}},
+    "плащ":    {"kind": "armor",      "expresses": {"defense": {"прочность": 0.5, "теплостойкость": 0.5}}}
   },
   "treatments": {
     "закалка":   {"твёрдость": 12, "гибкость": -8},

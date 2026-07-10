@@ -63,14 +63,18 @@ DEFAULT_RULES = {
     "mana":       {"attr": "мана", "bands": [(75, 3), (50, 2), (25, 1)], "target": "special:mana"},
     "worth":      {"w": {"ценность": 0.6, "краса": 0.25, "чара": 0.15}, "k": 0.6, "min": 1},
     "durability": {"attr": "прочность", "k": 0.5, "min": 4},
+    "elements":   {"map": {"горючесть": "special:огонь", "взрывчатость": "special:взрыв",
+                           "едкость": "special:кислота", "мороз": "special:мороз", "заряд": "special:разряд"},
+                   "bands": [(70, 3), (45, 2), (20, 1)], "when": "conditional", "cond": "при попадании"},
 }
 FOCUS_FORMS = ("оправа", "посох", "жезл", "амулет", "талисман")
 
 # attribute groups — an inspection reveals a whole group's TRUE values (sentinels double as `known` keys)
 ATTR_GROUPS = {
-    "attr:phys":   ("острота", "твёрдость", "прочность", "точность", "гибкость", "вес", "теплостойкость"),
+    "attr:phys":   ("острота", "твёрдость", "прочность", "точность", "гибкость", "вес", "теплостойкость",
+                    "горючесть", "взрывчатость", "едкость"),
     "attr:value":  ("ценность", "краса"),
-    "attr:arcane": ("чара", "мана", "святость", "скверна"),
+    "attr:arcane": ("чара", "мана", "святость", "скверна", "мороз", "заряд"),
 }
 _ATTR_TO_GROUP = {a: g for g, atts in ATTR_GROUPS.items() for a in atts}
 
@@ -127,6 +131,13 @@ def derive_effects(item: dict, rules: dict | None = None, known=None) -> dict:
     if amt and (kind == "consumable" or form in FOCUS_FORMS):
         mods.append({"target": mn["target"], "op": "add", "amount": amt,
                      "when": "on_use" if kind == "consumable" else "equipped"})
+    el = r["elements"]                                     # elemental payloads on weapon/projectile forms
+    if (attr_graph()["forms"].get(form) or {}).get("kind") == "weapon":
+        for attr, target in el["map"].items():
+            amt = _band(_eff(attrs, attr, known), el["bands"])
+            if amt:
+                mods.append({"target": target, "op": "add", "amount": amt,
+                             "when": el["when"], "cond": el["cond"]})
     wr = r["worth"]
     worth = max(wr["min"], round(_score(attrs, wr["w"], known) * wr["k"]))
     du = r["durability"]

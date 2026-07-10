@@ -33,7 +33,8 @@ COMPETENCIES = ("metalwork", "gems", "herbs", "poison", "medicine", "letters", "
 # ATTRIBUTES: intrinsic physical properties (0–100), the canonical center of the item model.
 # Composition (materials+treatments) feeds them; effects derive from them (see aidnd.items.attrs).
 ATTRS = ("острота", "твёрдость", "прочность", "вес", "гибкость", "краса", "ценность",
-         "чара", "мана", "святость", "скверна", "теплостойкость", "точность")
+         "чара", "мана", "святость", "скверна", "теплостойкость", "точность",
+         "горючесть", "взрывчатость", "едкость", "мороз", "заряд")
 
 
 @dataclass

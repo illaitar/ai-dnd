@@ -49,14 +49,21 @@ bystanders register it.
 - Salient text is observable third-person: `f"чужак: {text[:70]}"` — the LLM reads the gist (a follow-up
   could pass a cleaner derived phrase).
 
-### D2 — DM narrates only the player's action
-Add a directive to `_DM_SYS` (`voice.py`) — used by the freeform fallback (`freeform.py:373-383`):
-*"Опиши ТОЛЬКО само действие игрока, коротко (одна фраза). НЕ описывай, как реагируют окружающие — их
-ответ придёт следующим ходом."* So the fallback line reads "Ты выхватываешь нож и рычишь на весь зал"
-(neutral player-result), and the room's reaction rides in the tick's digest — no more "никто не
-оборачивается" contradicting the replies. (Check `_DM_SYS` is not shared with a path that *should*
-narrate reactions; if it is, add the directive only to the freeform-fallback call's user message
-instead of `_DM_SYS`.)
+### D2 — DM narrates the act as *happening*, and never blocks it
+The old `_DM_SYS` (`voice.py`) told the DM *"мир от него НЕ изменится … НИКОГДА не подтверждай
+свершение заявленного (особенно разрушительного): покажи, почему оно не происходит"* — **this was the
+real cause of "приклеена жиром" and the ignored shout: the DM was instructed to negate destructive
+player acts.** Per the player-agency directive, that negation is **removed entirely** — a destructive
+act is not gated by the narrator. `_DM_SYS` is rewritten to:
+- **narrate the player's act as SWERSHING** ("Ты выхватываешь нож… это ПРОИСХОДИТ; свободу действий не
+  ограничивай, не выдумывай, почему оно «не выходит»");
+- **not describe others' reactions** (those ride in the tick's digest — no more "никто не
+  оборачивается" contradicting the replies);
+- **not resolve others' fate** (whether a blow lands, whether someone dies) — only what the player
+  does; contested outcomes stay with the world/combat, not the freeform narrator.
+
+`_DM_SYS` is used only by the freeform fallback (`freeform.py`), not shared with NPC dialogue — verified,
+so the rewrite is safe.
 
 ## Testing
 

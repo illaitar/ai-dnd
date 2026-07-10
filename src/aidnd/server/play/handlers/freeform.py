@@ -9,6 +9,7 @@ act(request: Request) -> dict : POST /api/play/act endpoint; parse free-form tex
 from __future__ import annotations
 
 import random
+import re
 
 from fastapi import Request
 
@@ -46,6 +47,15 @@ from aidnd.server.play.engine.world import (
 from aidnd.server.play.mechanics.combat import _combatant_from_npc, _pc_combatant
 from aidnd.server.play.mechanics.contracts import _contract_on_give
 from aidnd.server.play.mechanics.items import _do_craft, _materialize_npc, _pc_coins
+
+_DISRUPTIVE_RE = re.compile(
+    # a loud/visible player act the whole room notices (→ salient); NOT ordinary speech
+    r"кричу|ору\b|заор|во весь голос|громко (говорю|спрашива|зов|крич)|рычу|выхватыва|обнажа"
+    r"|хвата\w* за (нож|меч|оруж|клинок|груд)|достаю (нож|меч|клинок|оруж)|швыр"
+    r"|броса\w* (кружк|в стену|об пол|об стол)|опрокид|бью кулак|стуч\w* по стол|разбива"
+    r"|угрожа|за грудки",
+    re.IGNORECASE,
+)
 
 
 def _attempt(intent: dict, sc: dict) -> dict:
@@ -363,6 +373,9 @@ def _attempt(intent: dict, sc: dict) -> dict:
         _witness_crime(
             people, crof, loc, npc, "бросился на меня с оружием", weight=PB["crime_assault"]
         )
+        _lv = _S.get("live")
+        if _lv is not None:
+            _lv["salient"] = f"чужак выхватил оружие на {p.name}!"
         out["combat"] = True
         out["narr"].append(f"Ты бросаешься на {p.name}. Назад дороги нет.")
         return out
@@ -374,6 +387,9 @@ def _attempt(intent: dict, sc: dict) -> dict:
         if _lv is not None and text:
             _lv["pc_said"] = text
             _lv["pc_spoke"] = True
+            if _DISRUPTIVE_RE.search(text):
+                # a loud/visible act: the whole room notices and reacts in character
+                _lv["salient"] = f"чужак: {text[:70]}"
         resp = mgr.call(
             "narrator",
             [

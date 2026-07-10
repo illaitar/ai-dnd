@@ -272,18 +272,30 @@
   .snd{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;font:italic 12.5px var(--serif);color:var(--dim)}
   .dots{color:var(--dim);letter-spacing:3px;animation:dotpulse 1.1s ease-in-out infinite}
   @keyframes dotpulse{0%,100%{opacity:.3}50%{opacity:1}}
-  /* text-sounds in the thread: overheard speech & деяния — deliberately SMALLER than narration */
+  /* processing indicator — "the scene is assembling" (ChatGPT-style breathing dots) */
+  .thinking{display:inline-flex;align-items:center;gap:8px;color:var(--faint);font-style:italic}
+  .thinking .tdots{display:inline-flex;gap:4px}
+  .thinking .tdots i{width:5px;height:5px;border-radius:50%;background:var(--gold);opacity:.5;
+    animation:tbreathe 1.3s ease-in-out infinite}
+  .thinking .tdots i:nth-child(2){animation-delay:.18s}
+  .thinking .tdots i:nth-child(3){animation-delay:.36s}
+  @keyframes tbreathe{0%,100%{opacity:.35;transform:translateY(0)}50%{opacity:1;transform:translateY(-2px)}}
+  @media (prefers-reduced-motion:reduce){.thinking .tdots i{animation:none;opacity:.7}}
+  /* text-sounds in the thread: overheard speech & деяния — deliberately SMALLER than narration.
+     Single tone by default (no per-tier greys, no NPC name highlight);
+     :root[data-tone="grad"] restores the near→far dimming. */
   .msg.sndline{font:italic 12px/1.5 var(--serif);color:var(--dim);margin:0 0 10px;
     padding-left:14px;border-left:2px solid var(--line)}
-  .msg.sndline b{color:var(--ink);font-weight:500}
+  .msg.sndline b{color:var(--dim);font-weight:500}
   .msg.sndline .lfto{color:var(--faint);font-size:11px}
-  .msg.sndline.t2{color:var(--dim)}
-  .msg.sndline.t3{color:var(--faint)}
+  :root[data-tone="grad"] .msg.sndline b{color:var(--ink)}
+  :root[data-tone="grad"] .msg.sndline.t2{color:var(--dim)}
+  :root[data-tone="grad"] .msg.sndline.t3{color:var(--faint)}
   /* turn in flight: world actions blocked until the tick resolves (typing stays free) */
   body.busy .suggest button,body.busy .gobtn,body.busy .facegrid .face,
   body.busy .planbox [data-zid],body.busy .kmark,body.busy #citybase .h{pointer-events:none;opacity:.55}
   body.busy .inbar button{opacity:.45;pointer-events:none}
-  .msg.npc .sp{font:500 13px var(--sans);color:var(--gold);margin-bottom:2px}
+  .msg.npc .sp{font:500 13px var(--sans);color:var(--dim);margin-bottom:2px}  /* NPCs not highlighted */
   .msg.npc .tx{font:15px/1.6 var(--serif);color:var(--ink)}
   .msg.me{margin-left:auto;text-align:right;color:var(--dim)}
   .msg.me .tx{font-size:14px}
@@ -570,6 +582,22 @@ const byId=id=>SCENE.here.find(x=>x.id===id)||{name:id,init:'?',color:'#8a6fae'}
 const thread=()=>$('thread');
 function push(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;
   thread().appendChild(d);thread().scrollTop=thread().scrollHeight;return d;}
+// the scene is assembling — breathing indicator while the tick resolves (returns the node to .remove())
+function thinkingMsg(){return push('sys','<span class="thinking"><span>сцена собирается</span>'
+  +'<span class="tdots"><i></i><i></i><i></i></span></span>');}
+// one turn's observable events, ordered MOST-HEARABLE → LEAST:
+//   result (narr) → near (direct address / r.line) → overheard speech (tier 1→3) → deeds/ambient last.
+function renderScene(r){
+  if(!r)return;
+  (r.narr||[]).forEach(t=>push('narr',esc(t)));
+  (r.address||[]).forEach(a=>{                                   // near: spoken straight at you
+    const el=npcMsg(a.npc,a.text,'— тебе',a.who);
+    el.style.cursor='pointer';el.title='ответить';el.onclick=()=>talk(a.npc);});
+  if(r.line){const pid=(SCENE.here.find(h=>h.name===r.line.who)||{}).id;   // near: freeform single reply
+    if(pid)npcMsg(pid,r.line.text);
+    else push('npc',`<div class="sp">${esc(r.line.who)}</div><div class="tx">${esc(r.line.text)}</div>`);}
+  pushFeed(r.feed);                                              // overheard (by tier) then deeds/ambient
+}
 
 // ─── adaptive panels: one body-class state machine drives the 3-column morph ───
 let VIEW='explore';
@@ -894,21 +922,22 @@ async function asTurn(fn){          // one player action = one turn; re-entry ig
   busyOn();try{return await fn();}finally{busyOff();}
 }
 // text-sounds (overheard speech, деяния) live in the THREAD, small type — not on the scene card
-function pushFeed(fs){(fs||[]).forEach(f=>{
-  const h=f.k==='speech'
-    ?`<b>${esc(f.who)}</b> <span class="lfto">&#8594; ${esc(f.to)}</span>: «${esc(f.text)}»`
-    :`${esc(f.who)} · <i>${esc(f.text)}</i>`;
-  push('sndline'+(f.k==='speech'?(' t'+(f.tier||1)):''),h);});}
+function pushFeed(fs){
+  // order by hearability: overheard speech nearest first (tier 1→3), then deeds/ambient sound
+  const arr=(fs||[]).slice().sort((a,b)=>{
+    const rank=x=>x.k==='speech'?(x.tier||1):9;
+    return rank(a)-rank(b);});
+  arr.forEach(f=>{
+    const h=f.k==='speech'
+      ?`<b>${esc(f.who)}</b> <span class="lfto">&#8594; ${esc(f.to)}</span>: «${esc(f.text)}»`
+      :`${esc(f.who)} · <i>${esc(f.text)}</i>`;
+    push('sndline'+(f.k==='speech'?(' t'+(f.tier||1)):''),h);});}
 // ─── пошаговый мир: единый обработчик ответа действия ───
 function applyWorld(r){
   if(!r)return;
   if(r.gt!=null){GT=r.gt;setClock();}
   setCoins(r.coins);if(r.hp!=null)setHp(r.hp);
-  (r.narr||[]).forEach(t=>push('narr',esc(t)));
-  pushFeed(r.feed);
-  (r.address||[]).forEach(a=>{
-    const el=npcMsg(a.npc,a.text,'— тебе',a.who);
-    el.style.cursor='pointer';el.title='ответить';el.onclick=()=>talk(a.npc);});
+  renderScene(r);                                    // narr → address → overheard, ordered by hearability
   if(r.contract_done){push('narr',esc(r.contract_done));renderJobs();}
   if(r.dice)showDice(r.dice);
   if(r.location){SCENE=r;
@@ -926,7 +955,7 @@ function applyWorld(r){
 async function reactLive(){
   if(mode!=='explore'||LIVEBUSY)return;
   LIVEBUSY=true;busyOn();
-  const el=push('sys','<span class="dots">…</span>');
+  const el=thinkingMsg();
   try{const r=await api('/api/play/live',{});el.remove();applyWorld(r);}
   catch(e){el.remove();}
   finally{LIVEBUSY=false;busyOff();}
@@ -978,7 +1007,7 @@ async function goRoom(room){await asTurn(async()=>{
 async function enterB(){await asTurn(async()=>{applyWorld(await api('/api/play/enter',{}));refreshKeys();});}
 async function exitB(){await asTurn(async()=>applyWorld(await api('/api/play/exit',{})));}
 async function waitTurn(){await asTurn(async()=>{
-  const el=push('sys','<span class="dots">…</span>');
+  const el=thinkingMsg();
   try{applyWorld(await api('/api/play/live',{}));}finally{el.remove();}
 });}
 async function newWorld(){
@@ -1035,7 +1064,7 @@ async function talkNow(id){
   $('talkchip').classList.add('on');$('talkname').textContent=byId(id).name;
   $('inp').placeholder='сказать '+byId(id).name+'…';$('inp').focus();
   renderAmb();
-  const wt=push('sys','<span class="dots">…</span>');
+  const wt=thinkingMsg();
   const n=await api('/api/play/talk',{npc:id});
   wt.remove();
   if(n.error){push('sys',esc(n.error));endTalk();return;}
@@ -1094,14 +1123,12 @@ function submit(){
 }
 async function freeAct(v){await asTurn(()=>freeActNow(v));}
 async function freeActNow(v){
-  const el=push('sys','<span class="dots">…</span>');
+  const el=thinkingMsg();
   const r=await api('/api/play/act',{text:v});
   el.remove();
   if(r.gt!=null){GT=r.gt;setClock();}
-  setCoins(r.coins);
-  (r.narr||[]).forEach(t=>push('narr',esc(t)));
-  if(r.line){const pid=(SCENE.here.find(h=>h.name===r.line.who)||{}).id;
-    if(pid)npcMsg(pid,r.line.text);else push('npc',`<div class="sp">${esc(r.line.who)}</div><div class="tx">${esc(r.line.text)}</div>`);}
+  setCoins(r.coins);if(r.hp!=null)setHp(r.hp);
+  renderScene(r);                                    // result → near reply → overheard sound/deeds
   if(r.loot)await loot(r.loot);
   if(r.inspect)await inspectItem(r.inspect);
   if(r.goto!=null){selectDest(r.goto,null);await goNow();}

@@ -20,7 +20,7 @@ def _roll(seed: str) -> int:
 
 
 _VIA_GROUP = {"craft_eye": "attr:phys", "appraise": "attr:value", "lore": "attr:arcane"}
-_GROUP_COMPS = {"attr:phys": {"metalwork", "leather", "gems", "herbs"},
+_GROUP_COMPS = {"attr:phys": {"metalwork", "gems", "herbs"},
                 "attr:value": {"trade", "gems"},
                 "attr:arcane": {"lore", "faith"}}
 _ATTR_DC = 12
@@ -89,16 +89,18 @@ def inspect(item: dict, cap: Capability, via: str, *, tool=None, context=None,
 def _view_attrs(item: dict, known: set) -> dict:
     """View for attribute-driven items: surface values until the group is revealed; worth/mods
     derived from the effective vector."""
-    from .attrs import ATTR_GROUPS, attr_group, derive_effects
+    from .attrs import ATTR_GROUPS, DEFAULT_RULES, attr_group, derive_effects
 
     eff = derive_effects(item, known=known)
     shown = {}
     for a, v in item["attrs"].items():
         grp_known = attr_group(a) in known
         shown[a] = {"value": int(v["true"] if grp_known else v["surface"]), "true_known": grp_known}
+    # worth is known only when every worth-feeding attribute the item HAS is revealed (value + arcane чара)
+    worth_groups = {attr_group(a) for a in DEFAULT_RULES["worth"]["w"] if a in item["attrs"]}
     return {"name": item["name"], "kind": item["kind"], "slot": item["slot"],
             "material": item["material"], "quality": item["quality"], "weight": item["weight"],
-            "worth": eff["worth"], "worth_known": ("attr:value" in known),
+            "worth": eff["worth"], "worth_known": worth_groups <= known,
             "tags": item["tags"], "mods": eff["mods"], "attrs": shown,
             "facts": [h["fact"] for h in item.get("hidden", []) if h["prop"] in known and h.get("fact")],
             "unknown": sum(1 for g in ATTR_GROUPS if g not in known),

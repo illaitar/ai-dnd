@@ -26,6 +26,14 @@ def test_shown_vector_and_unknown_count():
     assert v2["unknown"] == 2
 
 
+def test_worth_unknown_until_every_feeding_group_revealed():
+    # чара feeds worth (arcane group); a forged чара must keep worth unknown after a value-only appraisal
+    it = _mk({"kind": "trinket", "name": "перстень", "form": "оправа",
+              "attrs": {"ценность": {"surface": 50, "true": 50}, "чара": {"surface": 80, "true": 5}}})
+    assert view(it, {"attr:value"})["worth_known"] is False
+    assert view(it, {"attr:value", "attr:arcane"})["worth_known"] is True
+
+
 def test_legacy_view_has_no_attrs_key_and_same_worth():
     it = _mk({"kind": "weapon", "name": "ржавый нож", "worth": 3, "apparent_worth": 3, "mods": []})
     v = view(it, set())

@@ -356,11 +356,11 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     here_all = _here(loc, crof)  # everyone present — no LOD cap (buildings bounded by _building_cap)
     leisure = PB["leisure_social_lift"] if "tavern" in society.kinds_of(data or {}) else 0.0
     workers = {pid for pid in here_all if people[pid].work == bid}
-    _bname = (data or {}).get("name", "")             # 'Кузница «…»' — matches open_hours by type substring
+    _bname = _binfo(bid)["name"] if bid else ""       # 'Кузница «…»' — matches open_hours by type substring
     _now_gt = _gt()
     for _pid in here_all:                            # leisure venue lifts converse toward acquaintances
         people[_pid].state.venue_social = leisure
-        people[_pid].state.on_shift = _work_lift(_pid, workers, _bname, _now_gt)
+        people[_pid].state.on_shift = _work_lift(_pid, workers, _bname, _now_gt) if bid else 0.0
     zonemap = assign_zones({pid: people[pid].state for pid in here_all}, zones,
                            f"zones|{_wid()}|{bid}|{_phase()}",
                            roles={pid: people[pid].role for pid in here_all},

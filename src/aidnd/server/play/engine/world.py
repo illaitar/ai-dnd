@@ -272,6 +272,20 @@ def _work_lift(pid, workers, info: str, gt: int) -> float:
     return 0.0
 
 
+def _afford_need(afford: dict, zone_kind: str, is_post: bool) -> str | None:
+    """Need a zone object should satisfy: at a worker's post, purpose wins over comfort/etc
+    (so a hot forge surfaces WORK, not just warmth) — else the existing max-afford rule,
+    with fatigue remapped to comfort outside beds/cell (bench = rest, not sleep)."""
+    if not afford:
+        return None
+    if is_post and afford.get("purpose", 0) > 0:      # a worker's post surfaces WORK, not comfort
+        return "purpose"
+    need, _rate = max(afford.items(), key=lambda kv: kv[1])
+    if need == "fatigue" and zone_kind not in ("beds", "cell"):
+        need = "comfort"
+    return need
+
+
 def _live_build(city, people, crof, cr2b, loc) -> None:
     bid = cr2b.get(loc)
     place = _binfo(bid)["name"] if bid else "улица"
@@ -308,9 +322,14 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             for iid, o in src:
                 aff = o.get("afford") or {}
                 if aff:
-                    need, rate = max(aff.items(), key=lambda kv: kv[1])
-                    if need == "fatigue" and z["kind"] not in ("beds", "cell"):
-                        need = "comfort"             # bench — rest, but NOT sleep: sleep in bed
+                    is_post = bool(z.get("post"))
+                    need = _afford_need(aff, z["kind"], is_post)
+                    # rate is the object's raw max-afford value UNLESS the post-priority branch
+                    # picked "purpose" over a higher-rated need — then use purpose's own rate.
+                    # (matches original `need, rate = max(aff.items(), key=...)` exactly whenever
+                    # need is not overridden — including the fatigue→comfort label remap, where
+                    # aff may have no "comfort" key at all.)
+                    rate = aff[need] if (is_post and need == "purpose") else max(aff.values())
                     itms.append(MItem(o["name"], min(0.5, round(rate * 2.2, 2)), satisfies=need))
                 if iid:
                     tgt = zone_fixed if o.get("fixed") else zone_items

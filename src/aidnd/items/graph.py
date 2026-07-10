@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from .attrs import QUALITY_MUL, _clamp
 from .model import ATTRS
@@ -117,9 +118,15 @@ def node_item(node_id: str, quality: str = "plain", graph: dict | None = None) -
             "form": node.get("form", ""), "quality": quality, "attrs": _as_attrs(vec)}
 
 
+def _toks(s: str) -> set:
+    return set(re.findall(r"[а-яёa-z]+", s.lower()))
+
+
 def node_lookup(name: str, graph: dict | None = None) -> str | None:
-    """Resolve a display name/alias to a node id: exact, then case-insensitive, then substring
-    either way (so «Кривой нож» → «нож»). None if nothing matches."""
+    """Resolve a display name/alias to a node id: exact, then case-insensitive exact, then whole-token
+    containment — every WORD of the node id must appear as a word in the name (so «Кривой нож» → «нож»
+    but «Порог таверны» does NOT match «рог»). A last-resort bridge; explicit `node` ids are primary.
+    Prefers the most specific (longest) id. None if nothing matches."""
     g = graph or item_graph()
     keys = list(g["nodes"]) + list(g["materials"])
     if name in keys:
@@ -128,7 +135,10 @@ def node_lookup(name: str, graph: dict | None = None) -> str | None:
     for k in keys:
         if k.lower() == nl:
             return k
-    for k in sorted(keys, key=len, reverse=True):          # prefer the most specific (longest) match
-        if k.lower() in nl or nl in k.lower():
-            return k
-    return None
+    nt = _toks(name)
+    best = None
+    for k in keys:
+        kt = _toks(k)
+        if kt and kt <= nt and (best is None or len(k) > len(best)):   # all of the id's words are present
+            best = k
+    return best

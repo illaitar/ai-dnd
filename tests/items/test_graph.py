@@ -50,8 +50,32 @@ def test_gunpowder_arrow_is_a_deterministic_exploding_projectile():
 
 def test_node_lookup_resolves_aliases():
     assert node_lookup("меч") == "меч"
-    assert node_lookup("Кривой нож") == "нож"
+    assert node_lookup("Кривой нож") == "нож"                 # whole word «нож» present
     assert node_lookup("несуществующая чепуха") is None
+
+
+def test_node_lookup_avoids_substring_false_positives():
+    assert node_lookup("Порог таверны") is None               # «рог» is not a whole word here
+    assert node_lookup("Стоптанный каблук") is None           # not «лук»
+
+
+def test_itemgraph_integrity():
+    from aidnd.items.attrs import attr_graph
+    from aidnd.items.model import ATTRS
+    g = item_graph()
+    A, mats, nodes = set(ATTRS), set(g["materials"]), set(g["nodes"])
+    forms, procs = set(attr_graph()["forms"]), set(g["processes"])
+    assert not (mats & nodes), f"id collision material/node: {mats & nodes}"
+    for m, d in g["materials"].items():
+        assert set(d) <= A, f"material {m}: unknown attrs {set(d) - A}"
+    for p, d in g["processes"].items():
+        assert set(d) <= A, f"process {p}: unknown attrs {set(d) - A}"
+    for nid, n in g["nodes"].items():
+        assert set(n.get("from", [])) <= (mats | nodes), f"{nid}: dangling from {set(n['from']) - (mats | nodes)}"
+        assert not n.get("process") or n["process"] in procs, f"{nid}: unknown process {n.get('process')}"
+        assert set(n.get("treatments") or []) <= procs, f"{nid}: unknown treatment"
+        assert not n.get("form") or n["form"] in forms, f"{nid}: unknown form {n.get('form')}"
+        node_attrs(nid)                                        # every node computes without error
 
 
 def test_unknown_node_and_cycle_raise():

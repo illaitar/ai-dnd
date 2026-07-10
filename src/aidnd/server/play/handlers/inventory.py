@@ -120,7 +120,7 @@ async def inspect_item(request: Request):
     else:
         cap, observer, by = _PC_CAP, "pc", "ты"
     res = item_inspect(it, cap, via, observer=observer, known=known)
-    known |= {h["prop"] for h in res["revealed"]}
+    known |= {h["prop"] for h in res["revealed"]} | set(res.get("attr_groups", []))
     _store().inv_set_known(_wid(), iid, known)
     return {
         "item": _item_card(it, known),

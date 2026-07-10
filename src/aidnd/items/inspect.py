@@ -19,6 +19,31 @@ def _roll(seed: str) -> int:
     return Random(seed).randint(1, 20)                     # stable d20 (can't re-roll by re-examining)
 
 
+_VIA_GROUP = {"craft_eye": "attr:phys", "appraise": "attr:value", "lore": "attr:arcane"}
+_GROUP_COMPS = {"attr:phys": {"metalwork", "leather", "gems", "herbs"},
+                "attr:value": {"trade", "gems"},
+                "attr:arcane": {"lore", "faith"}}
+_ATTR_DC = 12
+
+
+def _attr_reveal(item: dict, cap: Capability, via: str, seed: str) -> list:
+    """Attribute GROUPS this inspection reveals as true. Expert assesses fully; a trained eye
+    (competency) sees at a glance; else appraise/lore fall to an ability roll; phys needs the hand."""
+    if not item.get("attrs"):
+        return []
+    if via == "expert":
+        return list(_VIA_GROUP.values())
+    grp = _VIA_GROUP.get(via)
+    if not grp:
+        return []
+    if cap.competencies & _GROUP_COMPS[grp]:
+        return [grp]
+    if grp == "attr:phys":
+        return []                                          # physical truth needs the trained hand
+    abil = max(cap.mod("int"), cap.mod("wis")) if via == "appraise" else cap.mod("int")
+    return [grp] if abil + _roll(seed) >= _ATTR_DC else []
+
+
 def _gate(g: dict, cap: Capability, via: str, tool, context, seed: str) -> str:
     """'pass' | 'near' | 'fail'."""
     if via in ("glance", "handle"):
@@ -57,7 +82,8 @@ def inspect(item: dict, cap: Capability, via: str, *, tool=None, context=None,
             revealed.append(h)
         elif res == "near":
             hints.append("что-то не так с предметом — нужен иной осмотр или знаток")
-    return {"revealed": revealed, "hints": hints, "via": via}
+    attr_groups = [g for g in _attr_reveal(item, cap, via, f"{base}|attrs|{via}") if g not in known]
+    return {"revealed": revealed, "hints": hints, "via": via, "attr_groups": attr_groups}
 
 
 def view(item: dict, known=None) -> dict:

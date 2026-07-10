@@ -122,34 +122,43 @@ def _play():
         saved_loc = row.get("loc")
         if saved_loc in xy:
             start = saved_loc
-        # cache the geom (the ~1s visual() SVG render) in live.db — deterministic by seed, so a
-        # server restart / cold start reads it back instead of re-rendering 5k+ SVG elements.
-        # v3: the client never gets the 5k-element SVG — the visual ships as phase PNGs + ID-map.
+        # The map is deterministic by seed, so it is DRAWN ONCE and never re-drawn on a load.
+        # Two independent caches:
+        #   • geom metadata (points/keys/click-map/_xy + PNG urls) — cheap to rebuild (~0.2s),
+        #     cached in live.db by seed|GEOM_VER; a version bump rebuilds THIS only.
+        #   • the PNG raster FILES — expensive (~5–12s), a create-time artifact keyed by seed
+        #     (map_seed flag). A geom bump NEVER touches them; an existing world adopts the PNGs
+        #     already on disk without redrawing. Only a different town (new seed) or missing
+        #     files trigger a one-time render.
         import json as _json
 
-        from .mappng import build_map_rasters, map_file
+        from .mappng import map_file, map_meta, render_map_rasters
 
         _wg = _wid()
+        _sd = str(_S["seed"])
         _gc = (
             _store().flag_get(_wg, "geom")
-            if _store().flag_get(_wg, "geom_seed") == f"{_S['seed']}|v3"
+            if _store().flag_get(_wg, "geom_seed") == f"{_sd}|v3"
             else None
         )
+        _map_seed = _store().flag_get(_wg, "map_seed")
+        _need_raster = map_file(_wg, "day.png") is None or (
+            _map_seed is not None and _map_seed != _sd  # seed changed → a different town
+        )
+        _vis = visual(params) if (_gc is None or _need_raster) else None
         if _gc:
             geom = _json.loads(_gc)
             geom["_xy"] = {int(k): v for k, v in geom["_xy"].items()}  # JSON stringified int node-ids
-            if map_file(_wg, "day.png") is None:  # raster files lost (fresh checkout) — re-render
-                _stage(5, "Рисуем карту города заново…")
-                geom["map"] = build_map_rasters(_wg, visual(params), ver=str(_S["seed"]))
-                _store().flag_set(_wg, "geom", _json.dumps(geom))
         else:
-            _stage(5, "Рисуем карту города…")
-            vis = visual(params)
-            geom = _build_geom(city, xy, n2b, vis)
+            geom = _build_geom(city, xy, n2b, _vis)
             geom.pop("svg", None)  # raster world: SVG stays a build-time artifact
-            geom["map"] = build_map_rasters(_wg, vis, fresh=True, ver=str(_S["seed"]))
-            _store().flag_set(_wg, "geom_seed", f"{_S['seed']}|v3")
+            geom["map"] = map_meta(_vis, _sd)
+            _store().flag_set(_wg, "geom_seed", f"{_sd}|v3")
             _store().flag_set(_wg, "geom", _json.dumps(geom))
+        if _need_raster:                              # draw ONCE (block once); adopt-existing otherwise
+            _stage(5, "Рисуем карту города…")
+            render_map_rasters(_wg, _vis, fresh=True)
+        _store().flag_set(_wg, "map_seed", _sd)       # record which town the on-disk PNGs belong to
         _stage(8, "Расставляем жителей по домам…")
         _S.update(
             city=city,

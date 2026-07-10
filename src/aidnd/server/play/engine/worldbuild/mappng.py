@@ -6,8 +6,11 @@ resolves clicks through a raster ID-map (each clickable polygon painted a unique
 Key functions
 -------------
 phase_of(gt_min) -> str : Day phase bucket ("morning"|"day"|"evening"|"night") for game minutes.
-build_map_rasters(wid, vis) -> dict : Write data/maps/w<wid>/{phase}.png + idmap.png;
-    return {"png": {phase: url}, "idmap": url, "ids": [house ids by index]}.
+map_meta(vis, ver) -> dict : Client metadata (phase PNG urls + idmap url + polygon→id list); pure,
+    no rendering — safe to rebuild on a geom-cache miss without touching the drawn-once PNG files.
+render_map_rasters(wid, vis, fresh) -> None : Write data/maps/w<wid>/{phase}.png + idmap.png ONCE
+    (idempotent by file presence). A create-time artifact — the load path calls it only when the
+    files are missing, never to redraw an existing map.
 """
 
 from __future__ import annotations
@@ -108,10 +111,23 @@ def _idmap_svg(polys: list, w: int, h: int) -> str:
     return "".join(e)
 
 
-def build_map_rasters(wid: int, vis: dict, fresh: bool = False, ver: str = "0") -> dict:
-    """Render phase PNGs + id-map for a world (idempotent by file presence).
-    fresh=True wipes the world's raster dir first — a NEW world reuses the wid, and stale
-    PNGs of the previous city must not survive the file-presence check."""
+def map_meta(vis: dict, ver: str = "0") -> dict:
+    """Map METADATA the client needs — phase PNG urls + id-map url + polygon→building-id list.
+    Pure and cheap (no rendering, no file IO): deterministic from the city, so it can be rebuilt
+    on a geom-cache miss WITHOUT ever touching the (expensive, draw-once) PNG files. `?v=<seed>`
+    busts the browser cache when a genuinely different town is generated."""
+    return {
+        "png": {ph: f"/api/play/mapimg/{ph}.png?v={ver}" for ph in PHASES},
+        "idmap": f"/api/play/mapimg/idmap.png?v={ver}",
+        "ids": [p["id"] for p in vis["polys"]],
+    }
+
+
+def render_map_rasters(wid: int, vis: dict, fresh: bool = False) -> None:
+    """Draw the phase PNG files + id-map for a world — a CREATE-TIME artifact, drawn ONCE.
+    Idempotent by file presence; fresh=True wipes first (a different town on the same world id).
+    The load path calls this only when the files are missing/stale — never to redraw an existing
+    map (see assembly._play)."""
     import cairosvg
 
     w, h = vis["W"], vis["H"]
@@ -122,7 +138,6 @@ def build_map_rasters(wid: int, vis: dict, fresh: bool = False, ver: str = "0") 
         shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
     ru = {"morning": "утреннюю", "day": "дневную", "evening": "вечернюю", "night": "ночную"}
-    urls = {}
     for phase in PHASES:
         try:  # real build progress for the client bar (no session in offline scripts — skip)
             from ..session.state import _S
@@ -140,7 +155,6 @@ def build_map_rasters(wid: int, vis: dict, fresh: bool = False, ver: str = "0") 
             cairosvg.svg2png(
                 bytestring=svg.encode("utf-8"), write_to=path, output_width=w * _SCALE
             )
-        urls[phase] = f"/api/play/mapimg/{phase}.png?v={ver}"  # ?v busts browser cache on new world
     idpath = os.path.join(out_dir, "idmap.png")
     if not os.path.exists(idpath):
         cairosvg.svg2png(
@@ -148,11 +162,6 @@ def build_map_rasters(wid: int, vis: dict, fresh: bool = False, ver: str = "0") 
             write_to=idpath,
             output_width=w * _ID_SCALE,
         )
-    return {
-        "png": urls,
-        "idmap": f"/api/play/mapimg/idmap.png?v={ver}",
-        "ids": [p["id"] for p in vis["polys"]],
-    }
 
 
 def map_file(wid: int, name: str) -> str | None:

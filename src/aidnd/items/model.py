@@ -100,6 +100,39 @@ def norm_durability(d) -> dict | None:
             "weak_at": round(min(0.9, max(0.0, _num(d.get("weak_at", 0.0), 0.0))), 2)}  # early break threshold (defect)
 
 
+def _clamp100(v) -> int:
+    return max(0, min(100, _num(v, 0)))
+
+
+def norm_attr_vector(a) -> dict:
+    """{attr: int | {surface,true}} → {attr: {surface:int, true:int}}. Unknown attrs dropped,
+    values clamped 0–100; a scalar means surface == true (honest)."""
+    if not isinstance(a, dict):
+        return {}
+    out = {}
+    for k, v in a.items():
+        if k not in ATTRS:
+            continue
+        if isinstance(v, dict):
+            t = _clamp100(v.get("true", v.get("surface", 0)))
+            s = _clamp100(v.get("surface", t))
+        else:
+            t = s = _clamp100(v)
+        out[k] = {"surface": s, "true": t}
+    return out
+
+
+def norm_parts(p) -> list:
+    out = []
+    for part in (p if isinstance(p, list) else []):
+        if not isinstance(part, dict) or not str(part.get("material") or "").strip():
+            continue
+        out.append({"role": str(part.get("role") or "").strip(),
+                    "material": str(part["material"]).strip(),
+                    "treatments": _list(part.get("treatments"))})
+    return out
+
+
 def normalize(d: dict) -> dict:
     """LLM/skeleton-dict → clean item factsheet."""
     d = d or {}
@@ -119,6 +152,9 @@ def normalize(d: dict) -> dict:
         "hidden": [x for x in (norm_hidden(h) for h in (d.get("hidden") or [])) if x],
         "durability": norm_durability(d.get("durability")),
         "make": (d.get("make") if isinstance(d.get("make"), dict) else None),
+        "form": str(d.get("form") or "").strip(),
+        "parts": norm_parts(d.get("parts")),
+        "attrs": norm_attr_vector(d.get("attrs")),
     }
 
 

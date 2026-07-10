@@ -19,13 +19,15 @@ normalize(item) -> Dict : canonical item representation.
 from __future__ import annotations
 
 from . import loot_pool
+from .attrs import attr_graph, compose, derive_effects
 from .craft import Recipe, craft, craft_path, mastery, materials_graph, repair
 from .durability import active_mods, condition, use
 from .inspect import inspect, view
-from .model import Capability, normalize, rarity_price
+from .model import ATTRS, Capability, normalize, rarity_price
 from .smith import ItemCtx, LLMSmith, Smith, StubSmith
 
 __all__ = ["ItemCtx", "Smith", "LLMSmith", "StubSmith", "Capability",
            "inspect", "view", "normalize", "rarity_price", "loot_pool",
            "Recipe", "craft", "craft_path", "materials_graph", "mastery", "repair",
-           "condition", "use", "active_mods"]
+           "condition", "use", "active_mods",
+           "ATTRS", "attr_graph", "compose", "derive_effects"]

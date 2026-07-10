@@ -15,6 +15,9 @@
     --green:#6f9e72; --blue:#6f909c; --red:#bd5749; --violet:#8f78ad;
     --serif:"Iowan Old Style",Georgia,"Times New Roman",serif;
     --sans:-apple-system,Segoe UI,Roboto,sans-serif;
+    /* parchment texture = cream + low-freq stains + fine grain (mirrors floorart #stains/#grain),
+       so the whole inside-map card is ONE textured surface and the plan sheet paints no seam */
+    --parch:#eadfc4 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320'%3E%3Cfilter id='s'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.013 0.017' numOctaves='3' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.27 0 0 0 0 0.14 0 0 0 0.16 0'/%3E%3C/filter%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0.23 0 0 0 0 0.19 0 0 0 0 0.13 0 0 0 0.14 0'/%3E%3C/filter%3E%3Crect width='320' height='320' filter='url(%23s)'/%3E%3Crect width='320' height='320' filter='url(%23g)'/%3E%3C/svg%3E");
   }
   *{box-sizing:border-box}
   html,body{height:100%}
@@ -138,8 +141,8 @@
   .invcard .bn{font-size:13.5px;color:var(--ink)}
   .invcard .bw{font-size:11px;color:var(--faint);margin-top:3px}
   .map.inside svg#mapsvg{pointer-events:none;filter:brightness(.45) saturate(.5)}
-  .map.inside{background:#eadfc4}   /* building view: ground = the floorplan paper (PAPER), seamless with the plan */
-  .map .planbox{position:absolute;inset:0;overflow:auto;opacity:0;pointer-events:none;background:#eadfc4;padding:0}   /* parchment = paper_svg PAPER — plan feels infinite, no dark box */
+  .map.inside{background:var(--parch)}   /* building view: the card IS the parchment (textured), plan draws on it */
+  .map .planbox{position:absolute;inset:0;overflow:auto;opacity:0;pointer-events:none;background:var(--parch);padding:0}   /* one textured surface — plan feels infinite, no seam */
   .map.inside.hasplan .planbox{opacity:1;pointer-events:auto}
   .map.inside.hasplan .insidemsg{opacity:0}
   .planbox .zone:hover{fill:#5aa0ff22}
@@ -167,6 +170,15 @@
   .dtxt{font:12px var(--sans);color:var(--dim)}
   .dtxt b{color:var(--ink);font-size:14px}
   .dtxt .ok{color:var(--green)} .dtxt .fail{color:var(--red)}
+  /* expand-to-fullscreen-map button (top-right of the map inset) — CSS corner brackets, no emoji */
+  #mapexpand{position:absolute;right:8px;top:8px;width:26px;height:26px;cursor:pointer;z-index:5;
+    background:rgba(15,17,22,.82);border:1px solid var(--line2);border-radius:7px;padding:0}
+  #mapexpand:hover{border-color:var(--gold-dim)}
+  #mapexpand span{position:absolute;width:7px;height:7px}
+  #mapexpand span:first-child{top:6px;left:6px;border-top:2px solid var(--gold);border-left:2px solid var(--gold)}
+  #mapexpand span:last-child{bottom:6px;right:6px;border-bottom:2px solid var(--gold);border-right:2px solid var(--gold)}
+  body.view-map #mapexpand span:first-child{top:6px;left:6px;border-top:2px solid var(--gold);border-left:2px solid var(--gold);transform:translate(2px,2px)}
+  body.view-map #mapexpand span:last-child{bottom:6px;right:6px;transform:translate(-2px,-2px)}
   .zoom{position:absolute;left:8px;bottom:8px;display:flex;align-items:center;gap:2px;
     background:rgba(15,17,22,.82);border:1px solid var(--line2);border-radius:8px;padding:2px}
   .zoom button{background:transparent;border:0;color:var(--ink);font:500 16px var(--sans);
@@ -399,6 +411,7 @@
       <div class="map" id="mapbox"><svg id="mapsvg"></svg>
         <div class="insidemsg">ты внутри — карта подождёт снаружи</div>
         <div class="planbox" id="planbox"></div>
+        <button id="mapexpand" onclick="setView('map')" title="развернуть карту / esc — назад"><span></span><span></span></button>
         <div class="zoom"><button onclick="zoomBy(1/1.4)" aria-label="отдалить">&#8722;</button>
           <span id="zlvl">100%</span>
           <button onclick="zoomBy(1.4)" aria-label="приблизить">&#43;</button>
@@ -669,7 +682,12 @@ function applyVB(){const [w,h]=viewWH();
     set('pmarki',7);set('dmarki',7);
     const ns=(9*upp).toFixed(3);                            // key-number badges: constant small screen size
     document.querySelectorAll('#keynums .knumi').forEach(e=>e.setAttribute('transform',`scale(${ns})`));
-    const ep=document.getElementById('epulse');if(ep)ep.setAttribute('r',(11*upp).toFixed(1));}
+    const ep=document.getElementById('epulse');if(ep)ep.setAttribute('r',(11*upp).toFixed(1));
+    // nudge the player marker off any key-building number it would cover — both stay legible
+    const po=document.getElementById('pmarkoff');
+    if(po){const gap=(9+7+2)*upp;                           // badge r + marker r + breathing room
+      const on=(MAP.keys||[]).some(k=>Math.hypot(k.x-PXY.x,k.y-PXY.y)<gap);
+      po.setAttribute('transform',on?`translate(0,${(-gap).toFixed(2)})`:'');}}
   $('zlvl').textContent=Math.round(Z*100)+'%';}
 window.addEventListener('resize',()=>{if(MAP)applyVB();});
 function svgEl(m){
@@ -689,9 +707,9 @@ function svgEl(m){
   g+=`<g id="destmark" pointer-events="none" style="display:none"><g id="dmarki">
       <circle fill="none" stroke="#e5372a" stroke-width=".24"><animate attributeName="r" values="0.5;1.9;0.5" dur="1.05s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0;1" dur="1.05s" repeatCount="indefinite"/></circle>
       <circle r="0.5" fill="#e5372a" stroke="#3a0d08" stroke-width=".12"><animate attributeName="r" values="0.42;0.58;0.42" dur="1.05s" repeatCount="indefinite"/></circle></g></g>`;
-  g+=`<g id="pmark" transform="translate(${PXY.x},${PXY.y})" pointer-events="none"><g id="pmarki">
+  g+=`<g id="pmark" transform="translate(${PXY.x},${PXY.y})" pointer-events="none"><g id="pmarkoff"><g id="pmarki">
       <circle r="1" fill="#d9a441" stroke="#241a08" stroke-width=".24"/>
-      <circle r="1" fill="none" stroke="#ffe6a8" opacity=".55" stroke-width=".18"><animate attributeName="r" values="1;2.6;1" dur="2.2s" repeatCount="indefinite"/><animate attributeName="opacity" values=".7;0;.7" dur="2.2s" repeatCount="indefinite"/></circle></g></g>`;
+      <circle r="1" fill="none" stroke="#ffe6a8" opacity=".55" stroke-width=".18"><animate attributeName="r" values="1;2.6;1" dur="2.2s" repeatCount="indefinite"/><animate attributeName="opacity" values=".7;0;.7" dur="2.2s" repeatCount="indefinite"/></circle></g></g></g>`;
   return g;
 }
 function showDest(x,y){const d=$('mapsvg').querySelector('#destmark');

@@ -373,10 +373,13 @@ def _npc_markers(out, fl, game, ox, oy, hall_oy):
                        f'<title>{p.get("name", "")}</title></g>')
 
 
-def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = None) -> str:
+def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = None,
+              transparent_bg: bool = False) -> str:
     """Plan (floorplan.plan_location) → parchment sheet with glyphs, hatching, and legend.
     game (game mode): {npcs: [{id, name, init, color, zone, is_player}], locked_hidden:
-    bool, interactive: bool} — people markers, fog on locked, clickable zones."""
+    bool, interactive: bool} — people markers, fog on locked, clickable zones.
+    transparent_bg: skip the paper/stain/grain fill rects — the HOST supplies the parchment
+    (play draws the plan on a textured card, so the sheet must not paint its own seam)."""
     rng = _rng(seed_key or plan.get("name", ""))
     seed = int(hashlib.md5((seed_key or "x").encode()).hexdigest()[:6], 16)
     fl = plan["floors"][0]
@@ -402,16 +405,17 @@ def paper_svg(plan: dict, data: dict, seed_key: str = "", game: dict | None = No
             idxs = [j + 1 for j, q in enumerate(legend_zones) if q["name"].split(" ")[0] == base]
             legend.append(f"{idxs[0]}–{idxs[-1]} — {base} ×{len(idxs)}")
         else:
-            legend.append(f"{i + 1} — {r['name']}" + (" 🔒" if r.get("lock") else ""))
+            legend.append(f"{i + 1} — {r['name']}" + (" (заперто)" if r.get("lock") else ""))
     legend_h = 14 * ((len(legend) + 1) // 2) + 10
 
     W = pad * 2 + main_w + up_w
     H = pad * 2 + title_h + main_h + legend_h
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="100%">',
-           _defs(seed),
-           f'<rect width="{W}" height="{H}" fill="{PAPER}"/>',
-           f'<rect width="{W}" height="{H}" fill="{PAPER}" filter="url(#stains)"/>',
-           f'<rect width="{W}" height="{H}" fill="none" filter="url(#grain)"/>']
+           _defs(seed)]
+    if not transparent_bg:                 # host (play) paints the parchment instead — no seam
+        out += [f'<rect width="{W}" height="{H}" fill="{PAPER}"/>',
+                f'<rect width="{W}" height="{H}" fill="{PAPER}" filter="url(#stains)"/>',
+                f'<rect width="{W}" height="{H}" fill="none" filter="url(#grain)"/>']
     # no sheet frame — the plan reads as a borderless drawing on infinite paper
     # title
     name = data.get("name") or plan.get("name") or ""

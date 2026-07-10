@@ -449,24 +449,9 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                 if note:
                     x.state.memory.add(note.format(y.name), _mt(), 0.5, kind="fact",
                                        about=[yid])
-    from aidnd import config as _config
-
-    mgr = _model()
-    todo = ([] if _config.NO_LLM_TICKS
-            else [pid for pid in here_all if not (people[pid].state.agendas or [])])
-    if todo:  # long-term goal for placed NPC (rare call)
-
-        def plan_one(pid):
-            st = people[pid].state
-            ag = plan_agenda(st, w, {"roles": roles}, mgr)
-            if ag:
-                st.agendas.append(ag)
-
-        from concurrent.futures import ThreadPoolExecutor
-
-        from aidnd import config
-        with ThreadPoolExecutor(max_workers=config.LIVE_CONCURRENCY) as ex:
-            list(ex.map(plan_one, todo))
+    # NB: NPC agenda planning is NOT done here — _live_build runs on the FAST enter/move path
+    # (_world_tick_fast) and must never block on LLM calls. Missing agendas are planned lazily in
+    # _live_tick (the streamed /live turn, behind the "…"), so entering a building is instant.
     prev = _S.get("live") or {}
     prev_places = {pid: b.place for pid, b in (prev.get("world").bodies.items()
                                                if prev.get("world") else {}.items())}
@@ -554,6 +539,22 @@ def _live_tick(people) -> tuple:
         and (w.bodies[pid].place in inz if inz else w.bodies[pid].place == lv["place"])
     ]
     random.Random(f"tick|{lv['clock']}").shuffle(order)
+    # LAZY AGENDA PLANNING (moved off the fast enter/move path): present NPCs without a
+    # long-term goal get one here — inside the streamed /live turn, so entering never blocks.
+    todo = [pid for pid in order if not (w.npc_minds[pid].agendas or [])]
+    if todo:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from aidnd import config
+
+        def _plan_one(pid):
+            st = w.npc_minds[pid]
+            ag = plan_agenda(st, w, {"roles": lv["roles"]}, mgr)
+            if ag:
+                st.agendas.append(ag)
+
+        with ThreadPoolExecutor(max_workers=config.LIVE_CONCURRENCY) as ex:
+            list(ex.map(_plan_one, todo))
     # SILENCE — also signal: hailed stranger, they didn't respond → this is world fact, NPC remembers
     awaiting = lv.get("awaiting") or []
     if awaiting and not lv.pop("pc_spoke", False):

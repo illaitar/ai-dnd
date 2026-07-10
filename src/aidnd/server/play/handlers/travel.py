@@ -356,7 +356,8 @@ def _plan_payload() -> dict:
     hidden = [z["id"] for z in zones if z.get("lockable")]  # guest rooms: until uncovered — fog
     svg = paper_svg(plan, data, seed_key=f"{_wid()}|{bid}",
                     game={"npcs": npcs, "hidden_zones": hidden, "interactive": True,
-                          "more": more})
+                          "more": more},
+                    transparent_bg=True)  # the play card supplies the parchment texture — no seam
     znames = {z["id"]: z["name"] for z in zones}
     return {"plan": svg, "zones": znames, "zone": _S.get("zone"), "gt": _gt()}
 

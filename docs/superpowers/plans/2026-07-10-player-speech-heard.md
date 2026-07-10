@@ -16,6 +16,8 @@
 - Full suite green before deploy: `uv run pytest /Users/nik/Desktop/dnd-ai/tests` (ABSOLUTE path).
 - Deploy the green increment via `/deploy` (commit — NO `Co-Authored-By: Claude` trailer — push origin main, VPS git-reset + restart `aidnd`, verify `active`).
 
+> **✔ shipped to prod.** Playtest: player speech draws emergent multi-NPC replies (keeper introduced herself + offered a drink); not a mob. Final review: SHIP. 278 green. pc_said_impulse tuned to 2.8.
+
 Spec: [docs/superpowers/specs/2026-07-10-player-speech-heard-design.md](../specs/2026-07-10-player-speech-heard-design.md).
 
 ---

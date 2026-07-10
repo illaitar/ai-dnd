@@ -13,6 +13,8 @@ say(request)   [POST /api/play/say] : one spoken line to the current NPC — ton
     words shifts affinity/trust/fear/emotion; the NPC answers in its own voice (world._voice) and
     both sides remember it. If the player's words show interest in work (_WORK_INTEREST_RE) AND an
     errand is stashed for this NPC, the «Уговор» contract card is attached here instead.
+npc_card(request) [POST /api/play/npc] : view-only NPC card (portrait, acquainted, relationship,
+    remembered history) — no world tick, no side effects on the conversation.
 """
 
 from __future__ import annotations
@@ -189,4 +191,30 @@ async def say(request: Request):
         "contract": contract,
         "contract_done": ct_done,
         "coins": _pc_coins(),
+    }
+
+
+@router.post("/api/play/npc")
+async def npc_card(request: Request):
+    """View-only NPC card (portrait/map click) — portrait, acquainted flag, PLAYER→npc relationship,
+    remembered history. No world tick, no dialogue side effects."""
+    _city, people, crof_, _cr2b, loc_ = _play()
+    npc = (await request.json()).get("npc")
+    if npc not in people:
+        return {"error": "нет такого"}
+    p = people[npc]
+    acquainted = npc in _met()  # BEFORE rel() — rel() setdefaults the entry and would always flip this true
+    rel = _pc().rel(npc)
+    history = [m.text for m in _pc().memory.items if npc in (m.about or [])][-6:][::-1]
+    return {
+        "name": p.name,
+        "role": p.role,
+        "portrait": _portrait_url(p, _emo(p.state)),
+        "acquainted": acquainted,
+        "rel": {
+            "affinity": round(rel.get("affinity", 0.0), 2),
+            "trust": round(rel.get("trust", 0.0), 2),
+            "fear": round(rel.get("fear", 0.0), 2),
+        },
+        "history": history,
     }

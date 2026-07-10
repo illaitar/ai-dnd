@@ -129,7 +129,7 @@ normal `act()` intent; the addressed NPC's reply comes back as a `near` event in
 
 ## Increments (each green → commit; deploy per deploy-autonomously once user-confirmed)
 
-1. **Frontend chat rework (this PR).** Single-tone taxonomy, drop NPC gold highlight, reorder each
+1. **Frontend chat rework — ✔ on prod (commit 06072da).** Single-tone taxonomy, drop NPC gold highlight, reorder each
    turn most-hearable→least (narr → address → feed speech tier 1→3 → deeds/ambient last), breathing
    processing indicator, reduced-motion. Driven by the *existing* response (no backend change).
    Verify: serve play.html with a mocked `/api/play/act` response, drive it, screenshot.

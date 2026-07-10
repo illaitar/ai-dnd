@@ -84,10 +84,17 @@ def _fill_from_pool(city, keynode, kps):
     return _settle_fresh(city)
 
 
+def _stage(n: int, text: str, of: int = 8) -> None:
+    """Real build progress — the client polls /api/play/buildstate and shows THIS."""
+    _S["build_stage"] = {"n": n, "of": of, "text": text}
+
+
 def _play():
     if _S["city"] is None:
+        _stage(1, "Чертим улицы и кварталы…")
         params = CityParams(seed=_S["seed"], key_buildings=12, river=True, walls=True, segment=16)
         city = generate(params)
+        _stage(2, "Назначаем ключевые здания…")
         _assign_key_buildings(city)  # user's world: buildings from POOL, no LLM
         _seed_item_pool()  # world items pool (seed-set, data)
         xy = {n.id: (n.x, n.y) for n in city.nodes()}
@@ -95,6 +102,7 @@ def _play():
             bid: kb.node for bid, kb in city.key_buildings.items()
         }  # building → NEAREST point (door)
         kps = city.key_points()
+        _stage(3, "Заселяем город из банка душ…")
         people, spot = _fill_from_pool(city, keynode, kps)  # only bank; empty bank = error
         n2b = {}  # node-point → building (key before homes)
         for bid, kb in city.key_buildings.items():
@@ -107,6 +115,7 @@ def _play():
         start = keynode.get(start_bid) or kps[0]
         if start_bid and not _store().flag_get(_wid(), f"seen|{start_bid}"):
             _store().flag_set(_wid(), f"seen|{start_bid}")  # only the STARTING tavern is pre-known
+        _stage(4, "Плетём родство, знакомства и завсегдатаев…")
         _weave_ties(people)  # person ties → real pool people
         _weave_locals(people)  # local-tavern regulars → mild mutual acquaintance
         row = _store().get_pc(_wid()) or {}  # player position SURVIVES restart/deploy
@@ -130,15 +139,18 @@ def _play():
             geom = _json.loads(_gc)
             geom["_xy"] = {int(k): v for k, v in geom["_xy"].items()}  # JSON stringified int node-ids
             if map_file(_wg, "day.png") is None:  # raster files lost (fresh checkout) — re-render
+                _stage(5, "Рисуем карту города заново…")
                 geom["map"] = build_map_rasters(_wg, visual(params), ver=str(_S["seed"]))
                 _store().flag_set(_wg, "geom", _json.dumps(geom))
         else:
+            _stage(5, "Рисуем карту города…")
             vis = visual(params)
             geom = _build_geom(city, xy, n2b, vis)
             geom.pop("svg", None)  # raster world: SVG stays a build-time artifact
             geom["map"] = build_map_rasters(_wg, vis, fresh=True, ver=str(_S["seed"]))
             _store().flag_set(_wg, "geom_seed", f"{_S['seed']}|v3")
             _store().flag_set(_wg, "geom", _json.dumps(geom))
+        _stage(8, "Расставляем жителей по домам…")
         _S.update(
             city=city,
             people=people,
@@ -152,6 +164,7 @@ def _play():
         if saved_loc in xy and row.get("inside") in n2b.values():
             _S["inside"], _S["room"] = row["inside"], row.get("room")
             _S["zone"] = row.get("zone")             # and place in hall — also position
+        _S["build_stage"] = None                     # built — the progress bar may retire
     from ..world import _apply_routine
     _apply_routine()  # spots = f(time): daily schedule
     return _S["city"], _S["people"], _S["crof"], _S["cr2b"], _S["loc"]

@@ -121,8 +121,15 @@ def build_map_rasters(wid: int, vis: dict, fresh: bool = False, ver: str = "0") 
 
         shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
+    ru = {"morning": "утреннюю", "day": "дневную", "evening": "вечернюю", "night": "ночную"}
     urls = {}
     for phase in PHASES:
+        try:  # real build progress for the client bar (no session in offline scripts — skip)
+            from ..session.state import _S
+
+            _S["build_stage"] = {"n": 6, "of": 8, "text": f"Печатаем {ru[phase]} палитру карты…"}
+        except Exception:  # noqa: BLE001
+            pass
         path = os.path.join(out_dir, f"{phase}.png")
         if not os.path.exists(path):
             svg = (

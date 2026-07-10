@@ -667,6 +667,8 @@ function applyVB(){const [w,h]=viewWH();
     const set=(id,px)=>{const el=document.getElementById(id);
       if(el)el.setAttribute('transform',`scale(${(px*upp).toFixed(3)})`);};
     set('pmarki',7);set('dmarki',7);
+    const ns=(9*upp).toFixed(3);                            // key-number badges: constant small screen size
+    document.querySelectorAll('#keynums .knumi').forEach(e=>e.setAttribute('transform',`scale(${ns})`));
     const ep=document.getElementById('epulse');if(ep)ep.setAttribute('r',(11*upp).toFixed(1));}
   $('zlvl').textContent=Math.round(Z*100)+'%';}
 window.addEventListener('resize',()=>{if(MAP)applyVB();});
@@ -676,11 +678,12 @@ function svgEl(m){
   // the player/destination markers are a thin vector overlay on top
   PHASE=phaseOf();
   let g=`<image id="cityimg" href="${m.map.png[PHASE]}" x="${BVB[0]}" y="${BVB[1]}" width="${BVB[2]}" height="${BVB[3]}"/>`;
-  g+=`<g id="keynums">`+m.keys.map(k=>{
-    const rr=Math.max(4.5,Math.min((k.r||9)*0.75,11));   // badge strictly inside the building polygon
-    return `<g class="knum" data-node="${k.node}" data-bid="${k.bid}" transform="translate(${k.x},${k.y})">`
-      +`<circle r="${rr.toFixed(1)}"/><text y="${(rr*0.4).toFixed(1)}" font-size="${(rr*1.2).toFixed(1)}">${k.num==null?'Д':k.num}</text></g>`;
-  }).join('')+`</g>`;
+  // number badges keep a CONSTANT small SCREEN size (inner group drawn at r=1, scaled by
+  // units-per-px in applyVB) — never balloons on zoom, always small enough to sit on a building
+  g+=`<g id="keynums">`+m.keys.map(k=>
+    `<g class="knum" data-node="${k.node}" data-bid="${k.bid}" transform="translate(${k.x},${k.y})">`
+      +`<g class="knumi"><circle r="1"/><text y="0.4" font-size="1.2">${k.num==null?'Д':k.num}</text></g></g>`
+  ).join('')+`</g>`;
   // markers keep a CONSTANT SCREEN size: inner groups are drawn at r=1 and applyVB scales
   // them by units-per-pixel, so street zoom doesn't blow them up
   g+=`<g id="destmark" pointer-events="none" style="display:none"><g id="dmarki">
@@ -728,7 +731,24 @@ function houseAt(wx,wy){
   const idx=d[0]+(d[1]<<8);
   return (idx&&idx<=MAP.map.ids.length)?MAP.map.ids[idx-1]:null;
 }
-async function loadMap(){MAP=await api('/api/play/map');if(!MAP||!MAP.viewBox)return;
+// ── настоящий прогресс сборки мира: сервер пишет стадию, клиент её показывает ──
+function genShow(text,pct){$('genwrap').classList.remove('hidden');
+  $('genstage').textContent=text||'…';$('genfill').style.width=Math.max(2,pct||2)+'%';}
+function genHide(){$('genwrap').classList.add('hidden');}
+let GENPOLL=0;
+function genWatch(){
+  clearInterval(GENPOLL);
+  GENPOLL=setInterval(async()=>{try{
+    const r=await api('/api/play/buildstate');
+    if(r&&r.building&&r.stage)genShow(r.stage.text,Math.round(100*r.stage.n/r.stage.of));
+  }catch(e){}},500);
+}
+function genDone(){clearInterval(GENPOLL);GENPOLL=0;genHide();}
+async function loadMap(){
+  const slow=setTimeout(genWatch,600);   // холодный старт строит мир — покажем настоящие стадии
+  MAP=await api('/api/play/map');
+  clearTimeout(slow);genDone();
+  if(!MAP||!MAP.viewBox)return;
   BVB=MAP.viewBox;PXY=MAP.player;CX=PXY.x;CY=PXY.y;Z=DEFZ();
   CRXY={};(MAP.points||[]).forEach(p=>CRXY[p.id]=[p.x,p.y]);setClock();renderMap();loadIdmap();}
 async function refreshKeys(){                      // знание мест изменилось (вошёл/вывеска)
@@ -943,20 +963,14 @@ async function waitTurn(){await asTurn(async()=>{
   const el=push('sys','<span class="dots">…</span>');
   try{applyWorld(await api('/api/play/live',{}));}finally{el.remove();}
 });}
-const GEN_STAGES=['Возводим город…','Заселяем дома…','Плетём связи…','Открываем лавки…','Будим горожан…'];
 async function newWorld(){
   if(!confirm('Начать НОВЫЙ мир? Текущий прогресс будет стёрт — город и жители сгенерируются заново (из тех же пулов).'))return;
-  const wrap=$('genwrap'),fill=$('genfill'),stage=$('genstage');
-  wrap.classList.remove('hidden');fill.style.width='0%';stage.textContent=GEN_STAGES[0];
-  let p=0,si=0;                                   // bar climbs to ~92% on estimate, snaps to 100% when the build returns
-  const t=setInterval(()=>{p=Math.min(92,p+Math.random()*7+2);fill.style.width=p+'%';
-    const ns=Math.min(GEN_STAGES.length-1,Math.floor(p/(93/GEN_STAGES.length)));
-    if(ns!==si){si=ns;stage.textContent=GEN_STAGES[si];}},260);
+  genShow('Стираем старый мир…',2);genWatch();    // стадии сборки — настоящие, с сервера
   try{
     await api('/api/play/newworld',{});           // wipe runtime
     await api('/api/play/scene');                  // trigger the real rebuild (the expensive assembly)
   }finally{
-    clearInterval(t);fill.style.width='100%';stage.textContent='Готово';
+    genDone();genShow('Готово',100);
     setTimeout(()=>location.reload(),400);        // world now built + cached → reload is instant
   }
 }

@@ -106,6 +106,18 @@ def game_map():
     }
 
 
+@router.get("/api/play/buildstate")
+def buildstate():
+    """Real world-build progress for the client bar. Deliberately does NOT call _play() —
+    it peeks at the stage another request's build is writing."""
+    st = _S.get("build_stage")
+    return {
+        "building": bool(st),
+        "stage": st or None,
+        "ready": _S.get("city") is not None,
+    }
+
+
 @router.get("/api/play/mapimg/{name}")
 def map_img(name: str):
     """Phase PNGs / click ID-map of the current world (rendered once at world build)."""

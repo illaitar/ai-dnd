@@ -1,6 +1,5 @@
 # tests/items/test_attrs.py
-from aidnd.items.attrs import attr_graph
-
+from aidnd.items.attrs import attr_graph, compose
 from aidnd.items.model import ATTRS
 
 
@@ -19,3 +18,33 @@ def test_graph_loads_and_references_only_known_attrs():
     for _f, spec in g["forms"].items():
         for _eff, attrs in spec.get("expresses", {}).items():
             assert set(attrs) <= set(ATTRS), f"unknown attr in form {_f}/{_eff}"
+
+
+KNIFE = [{"role": "клинок", "material": "сталь", "treatments": ["заточка"]},
+         {"role": "рукоять", "material": "дуб", "treatments": []}]
+
+
+def test_compose_knife_expresses_steel_and_wood():
+    a = compose(KNIFE, "plain")
+    assert a["острота"] == 65 + 15          # steel 65 + hone 15
+    assert a["твёрдость"] == 70             # from steel blade
+    assert a["прочность"] == 70             # max(steel 70, oak 55)
+    assert a["вес"] == 60                   # max(steel 60, oak 45)
+
+
+def test_temper_raises_hardness_lowers_flex():
+    plain = compose([{"role": "клинок", "material": "кожа", "treatments": []}], "plain")
+    tempered = compose([{"role": "клинок", "material": "кожа", "treatments": ["закалка"]}], "plain")
+    assert tempered["твёрдость"] > plain.get("твёрдость", 0)
+    assert tempered.get("гибкость", 0) < plain["гибкость"]   # кожа гибкость 70 → 62
+
+
+def test_quality_scales_the_vector():
+    crude = compose(KNIFE, "crude")
+    exq = compose(KNIFE, "exquisite")
+    assert exq["острота"] > crude["острота"]
+
+
+def test_clamp_ceiling_at_100():
+    a = compose([{"role": "оправа", "material": "золото", "treatments": ["золочение"]}], "exquisite")
+    assert a["ценность"] <= 100

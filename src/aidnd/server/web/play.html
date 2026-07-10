@@ -596,7 +596,8 @@ function renderScene(r){
   if(r.line){const pid=(SCENE.here.find(h=>h.name===r.line.who)||{}).id;   // near: freeform single reply
     if(pid)npcMsg(pid,r.line.text);
     else push('npc',`<div class="sp">${esc(r.line.who)}</div><div class="tx">${esc(r.line.text)}</div>`);}
-  pushFeed(r.feed);                                              // overheard (by tier) then deeds/ambient
+  if(r.digest)push('narr',esc(r.digest));                        // woven observable surroundings (scene narrator)
+  else pushFeed(r.feed);                                         // fallback: raw overheard/deeds (no digest)
 }
 
 // ─── adaptive panels: one body-class state machine drives the 3-column morph ───

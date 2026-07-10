@@ -33,17 +33,23 @@ def _world_tick() -> dict:
     if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
         _live_build(city, people, crof, cr2b, loc)
     if config.NO_LLM_TICKS:  # debug: the hall stays quiet — no NPC decisions this turn
-        return {"feed": [], "address": []}
+        return {"feed": [], "address": [], "digest": ""}
     try:
         feed, address = _live_tick(people)  # live scene: those nearby
+        # end-of-tick scene narrator: weave observable events into ONE third-person account,
+        # laundering raw first-person self-narration / intent out of the player-visible prose.
+        digest = ""
+        if feed:
+            from ..narrator.scene_digest import scene_digest
+            digest = scene_digest(feed, (lv or {}).get("place", loc))
     except (LLMUnavailable, LLMBadOutput):  # no model won't pretend — honest error to player
         raise
     except Exception:  # noqa: BLE001 — other tick bugs don't drop the player's action
         import logging
 
         logging.getLogger("aidnd").warning("live tick failed", exc_info=True)
-        return {"feed": [], "address": []}
-    return {"feed": feed, "address": address}
+        return {"feed": [], "address": [], "digest": ""}
+    return {"feed": feed, "address": address, "digest": digest}
 
 
 def _world_tick_fast() -> dict:

@@ -21,6 +21,8 @@
 
 ## Scope
 
+> **Increment 1 — ✔ shipped to prod (commit b0b0df7).** Playtest-confirmed: on-shift smith works (forge/bellows/orders) instead of drinking; balanced pull holds. 264 tests green. Final review: SHIP.
+
 This plan covers **Increment 1 — "workers work"** (spec Units 1, 2, and the minimal slice of Unit 3 needed to demonstrate it). Increments 2–4 (pool-wide work affordances, idle repertoire + satiety, shop customers) are outlined at the end and get their own detailed plans after Increment 1 ships and the live playtest informs tuning.
 
 Spec: [docs/superpowers/specs/2026-07-10-npc-work-and-idle-design.md](../specs/2026-07-10-npc-work-and-idle-design.md).

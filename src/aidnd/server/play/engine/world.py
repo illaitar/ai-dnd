@@ -38,6 +38,7 @@ from aidnd.server.play.engine.core import (
     _scene_descriptors,
     _store,
     _tokens_ru,
+    _topics_for,
     _wid,
     router,
 )
@@ -699,6 +700,9 @@ def _live_tick(people) -> tuple:
         "zones": zname_of,
         "news": news[:3],
         "rumor_of": rumor_of,
+        "topics_of": {pid: [t for t in _topics_for(people[pid])
+                            if heat.get(t, 0.0) < PB["rumor_hot"]]
+                      for pid in order},
         "sexes": {pid: ("женщина" if (people[pid].persona or {}).get("sex") == "f" else "мужчина")
                   for pid in order},
         "time": f"{_PHASE_RU[_phase()]}, {_gt() // 60 % 24:02d}:{_gt() % 60:02d}",

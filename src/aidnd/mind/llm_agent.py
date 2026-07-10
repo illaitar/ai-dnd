@@ -159,6 +159,10 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     if my_rumor:
         lines.append(f"  ТЫ слыхал здешний слух: «{my_rumor}» — поделишься или придержишь, "
                      "дело твоё (другие могут его и не знать).")
+    my_topics = (ctx.get("topics_of") or {}).get(cfg.id) or []
+    if my_topics:
+        lines.append("  ТВОИ ТЕМЫ (о чём тебе есть что сказать): "
+                     + "; ".join(f"«{t}»" for t in my_topics[:3]) + " — заведи, к слову.")
     ev = ctx.get("event")
     if ev:
         lines.append(f"  ⚡ ТОЛЬКО ЧТО: {ev} — отреагируй по своему характеру (страх/любопытство/"

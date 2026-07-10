@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI-DnD</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e1413'/%3E%3Cpolygon points='16,3 19,13 29,16 19,19 16,29 13,19 3,16 13,13' fill='%23c9a24e'/%3E%3C/svg%3E">
 <style>
   :root{
     /* Реваколь / Disco Elysium — desaturated teal-green ground, aged-parchment ink,
@@ -1150,11 +1151,11 @@ const boot0=thinkingMsg();                             // сцена собир�
 api('/api/play/scene').then(s=>{
   boot0.remove();
   SCENE=s;if(s.gt!=null){GT=s.gt;setClock();}setCoins(s.coins);
-  if(s.hero&&s.hero!=='Странник')document.title=(s.city||'AI-DnD')+' · '+s.hero;
+  if(s.hero&&s.hero!=='Странник')document.title='AI-DnD · '+s.hero;   // no location in the tab title
   if(s.max_hp)PBMAXHP=s.max_hp;setHp(s.hp,s.max_hp);setMana(s.mana,s.mana_cap,s.fatigue);
   if(s.guild_board)BOARD={jobs:s.guild_board,news:s.guild_news};
   renderAmb();renderWays();
-  if(s.city){document.title=s.city+' — AI-DnD';$('locdist').textContent=s.city;}
+  if(s.city){$('locdist').textContent=s.city;}   // city shown in the UI, not in the browser tab
   if(s.location){$('locname').textContent=s.location.name;renderLoc(s.location);}
   const a0=s.ambient||{};
   push('narr',s.location.name+'. '+[a0.time,a0.weather,a0.mood].filter(Boolean).join(', ')+'. '

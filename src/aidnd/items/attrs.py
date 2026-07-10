@@ -66,9 +66,26 @@ DEFAULT_RULES = {
 }
 FOCUS_FORMS = ("оправа", "посох", "жезл", "амулет", "талисман")
 
+# attribute groups — an inspection reveals a whole group's TRUE values (sentinels double as `known` keys)
+ATTR_GROUPS = {
+    "attr:phys":   ("острота", "твёрдость", "прочность", "точность", "гибкость", "вес", "теплостойкость"),
+    "attr:value":  ("ценность", "краса"),
+    "attr:arcane": ("чара", "мана", "святость", "скверна"),
+}
+_ATTR_TO_GROUP = {a: g for g, atts in ATTR_GROUPS.items() for a in atts}
 
-def _true(attrs: dict, a: str) -> int:
-    return int((attrs.get(a) or {}).get("true", 0))
+
+def attr_group(a: str) -> str:
+    return _ATTR_TO_GROUP.get(a, "attr:phys")
+
+
+def _eff(attrs: dict, a: str, known) -> int:
+    """Effective value for an observer: TRUE if known is None (reality) or the attr's group is
+    revealed in `known`; else SURFACE (the lie)."""
+    v = attrs.get(a) or {}
+    if known is None or attr_group(a) in known:
+        return int(v.get("true", 0))
+    return int(v.get("surface", 0))
 
 
 def _band(v: float, bands: list) -> int:
@@ -78,12 +95,13 @@ def _band(v: float, bands: list) -> int:
     return 0
 
 
-def _score(attrs: dict, w: dict) -> float:
-    return sum(_true(attrs, a) * k for a, k in w.items())
+def _score(attrs: dict, w: dict, known) -> float:
+    return sum(_eff(attrs, a, known) * k for a, k in w.items())
 
 
-def derive_effects(item: dict, rules: dict | None = None) -> dict:
-    """Attribute TRUE vector + form → {mods, worth, durability}. Form gates attack/defense."""
+def derive_effects(item: dict, rules: dict | None = None, known=None) -> dict:
+    """Attribute vector (TRUE if `known` reveals the group, else SURFACE) + form → {mods, worth,
+    durability}. `known=None` means reality (all true). Form gates attack/defense."""
     r = rules or DEFAULT_RULES
     attrs = item.get("attrs") or {}
     form = item.get("form") or ""
@@ -93,25 +111,25 @@ def derive_effects(item: dict, rules: dict | None = None) -> dict:
     for key in ("attack", "defense"):                      # form-gated: weights come from the form
         w = expresses.get(key)
         if w:
-            amt = _band(_score(attrs, w), r[key]["bands"])
+            amt = _band(_score(attrs, w, known), r[key]["bands"])
             if amt:
                 mods.append({"target": key, "op": "add", "amount": amt, "when": r[key]["when"]})
     ap = r["appearance"]                                    # universal: appearance
-    amt = _band(_true(attrs, ap["attr"]), ap["bands"])
+    amt = _band(_eff(attrs, ap["attr"], known), ap["bands"])
     if amt:
         mods.append({"target": ap["target"], "op": "add", "amount": amt, "when": ap["when"]})
     po = r["poison"]                                        # universal: toxicity (hidden)
-    amt = _band(_true(attrs, po["attr"]), po["bands"])
+    amt = _band(_eff(attrs, po["attr"], known), po["bands"])
     if amt:
         mods.append({"target": po["target"], "op": "add", "amount": amt, "when": po["when"], "hidden": True})
     mn = r["mana"]                                          # mana: focus (equipped) or consumable (on_use)
-    amt = _band(_true(attrs, mn["attr"]), mn["bands"])
+    amt = _band(_eff(attrs, mn["attr"], known), mn["bands"])
     if amt and (kind == "consumable" or form in FOCUS_FORMS):
         mods.append({"target": mn["target"], "op": "add", "amount": amt,
                      "when": "on_use" if kind == "consumable" else "equipped"})
     wr = r["worth"]
-    worth = max(wr["min"], round(_score(attrs, wr["w"]) * wr["k"]))
+    worth = max(wr["min"], round(_score(attrs, wr["w"], known) * wr["k"]))
     du = r["durability"]
-    pr = _true(attrs, du["attr"])
+    pr = _eff(attrs, du["attr"], known)
     durability = {"max": max(du["min"], round(pr * du["k"]))} if pr else None
     return {"mods": mods, "worth": worth, "durability": durability}

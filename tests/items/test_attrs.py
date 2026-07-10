@@ -103,3 +103,19 @@ def test_precision_is_producible_and_feeds_attack():
     from aidnd.items.attrs import compose
     vec = compose([{"role": "клинок", "material": "сталь", "treatments": ["правка"]}], "plain")
     assert vec.get("точность", 0) > 0                                    # сталь + правка produce it
+
+
+def test_known_none_is_reality_all_true():
+    it = {"attrs": {"ценность": {"surface": 90, "true": 5}}, "form": "оправа", "kind": "trinket"}
+    assert derive_effects(it)["worth"] == derive_effects(it, known={"attr:value"})["worth"]  # both true=5
+
+
+def test_surface_until_value_group_revealed():
+    it = {"attrs": {"ценность": {"surface": 90, "true": 5}}, "form": "оправа", "kind": "trinket"}
+    assert derive_effects(it, known=set())["worth"] > derive_effects(it, known={"attr:value"})["worth"]
+
+
+def test_poison_hidden_until_arcane_revealed():
+    it = {"attrs": {"скверна": {"surface": 0, "true": 60}}, "form": "клинок", "kind": "weapon"}
+    assert not [m for m in derive_effects(it, known=set())["mods"] if m["target"] == "special:poison"]
+    assert [m for m in derive_effects(it, known={"attr:arcane"})["mods"] if m["target"] == "special:poison"]

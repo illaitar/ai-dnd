@@ -1,6 +1,47 @@
 # tests/items/test_attrs.py
-from aidnd.items.attrs import attr_graph, compose
+from aidnd.items.attrs import attr_graph, compose, derive_effects
 from aidnd.items.model import ATTRS
+
+
+def _item(attrs, form="клинок", kind="weapon"):
+    return {"attrs": {a: {"surface": v, "true": v} for a, v in attrs.items()}, "form": form, "kind": kind}
+
+
+def test_sharp_blade_yields_attack():
+    eff = derive_effects(_item({"острота": 80, "твёрдость": 70, "точность": 50}, "клинок", "weapon"))
+    atk = [m for m in eff["mods"] if m["target"] == "attack"]
+    assert atk and atk[0]["amount"] >= 2
+
+
+def test_same_attrs_as_shield_yield_no_attack():
+    eff = derive_effects(_item({"острота": 80, "твёрдость": 70, "прочность": 65}, "щит", "armor"))
+    assert not [m for m in eff["mods"] if m["target"] == "attack"]
+    assert [m for m in eff["mods"] if m["target"] == "defense"]
+
+
+def test_beauty_yields_appearance_and_worth():
+    eff = derive_effects(_item({"краса": 90, "ценность": 80}, "оправа", "trinket"))
+    assert [m for m in eff["mods"] if m["target"] == "social:appearance"]
+    assert eff["worth"] > 0
+
+
+def test_toxic_is_hidden_and_mana_focus():
+    poison = derive_effects(_item({"скверна": 60}, "клинок", "weapon"))
+    pm = [m for m in poison["mods"] if m["target"] == "special:poison"]
+    assert pm and pm[0]["hidden"] is True
+    mana = derive_effects(_item({"мана": 70}, "оправа", "trinket"))
+    assert [m for m in mana["mods"] if m["target"] == "special:mana"]
+
+
+def test_derive_reads_true_not_surface():
+    forged = {"attrs": {"ценность": {"surface": 90, "true": 5}}, "form": "оправа", "kind": "trinket"}
+    honest = {"attrs": {"ценность": {"surface": 90, "true": 90}}, "form": "оправа", "kind": "trinket"}
+    assert derive_effects(forged)["worth"] < derive_effects(honest)["worth"]
+
+
+def test_durability_from_integrity():
+    eff = derive_effects(_item({"прочность": 80}, "клинок", "weapon"))
+    assert eff["durability"] and eff["durability"]["max"] >= 4
 
 
 def test_attrs_vocabulary_is_13():

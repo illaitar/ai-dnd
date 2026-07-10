@@ -50,3 +50,69 @@ def compose(parts, quality: str = "plain", graph: dict | None = None) -> dict:
                 acc[a] = acc.get(a, 0) + dv
     mul = QUALITY_MUL.get(quality, 1.0)
     return {a: _clamp(v * mul) for a, v in acc.items() if a in ATTRS and _clamp(v * mul) > 0}
+
+
+# Effect-rule coefficients — code owns the math (pure module; PB override seam lands in Phase 3).
+DEFAULT_RULES = {
+    "attack":     {"w": {"острота": 0.5, "твёрдость": 0.3, "точность": 0.2},
+                   "bands": [(80, 3), (60, 2), (40, 1)], "when": "equipped"},
+    "defense":    {"w": {"твёрдость": 0.6, "прочность": 0.4},
+                   "bands": [(80, 3), (60, 2), (40, 1)], "when": "equipped"},
+    "appearance": {"attr": "краса", "bands": [(88, 3), (70, 2), (45, 1)],
+                   "target": "social:appearance", "when": "worn"},
+    "poison":     {"attr": "скверна", "bands": [(75, 3), (50, 2), (20, 1)],
+                   "target": "special:poison", "when": "on_use"},
+    "mana":       {"attr": "мана", "bands": [(75, 3), (50, 2), (25, 1)], "target": "special:mana"},
+    "worth":      {"w": {"ценность": 0.6, "краса": 0.25, "чара": 0.15}, "k": 0.6, "min": 1},
+    "durability": {"attr": "прочность", "k": 0.5, "min": 4},
+}
+FOCUS_FORMS = ("оправа", "посох", "жезл", "амулет", "талисман")
+
+
+def _true(attrs: dict, a: str) -> int:
+    return int((attrs.get(a) or {}).get("true", 0))
+
+
+def _band(v: float, bands: list) -> int:
+    for thr, amt in bands:                                 # bands ordered high→low
+        if v >= thr:
+            return amt
+    return 0
+
+
+def _score(attrs: dict, w: dict) -> float:
+    return sum(_true(attrs, a) * k for a, k in w.items())
+
+
+def derive_effects(item: dict, rules: dict | None = None) -> dict:
+    """Attribute TRUE vector + form → {mods, worth, durability}. Form gates attack/defense."""
+    r = rules or DEFAULT_RULES
+    attrs = item.get("attrs") or {}
+    form = item.get("form") or ""
+    kind = item.get("kind") or ""
+    expresses = ((attr_graph()["forms"].get(form) or {}).get("expresses")) or {}
+    mods: list = []
+    for key in ("attack", "defense"):                      # form-gated combat effects
+        if key in expresses:
+            amt = _band(_score(attrs, r[key]["w"]), r[key]["bands"])
+            if amt:
+                mods.append({"target": key, "op": "add", "amount": amt, "when": r[key]["when"]})
+    ap = r["appearance"]                                    # universal: appearance
+    amt = _band(_true(attrs, ap["attr"]), ap["bands"])
+    if amt:
+        mods.append({"target": ap["target"], "op": "add", "amount": amt, "when": ap["when"]})
+    po = r["poison"]                                        # universal: toxicity (hidden)
+    amt = _band(_true(attrs, po["attr"]), po["bands"])
+    if amt:
+        mods.append({"target": po["target"], "op": "add", "amount": amt, "when": po["when"], "hidden": True})
+    mn = r["mana"]                                          # mana: focus (equipped) or consumable (on_use)
+    amt = _band(_true(attrs, mn["attr"]), mn["bands"])
+    if amt and (kind == "consumable" or form in FOCUS_FORMS):
+        mods.append({"target": mn["target"], "op": "add", "amount": amt,
+                     "when": "on_use" if kind == "consumable" else "equipped"})
+    wr = r["worth"]
+    worth = max(wr["min"], round(_score(attrs, wr["w"]) * wr["k"]))
+    du = r["durability"]
+    pr = _true(attrs, du["attr"])
+    durability = {"max": max(du["min"], round(pr * du["k"]))} if pr else None
+    return {"mods": mods, "worth": worth, "durability": durability}

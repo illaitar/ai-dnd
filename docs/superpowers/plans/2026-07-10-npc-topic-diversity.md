@@ -19,6 +19,9 @@
 ---
 
 ## Scope
+
+> **✔ shipped to prod (commit 02ac2ad).** Playtest-confirmed: tavern monoculture broken — a coherent evolving subject (cellar rats) + a second competing subject (murdered merchant), no "клад". Final review: SHIP. 271 tests green.
+
 Increment B1+B2+B3 (spec Units B1–B3). B4 (conversation subject+budget in `convo.py`) is a deferred follow-up.
 Spec: [docs/superpowers/specs/2026-07-10-npc-topic-diversity-design.md](../specs/2026-07-10-npc-topic-diversity-design.md).
 

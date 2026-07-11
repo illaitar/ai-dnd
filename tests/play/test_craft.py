@@ -98,3 +98,15 @@ def test_crafted_weapon_feeds_combat_and_prices(world):
     base = from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon={**made, "bonus": 0}).dmg_bonus
     assert cmb.dmg_bonus == base + atk                        # its derived attack reached combat damage
     assert view(made)["worth"] == derive_effects(made)["worth"]   # trade prices off derived worth
+
+
+def test_crafted_armor_raises_ac_by_best_piece(world):
+    from aidnd.server.play.engine.session.persist import _store
+    from aidnd.server.play.mechanics.combat import _derived_amount, _pc_combatant
+    from aidnd.server.play.mechanics.items import _put_graph_item
+
+    bare = _pc_combatant().ac                                 # no crafted armor yet (legacy = 0 derived)
+    vest = _store().get_item(_put_graph_item("кожаный жилет", "fine"))
+    boots = _store().get_item(_put_graph_item("сапоги", "fine"))
+    best = max(_derived_amount(vest, "defense"), _derived_amount(boots, "defense"))
+    assert _pc_combatant().ac == bare + best                  # best single piece — NOT the sum (no stacking)

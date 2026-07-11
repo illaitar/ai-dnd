@@ -293,7 +293,8 @@ def _pc_combatant():
     if weapon and weapon.get("attrs"):                     # a crafted/graph blade: derived острота → damage
         weapon = {**weapon, "bonus": _derived_amount(weapon, "attack")}
     combatant = from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon=weapon)
-    combatant.ac += sum(_derived_amount(it, "defense") for _i, it in rows if it and it["kind"] == "armor")
+    combatant.ac += max((_derived_amount(it, "defense")   # best single piece — no equip slot to stack by
+                         for _i, it in rows if it and it["kind"] == "armor"), default=0)
     combatant.name = _pc_name()  # hero's name (from landing), not 'Wanderer'
     return combatant
 

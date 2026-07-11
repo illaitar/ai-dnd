@@ -80,3 +80,21 @@ def test_duplicate_inputs_are_counted(world):
     out = {"narr": []}
     _do_craft("zhernov", out)
     assert "не хватает" in " ".join(out["narr"]).lower()      # (was a dup-input collapse bug)
+
+
+def test_crafted_weapon_feeds_combat_and_prices(world):
+    from aidnd.combat.model import from_pc
+    from aidnd.items import derive_effects, view
+    from aidnd.server.play.engine.pc.hero import _PC_CAP, _pc_hp
+    from aidnd.server.play.engine.session.config import PB
+    from aidnd.server.play.engine.session.persist import _store
+    from aidnd.server.play.mechanics.combat import _derived_amount, _pc_combatant
+    from aidnd.server.play.mechanics.items import _put_graph_item
+
+    made = _store().get_item(_put_graph_item("меч", "exquisite", masterwork=True))
+    atk = _derived_amount(made, "attack")
+    assert atk > 0                                            # the masterwork blade has real bite
+    cmb = _pc_combatant()                                     # highest-worth weapon → the меч
+    base = from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon={**made, "bonus": 0}).dmg_bonus
+    assert cmb.dmg_bonus == base + atk                        # its derived attack reached combat damage
+    assert view(made)["worth"] == derive_effects(made)["worth"]   # trade prices off derived worth

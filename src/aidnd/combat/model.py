@@ -142,7 +142,7 @@ def from_npc(pid: str, name: str, mech: dict, hp: int | None = None,
         id=pid, name=name, side="party",
         hp=hp, max_hp=hp, ac=11 + dmod + (1 if brave > 0.7 else 0),   # equipped fighter is tougher
         speed=6, init_mod=dmod, to_hit=2 + atk + prof,
-        dmg_dice=dice, dmg_bonus=atk + (1 if brave > 0.6 else 0),
+        dmg_dice=dice, dmg_bonus=atk + (1 if brave > 0.6 else 0) + int((weapon or {}).get("bonus", 0)),
         dmg_type="piercing" if rng > 1 else "slashing", range=rng,
         cr=0.25 + brave * 0.5, kind="npc", ref=pid)
 
@@ -155,6 +155,7 @@ def from_pc(abilities: dict, hp: int, max_hp: int, weapon: dict | None = None) -
         id="pc", name="Странник", side="party",
         hp=hp, max_hp=max_hp, ac=10 + dmod, speed=6, init_mod=dmod,
         to_hit=2 + (dmod if rng > 1 else max(smod, dmod)),   # ranged relies on dexterity
-        dmg_dice=dice, dmg_bonus=(dmod if rng > 1 else smod), range=rng,
+        dmg_dice=dice, dmg_bonus=(dmod if rng > 1 else smod) + int((weapon or {}).get("bonus", 0)),
+        range=rng,
         dmg_type="piercing" if rng > 1 else ("slashing" if weapon else "bludgeoning"),
         kind="pc", ref="pc")

@@ -275,13 +275,25 @@ def _guild_status() -> dict:
     }
 
 
+def _derived_amount(item: dict, target: str) -> int:
+    """Sum of an item's DERIVED effect (attack/defense) — only for graph items with an attribute
+    vector; legacy items (no attrs) return 0, so combat is unchanged for them."""
+    if not (item and item.get("attrs")):
+        return 0
+    from aidnd.items import derive_effects
+    return sum(m["amount"] for m in derive_effects(item)["mods"] if m["target"] == target)
+
+
 def _pc_combatant():
     rows = [
         (r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), "pc")
     ]
     weapons = [it for _i, it in rows if it and it["kind"] == "weapon"]
     weapon = max(weapons, key=lambda w: w["worth"], default=None)
+    if weapon and weapon.get("attrs"):                     # a crafted/graph blade: derived острота → damage
+        weapon = {**weapon, "bonus": _derived_amount(weapon, "attack")}
     combatant = from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon=weapon)
+    combatant.ac += sum(_derived_amount(it, "defense") for _i, it in rows if it and it["kind"] == "armor")
     combatant.name = _pc_name()  # hero's name (from landing), not 'Wanderer'
     return combatant
 

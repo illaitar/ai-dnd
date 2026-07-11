@@ -71,3 +71,12 @@ def test_craft_loop_consumes_input_and_narrates(world):
              if _store().get_item(r["item_id"])]
     assert "масло" not in names                               # the input was consumed
     assert out["narr"]                                        # an outcome was narrated
+
+
+def test_duplicate_inputs_are_counted(world):
+    from aidnd.server.play.mechanics.items import _do_craft, _put_item
+
+    _put_item("t|k1", "камень", "material", holder="pc")      # «zhernov» needs 2× камень; one is not enough
+    out = {"narr": []}
+    _do_craft("zhernov", out)
+    assert "не хватает" in " ".join(out["narr"]).lower()      # (was a dup-input collapse bug)

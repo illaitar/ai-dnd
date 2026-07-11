@@ -197,15 +197,16 @@ def _do_craft(detail: str, out: dict) -> dict:
     node = g["nodes"][want]
     need = node.get("from", [])
     inv = [(r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), "pc")]
-    matched, used = {}, set()
+    matched, used = [], set()                              # list, not dict — a node may need N of the same input
     for inp in need:                                       # each input → a distinct held item
         iid = next((i for i, itm in inv
                     if itm and i not in used and node_lookup(itm["name"]) == inp), None)
         if iid:
-            matched[inp] = iid
+            matched.append((inp, iid))
             used.add(iid)
-    miss = [inp for inp in need if inp not in matched]
-    if miss:
+    if len(matched) < len(need):
+        from collections import Counter
+        miss = list((Counter(need) - Counter(inp for inp, _ in matched)).elements())
         out["narr"].append("Не хватает для работы: " + ", ".join(miss) + ".")
         return out
     inside = _S.get("inside")
@@ -225,13 +226,15 @@ def _do_craft(detail: str, out: dict) -> dict:
     spark = PB["craft_base"] + mastery + material + _pc_luck() + _pc_inspiration() + roll
     band = _craft_band(spark)
     _gt_add(PB["craft_time"])
-    for i in matched.values():                             # inputs are always consumed
-        _store().inv_drop(_wid(), i)
     if band == "waste":
+        for _inp, i in matched:
+            _store().inv_drop(_wid(), i)
         out["narr"].append("Работа загублена — материал испорчен, впустую.")
         out["refresh"] = True
         return out
     made = _put_graph_item(want, band, flaw=(band == "crude"), masterwork=(band == "exquisite"))
+    for _inp, i in matched:                                # consume ONLY once the item exists (no robbery)
+        _store().inv_drop(_wid(), i)
     _pool_add_new(_store().get_item(made))
     qru = {"crude": "грубо", "plain": "просто", "fine": "добротно", "exquisite": "искусно"}[band]
     tail = " — истинный шедевр!" if band == "exquisite" else "."

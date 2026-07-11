@@ -122,23 +122,32 @@ def _toks(s: str) -> set:
     return set(re.findall(r"[а-яёa-z]+", s.lower()))
 
 
+_LOOKUP_CACHE: dict = {}                                    # name → node-id, for the default graph (hot path)
+
+
 def node_lookup(name: str, graph: dict | None = None) -> str | None:
     """Resolve a display name/alias to a node id: exact, then case-insensitive exact, then whole-token
     containment — every WORD of the node id must appear as a word in the name (so «Кривой нож» → «нож»
     but «Порог таверны» does NOT match «рог»). A last-resort bridge; explicit `node` ids are primary.
-    Prefers the most specific (longest) id. None if nothing matches."""
+    Prefers the most specific (longest) id. None if nothing matches. Cached for the default graph."""
+    if graph is None and name in _LOOKUP_CACHE:
+        return _LOOKUP_CACHE[name]
     g = graph or item_graph()
     keys = list(g["nodes"]) + list(g["materials"])
+    res = None
     if name in keys:
-        return name
-    nl = name.lower().strip()
-    for k in keys:
-        if k.lower() == nl:
-            return k
-    nt = _toks(name)
-    best = None
-    for k in keys:
-        kt = _toks(k)
-        if kt and kt <= nt and (best is None or len(k) > len(best)):   # all of the id's words are present
-            best = k
-    return best
+        res = name
+    else:
+        nl = name.lower().strip()
+        res = next((k for k in keys if k.lower() == nl), None)
+        if res is None:
+            nt = _toks(name)
+            best = None
+            for k in keys:
+                kt = _toks(k)
+                if kt and kt <= nt and (best is None or len(k) > len(best)):   # all id words present
+                    best = k
+            res = best
+    if graph is None:
+        _LOOKUP_CACHE[name] = res
+    return res

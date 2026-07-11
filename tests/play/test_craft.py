@@ -100,6 +100,17 @@ def test_crafted_weapon_feeds_combat_and_prices(world):
     assert view(made)["worth"] == derive_effects(made)["worth"]   # trade prices off derived worth
 
 
+def test_graph_enrich_backs_a_legacy_item():
+    from aidnd.items import normalize
+    from aidnd.server.play.mechanics.items import _graph_enrich
+
+    it = _graph_enrich(normalize({"kind": "weapon", "name": "ржавый зазубренный нож", "quality": "crude"}))
+    assert it["attrs"]                                        # «нож» resolved → real attributes attached
+    assert it["form"] == "клинок"
+    plain = _graph_enrich(normalize({"kind": "misc", "name": "цумцум-абракадабра-щщщ"}))
+    assert plain["attrs"] == {}                               # unresolvable name → stays legacy (dual-path)
+
+
 def test_crafted_armor_raises_ac_by_best_piece(world):
     from aidnd.server.play.engine.session.persist import _store
     from aidnd.server.play.mechanics.combat import _derived_amount, _pc_combatant

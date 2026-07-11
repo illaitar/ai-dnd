@@ -1,14 +1,12 @@
-"""Crafting: master + station + recipe + materials → item. Mastery SHIFTS outcome distribution
-(quality / +mods / mark / durability); defects spawn HIDDEN flaw (same hidden-gate) + fragility.
-Repair/reforge — same transform, gate by mastery. Deterministic (score + roll by seed).
+"""NPC-artisan crafting (commission / repair): master + station + recipe → item. Mastery SHIFTS the
+outcome distribution (quality / +mods / mark / durability); defects spawn a HIDDEN flaw + fragility.
+Repair/reforge — same transform, gated by mastery. Deterministic (score + roll by seed).
 
-Crafting by NPC-master (Capability from NpcState) and player (pc-Capability). LLM not needed here — mechanics
-are tabular; flavor-name applied by item_smith at game layer (optional).
+(Player crafting no longer lives here — it walks the derivation graph, see aidnd.items.graph +
+server.play.mechanics.items._do_craft. The old materials.json craft-path graph is retired.)
 
 Key functions
 -------------
-materials_graph() -> dict : Load/cache materials dependency graph.
-craft_path(have, want, graph) -> list | None : Find crafting steps to transform materials.
 Recipe : Dataclass defining a crafting recipe with DC, duration, station, mod target.
 mastery(cap, station, reputation, station_tier) -> int : Calculate crafter's skill modifier.
 craft(cap, recipe, *, seed, inputs, maker, reputation, station_tier) -> dict : Craft item with quality/mods/flaws based on roll.
@@ -17,47 +15,14 @@ repair(item, cap, *, seed, station) -> dict : Repair item durability, may degrad
 
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import dataclass
 from random import Random
 
 from .model import Capability, normalize
 
-_MATERIALS = None
-_MPATH = os.path.join(os.path.dirname(__file__), "materials.json")
-
-
-def materials_graph() -> dict:
-    global _MATERIALS
-    if _MATERIALS is None:
-        with open(_MPATH, encoding="utf-8") as f:
-            _MATERIALS = json.load(f)
-    return _MATERIALS
-
-
-def craft_path(have: set, want: str, graph: dict | None = None, _depth: int = 0) -> list | None:
-    """Path through MATERIALS graph: list of edges leading from have to want.
-    Node is ready when all its inputs are either in have or reachable by their edges. None — unreachable.
-    Each edge carries gates: tool/place/skill/time (checked by game layer)."""
-    have = set(have)
-    if want in have or _depth > 8:
-        return [] if want in have else None
-    edges = (graph or materials_graph())["edges"]
-    edge = next((e for e in edges if e["to"] == want), None)
-    if not edge:
-        return None
-    steps: list = []
-    for src in edge["from"]:                               # recursively fetch each input
-        sub = craft_path(have, src, graph, _depth + 1)
-        if sub is None:
-            return None
-        for s in sub:
-            if s not in steps:
-                steps.append(s)
-        have.add(src)                                      # input fetched — available for next steps
-    steps.append(edge)
-    return steps
+# NOTE: the old materials.json craft-path graph is retired — player crafting now walks the
+# derivation graph (aidnd.items.graph + server.play.mechanics.items._do_craft). What remains here is
+# the NPC-artisan engine (commission / repair): mastery + Recipe + craft() + repair().
 
 STATIONS = ("anvil", "bench", "cauldron", "loom", "tannery")
 _ABIL = {"anvil": ("str", "dex"), "bench": ("dex",), "cauldron": ("int", "wis"),

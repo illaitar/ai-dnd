@@ -45,6 +45,24 @@ def _seed_item_pool() -> None:
         _store().pool_add_item(_wid(), t["key"], t["data"], t["weight"])
 
 
+def _graph_enrich(it: dict) -> dict:
+    """Make a legacy item graph-backed: if it has no attribute vector and its name resolves to a
+    derivation-graph node, attach that node's attrs (scaled by the item's quality) + form — so looted,
+    NPC-gear, and décor items gain real, inspectable, combat/trade-live attributes. Dual-path:
+    an unresolved name leaves the item unchanged. Keeps the flavourful name (epithet)."""
+    if it.get("attrs"):
+        return it
+    from aidnd.items.graph import node_item, node_lookup
+    nid = node_lookup(it.get("name", ""))
+    if nid:
+        ni = node_item(nid, it.get("quality", "plain"))
+        if ni.get("attrs"):
+            it["attrs"] = ni["attrs"]
+            if ni.get("form") and not it.get("form"):
+                it["form"] = ni["form"]
+    return it
+
+
 def _pool_draw(seed: str, tier: str | None = None, holder: str = "pc") -> dict | None:
     """Draw item from world pool (by rarity weight, skipping used uniques), forge it as real item
     for holder, and—if unique—mark so it won't drop again."""
@@ -61,7 +79,7 @@ def _pool_draw(seed: str, tier: str | None = None, holder: str = "pc") -> dict |
         _store().unique_mark(_wid(), tpl["key"])
     iid = "it:" + hashlib.md5(f"{seed}|{tpl['key']}|{holder}".encode()).hexdigest()[:10]
     if not _store().get_item(iid):
-        it = item_normalize({**d, "apparent_worth": d.get("worth", 1)})
+        it = _graph_enrich(item_normalize({**d, "apparent_worth": d.get("worth", 1)}))
         it["id"] = iid
         _store().save_item(it)
     _store().inv_add(_wid(), iid, holder=holder)
@@ -294,7 +312,7 @@ def _materialize_zones(bid: str) -> None:
             iid = "it:" + hashlib.md5(
                 f"zone|{_wid()}|{bid}|{z['id']}|{i}|{o['name']}".encode()).hexdigest()[:10]
             if not _store().get_item(iid):
-                it = item_normalize(o)
+                it = _graph_enrich(item_normalize(o))
                 it["id"] = iid
                 it["fixed"] = bool(o.get("fixed"))    # zone roles travel with item
                 it["afford"] = dict(o.get("afford") or {})
@@ -338,6 +356,7 @@ def _put_item(
                 "mods": mods or [],
             }
         )
+        _graph_enrich(it)                                  # NPC gear / persona items → graph-backed
         it["id"] = iid
         _store().save_item(it)
     _store().inv_add(_wid(), iid, holder=holder)

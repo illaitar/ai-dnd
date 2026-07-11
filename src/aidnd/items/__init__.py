@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from . import loot_pool
 from .attrs import attr_graph, compose, derive_effects
-from .craft import Recipe, craft, craft_path, mastery, materials_graph, repair
+from .craft import Recipe, craft, mastery, repair
 from .durability import active_mods, condition, use
 from .graph import combine, combine_item, item_graph, node_attrs, node_item, node_lookup
 from .inspect import inspect, view
@@ -29,7 +29,7 @@ from .smith import ItemCtx, LLMSmith, Smith, StubSmith
 
 __all__ = ["ItemCtx", "Smith", "LLMSmith", "StubSmith", "Capability",
            "inspect", "view", "normalize", "rarity_price", "loot_pool",
-           "Recipe", "craft", "craft_path", "materials_graph", "mastery", "repair",
+           "Recipe", "craft", "mastery", "repair",
            "condition", "use", "active_mods",
            "ATTRS", "attr_graph", "compose", "derive_effects",
            "item_graph", "node_attrs", "combine", "combine_item", "node_item", "node_lookup"]

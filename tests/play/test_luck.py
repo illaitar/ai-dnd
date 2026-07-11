@@ -14,6 +14,12 @@ def test_inspiration_decays_linearly_to_zero():
     assert inspiration_decay(5.0, 90, 90) == 0.0      # spent
     assert inspiration_decay(5.0, 120, 90) == 0.0     # past its life
     assert inspiration_decay(0.0, 10, 90) == 0.0      # nothing to decay
+    assert inspiration_decay(5.0, -3, 90) == 5.0      # clock rewind → still fresh, not negative
+
+
+def test_luck_from_karma_rounds():
+    assert luck_from_karma(25, 20, 4.0) == 1.25       # 25/20 rounded to 2dp
+    assert luck_from_karma(10, 0, 4.0) == 4.0         # divide-by-zero guarded (max(1, per))
 
 
 def test_karma_add_clamps_and_luck_tracks_it():

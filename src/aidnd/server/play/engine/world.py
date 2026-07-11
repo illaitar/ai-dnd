@@ -744,7 +744,7 @@ def _live_tick(people) -> tuple:
 
     conv_tick(lv, lambda m: w.bodies[m].place if m in w.bodies else None)
     salient = lv.pop("salient", None)
-    if salient and not str(salient).startswith("чужак"):  # witnessing an unusual event (not your own act)
+    if salient and "чужак" not in str(salient):  # witnessing an unusual event (not your own act/its fallout)
         from .pc.luck import _pc_inspire
         _pc_inspire()  # → a fleeting inspiration spark
     pc_said = lv.pop("pc_said", None)

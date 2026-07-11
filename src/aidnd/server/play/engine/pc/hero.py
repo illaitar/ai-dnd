@@ -90,10 +90,12 @@ def _pc_cap_eff():
 
 def _pc_save() -> None:
     from .glyphs import _glyphs_known  # lazy: keeps hero import-time free of sibling deps
+    from .luck import _luck_load  # lazy: sibling dep
     from .mana import _mana_load  # lazy: mana imports _PC_CAP from hero — avoid an import cycle
 
     st = _pc()
     _mana_load()
+    _luck_load()  # populate _S before the save dict, else a save-before-touch clobbers persisted karma
     _store().save_pc(
         _wid(),
         {

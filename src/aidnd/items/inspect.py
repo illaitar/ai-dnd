@@ -98,9 +98,16 @@ def _view_attrs(item: dict, known: set) -> dict:
         shown[a] = {"value": int(v["true"] if grp_known else v["surface"]), "true_known": grp_known}
     # worth is known only when every worth-feeding attribute the item HAS is revealed (value + arcane чара)
     worth_groups = {attr_group(a) for a in DEFAULT_RULES["worth"]["w"] if a in item["attrs"]}
+    # HONEST item (no surface≠true on a value attr): the graph under-values basic goods, so never let
+    # derived worth drop below the item's authored price. A forgery (value deception) keeps derived.
+    worth = eff["worth"]
+    honest = all((item["attrs"].get(a) or {}).get("surface") == (item["attrs"].get(a) or {}).get("true")
+                 for a in DEFAULT_RULES["worth"]["w"] if a in item["attrs"])
+    if honest:
+        worth = max(worth, int(item.get("apparent_worth", 0)))
     return {"name": item["name"], "kind": item["kind"], "slot": item["slot"],
             "material": item["material"], "quality": item["quality"], "weight": item["weight"],
-            "worth": eff["worth"], "worth_known": worth_groups <= known,
+            "worth": worth, "worth_known": worth_groups <= known,
             "tags": item["tags"], "mods": eff["mods"], "attrs": shown,
             "facts": [h["fact"] for h in item.get("hidden", []) if h["prop"] in known and h.get("fact")],
             "unknown": sum(1 for g in ATTR_GROUPS if g not in known),

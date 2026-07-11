@@ -315,6 +315,8 @@ def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
         _npc_save(w)
     _npc_save(npc)
     _wanted_add(weight + min(3, len(wit)), what)  # victim + witnesses → wanted
+    from .pc.luck import _pc_karma_add  # lazy: luck→session only, avoid an import cycle
+    _pc_karma_add(-PB["karma_crime"])  # a crime stains your luck
     return len(wit)
 
 

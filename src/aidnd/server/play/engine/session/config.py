@@ -140,6 +140,17 @@ PB = {
     "watch_flee_dc": 12,
     "watch_jail_h": 7,  # didn't pay — "lockup" until morning
     # MAGIC (mana-candle): start/cap/regen/growth/fatigue/cast difficulty
+    # LUCK & INSPIRATION: earned karma → luck; a fleeting inspiration spark (feeds the craft roll)
+    "karma_ceil": 100,
+    "karma_floor": 100,          # symmetric bound (±)
+    "karma_per_luck": 20,        # karma ÷ this = luck
+    "luck_cap": 4.0,             # luck bounded ±
+    "karma_crime": 4,            # a witnessed crime lowers karma
+    "karma_gift": 3,
+    "karma_quest": 6,
+    "karma_mercy": 5,
+    "insp_spark": 5.0,           # inspiration set on an unusual sighting
+    "insp_minutes": 90,          # decays linearly to 0 over this many game-minutes
     "mana_start": 12.0,
     "mana_cap_start": 14.0,
     "mana_hardcap_per_int": 8,  # cap ≤ Int×8

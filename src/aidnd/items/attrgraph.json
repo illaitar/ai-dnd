@@ -16,7 +16,7 @@
     "рукоять": {"kind": "misc",       "expresses": {}},
     "древко":  {"kind": "misc",       "expresses": {}},
     "щит":     {"kind": "armor",      "expresses": {"defense": {"твёрдость": 0.6, "прочность": 0.4}}},
-    "доспех":  {"kind": "armor",      "expresses": {"defense": {"твёрдость": 0.5, "прочность": 0.3, "гибкость": 0.2}}},
+    "доспех":  {"kind": "armor",      "expresses": {"defense": {"прочность": 0.5, "твёрдость": 0.3, "гибкость": 0.2}}},
     "оправа":  {"kind": "trinket",    "expresses": {}},
     "амулет":  {"kind": "trinket",    "expresses": {}},
     "сосуд":   {"kind": "consumable", "expresses": {}},

@@ -54,14 +54,16 @@ def compose(parts, quality: str = "plain", graph: dict | None = None) -> dict:
 
 # Effect-rule coefficients — code owns the math (pure module; PB override seam lands in Phase 3).
 DEFAULT_RULES = {
-    "attack":     {"bands": [(80, 3), (60, 2), (40, 1)], "when": "equipped"},
-    "defense":    {"bands": [(80, 3), (60, 2), (40, 1)], "when": "equipped"},
+    "attack":     {"bands": [(75, 3), (55, 2), (35, 1)], "when": "equipped"},
+    "defense":    {"bands": [(70, 3), (50, 2), (30, 1)], "when": "equipped"},
     "appearance": {"attr": "краса", "bands": [(88, 3), (70, 2), (45, 1)],
                    "target": "social:appearance", "when": "worn"},
     "poison":     {"attr": "скверна", "bands": [(75, 3), (50, 2), (20, 1)],
                    "target": "special:poison", "when": "on_use"},
     "mana":       {"attr": "мана", "bands": [(75, 3), (50, 2), (25, 1)], "target": "special:mana"},
-    "worth":      {"w": {"ценность": 0.6, "краса": 0.25, "чара": 0.15}, "k": 0.6, "min": 1},
+    "worth":      {"w": {"ценность": 0.6, "краса": 0.25, "чара": 0.15,          # material value +
+                         "острота": 0.08, "твёрдость": 0.06, "прочность": 0.05},  # the work in it
+                   "k": 0.6, "min": 1},
     "durability": {"attr": "прочность", "k": 0.5, "min": 4},
     "elements":   {"map": {"горючесть": "special:огонь", "взрывчатость": "special:взрыв",
                            "едкость": "special:кислота", "мороз": "special:мороз", "заряд": "special:разряд"},

@@ -13,14 +13,11 @@ give_item(request) -> dict : Gift or trade items to NPCs via unified resolver.
 
 from __future__ import annotations
 
-import hashlib
 import random
 
 from fastapi import Request
 
-from aidnd.items import craft as item_craft
 from aidnd.items import inspect as item_inspect
-from aidnd.items import repair as item_repair
 from aidnd.items import use as item_use
 from aidnd.server.play.engine.core import (
     _PC_CAP,
@@ -39,14 +36,16 @@ from aidnd.server.play.engine.core import (
 from aidnd.server.play.engine.world import _play
 from aidnd.server.play.handlers.freeform import _attempt
 from aidnd.server.play.mechanics.items import (
-    _CRAFT,
+    _ROLE_NODE,
     _cont_holder,
+    _craft_band,
     _forge,
     _item_card,
     _known,
     _npc_cap,
     _pc_coins,
     _pc_key_for,
+    _put_graph_item,
 )
 
 
@@ -144,33 +143,25 @@ def inventory():
 
 @router.post("/api/play/commission")
 async def commission(request: Request):
-    """Commission an item from an NPC artisan: their CRAFT determines the outcome (quality/mark/defect/durability)."""
+    """Commission an item from an NPC artisan: they forge a derivation-graph node; their mastery + a
+    roll set the quality (via the same spark ladder as player craft)."""
     _city, people, _crof, _cr2b, _loc = _play()
     npc = (await request.json()).get("npc")
     if npc not in people:
         return {"error": "нет такого"}
     p = people[npc]
-    rec = _CRAFT.get(p.role)
-    if not rec:
+    node_id = _ROLE_NODE.get(p.role)
+    if not node_id:
         return {"error": f"{p.name} не берётся за ремесло"}
     if _spurns(p):
         return {"error": f"{p.name} не желает иметь с тобой дела"}
-
     n = len(_store().inventory(_wid()))
-    rep = random.Random(f"skill|{npc}").randint(
-        -1, 3
-    )  # each master has their own hand (world is diverse)
-    it = item_craft(
-        _npc_cap(p),
-        rec,
-        seed=f"{npc}|{rec.name}|{n}",
-        maker={"id": npc, "name": p.name},
-        reputation=rep,
-    )
-    it["id"] = "it:" + hashlib.md5(f"comm|{npc}|{n}".encode()).hexdigest()[:10]
-    _store().save_item(it)
-    _store().inv_add(_wid(), it["id"])
-    return {"item": _item_card(it, set()), "maker": p.name, "recipe": rec.name}
+    cap = _npc_cap(p)
+    roll = random.Random(f"comm|{npc}|{n}").randint(1, 20)
+    band = _craft_band(PB["craft_base"] + max(cap.mod("dex"), cap.mod("int")) + roll)
+    band = "crude" if band == "waste" else band            # a commission is always delivered (no waste)
+    made = _put_graph_item(node_id, band, masterwork=(band == "exquisite"), seed=f"comm|{npc}|{n}")
+    return {"item": _item_card(_store().get_item(made), set()), "maker": p.name, "recipe": node_id}
 
 
 @router.post("/api/play/repair")
@@ -182,15 +173,19 @@ async def repair_item(request: Request):
     if not it:
         return {"error": "нет предмета"}
     p = people.get(npc)
-    if not p or p.role not in _CRAFT:
+    if not p or p.role not in _ROLE_NODE:
         return {"error": "он не мастер"}
-    if not it.get("durability"):
-        return {"error": "чинить нечего"}
-    res = item_repair(it, _npc_cap(p), seed=f"rep|{iid}|{npc}", station=_CRAFT[p.role].station)
-    if not res.get("ok"):
-        return {"error": res.get("reason", "не чинится")}
-    _store().save_item(it)
-    return {"item": _item_card(it, _known(iid)), "note": res.get("note"), "by": p.name}
+    pr = (it.get("attrs") or {}).get("прочность")
+    if pr and pr.get("true", 0) < pr.get("surface", 0):    # a hidden crack → a smith mends it
+        pr["true"] = pr["surface"]
+        _store().save_item(it)
+        return {"item": _item_card(it, _known(iid)), "note": "трещину заделали — как новое", "by": p.name}
+    d = it.get("durability")
+    if d:                                                  # legacy durability item → restore condition
+        d["current"] = d["max"]
+        _store().save_item(it)
+        return {"item": _item_card(it, _known(iid)), "note": "как новое", "by": p.name}
+    return {"error": "чинить нечего"}
 
 
 @router.post("/api/play/use")

@@ -23,7 +23,6 @@ from aidnd.items import condition as item_condition
 from aidnd.items import inspect as item_inspect
 from aidnd.items import normalize as item_normalize
 from aidnd.items import view as item_view
-from aidnd.items.craft import ROLE_RECIPES
 from aidnd.server.play.engine.core import (
     _PC_CAP,
     _S,
@@ -52,6 +51,7 @@ def _graph_enrich(it: dict) -> dict:
     an unresolved name leaves the item unchanged. Keeps the flavourful name (epithet)."""
     if it.get("attrs"):
         return it
+    from aidnd.items import derive_effects
     from aidnd.items.graph import node_item, node_lookup
     nid = node_lookup(it.get("name", ""))
     if nid:
@@ -60,6 +60,8 @@ def _graph_enrich(it: dict) -> dict:
             it["attrs"] = ni["attrs"]
             if ni.get("form") and not it.get("form"):
                 it["form"] = ni["form"]
+            # reconcile stored worth with the derived (floored) value so every reader agrees with trade
+            it["worth"] = it["apparent_worth"] = max(derive_effects(it)["worth"], int(it.get("apparent_worth", 0)))
     return it
 
 
@@ -482,7 +484,12 @@ def _item_card(it: dict, known) -> dict:
     return v
 
 
-_CRAFT = ROLE_RECIPES  # recipes—item system data
+# artisan role → the derivation-graph node they craft (commission/repair). Item system data.
+_ROLE_NODE = {
+    "кузнец": "нож", "оружейник": "меч", "знахарка": "целебный отвар", "сапожник": "сапоги",
+    "дубильщик": "кожаный жилет", "охотник": "лук", "лавочник": "перстень", "мельник": "мука",
+    "трактирщик": "хлеб",
+}
 
 
 def _known(iid: str) -> set:

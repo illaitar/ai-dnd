@@ -30,7 +30,7 @@ from aidnd.server.play.engine.core import (
 from aidnd.server.play.engine.resolve import _voice
 from aidnd.server.play.engine.world import _play
 from aidnd.server.play.mechanics.items import (
-    _CRAFT,
+    _ROLE_NODE,
     _item_card,
     _materialize_npc,
     _npc_cap,
@@ -41,7 +41,7 @@ from aidnd.server.play.mechanics.items import (
 
 def _merchant(people, npc):
     p = people.get(npc)
-    return p if (p and (p.role in _CRAFT or p.role == "лавочник")) else None
+    return p if (p and (p.role in _ROLE_NODE or p.role == "лавочник")) else None
 
 
 @router.post("/api/play/askkey")

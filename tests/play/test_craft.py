@@ -100,6 +100,52 @@ def test_crafted_weapon_feeds_combat_and_prices(world):
     assert view(made)["worth"] == derive_effects(made)["worth"]   # trade prices off derived worth
 
 
+def test_role_nodes_all_resolve():
+    from aidnd.items.graph import item_graph
+    from aidnd.server.play.mechanics.items import _ROLE_NODE
+
+    nodes = item_graph()["nodes"]
+    for role, nid in _ROLE_NODE.items():
+        assert nid in nodes, f"artisan {role} → {nid} is not a graph node"
+
+
+def test_enrich_reconciles_stored_worth_with_view():
+    from aidnd.items import normalize, view
+    from aidnd.server.play.mechanics.items import _graph_enrich
+
+    it = _graph_enrich(normalize({"kind": "armor", "name": "кожаный жилет", "apparent_worth": 10, "worth": 10}))
+    assert it["attrs"]
+    assert it["worth"] == view(it, set())["worth"]           # stored worth == trade/view worth (no divergence)
+
+
+def test_commission_forges_graph_item_and_repair_mends_a_flaw(world):
+    import asyncio
+
+    from aidnd.server.play.engine.session.persist import _store
+    from aidnd.server.play.engine.world import _play
+    from aidnd.server.play.handlers.inventory import commission, repair_item
+    from aidnd.server.play.mechanics.items import _ROLE_NODE, _put_graph_item
+
+    class Req:
+        def __init__(self, d):
+            self.d = d
+
+        async def json(self):
+            return self.d
+
+    _city, people, *_ = _play()
+    npc = next(pid for pid, p in people.items() if p.role in _ROLE_NODE)
+    res = asyncio.run(commission(Req({"npc": npc})))
+    assert "error" not in res and res.get("item")            # the artisan forged a graph item
+
+    made = _store().get_item(_put_graph_item("меч", "crude", flaw=True))
+    pr = made["attrs"]["прочность"]
+    assert pr["true"] < pr["surface"]                        # a hidden crack
+    asyncio.run(repair_item(Req({"item": made["id"], "npc": npc})))
+    pr2 = _store().get_item(made["id"])["attrs"]["прочность"]
+    assert pr2["true"] == pr2["surface"]                     # a smith mended it
+
+
 def test_graph_enrich_backs_a_legacy_item():
     from aidnd.items import normalize
     from aidnd.server.play.mechanics.items import _graph_enrich

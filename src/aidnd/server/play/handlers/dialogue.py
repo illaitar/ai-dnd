@@ -46,7 +46,7 @@ from aidnd.server.play.engine.core import (
 from aidnd.server.play.engine.resolve import _voice
 from aidnd.server.play.engine.world import _play, _world_tick
 from aidnd.server.play.mechanics.contracts import _contract_offer, _contract_on_talk
-from aidnd.server.play.mechanics.items import _CRAFT, _materialize_npc, _pc_coins
+from aidnd.server.play.mechanics.items import _ROLE_NODE, _materialize_npc, _pc_coins
 
 # Player's words signal interest in work/errands — gates the «Уговор» card reveal in say().
 _WORK_INTEREST_RE = re.compile(
@@ -123,8 +123,8 @@ async def talk(request: Request):
         "origin": per.get("origin"),
         "look": (per.get("look") or {}).get("clothing") or None,
         "keys": [k["name"] for k in (p.keys or [])],
-        "crafter": p.role in _CRAFT,
-        "recipe": (_CRAFT[p.role].name if p.role in _CRAFT else None),
+        "crafter": p.role in _ROLE_NODE,
+        "recipe": _ROLE_NODE.get(p.role),
         "known": known,
         "gt": _gt(),
         "topics": _topics_for(p),

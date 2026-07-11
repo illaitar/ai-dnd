@@ -175,6 +175,8 @@ async def repair_item(request: Request):
     p = people.get(npc)
     if not p or p.role not in _ROLE_NODE:
         return {"error": "он не мастер"}
+    if _spurns(p):
+        return {"error": f"{p.name} не станет тебе помогать"}
     pr = (it.get("attrs") or {}).get("прочность")
     if pr and pr.get("true", 0) < pr.get("surface", 0):    # a hidden crack → a smith mends it
         pr["true"] = pr["surface"]

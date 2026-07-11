@@ -41,7 +41,7 @@ from aidnd.server.play.mechanics.items import (
 
 def _merchant(people, npc):
     p = people.get(npc)
-    return p if (p and (p.role in _ROLE_NODE or p.role == "лавочник")) else None
+    return p if (p and p.role in _ROLE_NODE) else None
 
 
 @router.post("/api/play/askkey")

@@ -3,7 +3,8 @@
 Public contract:
     from aidnd.items import ItemCtx, LLMSmith, StubSmith, Capability, inspect, view, normalize
 
-Craft/mastery/durability (craft.py, durability.py) — next slice.
+Attributes/derivation graph in attrs.py + graph.py; player & NPC crafting walk the graph
+(server.play.mechanics.items). Durability in durability.py.
 
 Key functions
 -------------
@@ -12,7 +13,6 @@ LLMSmith : LLM-powered smith for emergent item creation.
 inspect(item, actor, context) -> Result : inspect items with gating rules.
 view(item) -> Dict : expose surface (public) or hidden (private) item data.
 Capability : enum of item capabilities and properties.
-craft(recipe, materials) -> ItemCtx : forge item from recipe with durability.
 normalize(item) -> Dict : canonical item representation.
 """
 

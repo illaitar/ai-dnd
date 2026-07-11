@@ -18,12 +18,12 @@ from __future__ import annotations
 import hashlib
 import random
 
-from aidnd.items import Capability, ItemCtx, LLMSmith, craft_path, loot_pool
+from aidnd.items import Capability, ItemCtx, LLMSmith, loot_pool
 from aidnd.items import condition as item_condition
 from aidnd.items import inspect as item_inspect
 from aidnd.items import normalize as item_normalize
 from aidnd.items import view as item_view
-from aidnd.items.craft import ROLE_RECIPES, materials_graph
+from aidnd.items.craft import ROLE_RECIPES
 from aidnd.server.play.engine.core import (
     _PC_CAP,
     _S,
@@ -33,7 +33,6 @@ from aidnd.server.play.engine.core import (
     _model,
     _mt,
     _store,
-    _tokens_ru,
     _wid,
 )
 
@@ -119,92 +118,124 @@ STATION_RU = {
     "cauldron": "котёл",
     "tannery": "дубильня",
 }
+# itemgraph process → the station it needs (processes not listed can be done anywhere)
+_PROC_STATION = {
+    "ковка": "anvil", "заточка": "anvil", "правка": "anvil",
+    "плавка": "forge", "легирование": "forge", "закалка": "forge",
+    "дубление": "tannery", "отвар": "cauldron", "выпечка": "cauldron",
+    "крой": "bench", "резьба": "bench", "сборка": "bench", "распил": "bench",
+    "прядение": "bench", "ткачество": "bench", "оправа": "bench",
+}
+
+
+def _craft_band(spark: float) -> str:
+    """spark → outcome band (pure). waste | crude(flaw) | plain | fine | exquisite(masterwork)."""
+    if spark < PB["craft_waste"]:
+        return "waste"
+    if spark < PB["craft_flaw"]:
+        return "crude"
+    if spark < PB["craft_clean"]:
+        return "plain"
+    if spark < PB["craft_fine"]:
+        return "fine"
+    return "exquisite"
+
+
+def _flaw_attrs(attrs: dict) -> dict:
+    """Bake a HIDDEN crack: surface прочность intact, true prochnost dropped (revealed by craft_eye)."""
+    pr = attrs.get("прочность")
+    if pr:
+        pr["true"] = max(1, int(round(pr["true"] * PB["craft_flaw_mul"])))
+    else:
+        attrs["прочность"] = {"surface": 35, "true": 10}
+    return attrs
+
+
+def _mw_attrs(attrs: dict) -> dict:
+    """Masterwork: bump the strongest attribute (surface+true)."""
+    if attrs:
+        best = max(attrs, key=lambda a: attrs[a]["true"])
+        for k in ("surface", "true"):
+            attrs[best][k] = min(100, attrs[best][k] + PB["craft_masterwork_bonus"])
+    return attrs
+
+
+def _put_graph_item(node_id: str, quality: str = "plain", *, flaw: bool = False,
+                    masterwork: bool = False, holder: str = "pc", seed: str | None = None) -> str:
+    """Materialize an itemgraph node into a REAL attribute-bearing item in a holder's inventory."""
+    from aidnd.items import derive_effects
+    from aidnd.items.graph import node_item
+
+    it = item_normalize(node_item(node_id, quality))
+    if flaw:
+        _flaw_attrs(it["attrs"])
+    if masterwork:
+        _mw_attrs(it["attrs"])
+    worth = derive_effects(it)["worth"]                    # store a real worth (combat/trade read it)
+    it["worth"] = worth
+    it["apparent_worth"] = worth
+    it["tags"] = (it.get("tags") or []) + (["искусной работы"] if masterwork else ["своей работы"])
+    it["id"] = "it:" + hashlib.md5((seed or f"craft|{node_id}|{_mt()}").encode()).hexdigest()[:10]
+    _store().save_item(it)
+    _store().inv_add(_wid(), it["id"], holder=holder)
+    return it["id"]
 
 
 def _do_craft(detail: str, out: dict) -> dict:
-    """Craft along MATERIALS GRAPH: inventory items → goal via path with gates (place=workshop,
-    time from edges). Consumes leaf materials, forges result, adds to world pool."""
-    graph = materials_graph()
-    nodes = {n["id"]: n for n in graph["nodes"]}
-    dtok = _tokens_ru(detail)
-    scored = [
-        (nid, len(_tokens_ru(nid) & dtok) + (2 if nid.lower() in detail.lower() else 0))
-        for nid in nodes
-    ]
-    best = max(scored, key=lambda s: s[1])
-    want = best[0] if best[1] > 0 else None  # most matched words
-    if not want:
-        out["narr"].append(
-            "Не пойму, что сковать — назови вещь ремесла (клинок, лук, доспех, отвар…)."
-        )
+    """Craft on the DERIVATION GRAPH via the SPARK LADDER. Resolve the target node, gather its direct
+    inputs from the bag, roll spark = base + mastery + material + luck + inspiration + d20, and band it:
+    waste (inputs lost) / crude+hidden-crack / plain / fine / exquisite masterwork. Forges a real
+    attribute-bearing item — so it lands with combat/trade stats immediately."""
+    from aidnd.items.graph import item_graph, node_attrs, node_lookup
+    from aidnd.server.play.engine.pc.luck import _pc_inspiration, _pc_luck
+
+    g = item_graph()
+    want = node_lookup(detail)
+    if not want or want not in g["nodes"]:
+        out["narr"].append("Не пойму, что смастерить — назови вещь (клинок, лук, доспех, отвар…).")
         return out
-    inv = [
-        (r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), "pc")
-    ]
-    have = {itm["name"] for _i, itm in inv if itm}
-    path = craft_path(have, want)
-    if path is None:
-        out["narr"].append(f"«{want}» так просто не сделать — не хватает материалов.")
-        return out
-    if not path:
-        out["narr"].append(f"«{want}» у тебя уже есть.")
+    node = g["nodes"][want]
+    need = node.get("from", [])
+    inv = [(r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), "pc")]
+    matched, used = {}, set()
+    for inp in need:                                       # each input → a distinct held item
+        iid = next((i for i, itm in inv
+                    if itm and i not in used and node_lookup(itm["name"]) == inp), None)
+        if iid:
+            matched[inp] = iid
+            used.add(iid)
+    miss = [inp for inp in need if inp not in matched]
+    if miss:
+        out["narr"].append("Не хватает для работы: " + ", ".join(miss) + ".")
         return out
     inside = _S.get("inside")
-    if not inside:  # gate-place: need workshop
+    if not inside:
         out["narr"].append("Тут не смастеришь — зайди в мастерскую/кузницу.")
         return out
-    binfo = _binfo(inside)
-    btok = (binfo["name"] + " " + binfo["kind"]).lower()
-    for e in path:  # gate-machine: BUILDING must have required
-        hints = STATION_HINTS.get(e.get("place", "bench"), ())
-        if hints and not any(h in btok for h in hints):
-            need = STATION_RU.get(e.get("place"), e.get("place", ""))
-            out["narr"].append(f"Для «{e['to']}» нужен {need} — тут такого нет.")
+    place = _PROC_STATION.get(node.get("process", ""))     # gate: right station for this process
+    if place:
+        btok = (lambda b: (b["name"] + " " + b["kind"]).lower())(_binfo(inside))
+        if not any(h in btok for h in STATION_HINTS.get(place, ())):
+            out["narr"].append(f"Для такой работы нужен {STATION_RU.get(place, place)} — тут его нет.")
             return out
-    produced = {e["to"] for e in path}
-    leaves = {src for e in path for src in e["from"] if src not in produced}
-    missing = [s for s in leaves if s not in have]
-    if missing:
-        out["narr"].append("Не хватает: " + ", ".join(missing) + ".")
+    scores = [max(node_attrs(inp).values(), default=0) for inp in need]
+    material = (sum(scores) / len(scores)) * PB["craft_material_k"] if scores else 0.0
+    mastery = max(_PC_CAP.mod("dex"), _PC_CAP.mod("int"))
+    roll = random.Random(f"craft|{want}|{_mt()}").randint(1, 20)
+    spark = PB["craft_base"] + mastery + material + _pc_luck() + _pc_inspiration() + roll
+    band = _craft_band(spark)
+    _gt_add(PB["craft_time"])
+    for i in matched.values():                             # inputs are always consumed
+        _store().inv_drop(_wid(), i)
+    if band == "waste":
+        out["narr"].append("Работа загублена — материал испорчен, впустую.")
+        out["refresh"] = True
         return out
-    skills = {e["skill"] for e in path if e.get("skill")}
-    if skills - set(_PC_CAP.competencies):  # gate-skill: unfamiliar craft—roll
-        roll = random.Random(f"craftskill|{want}|{_mt()}").randint(1, 20)
-        total_r = roll + _PC_CAP.mod("int")
-        out["dice"] = {
-            "die": 20,
-            "roll": roll,
-            "mod": _PC_CAP.mod("int"),
-            "total": total_r,
-            "dc": PB["craft_skill_dc"],
-            "ok": total_r >= PB["craft_skill_dc"],
-            "label": "Ремесло (Int) — незнакомая работа",
-        }
-        if total_r < PB["craft_skill_dc"]:
-            _gt_add(PB["craft_fail_min"])
-            out["narr"].append(
-                "Работа не задалась — заготовка цела, но время ушло. Попробуй позже."
-            )
-            return out
-    for name in leaves:  # consume base materials from bag
-        iid = next((i for i, itm in inv if itm and itm["name"] == name), None)
-        if iid:
-            _store().inv_drop(_wid(), iid)
-    total = sum(int(e.get("time", 10)) for e in path)
-    _gt_add(total)
-    made_id = _put_item(
-        f"craft|{want}|{_mt()}",
-        want,
-        nodes[want].get("kind", "misc"),
-        tier="fine",
-        note="своей ковки",
-        holder="pc",
-    )
-    _pool_add_new(_store().get_item(made_id))
-    out["narr"].append(
-        f"Ты мастеришь: {' → '.join(e['to'] for e in path)}. "
-        f"Готово — «{want}» (потрачено {total} мин)."
-    )
+    made = _put_graph_item(want, band, flaw=(band == "crude"), masterwork=(band == "exquisite"))
+    _pool_add_new(_store().get_item(made))
+    qru = {"crude": "грубо", "plain": "просто", "fine": "добротно", "exquisite": "искусно"}[band]
+    tail = " — истинный шедевр!" if band == "exquisite" else "."
+    out["narr"].append(f"Ты мастеришь «{node.get('name', want)}» — вышло {qru}{tail}")
     out["refresh"] = True
     return out
 

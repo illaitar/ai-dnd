@@ -173,6 +173,16 @@ PB = {
     "taboo_witness": 2,  # attack magic with witnesses → wanted
     "craft_skill_dc": 12,
     "craft_fail_min": 15,  # unfamiliar craft: Int roll / failure cost
+    # CRAFT SPARK LADDER: spark = base + mastery + material + luck + inspiration + d20 → band
+    "craft_base": 2,
+    "craft_material_k": 0.15,   # material-quality contribution (mean input attr × this)
+    "craft_waste": 12,          # spark < this → inputs wasted, nothing made
+    "craft_flaw": 18,           # < this → item with a HIDDEN crack (low true прочность)
+    "craft_clean": 26,          # < this → clean plain item
+    "craft_fine": 34,           # < this → fine (modified); ≥ this → exquisite masterwork
+    "craft_flaw_mul": 0.35,     # flawed item: true прочность × this
+    "craft_masterwork_bonus": 12,  # masterwork: strongest attribute +this
+    "craft_time": 30,           # minutes spent per craft
     "guild_float": 120,
     "guild_reward_per_cr": 8,
     "guild_mark_fine": 15,

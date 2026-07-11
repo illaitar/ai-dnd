@@ -302,25 +302,39 @@ def _pc_combatant():
 _TIER_QUALITY = {"poor": "crude", "modest": "plain", "comfortable": "fine", "wealthy": "exquisite"}
 
 
+def _npc_gear_bonus(name: str, quality: str, target: str) -> int:
+    """Resolve an NPC's persona-gear NAME to a derivation-graph node and read its derived attack/
+    defense (scaled by the persona tier's quality). 0 if the name doesn't resolve — dual-path."""
+    from aidnd.items.graph import node_item, node_lookup
+    nid = node_lookup(name or "")
+    return _derived_amount(node_item(nid, quality), target) if nid else 0
+
+
 def _npc_weapon(p) -> dict | None:
-    """NPC weapon for combat — from persona (name gives ranged, tier → bone quality)."""
+    """NPC weapon for combat — from persona (name → node → derived острота; tier → quality dice)."""
     w = ((p.persona or {}).get("gear") or {}).get("weapon")
     if not w:
         return None
-    return {
-        "name": w.get("name", ""),
-        "quality": _TIER_QUALITY.get(w.get("tier", "modest"), "plain"),
-    }
+    quality = _TIER_QUALITY.get(w.get("tier", "modest"), "plain")
+    return {"name": w.get("name", ""), "quality": quality,
+            "bonus": _npc_gear_bonus(w.get("name", ""), quality, "attack")}
 
 
 def _combatant_from_npc(pid, p):
-    """Combatant from NPC: durability from endurance/courage, weapon from persona (from_npc calculates hp)."""
-    return from_npc(
+    """Combatant from NPC: durability from endurance/courage, weapon+armor from persona gear resolved
+    to graph nodes (derived attack→damage, best armor defense→AC). Dual-path: unresolved gear → 0."""
+    c = from_npc(
         pid,
         p.name,
         {"abilities": p.state.config.abilities, "traits": p.state.config.traits},
         weapon=_npc_weapon(p),
     )
+    gear = (p.persona or {}).get("gear") or {}
+    c.ac += max((_npc_gear_bonus((gear.get(slot) or {}).get("name", ""),
+                                 _TIER_QUALITY.get((gear.get(slot) or {}).get("tier", "modest"), "plain"),
+                                 "defense")
+                 for slot in ("armor", "garb")), default=0)      # best single armour piece → AC
+    return c
 
 
 def _contract_on_death(pid: str) -> str | None:

@@ -46,7 +46,12 @@ from aidnd.server.play.engine.world import (
 )
 from aidnd.server.play.mechanics.combat import _combatant_from_npc, _pc_combatant
 from aidnd.server.play.mechanics.contracts import _contract_on_give
-from aidnd.server.play.mechanics.items import _do_craft, _materialize_npc, _pc_coins
+from aidnd.server.play.mechanics.items import (
+    _apply_consumable,
+    _do_craft,
+    _materialize_npc,
+    _pc_coins,
+)
 
 _DISRUPTIVE_RE = re.compile(
     # a loud/visible player act the whole room notices (→ salient); NOT ordinary speech
@@ -270,8 +275,10 @@ def _attempt(intent: dict, sc: dict) -> dict:
             return out
         _gt_add(PB["give_min"])
         if it["kind"] == "consumable" or not it.get("durability"):
+            fx = _apply_consumable(it)              # heal / mana from attrs (banded, code-owned)
             _store().inv_move(_wid(), iid, "used")  # drunk/consumed — item is gone
-            out["narr"].append(f"«{it['name']}» — израсходовано.")
+            tail = (" — " + ", ".join(fx)) if fx else ""
+            out["narr"].append(f"«{it['name']}» — израсходовано{tail}.")
         else:
             ev = item_use(it, 1)
             _store().save_item(it)

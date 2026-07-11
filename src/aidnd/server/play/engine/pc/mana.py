@@ -68,6 +68,13 @@ def _mana_spend(amount: float) -> float:
     return round(_S["mana"], 2)
 
 
+def _mana_restore(amount: float) -> float:
+    """Restore mana toward the cap (clamped) — e.g. drinking a mana draught."""
+    _mana_load()
+    _S["mana"] = min(_mana_cap(), _mana() + float(amount))
+    return round(_S["mana"], 2)
+
+
 def _mana_grow(spent: float) -> None:
     """Cap growth from burning (magic as muscle), up to hard limit Int×N."""
     if spent <= 0:

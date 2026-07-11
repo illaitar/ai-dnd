@@ -194,14 +194,25 @@ class Encounter:
         elif c.dmg_type in t.resist:
             dmg //= 2
         t.hp -= dmg
-        if dmg > 0 and t.status.pop("asleep", 0):          # hit wakes the sleeping
+        elem_hits = []                                     # weapon elemental payload (on_hit)
+        for el in c.on_hit:
+            n = el["amount"]
+            if el["type"] in t.immune:
+                n = 0
+            elif el["type"] in t.resist:
+                n //= 2
+            if n > 0:
+                t.hp -= n
+                elem_hits.append(f"+{n} {el['ru']}")
+        if (dmg > 0 or elem_hits) and t.status.pop("asleep", 0):   # a landed hit wakes the sleeping
             self._log(f"{t.name} просыпается от удара.")
         crit = " (крит!)" if roll == 20 else ""
+        etail = (" (" + ", ".join(elem_hits) + ")") if elem_hits else ""
         if t.hp <= 0:
             t.alive = False
-            self._log(f"{c.name} атакует: {t.name} получает {dmg} урона{crit} и падает.")
+            self._log(f"{c.name} атакует: {t.name} получает {dmg} урона{crit}{etail} и падает.")
         else:
-            self._log(f"{c.name} атакует: {t.name} получает {dmg} урона{crit} [{t.hp}/{t.max_hp}]")
+            self._log(f"{c.name} атакует: {t.name} получает {dmg} урона{crit}{etail} [{t.hp}/{t.max_hp}]")
         return None
 
     def act_dodge(self, c: Combatant) -> str | None:

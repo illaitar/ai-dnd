@@ -1221,7 +1221,8 @@ function bagItem(it){
   const mods=(it.mods&&it.mods.length)?` · <span class="imod">${it.mods.map(m=>esc(m.target)+(m.amount?('+'+m.amount):'')).join(' ')}</span>`:'';
   const canRepair=it.condition&&it.condition.ratio<1&&mode==='dialogue'&&CARD&&CARD.crafter;
   const acts=[`<button onclick="itemAct('${it.id}','inspect')">осмотреть</button>`];
-  if(it.condition)acts.push(`<button onclick="itemAct('${it.id}','use')">испытать</button>`);
+  if(it.kind==='consumable')acts.push(`<button onclick="itemAct('${it.id}','use')">применить</button>`);
+  else if(it.condition)acts.push(`<button onclick="itemAct('${it.id}','use')">испытать</button>`);
   if(canRepair)acts.push(`<button onclick="itemAct('${it.id}','repair')">починить</button>`);
   if(mode==='dialogue'&&CARD&&CARD.crafter&&it.kind!=='key')
     acts.push(OFFERS[it.id]!=null
@@ -1237,6 +1238,7 @@ function bagItem(it){
 async function itemAct(id,act){
   if(act==='inspect')return inspectItem(id);
   if(act==='use'){const r=await api('/api/play/use',{item:id});if(r.error){push('sys',esc(r.error));return;}
+    if(r.consumed){const fx=(r.effects&&r.effects.length)?(' — '+r.effects.join(', ')):'';push('narr','Ты пускаешь «'+esc(r.name)+'» в дело'+esc(fx)+'.');if(r.hp!=null)setHp(r.hp);if(r.mana!=null)setMana(r.mana,r.mana_cap);await refreshInv();return;}
     const e=r.event;push(e.broke?'sys':'narr',e.broke?('«'+esc(r.item.name)+'» с треском ломается ('+esc(e.break_behavior)+')!'):('Ты пускаешь «'+esc(r.item.name)+'» в дело — '+esc(e.label)+'.'));await refreshInv();}
   if(act==='repair'){const r=await api('/api/play/repair',{item:id,npc:cur});if(r.error){push('sys',esc(r.error));return;}
     push('narr','«'+esc(byId(cur).name)+'» чинит «'+esc(r.item.name)+'»: '+esc(r.note)+'.');await refreshInv();}

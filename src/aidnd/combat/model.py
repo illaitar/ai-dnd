@@ -58,7 +58,8 @@ def _mod(score: int) -> int:
 def _resist_types(s: str) -> set:
     """SRD resist string → set of simple damage types (conservative: take only explicit words)."""
     out = set()
-    for t in ("bludgeoning", "piercing", "slashing", "fire", "cold", "poison", "radiant", "necrotic"):
+    for t in ("bludgeoning", "piercing", "slashing", "fire", "cold", "poison", "radiant", "necrotic",
+              "acid", "lightning", "thunder"):                # +elemental types weapons can carry
         if t in (s or "").lower():
             out.add(t)
     return out
@@ -91,6 +92,7 @@ class Combatant:
     dodging: bool = False
     fled: bool = False
     status: dict = field(default_factory=dict)   # {bound|asleep|afraid: rounds_left}
+    on_hit: list = field(default_factory=list)   # weapon elemental payloads [{type,amount,ru}]
 
     def down(self) -> bool:
         return not self.alive or self.fled

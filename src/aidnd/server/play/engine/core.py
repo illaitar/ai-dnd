@@ -51,6 +51,7 @@ from .pc.mana import _mana_grow as _mana_grow
 from .pc.mana import _mana_hardcap as _mana_hardcap
 from .pc.mana import _mana_load as _mana_load
 from .pc.mana import _mana_rate as _mana_rate
+from .pc.mana import _mana_restore as _mana_restore
 from .pc.mana import _mana_sleep as _mana_sleep
 from .pc.mana import _mana_spend as _mana_spend
 from .session.config import _GT0 as _GT0

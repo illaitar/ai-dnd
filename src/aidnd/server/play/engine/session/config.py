@@ -157,6 +157,7 @@ PB = {
     "mana_regen_base": 1.0,
     "mana_grow_frac": 0.1,
     "mana_sleep_mult": 3,  # sleep fills candle faster
+    "mana_per_band": 3.0,  # a mana draught restores (special:mana band) × this to the pool
     "fatigue_div": 8,
     "fatigue_min_per_pt": 24,  # fatigue: 1+burned/8 to stats, fades over time
     # DRAWING (M-5.2): candle drains ~drain/sec (softer from Int+Wis) + glyph weight when inscribed;

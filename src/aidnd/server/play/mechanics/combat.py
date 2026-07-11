@@ -284,6 +284,25 @@ def _derived_amount(item: dict, target: str) -> int:
     return sum(m["amount"] for m in derive_effects(item)["mods"] if m["target"] == target)
 
 
+_ELEM_EN = {"special:огонь": ("fire", "огонь"), "special:мороз": ("cold", "мороз"),
+            "special:кислота": ("acid", "кислота"), "special:разряд": ("lightning", "разряд"),
+            "special:взрыв": ("thunder", "взрыв")}          # item element mod → (resist-key, ru label)
+
+
+def _weapon_elements(item: dict) -> list:
+    """A weapon's derived elemental payloads → [{type(en for resist), amount, ru(label)}] for on-hit.
+    Legacy items (no attrs) → [] so combat is unchanged."""
+    if not (item and item.get("attrs")):
+        return []
+    from aidnd.items import derive_effects
+    out = []
+    for m in derive_effects(item)["mods"]:
+        en = _ELEM_EN.get(m["target"])
+        if en and m["amount"] > 0:
+            out.append({"type": en[0], "amount": int(m["amount"]), "ru": en[1]})
+    return out
+
+
 def _pc_combatant():
     rows = [
         (r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), "pc")
@@ -293,6 +312,7 @@ def _pc_combatant():
     if weapon and weapon.get("attrs"):                     # a crafted/graph blade: derived острота → damage
         weapon = {**weapon, "bonus": _derived_amount(weapon, "attack")}
     combatant = from_pc(_PC_CAP.abilities, _pc_hp(), PB["pc_max_hp"], weapon=weapon)
+    combatant.on_hit = _weapon_elements(weapon)           # flaming/frost blade → on-hit element damage
     combatant.ac += max((_derived_amount(it, "defense")   # best single piece — no equip slot to stack by
                          for _i, it in rows if it and it["kind"] == "armor"), default=0)
     combatant.name = _pc_name()  # hero's name (from landing), not 'Wanderer'

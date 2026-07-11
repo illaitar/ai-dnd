@@ -26,6 +26,9 @@ from aidnd.server.play.engine.core import (
     _gt,
     _gt_add,
     _in_room,
+    _mana,
+    _mana_cap,
+    _pc_hp,
     _pc_remember,
     _spurns,
     _store,
@@ -37,6 +40,7 @@ from aidnd.server.play.engine.world import _play
 from aidnd.server.play.handlers.freeform import _attempt
 from aidnd.server.play.mechanics.items import (
     _ROLE_NODE,
+    _apply_consumable,
     _cont_holder,
     _craft_band,
     _forge,
@@ -197,8 +201,11 @@ async def use_item(request: Request):
     it = _store().get_item(iid)
     if not it:
         return {"error": "нет предмета"}
-    if not it.get("durability"):
-        return {"error": "нечего испытывать"}
+    if it.get("kind") == "consumable" or not it.get("durability"):
+        fx = _apply_consumable(it)                          # heal / mana from attrs (banded, code-owned)
+        _store().inv_move(_wid(), iid, "used")              # drunk/consumed — item is gone
+        return {"consumed": True, "name": it["name"], "effects": fx,
+                "hp": _pc_hp(), "mana": _mana(), "mana_cap": _mana_cap(), "gt": _gt()}
     ev = item_use(it, 1)
     _store().save_item(it)
     return {"item": _item_card(it, _known(iid)), "event": ev}

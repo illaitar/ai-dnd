@@ -61,6 +61,8 @@ DEFAULT_RULES = {
     "poison":     {"attr": "скверна", "bands": [(75, 3), (50, 2), (20, 1)],
                    "target": "special:poison", "when": "on_use"},
     "mana":       {"attr": "мана", "bands": [(75, 3), (50, 2), (25, 1)], "target": "special:mana"},
+    "heal":       {"attr": "святость", "bands": [(70, 8), (45, 5), (20, 2)],   # holy → healing draught
+                   "target": "special:heal", "when": "on_use"},                # consumables only (gated)
     "worth":      {"w": {"ценность": 0.6, "краса": 0.25, "чара": 0.15,          # material value +
                          "острота": 0.08, "твёрдость": 0.06, "прочность": 0.05},  # the work in it
                    "k": 0.6, "min": 1},
@@ -133,6 +135,10 @@ def derive_effects(item: dict, rules: dict | None = None, known=None) -> dict:
     if amt and (kind == "consumable" or form in FOCUS_FORMS):
         mods.append({"target": mn["target"], "op": "add", "amount": amt,
                      "when": "on_use" if kind == "consumable" else "equipped"})
+    hl = r["heal"]                                         # святость → healing draught (consumables only)
+    amt = _band(_eff(attrs, hl["attr"], known), hl["bands"])
+    if amt and kind == "consumable":
+        mods.append({"target": hl["target"], "op": "add", "amount": amt, "when": hl["when"]})
     el = r["elements"]                                     # elemental payloads on weapon/projectile forms
     if (attr_graph()["forms"].get(form) or {}).get("kind") == "weapon":
         for attr, target in el["map"].items():

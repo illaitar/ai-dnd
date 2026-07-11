@@ -29,11 +29,37 @@ from aidnd.server.play.engine.core import (
     PB,
     _binfo,
     _gt_add,
+    _mana,
+    _mana_restore,
     _model,
     _mt,
+    _pc_hp,
     _store,
     _wid,
 )
+
+
+def _apply_consumable(it: dict) -> list[str]:
+    """A consumable's on-use effects (heal, mana) applied to the pc; returns narration fragments.
+    Effects are DERIVED from attributes by derive_effects — banded, code-owned; the LLM authors
+    nothing. Legacy items (no attrs) yield no mods → no-op."""
+    from aidnd.items import derive_effects
+
+    frag: list[str] = []
+    for m in derive_effects(it).get("mods", []):
+        if m.get("when") != "on_use":
+            continue
+        if m["target"] == "special:heal":
+            before = _pc_hp()
+            gain = _pc_hp(int(m["amount"])) - before        # clamped to pc_max_hp inside _pc_hp
+            if gain > 0:
+                frag.append(f"+{gain} здоровья")
+        elif m["target"] == "special:mana":
+            before = _mana()
+            gain = round(_mana_restore(m["amount"] * PB["mana_per_band"]) - before, 1)
+            if gain > 0:
+                frag.append(f"+{gain} маны")
+    return frag
 
 
 def _seed_item_pool() -> None:
@@ -201,6 +227,80 @@ def _put_graph_item(node_id: str, quality: str = "plain", *, flaw: bool = False,
     return it["id"]
 
 
+# unambiguous "join two things" verbs → the process each implies (deterministic novel crafting).
+# Assemble-verbs (соедини/собери) are deliberately absent — too ambiguous to route a craft on; сборка
+# is just the fallback process below.
+_COMBINE_KW = {
+    "привяж": "привязать", "прикреп": "привязать", "прицеп": "привязать", "примот": "привязать",
+    "покро": "покрыть", "обмаж": "покрыть", "смаж": "покрыть", "натр": "покрыть", "обмота": "покрыть",
+    "напол": "наполнить", "зале": "наполнить", "насып": "наполнить",
+    "отрав": "отравление", "освят": "освящение", "зачар": "зарядка",
+}
+
+
+def _put_combine_item(node_ids: list, process: str, *, flaw: bool = False, masterwork: bool = False,
+                      name: str = "", holder: str = "pc", seed: str | None = None) -> str:
+    """Materialize a NOVEL combination of graph nodes (кind = the primary input's) into a real item."""
+    from aidnd.items import derive_effects
+    from aidnd.items.graph import combine_item, item_graph
+
+    kind = (item_graph()["nodes"].get(node_ids[0]) or {}).get("kind", "misc")
+    it = item_normalize(combine_item(node_ids, process, kind=kind, name=name))
+    if flaw:
+        _flaw_attrs(it["attrs"])
+    if masterwork:
+        _mw_attrs(it["attrs"])
+    worth = derive_effects(it)["worth"]
+    it["worth"] = it["apparent_worth"] = worth
+    it["tags"] = ["своей работы"]
+    it["id"] = "it:" + hashlib.md5((seed or f"combine|{'+'.join(node_ids)}|{_mt()}").encode()).hexdigest()[:10]
+    _store().save_item(it)
+    _store().inv_add(_wid(), it["id"], holder=holder)
+    return it["id"]
+
+
+def _do_combine(detail: str, out: dict) -> dict:
+    """No known target — resolve a NOVEL combination: join the 2+ held items named in the request via
+    an inferred process (deterministic, no LLM — «привяжи заряд к стреле» → an exploding arrow). The
+    spark roll still gates success/quality."""
+    from aidnd.items.graph import _toks, node_attrs, node_lookup
+    from aidnd.server.play.engine.pc.luck import _pc_inspiration, _pc_luck
+
+    dl = detail.lower()
+    inv = [(r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), "pc")]
+    named, used = [], set()
+    for i, itm in inv:                                     # which held items does the request name?
+        if itm and i not in used and any(len(t) >= 4 and t[:5] in dl for t in _toks(itm["name"])):
+            named.append((i, itm))                         # stem prefix — tolerate Russian inflection
+            used.add(i)
+    node_ids = [node_lookup(itm["name"]) for _i, itm in named]
+    if len(named) < 2 or not all(node_ids):
+        out["narr"].append("Не пойму, что смастерить — назови вещь или что с чем соединить.")
+        return out
+    proc = next((p for kw, p in _COMBINE_KW.items() if kw in dl), "сборка")
+    scores = [max(node_attrs(nid).values(), default=0) for nid in node_ids]
+    material = (sum(scores) / len(scores)) * PB["craft_material_k"]
+    mastery = max(_PC_CAP.mod("dex"), _PC_CAP.mod("int"))
+    roll = random.Random(f"combine|{'+'.join(node_ids)}|{_mt()}").randint(1, 20)
+    band = _craft_band(PB["craft_base"] + mastery + material + _pc_luck() + _pc_inspiration() + roll)
+    _gt_add(PB["craft_time"])
+    if band == "waste":
+        for i, _itm in named:
+            _store().inv_drop(_wid(), i)
+        out["narr"].append("Работа загублена — всё испорчено, впустую.")
+        out["refresh"] = True
+        return out
+    name = " + ".join(itm["name"] for _i, itm in named)
+    made = _put_combine_item(node_ids, proc, flaw=(band == "crude"), masterwork=(band == "exquisite"),
+                             name=name)
+    for i, _itm in named:
+        _store().inv_drop(_wid(), i)
+    _pool_add_new(_store().get_item(made))
+    out["narr"].append(f"Ты соединяешь: {name} — вышло нечто новое своей работы.")
+    out["refresh"] = True
+    return out
+
+
 def _do_craft(detail: str, out: dict) -> dict:
     """Craft on the DERIVATION GRAPH via the SPARK LADDER. Resolve the target node, gather its direct
     inputs from the bag, roll spark = base + mastery + material + luck + inspiration + d20, and band it:
@@ -210,10 +310,11 @@ def _do_craft(detail: str, out: dict) -> dict:
     from aidnd.server.play.engine.pc.luck import _pc_inspiration, _pc_luck
 
     g = item_graph()
+    if any(kw in detail.lower() for kw in _COMBINE_KW):    # explicit «привяжи/покрой/наполни …» → combine
+        return _do_combine(detail, out)
     want = node_lookup(detail)
     if not want or want not in g["nodes"]:
-        out["narr"].append("Не пойму, что смастерить — назови вещь (клинок, лук, доспех, отвар…).")
-        return out
+        return _do_combine(detail, out)                    # no known target → also try a combination
     node = g["nodes"][want]
     need = node.get("from", [])
     inv = [(r["item_id"], _store().get_item(r["item_id"])) for r in _store().inventory(_wid(), "pc")]

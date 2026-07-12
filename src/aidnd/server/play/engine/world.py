@@ -42,7 +42,7 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.engine.journal import journal_feed
+from aidnd.server.play.engine.journal import j_quest, journal_feed
 from aidnd.server.play.engine.loop.routine import _apply_routine as _apply_routine
 from aidnd.server.play.engine.loop.routine import _world_events as _world_events
 from aidnd.server.play.engine.loop.tick import _world_tick as _world_tick
@@ -178,6 +178,8 @@ async def contract_accept(request: Request):
         0.6,
         about=[ct["giver"]],
     )
+    j_quest("told", f"взялся за дело для {ct['giver_name']}: {ct.get('kind')} — "
+                    f"{ct.get('want') or ct.get('target_name')} ({ct['where']})", cid)
     return {"accepted": True, "note": note}
 
 

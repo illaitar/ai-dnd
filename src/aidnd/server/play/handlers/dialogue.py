@@ -180,6 +180,10 @@ async def say(request: Request):
     contract = None
     if _WORK_INTEREST_RE.search(text):  # player asked about work — reveal the stashed errand, if any
         contract = (_S.get("pending_offer") or {}).pop(npc, None)
+        if contract:                    # the pitch is now SHOWN as the «Уговор» card → journal it
+            from aidnd.server.play.engine.journal import j_quest
+
+            j_quest("told", contract.get("pitch") or "", contract["id"])
     t = _world_tick()  # line = world turn (turn-based)
     return {
         **t,

@@ -28,10 +28,16 @@ def wired(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "_store", lambda: st, raising=False)
         monkeypatch.setattr(mod, "_wid", lambda: 1, raising=False)
     monkeypatch.setattr(journal, "_gt", lambda: 514)
-    core._S._d().clear()
-    core._S["wid"] = 1
-    core._S["gt"] = 514
-    return st
+    d = core._S._d()
+    saved = dict(d)                    # snapshot the shared world-1 session blob...
+    try:
+        d.clear()
+        d["wid"] = 1
+        d["gt"] = 514
+        yield st
+    finally:
+        d.clear()
+        d.update(saved)                # ...and restore it so later tests keep their 'seed' etc.
 
 
 def test_accept_writes_quest_told(wired, monkeypatch):

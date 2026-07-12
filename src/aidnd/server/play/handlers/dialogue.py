@@ -39,6 +39,7 @@ from aidnd.server.play.engine.core import (
     _mt,
     _npc_save,
     _pc,
+    _pc_hp,
     _pc_remember,
     _portrait_url,
     _topics_for,
@@ -46,7 +47,8 @@ from aidnd.server.play.engine.core import (
 )
 from aidnd.server.play.engine.journal import j_person_once
 from aidnd.server.play.engine.resolve import _voice
-from aidnd.server.play.engine.world import _play, _world_tick
+from aidnd.server.play.engine.world import _play, _scene_dict, _world_tick
+from aidnd.server.play.handlers.freeform import _say_aloud
 from aidnd.server.play.mechanics.contracts import _contract_offer, _contract_on_talk
 from aidnd.server.play.mechanics.items import _ROLE_NODE, _materialize_npc, _pc_coins
 
@@ -145,13 +147,19 @@ async def say(request: Request):
     _city, people, crof_, _cr2b, loc_ = _play()
     b = await request.json()
     npc = b.get("npc")
+    text = str(b.get("text", ""))
+    if not npc:  # no addressee — speak aloud to whoever's in earshot (same path as /act freeform speech)
+        sc = _scene_dict(_city, people, crof_, _cr2b, loc_)
+        res = _say_aloud(text, sc)
+        _pc_remember(f"я: {text[:80]}", 0.2)
+        t = _world_tick()
+        return {**res, **t, "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}
     if npc not in people:
-        return {"error": "нет такого"}
+        return {"error": "нет такого — рядом никого с таким именем"}
     if npc not in _here(loc_, crof_):
         return {"error": "он уже не рядом — разговор оборвался"}
     p = people[npc]
     rel = p.state.relationships.setdefault(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
-    text = str(b.get("text", ""))
     _S["dlg"] = npc  # conversation continues
     lv = _S.get("live")
     if lv:  # scene sees: stranger talks (line — in conversation-object)

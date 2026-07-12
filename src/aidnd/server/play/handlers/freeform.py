@@ -63,6 +63,39 @@ _DISRUPTIVE_RE = re.compile(
 )
 
 
+def _say_aloud(text: str, sc: dict) -> dict:
+    """Player speaks with no specific target: the room hears it (pc_said/pc_spoke feed the world
+    tick — see _world_tick), a loud/visible line marks the scene salient, and the DM narrates the
+    world's reaction grounded in the live scene snapshot (never invented). Shared by /act's
+    non-verb fallback and /api/play/say when the player addresses no one in particular."""
+    out: dict = {"narr": []}
+    if not text:
+        out["narr"].append("Ничего не происходит.")
+        return out
+    lv = _S.get("live")
+    if lv is not None:
+        lv["pc_said"] = text
+        lv["pc_spoke"] = True
+        if _DISRUPTIVE_RE.search(text):
+            # a loud/visible act: the whole room notices and reacts in character
+            lv["salient"] = f"чужак: {text[:70]}"
+    mgr = _model()  # non-action: DM response BASED ON FACTS of live scene (snapshot, not invention)
+    resp = mgr.call(
+        "narrator",
+        [
+            {"role": "system", "content": _DM_SYS},
+            {
+                "role": "user",
+                "content": f"{_dm_snapshot(sc)}\n\nИГРОК ЗАЯВЛЯЕТ: «{text}»",
+            },
+        ],
+        options={"temperature": 0.5},
+    )
+    line = (resp.get("content") or "").strip()
+    out["narr"].append(line or "Ничего не происходит.")
+    return out
+
+
 def _attempt(intent: dict, sc: dict) -> dict:
     """Single resolver for all player actions: gates, rolls, transfers, memory, consequences.
     Returns {narr:[strings], open_talk?, refresh?}."""
@@ -387,32 +420,8 @@ def _attempt(intent: dict, sc: dict) -> dict:
         out["narr"].append(f"Ты бросаешься на {p.name}. Назад дороги нет.")
         return out
 
-    mgr = _model()  # non-action: DM response BASED ON FACTS of live scene (snapshot, not invention)
     text = str(intent.get("_text") or detail or "")
-    if text:
-        _lv = _S.get("live")
-        if _lv is not None and text:
-            _lv["pc_said"] = text
-            _lv["pc_spoke"] = True
-            if _DISRUPTIVE_RE.search(text):
-                # a loud/visible act: the whole room notices and reacts in character
-                _lv["salient"] = f"чужак: {text[:70]}"
-        resp = mgr.call(
-            "narrator",
-            [
-                {"role": "system", "content": _DM_SYS},
-                {
-                    "role": "user",
-                    "content": f"{_dm_snapshot(sc)}\n\nИГРОК ЗАЯВЛЯЕТ: «{text}»",
-                },
-            ],
-            options={"temperature": 0.5},
-        )
-        line = (resp.get("content") or "").strip()
-        out["narr"].append(line or "Ничего не происходит.")
-    else:
-        out["narr"].append("Ничего не происходит.")
-    return out
+    return _say_aloud(text, sc)
 
 
 def _run_plan(steps: list, sc: dict, text: str) -> dict:

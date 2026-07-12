@@ -149,6 +149,15 @@ def deeds_list(limit: int = 12):
     return {"deeds": _store().deeds(_wid(), limit=min(int(limit), 50))}
 
 
+@router.get("/api/play/journal")
+def journal_endpoint(kind: str | None = None, limit: int = 200):
+    """Player chronicle «Хроника»: journal rows newest-first (append-only capture; no LLM).
+    Optional kind ∈ person|event|quest|place filter; limit hard-capped at 500."""
+    _play()
+    from aidnd.server.play.engine.core import _store, _wid
+    return {"entries": _store().journal_list(_wid(), kind=kind, limit=min(int(limit), 500))}
+
+
 @router.post("/api/play/newworld")
 async def new_world():
     """Start a FRESH world from the SAME pools: wipe only this user's runtime (destroy_world) so a

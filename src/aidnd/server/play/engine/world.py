@@ -616,12 +616,40 @@ def _select_actors(ranked_imp: list, impulses: dict, lv: dict) -> list:
     return [p for p in ranked_imp if p in keep]                    # impulse order preserved for waves
 
 
-def _npc_trade_step(people, order, lv, feed) -> None:
+def _gname(it) -> str:                                     # some items carry a dict/odd name — show clean
+    nm = it.get("name")
+    return nm if isinstance(nm, str) else (nm.get("item", "вещь") if isinstance(nm, dict) else str(nm))
+
+
+def _seller_good(pid):
+    """The best sellable good an NPC carries (store inventory), or None."""
+    store, wid = _store(), _wid()
+    rows = [(r["item_id"], store.get_item(r["item_id"])) for r in store.inventory(wid, pid)]
+    goods = [(i, it) for i, it in rows if it and it.get("kind") not in ("key", "coin", "document")]
+    return max(goods, key=lambda x: x[1].get("worth", 1)) if goods else None
+
+
+def _market_view(order, people, lv) -> list:
+    """What co-present NPCs offer for sale — fed into buyers' decisions so the mind can CHOOSE to buy."""
+    out = []
+    for pid in order:
+        if pid not in people:
+            continue
+        good = _seller_good(pid)
+        if not good:
+            continue
+        _iid, it = good
+        out.append({"pid": pid, "name": lv.get("names", {}).get(pid, pid),
+                    "good": _gname(it), "price": max(1, int(it.get("worth", 1)))})
+    return out
+
+
+def _npc_trade_step(people, order, decisions, lv, feed) -> None:
     """Emergent NPC↔NPC trade + haggle (spec: 2026-07-12-npc-trade-haggle-design).
-    (1) OPEN a deal between a co-present economically-driven buyer (coins + a commercial agenda/need)
-    and a seller holding a good, when a value corridor exists. (2) ADVANCE each open haggle one round —
-    both offers voiced as speech, converging by trait-driven concession — and SETTLE it in the real store
-    (coins + item move) or walk away. Numbers are code-owned; the digest only voices them."""
+    (1a) OPEN deals from the mind's OWN `buy` actions (intentional — the LLM chose it, that choice IS the
+    want signal); (1b) a light background hum from commercial agendas keeps trade visible when minds are
+    preoccupied with needs. (2) ADVANCE each open haggle one round (offers voiced as speech, converging by
+    trait-driven concession) and SETTLE it in the real store, or walk. Numbers are code-owned."""
     from aidnd.server.play.mechanics.haggle import (
         concession,
         deal_corridor,
@@ -632,35 +660,59 @@ def _npc_trade_step(people, order, lv, feed) -> None:
 
     haggles = lv.setdefault("haggle", {})
     present, store, wid = set(order), _store(), _wid()
+    names = lv.get("names", {})
+    name2pid = {str(names.get(p, p)).lower(): p for p in order}
 
-    def _best_good(pid):
-        rows = [(r["item_id"], store.get_item(r["item_id"])) for r in store.inventory(wid, pid)]
-        goods = [(i, it) for i, it in rows if it and it.get("kind") not in ("key", "coin", "document")]
-        return max(goods, key=lambda x: x[1].get("worth", 1)) if goods else None
-
-    def _gname(it):                                        # some items carry a dict/odd name — show clean
-        nm = it.get("name")
-        return nm if isinstance(nm, str) else (nm.get("item", "вещь") if isinstance(nm, dict) else str(nm))
+    def _resolve(nm):                                      # LLM seller name → present pid (exact, else fuzzy)
+        s = str(nm or "").strip().lower()
+        if not s:
+            return None
+        return name2pid.get(s) or next((p for lbl, p in name2pid.items() if s in lbl or lbl in s), None)
 
     in_deal = {d["buyer"] for d in haggles.values()} | {d["seller"] for d in haggles.values()}
-    for buyer in order:                                    # (1) open new deals from opportunities
+    for buyer in order:                                    # (1) open from the mind's own buy actions
+        if buyer in in_deal or buyer not in people:
+            continue
+        for a in (decisions.get(buyer) or {}).get("actions") or []:
+            if not (isinstance(a, dict) and a.get("tool") == "buy"):
+                continue
+            seller = _resolve(a.get("seller"))
+            if not seller or seller == buyer or seller in in_deal or seller not in people:
+                continue
+            good = _seller_good(seller)
+            if not good:
+                continue
+            iid, it = good
+            stb, sts = people[buyer].state, people[seller].state
+            coins = store.purse_get(wid, buyer)
+            cor = deal_corridor(it.get("worth", 1), sts.needs, sts.config.traits,
+                                stb.needs, stb.config.traits, PB["haggle_wants_chosen"])
+            if not cor or coins < cor[0]:
+                continue
+            deal = open_deal(cor[0], cor[1], PB["haggle_patience"])
+            deal.update({"buyer": buyer, "seller": seller, "item_id": iid, "good": _gname(it),
+                         "s_conc": concession(sts.needs, sts.config.traits, "seller",
+                                              PB["haggle_s_base"], PB["haggle_b_base"]),
+                         "b_conc": concession(stb.needs, stb.config.traits, "buyer",
+                                              PB["haggle_s_base"], PB["haggle_b_base"])})
+            haggles[f"{buyer}|{seller}|{iid}"] = deal
+            in_deal.update((buyer, seller))
+            break                                          # one deal per buyer per tick
+
+    for buyer in order:                                    # (1b) background hum from commercial agendas
         if buyer in in_deal or buyer not in people:
             continue
         stb = people[buyer].state
-        coins = store.purse_get(wid, buyer)
-        if coins < PB["haggle_min_coins"]:
-            continue
         ag = (stb.agendas[0].summary if stb.agendas else "").lower()
-        driven = (stb.needs.get("wealth", 0.0) >= PB["haggle_want_need"]
-                  or any(k in ag for k in ("куп", "выкуп", "накоп", "монет", "долг", "лавк", "дело", "товар")))
-        if not driven:
+        if not any(k in ag for k in ("куп", "выкуп", "накоп", "монет", "долг", "лавк", "дело", "товар")):
             continue
-        if random.Random(f"trade|{buyer}|{lv['clock']}").random() > PB["haggle_open_p"]:
-            continue                                       # a deal doesn't start on every 3-minute tick
+        if random.Random(f"bgtrade|{buyer}|{lv['clock']}").random() > PB["haggle_bg_p"]:
+            continue
+        coins = store.purse_get(wid, buyer)
         for seller in order:
             if seller == buyer or seller in in_deal or seller not in people:
                 continue
-            good = _best_good(seller)
+            good = _seller_good(seller)
             if not good:
                 continue
             iid, it = good
@@ -677,7 +729,7 @@ def _npc_trade_step(people, order, lv, feed) -> None:
                                               PB["haggle_s_base"], PB["haggle_b_base"])})
             haggles[f"{buyer}|{seller}|{iid}"] = deal
             in_deal.update((buyer, seller))
-            break                                          # one deal per buyer per pass
+            break
 
     for key in list(haggles):                              # (2) advance each open deal one round
         deal = haggles[key]
@@ -894,6 +946,7 @@ def _live_tick(people) -> tuple:
     if salient:
         ctx["event"] = salient
     ctx["oaths"] = oaths
+    ctx["market"] = _market_view(order, people, lv)  # co-present goods for sale → buyers can choose to buy
     ctx["pc_said"] = {pid: pc_said for pid in pc_heard} if pc_said else {}
 
     def think_one(pid):  # inside wave — parallel; waves see previous claims
@@ -1179,7 +1232,7 @@ def _live_tick(people) -> tuple:
         does = (d.get("does") or "").strip()
         if does and not said:  # line itself carries moment — don't duplicate
             feed.append({"k": "deed", "who": who, "text": does[:150]})
-    _npc_trade_step(people, order, lv, feed)  # emergent NPC↔NPC trade + haggle, settled in the store
+    _npc_trade_step(people, order, decisions, lv, feed)  # NPC↔NPC trade + haggle from `buy` intents, settled in-store
     if lv.pop("murmur", 0):  # someone spoke too far off to make out — no longer gated to every 3rd tick
         feed.append({"k": "deed", "who": "зал", "text": "за столами гудит негромкий говор"})
     if not feed:  # idle backstop: nothing surfaced this tick — soundscape fills the silence

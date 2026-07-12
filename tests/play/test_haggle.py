@@ -65,9 +65,16 @@ def _state(needs, traits, agenda=None):
     return type("St", (), {"needs": needs, "config": cfg, "agendas": ag, "memory": _Mem()})()
 
 
-def test_npc_trade_step_opens_haggles_and_settles(monkeypatch):
-    """Integration: a driven buyer + a co-present seller with a knife → a deal opens, haggles over
-    several ticks (voiced as speech), and settles for real in the store."""
+def _people_seller_buyer():
+    return {
+        "seller": type("P", (), {"state": _state({"wealth": 0.3}, {"greed": 0.4})})(),
+        "buyer": type("P", (), {"state": _state({"wealth": 0.2}, {"greed": 0.3})})(),
+    }
+
+
+def test_npc_trade_step_opens_from_a_buy_action_and_settles(monkeypatch):
+    """The mind emits a `buy` action → a deal opens, haggles over several ticks (voiced as speech),
+    and settles for real in the store. The LLM's CHOICE to buy is the driver (no code heuristic)."""
     from aidnd.server.play.engine import world as W
     from aidnd.server.play.engine.session import persist
 
@@ -75,7 +82,59 @@ def test_npc_trade_step_opens_haggles_and_settles(monkeypatch):
     monkeypatch.setattr(persist, "_STORE", s)
     monkeypatch.setattr(W, "_wid", lambda: 1)
     monkeypatch.setattr(W, "_display", lambda pid, people: pid)
-    monkeypatch.setitem(W.PB, "haggle_open_p", 1.0)         # force the deal to open (test the FSM, not the dice)
+
+    people = _people_seller_buyer()
+    s.save_item({"id": "it:kn", "kind": "weapon", "name": "нож", "worth": 10})
+    s.inv_add(1, "it:kn", "seller")
+    s.purse_add(1, "seller", 2)
+    s.purse_add(1, "buyer", 30)
+    order = ["seller", "buyer"]
+    lv = {"clock": 100, "haggle": {}, "names": {"seller": "Кузнец", "buyer": "Ветл"}}
+    decisions = {"buyer": {"actions": [{"tool": "buy", "seller": "Кузнец", "good": "нож"}]}}
+    feeds = []
+    for _ in range(8):
+        feed = []
+        W._npc_trade_step(people, order, decisions, lv, feed)
+        feeds.append(feed)
+        if not lv["haggle"]:
+            break
+    assert any(r["item_id"] == "it:kn" for r in s.inventory(1, "buyer"))     # knife changed hands
+    assert s.purse_get(1, "seller") > 2 and s.purse_get(1, "buyer") < 30      # real coins moved
+    assert any(e.get("k") == "deed" and "переходит" in e.get("text", "") for f in feeds for e in f)
+    assert len([e for f in feeds for e in f if e.get("k") == "speech"]) >= 4   # ≥2 haggle rounds, voiced
+
+
+def test_npc_trade_step_needs_a_buy_action_and_a_good(monkeypatch):
+    from aidnd.server.play.engine import world as W
+    from aidnd.server.play.engine.session import persist
+
+    s = WorldStore(os.path.join(tempfile.mkdtemp(), "live.db"))
+    monkeypatch.setattr(persist, "_STORE", s)
+    monkeypatch.setattr(W, "_wid", lambda: 1)
+    monkeypatch.setattr(W, "_display", lambda pid, people: pid)
+    people = _people_seller_buyer()
+    s.save_item({"id": "it:kn", "kind": "weapon", "name": "нож", "worth": 10})
+    s.inv_add(1, "it:kn", "seller")
+    s.purse_add(1, "buyer", 30)
+    order = ["seller", "buyer"]
+    lv = {"clock": 1, "haggle": {}, "names": {"seller": "Кузнец", "buyer": "Ветл"}}
+    W._npc_trade_step(people, order, {}, lv, [])            # no buy action → no deal, even with a corridor
+    assert lv["haggle"] == {}
+    s.inv_move(1, "it:kn", "used")                          # seller now holds nothing sellable
+    W._npc_trade_step(people, order, {"buyer": {"actions": [{"tool": "buy", "seller": "Кузнец"}]}}, lv, [])
+    assert lv["haggle"] == {}                                # buy intent but no good → still no deal
+
+
+def test_background_hum_opens_from_a_commercial_agenda(monkeypatch):
+    """The background trickle: a commercially-minded buyer (no explicit `buy` action) opens a deal."""
+    from aidnd.server.play.engine import world as W
+    from aidnd.server.play.engine.session import persist
+
+    s = WorldStore(os.path.join(tempfile.mkdtemp(), "live.db"))
+    monkeypatch.setattr(persist, "_STORE", s)
+    monkeypatch.setattr(W, "_wid", lambda: 1)
+    monkeypatch.setattr(W, "_display", lambda pid, people: pid)
+    monkeypatch.setitem(W.PB, "haggle_bg_p", 1.0)          # force the trickle to fire
 
     people = {
         "seller": type("P", (), {"state": _state({"wealth": 0.3}, {"greed": 0.4})})(),
@@ -84,33 +143,7 @@ def test_npc_trade_step_opens_haggles_and_settles(monkeypatch):
     }
     s.save_item({"id": "it:kn", "kind": "weapon", "name": "нож", "worth": 10})
     s.inv_add(1, "it:kn", "seller")
-    s.purse_add(1, "seller", 2)
     s.purse_add(1, "buyer", 30)
-    order, lv, feeds = ["seller", "buyer"], {"clock": 100, "haggle": {}}, []
-    for _ in range(8):
-        feed = []
-        W._npc_trade_step(people, order, lv, feed)
-        feeds.append(feed)
-        if not lv["haggle"]:
-            break
-    assert any(r["item_id"] == "it:kn" for r in s.inventory(1, "buyer"))     # knife changed hands
-    assert s.purse_get(1, "seller") > 2 and s.purse_get(1, "buyer") < 30      # real coins moved
-    assert any(e.get("k") == "deed" and "переходит" in e.get("text", "") for f in feeds for e in f)
-    speech = [e for f in feeds for e in f if e.get("k") == "speech"]
-    assert len(speech) >= 4                                                    # ≥2 haggle rounds, voiced
-
-
-def test_npc_trade_step_no_deal_without_a_seller_good(monkeypatch):
-    from aidnd.server.play.engine import world as W
-    from aidnd.server.play.engine.session import persist
-
-    s = WorldStore(os.path.join(tempfile.mkdtemp(), "live.db"))
-    monkeypatch.setattr(persist, "_STORE", s)
-    monkeypatch.setattr(W, "_wid", lambda: 1)
-    monkeypatch.setattr(W, "_display", lambda pid, people: pid)
-    people = {"seller": type("P", (), {"state": _state({"wealth": 0.3}, {"greed": 0.4})})(),
-              "buyer": type("P", (), {"state": _state({"wealth": 0.6}, {"greed": 0.5}, "купить нож")})()}
-    s.purse_add(1, "buyer", 30)                              # seller holds NO sellable good
-    lv = {"clock": 1, "haggle": {}}
-    W._npc_trade_step(people, ["seller", "buyer"], lv, [])
-    assert lv["haggle"] == {}                                # nothing to sell → no deal opens
+    lv = {"clock": 100, "haggle": {}, "names": {"seller": "Кузнец", "buyer": "Ветл"}}
+    W._npc_trade_step(people, ["seller", "buyer"], {}, lv, [])   # NO buy action; the agenda drives it
+    assert lv["haggle"]                                          # a deal opened from the agenda hum

@@ -337,11 +337,66 @@ def _contract_complete(ct: dict) -> str:
         about=[giver],
     )
     _npc_save(giver)
+    if ct.get("src") == "sift":  # honest bridge (Inc 1): advance the giver's REAL agenda + re-plan
+        from aidnd.server.play.engine.quests import bridge as _qb
+
+        try:
+            _qb.quest_writeback(ct, _giver_world(ct), _S.get("model"))
+        except Exception:  # noqa: BLE001 — writeback must NEVER break the payout it follows
+            pass
     return f"Уговор исполнен! {paid}."
+
+
+def _giver_world(ct: dict) -> tuple:
+    """Build the giver-relative (state, world) the bridge consumes: the giver's Body carries their
+    REAL store loot (purse + inventory) so have/wealth predicates read true; each dead-disjunct target
+    gets a Body reflecting its dead-flag; affinity reads state.relationships. Dormant in Inc 1 — only
+    src:"sift" contracts (Inc 2+) ever reach it."""
+    from aidnd.mind import Body as _MBody
+    from aidnd.mind import Item as _MItem
+    from aidnd.mind import World as _MWorld
+
+    giver = ct["giver"]
+    p = _S["people"][giver]
+    _materialize_npc(giver, "pockets")
+    loot = []
+    coins = _store().purse_get(_wid(), giver)
+    if coins > 0:
+        loot.append(_MItem("кошель", min(1.0, coins / 40), kind="coin", amount=coins))
+    for r in _store().inventory(_wid(), giver):
+        it = _store().get_item(r["item_id"])
+        if it:
+            loot.append(_MItem(it["name"], min(1.0, (it.get("worth") or 0) / 40)))
+    w = _MWorld()
+    w.add(_MBody(id=giver, place="", loot=loot))
+    for cond in ct.get("done_any") or []:
+        if cond.get("type") == "dead":
+            vid = cond.get("id")
+            if vid and vid not in w.bodies:
+                dead = bool(_store().flag_get(_wid(), f"dead|{vid}"))
+                w.add(_MBody(id=vid, place="", hp=0 if dead else 10, alive=not dead))
+    return p.state, w
+
+
+def _sift_maybe_close() -> str | None:
+    """Predicate-driven close for emergent (src:"sift") contracts (spec §3a 'however obtained'):
+    any active sift contract whose done_any holds for the giver completes now, whatever route made it
+    true. Improvised contracts are skipped — their step engine stays authoritative."""
+    from aidnd.server.play.engine.quests import bridge as _qb
+
+    for ct in _store().contracts(_wid(), "active"):
+        if ct.get("src") != "sift":
+            continue
+        if _qb.done_any_met(ct, _giver_world(ct)):
+            return _contract_complete(ct)
+    return None
 
 
 def _contract_on_give(npc: str, it: dict) -> str | None:
     """give closes CURRENT step: bring (brought to giver) and deliver (handed to recipient)."""
+    hit = _sift_maybe_close()  # sift closes predicate-driven, whatever route was taken
+    if hit:
+        return hit
     for ct in _store().contracts(_wid(), "active"):
         cur = _ct_cur(ct)
         kind = cur.get("kind", "bring")
@@ -370,6 +425,9 @@ def _contract_on_give(npc: str, it: dict) -> str | None:
 
 def _contract_on_move(loc: int) -> str | None:
     """visit: reached location — current step complete."""
+    hit = _sift_maybe_close()  # sift closes predicate-driven, whatever route was taken
+    if hit:
+        return hit
     for ct in _store().contracts(_wid(), "active"):
         cur = _ct_cur(ct)
         if cur.get("kind") == "visit" and cur.get("target") == loc:
@@ -379,6 +437,9 @@ def _contract_on_move(loc: int) -> str | None:
 
 def _contract_on_talk(npc: str) -> str | None:
     """befriend: target took to you — current step complete."""
+    hit = _sift_maybe_close()  # sift closes predicate-driven, whatever route was taken
+    if hit:
+        return hit
     for ct in _store().contracts(_wid(), "active"):
         cur = _ct_cur(ct)
         if cur.get("kind") == "befriend" and cur.get("target") == npc:

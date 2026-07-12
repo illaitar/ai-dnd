@@ -43,7 +43,7 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.mechanics.contracts import _ct_advance, _ct_cur
+from aidnd.server.play.mechanics.contracts import _ct_advance, _ct_cur, _sift_maybe_close
 from aidnd.server.play.mechanics.items import (
     _merchant_restock,
     _pc_coins,
@@ -359,6 +359,9 @@ def _combatant_from_npc(pid, p):
 
 def _contract_on_death(pid: str) -> str | None:
     """dead-predicate: contracted enemy dead — current step closed."""
+    hit = _sift_maybe_close()  # villain down by ANY hand → a sift dead-disjunct may close now
+    if hit:
+        return hit
     for ct in _store().contracts(_wid(), "active"):
         cur = _ct_cur(ct)
         if cur.get("kind") == "dead" and cur.get("target") == pid:

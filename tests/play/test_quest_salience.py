@@ -37,3 +37,11 @@ def test_score_A_gt_B_number_for_number(monkeypatch):
     assert math.isclose(a, 3.14, abs_tol=1e-9)
     assert math.isclose(b, 2.60, abs_tol=1e-9)
     assert a > b
+
+
+def test_score_resolves_prefixed_deed_and_ignores_agenda_anchor():
+    ctx = {"recent": {}, "aff_edges": {}, "deeds": _deeds(1440), "prox": {}, "now_gt": 1440}
+    bare = SAL.score(_seed("kin_debt", "npc:dunn", "npc:ralf"), ctx)
+    prefixed = _seed("kin_debt", "npc:dunn", "npc:ralf")
+    prefixed["evidence"] = ["deed:d123", "agenda:npc:dunn:0"]
+    assert SAL.score(prefixed, dict(ctx, deeds=_deeds(1440))) == bare

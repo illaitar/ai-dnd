@@ -68,6 +68,9 @@ class WorldStore:
                       "PRIMARY KEY(world_id, key))")
             c.execute("CREATE TABLE IF NOT EXISTS npc_state (world_id INT, npc_id TEXT, data TEXT, "
                       "PRIMARY KEY(world_id, npc_id))")
+            # player journal «Хроника» — append-only capture at render moments (docs/.../player-journal-design.md)
+            c.execute("CREATE TABLE IF NOT EXISTS journal (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                      "world_id INT, gt INT, kind TEXT, prov TEXT, refs TEXT, text TEXT)")
 
     def _conn(self):
         c = sqlite3.connect(self.path, timeout=30)
@@ -241,6 +244,29 @@ class WorldStore:
         with self._conn() as c:
             c.execute("UPDATE deeds SET status=? WHERE world_id=? AND id=?",
                       (status, world_id, deed_id))
+
+    def journal_add(self, world_id: int, kind: str, prov: str, refs: list,
+                    text: str, gt: int) -> None:
+        """Append one chronicle row, then prune oldest beyond PB['journal_cap'] for this world."""
+        from aidnd.server.play.engine.core import PB  # lazy: PB is the single home of the cap
+        with self._conn() as c:
+            c.execute("INSERT INTO journal (world_id,gt,kind,prov,refs,text) VALUES (?,?,?,?,?,?)",
+                      (world_id, gt, kind, prov, json.dumps(refs or [], ensure_ascii=False), text))
+            c.execute("DELETE FROM journal WHERE world_id=? AND id NOT IN "
+                      "(SELECT id FROM journal WHERE world_id=? ORDER BY id DESC LIMIT ?)",
+                      (world_id, world_id, PB["journal_cap"]))
+
+    def journal_list(self, world_id: int, kind: str | None = None, limit: int = 200) -> list:
+        """Chronicle rows newest-first; optional kind filter. refs JSON-decoded to a list."""
+        q = "SELECT gt,kind,prov,refs,text FROM journal WHERE world_id=?"
+        args: list = [world_id]
+        if kind:
+            q += " AND kind=?"; args.append(kind)
+        q += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+        with self._conn() as c:
+            rows = c.execute(q, args).fetchall()
+        return [{"gt": r[0], "kind": r[1], "prov": r[2],
+                 "refs": json.loads(r[3] or "[]"), "text": r[4]} for r in rows]
 
     def save_person(self, pid: str, role: str, name: str, charisma: float, appearance: float,
                     mech: dict, persona: dict, portraits: dict, seed: int) -> None:

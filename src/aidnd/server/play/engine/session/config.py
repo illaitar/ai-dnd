@@ -211,5 +211,7 @@ PB = {
     "tone_threat_fear": 0.2,
     "look_dc": 8,
     "look_good": 15,
+    # PLAYER JOURNAL «Хроника»: rows kept per world; prune oldest on insert (docs/.../player-journal-design.md)
+    "journal_cap": 2000,
 }
 _GT0 = PB["start_gt"]

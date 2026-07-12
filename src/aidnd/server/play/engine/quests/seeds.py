@@ -82,7 +82,7 @@ def pat_kin_debt(people, deeds, gt) -> list[dict]:
             if _fam(people[victim].name) != _fam(g.name) or _aff(g, creditor) >= 0:
                 continue
             out.append(_seed("kin_debt", gid, people, dict(m.done), villain=creditor, prize=victim,
-                             evidence=[d["id"], f"agenda:{gid}:{cur}"],
+                             evidence=[f"deed:{d['id']}", f"agenda:{gid}:{cur}"],
                              twist=_twist_for(creditor, deeds, exclude={d["id"]})))
     return out
 
@@ -102,7 +102,7 @@ def pat_broken_promise(people, deeds, gt) -> list[dict]:
         if _aff(people[victim], promiser) >= 0:
             continue
         out.append(_seed("broken_promise", victim, people, {"type": "dead", "id": promiser},
-                         villain=promiser, prize=None, evidence=[d["id"]],
+                         villain=promiser, prize=None, evidence=[f"deed:{d['id']}"],
                          twist=_twist_for(promiser, deeds, exclude={d["id"]})))
     return out
 
@@ -124,18 +124,52 @@ def pat_blocked_rival(people, deeds, gt) -> list[dict]:
     return out
 
 
-def pat_unanswered_blood(people, deeds, gt) -> list[dict]:
-    """A witnessed murder/theft with no clearing answer → giver = the aggrieved victim's kin."""
+def _kin_giver(victim: str, villain: str, people: dict):
+    """A living kin/friend who can actually stand at the board and hire the party (spec: 'kin/friend
+    of the victim present') — the victim is dead and cannot be the giver. Surname match first
+    (reuses _fam, as kin_debt does); else affinity(candidate→victim) > 0.3; else None (abstain)."""
+    surname = _fam(people[victim].name)
+    for pid, p in people.items():
+        if pid in (victim, villain):
+            continue
+        if _fam(p.name) == surname:
+            return pid
+    for pid, p in people.items():
+        if pid in (victim, villain):
+            continue
+        if _aff(p, victim) > 0.3:
+            return pid
+    return None
+
+
+def _blood_answered(villain: str, deeds: list, flag_get) -> bool:
+    """Already answered iff an arrest deed NAMES the villain as its object (a clear deed's obj is a
+    LAIR, not a person — never matches here) or the world already marked the villain dead."""
+    if any(d["verb"] == "arrest" and d["obj"] == villain for d in deeds):
+        return True
+    if flag_get is not None and flag_get(f"dead|{villain}"):
+        return True
+    return False
+
+
+def pat_unanswered_blood(people, deeds, gt, flag_get=None) -> list[dict]:
+    """A witnessed murder/theft with no clearing answer → giver = a living kin/friend of the victim
+    (the victim, being dead, cannot hire the party); villain = the deed actor; the victim becomes
+    the cast prize (his memory). No kin/friend present → abstain."""
     out = []
-    cleared = {d["obj"] for d in deeds if d["verb"] in ("clear", "arrest")}
     for d in deeds:
         if d["verb"] not in ("murder", "theft") or not d.get("witnesses"):
             continue
         villain, victim = d["actor"], d["obj"]
-        if villain in cleared or villain not in people or victim not in people:
+        if villain not in people or victim not in people:
             continue
-        out.append(_seed("unanswered_blood", victim, people, {"type": "dead", "id": villain},
-                         villain=villain, evidence=[d["id"]],
+        if _blood_answered(villain, deeds, flag_get):
+            continue
+        giver = _kin_giver(victim, villain, people)
+        if giver is None:
+            continue
+        out.append(_seed("unanswered_blood", giver, people, {"type": "dead", "id": villain},
+                         villain=villain, prize=victim, evidence=[f"deed:{d['id']}"],
                          twist=_twist_for(villain, deeds, exclude={d["id"]})))
     return out
 
@@ -157,11 +191,14 @@ PATTERNS = [pat_kin_debt, pat_broken_promise, pat_blocked_rival, pat_unanswered_
             pat_courtship_wall]
 
 
-def sift(people: dict, deeds: list, gt: int) -> list[dict]:
-    """Run all 5 patterns; dedup identical (pattern, giver, villain, goal-type)."""
+def sift(people: dict, deeds: list, gt: int, flag_get=None) -> list[dict]:
+    """Run all 5 patterns; dedup identical (pattern, giver, villain, goal-type). `flag_get`
+    (optional, e.g. `lambda k: store.flag_get(wid, k)`) lets unanswered_blood see the world's
+    `dead|<pid>` flags; omit it in pure/tests contexts — the arrest-deed check alone still applies."""
     seen, out = set(), []
     for pat in PATTERNS:
-        for s in pat(people, deeds, gt):
+        raw = pat(people, deeds, gt, flag_get) if pat is pat_unanswered_blood else pat(people, deeds, gt)
+        for s in raw:
             key = (s["pattern"], s["giver"], s["cast"]["villain"], s["goal"]["done"].get("type"))
             if key in seen:
                 continue

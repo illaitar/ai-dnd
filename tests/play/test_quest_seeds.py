@@ -53,7 +53,7 @@ def test_kin_debt_goal_is_verbatim_milestone_done():
     seed = next(s for s in S.sift(people, deeds, gt) if s["pattern"] == "kin_debt")
     assert seed["goal"]["done"] == {"type": "have", "item": "гроссбух"}  # дословно из вехи
     assert seed["cast"] == {"villain": "npc:ralf", "prize": "npc:marta"}
-    assert "d123" in seed["evidence"]
+    assert "deed:d123" in seed["evidence"]
     assert "agenda:npc:dunn:0" in seed["evidence"]
 
 
@@ -61,7 +61,7 @@ def test_broken_promise_goal_is_real_met_dict():
     people, deeds, gt = _fixture()
     seed = next(s for s in S.sift(people, deeds, gt) if s["pattern"] == "broken_promise")
     assert seed["goal"]["done"] == {"type": "dead", "id": "npc:ralf"}   # маршрут-возмездие, код-авторство
-    assert seed["evidence"] == ["d123"]
+    assert seed["evidence"] == ["deed:d123"]
 
 
 def test_twist_candidate_from_second_fact_touching_cast():
@@ -69,3 +69,47 @@ def test_twist_candidate_from_second_fact_touching_cast():
     seed = next(s for s in S.sift(people, deeds, gt) if s["pattern"] == "kin_debt")
     assert seed["twist"] and seed["twist"]["adds"] == {"type": "dead", "id": "npc:ralf"}
     assert "d124" in seed["twist"]["fact"]
+
+
+def _blood_fixture(gt=5 * 1440):
+    # Тэм — жертва убийства; Коул — брат (общая фамилия Ли), жив и может нанять партию
+    victim = _person("npc:tam", "Тэм Ли", "фермер")
+    brother = _person("npc:cole", "Коул Ли", "кузнец")
+    villain = _person("npc:vex", "Векс Дорн", "бродяга")
+    people = {"npc:tam": victim, "npc:cole": brother, "npc:vex": villain}
+    d = {"id": "d200", "gt": gt - 60, "actor": "npc:vex", "obj": "npc:tam",
+         "verb": "murder", "place": "", "status": "open", "witnesses": ["npc:cole"],
+         "data": {}}
+    return people, [d], gt
+
+
+def test_unanswered_blood_giver_is_kin_not_victim():
+    people, deeds, gt = _blood_fixture()
+    seed = next(s for s in S.sift(people, deeds, gt) if s["pattern"] == "unanswered_blood")
+    assert seed["giver"] == "npc:cole"                             # брат, не сама жертва
+    assert seed["cast"] == {"villain": "npc:vex", "prize": "npc:tam"}   # жертва — приз (память)
+    assert seed["evidence"] == ["deed:d200"]                       # deed:-префикс
+
+
+def test_unanswered_blood_abstains_after_arrest():
+    people, deeds, gt = _blood_fixture()
+    arrest = {"id": "d201", "gt": gt - 10, "actor": "guard", "obj": "npc:vex",
+              "verb": "arrest", "place": "", "status": "closed", "data": {}}
+    got = S.sift(people, deeds + [arrest], gt)
+    assert not any(s["pattern"] == "unanswered_blood" for s in got)   # ответ уже есть — арест злодея
+
+
+def test_unanswered_blood_abstains_when_dead_flag_set():
+    people, deeds, gt = _blood_fixture()
+    got = S.sift(people, deeds, gt, flag_get=lambda k: k == "dead|npc:vex")
+    assert not any(s["pattern"] == "unanswered_blood" for s in got)   # мир уже отметил злодея мёртвым
+
+
+def test_unanswered_blood_abstains_without_living_kin():
+    victim = _person("npc:tam", "Тэм Ли", "фермер")
+    villain = _person("npc:vex", "Векс Дорн", "бродяга")
+    people = {"npc:tam": victim, "npc:vex": villain}
+    d = {"id": "d200", "gt": 100, "actor": "npc:vex", "obj": "npc:tam",
+         "verb": "murder", "place": "", "status": "open", "witnesses": ["npc:vex"], "data": {}}
+    got = S.sift(people, [d], 200)
+    assert not any(s["pattern"] == "unanswered_blood" for s in got)   # некому нанять партию — труп не наймёт

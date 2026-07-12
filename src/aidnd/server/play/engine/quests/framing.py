@@ -8,8 +8,22 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+
+from aidnd.server.play.engine.core import _tokens_ru
 
 log = logging.getLogger("aidnd.quests")
+
+_CAP_RU = re.compile(r"[А-ЯЁ][а-яё]+")
+_QUOTED = re.compile(r"«([^»]+)»")
+
+_FRAMER_SYS = (
+    "Ты пишешь ТРИ короткие фразы для городского поручения. Используй ТОЛЬКО названных людей и вещи — "
+    "никого и ничего нового не выдумывай. Верни СТРОГО JSON: "
+    '{"pitch":"<просьба в характере, 1-2 фразы, с сутью и наградой>", '
+    '"foreshadow":"<что гложет заказчика, 1 фраза, до предложения>", '
+    '"reveal":"<фраза поворота, если всплывёт второй факт>"}.'
+)
 
 _JUDGE_SYS = (
     "Ты — редактор городских слухов. Оцени зёрна сюжета на живость и вкус; наложи вето на те, "
@@ -62,3 +76,56 @@ def judge(seeds: list, deeds: dict, names: dict, manager) -> list[dict]:
         s["why"] = str(why.get(sid, ""))[:160]
         kept.append(s)
     return kept
+
+
+def _stem4(word: str) -> set:
+    """A coarser prefix (4 chars, not _tokens_ru's 5) so short names still match their case
+    endings ("Дунн"↔"Дунну", "Марта"↔"Марты") — _tokens_ru alone is too fine for 4-5 letter names."""
+    return {t[:4] for t in _tokens_ru(word)}
+
+
+def valid_entities(text: str, allowed: set) -> bool:
+    """Every «quoted» phrase and Capitalized Cyrillic word must share a stem with some allowed
+    name (mirrors _build_step contracts.py:60 — an unknown entity fails the whole artifact).
+    A capitalized word at the very start of a sentence is skipped — that capitalization is
+    Russian orthography (sentence-initial), not a signal of properness, so it can't be evidence
+    of an injected entity either way."""
+    text = text or ""
+    allow_tok = set()
+    for a in allowed:
+        allow_tok |= _stem4(a)
+    cands = list(_QUOTED.findall(text))
+    for m in _CAP_RU.finditer(text):
+        i = m.start() - 1
+        while i >= 0 and text[i] in " \t\n":
+            i -= 1
+        if i >= 0 and text[i] not in ".!?":
+            cands.append(m.group())
+    for c in cands:
+        if not (_stem4(c) & allow_tok):
+            return False
+    return True
+
+
+def framer(seed: dict, allowed: set, manager) -> dict | None:
+    """ONE artifact set (pitch/foreshadow/reveal); apophenia validator rejects unknown entities;
+    one regenerate on failure, else honest absence (mirrors _build_step's reject-don't-repair)."""
+    if manager is None:
+        return None
+    user = (f"ЗАКАЗЧИК: {seed['giver_name']}. Суть: {seed.get('why', '')}\n"
+            f"МОЖНО НАЗЫВАТЬ: {', '.join(sorted(allowed))}.")
+    for _attempt in range(2):                      # generate → validate → regenerate once → skip
+        resp = manager.call("narrator",
+                            [{"role": "system", "content": _FRAMER_SYS},
+                             {"role": "user", "content": user}],
+                            options={"temperature": 0.7})
+        t = (resp.get("content") if resp else "") or ""
+        try:
+            d = json.loads(t[t.find("{"): t.rfind("}") + 1])
+            art = {k: str(d.get(k, ""))[:220] for k in ("pitch", "foreshadow", "reveal")}
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if all(art.values()) and all(valid_entities(v, allowed) for v in art.values()):
+            return art
+    log.warning("quests: фреймер назвал чужую сущность дважды — пропуск этим утром")
+    return None

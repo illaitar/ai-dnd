@@ -50,3 +50,19 @@ def j_person(prov: str, text: str, pid: str) -> None:
 
 def j_place(text: str, bid: str) -> None:
     return _emit("place", "saw", [bid], text)
+
+
+def journal_feed(feed: list) -> None:
+    """Hook 1 pass over one tick's feed: the feed IS the witnessed scene.
+    speech tier 1 → event/heard1 (full) · tier 2 → event/heard2 (cutout fragment) ·
+    tier 3 & murmur → skip. deed with a real actor pid → event/saw refs=[pid] ·
+    ambient/'зал' deed (no pid) → skip. text is copied exactly, never rewritten."""
+    for e in feed or []:
+        if e.get("k") == "speech":
+            tier = e.get("tier")
+            if tier == 1:
+                j_event("heard1", e.get("text", ""), refs=[])
+            elif tier == 2:
+                j_event("heard2", e.get("text", ""), refs=[])
+        elif e.get("k") == "deed" and e.get("pid"):
+            j_event("saw", e.get("text", ""), refs=[e["pid"]])

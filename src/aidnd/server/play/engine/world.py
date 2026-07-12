@@ -42,6 +42,7 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
+from aidnd.server.play.engine.journal import journal_feed
 from aidnd.server.play.engine.loop.routine import _apply_routine as _apply_routine
 from aidnd.server.play.engine.loop.routine import _world_events as _world_events
 from aidnd.server.play.engine.loop.tick import _world_tick as _world_tick
@@ -746,7 +747,7 @@ def _npc_trade_step(people, order, decisions, lv, feed) -> None:
         status, price = haggle_tick(deal, deal["s_conc"], deal["b_conc"], PB["haggle_gap_eps"])
         if status == "settle" and store.purse_get(wid, buyer) >= price:
             settle(store, wid, buyer, seller, iid, price)
-            feed.append({"k": "deed", "who": b_disp,
+            feed.append({"k": "deed", "who": b_disp, "pid": buyer,
                          "text": f"отсчитывает {price} зм — «{deal['good']}» переходит из рук в руки"})
             people[buyer].state.memory.add(f"купил «{deal['good']}» за {price} зм", lv["clock"], 0.5)
             people[seller].state.memory.add(f"продал «{deal['good']}» за {price} зм", lv["clock"], 0.5)
@@ -1081,6 +1082,7 @@ def _live_tick(people) -> tuple:
                             {
                                 "k": "deed",
                                 "who": _display(pid, people),
+                                "pid": pid,
                                 "text": f"ловко срезает твой кошель — минус {take} зм!",
                             }
                         )
@@ -1095,6 +1097,7 @@ def _live_tick(people) -> tuple:
                             {
                                 "k": "deed",
                                 "who": _display(pid, people),
+                                "pid": pid,
                                 "text": f"вытягивает у тебя «{nm}»!",
                             }
                         )
@@ -1117,6 +1120,7 @@ def _live_tick(people) -> tuple:
                         {
                             "k": "deed",
                             "who": _display(pid, people),
+                            "pid": pid,
                             "text": f"тянет что-то из добра ({_display(vid, people)}) — ты это ВИДИШЬ",
                         }
                     )
@@ -1209,7 +1213,7 @@ def _live_tick(people) -> tuple:
                                     spot["node"] if spot else None,
                                     spot["label"] if spot else str(a.get("where") or ""),
                                     witnesses=[o for o in order if o != pid])
-                feed.append({"k": "deed", "who": who,
+                feed.append({"k": "deed", "who": who, "pid": pid,
                              "text": f"даёт слово: {str(a.get('what') or '')[:60]}"})
         if any(isinstance(a, dict) and a.get("tool") == "attack" for a in d.get("actions") or []):
             lv["salient"] = f"{who} бросается в драку!"     # event: hall will flinch next tick
@@ -1224,14 +1228,14 @@ def _live_tick(people) -> tuple:
                         _store().purse_add(_wid(), pid, -2)
                         _store().purse_add(_wid(), owner, 2)
                         if random.Random(f"pay|{pid}|{lv['clock']}").random() < 0.3:
-                            feed.append({"k": "deed", "who": _display(pid, people),
+                            feed.append({"k": "deed", "who": _display(pid, people), "pid": pid,
                                          "text": f"кидает пару монет за {a['item']}"})
         acted = "; ".join(evs + spoke)  # NPC REMEMBERS both acts and words — no repeat
         lv["last"][pid] = acted[:110] or "—"
         lv["hist"].setdefault(pid, []).append(acted[:80])
         does = (d.get("does") or "").strip()
         if does and not said:  # line itself carries moment — don't duplicate
-            feed.append({"k": "deed", "who": who, "text": does[:150]})
+            feed.append({"k": "deed", "who": who, "pid": pid, "text": does[:150]})
     _npc_trade_step(people, order, decisions, lv, feed)  # NPC↔NPC trade + haggle from `buy` intents, settled in-store
     if lv.pop("murmur", 0):  # someone spoke too far off to make out — no longer gated to every 3rd tick
         feed.append({"k": "deed", "who": "зал", "text": "за столами гудит негромкий говор"})
@@ -1239,6 +1243,7 @@ def _live_tick(people) -> tuple:
         amb = _idle_ambient(w, zones_l, order, lv["zone_ids"])
         if amb:
             feed.append({"k": "deed", "who": "зал", "text": amb})
+    journal_feed(feed)  # Hook 1: capture witnessed speech & deeds into the chronicle
     if zones_l:
         for pid in order:
             zmap[pid] = lv["zone_ids"].get(w.bodies[pid].place)

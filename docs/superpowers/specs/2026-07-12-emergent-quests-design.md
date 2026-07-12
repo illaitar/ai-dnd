@@ -299,11 +299,11 @@ Day 3 morning: sift + salience run (pure code) and produce A(3.14), B(2.60). The
 - **Inc 3 — arc.** Twist beat + foreshadow nudges + light director FSM (window/interrupt/expiry-compost).
 - **Deferred:** main-plot integration; authored multi-quest chains / MICE nesting; new persistence tables; any change to improvised contracts.
 
-## 10. Open questions
+## 10. Resolved questions (user-decided 2026-07-13)
 
-- **Freshness curve** — linear `1−age/5` (spec assumes this, keeps §5 arithmetic clean) or exponential half-life? Both are `salience.py` constants; the choice only reshuffles borderline seeds.
-- **Affinity-milestone delegation** — `deliver`-gift as the vehicle (§4 table) with a morning re-check, or skip `affinity` milestones for sifting entirely in Inc 2 and add them in Inc 3? Spec assumes deliver-with-re-check.
-- **Public vs private split** — currently by seed nature (personal grudge → private giver pitch; open bounty → board). Should high-salience private seeds *also* leak to the board after expiry, or only compost? Spec assumes compost-only.
+- **Freshness curve** — **linear `1−age/5`** (as used throughout §5's arithmetic). A `salience.py` constant.
+- **Affinity-milestone delegation** — **sifted in Inc 2, deliver-gift + morning re-check** (§4 table): the quest step is delivering the giver's gift to the target; the writeback fires only when the morning re-check confirms `_met` (the giver's affinity actually rose). The quest may honestly end "attempted" without the milestone closing.
+- **Expiry of unaccepted private offers** — **compost only, never a board leak**: the giver acts on his agenda himself; consequences become deeds the next sift can read. Private grief never appears on a public board.
 
 ## 11. PB tunables
 

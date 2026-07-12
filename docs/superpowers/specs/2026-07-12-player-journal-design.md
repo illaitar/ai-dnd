@@ -304,8 +304,8 @@ Live verify: play one tavern evening on the deepseek profile, open Хроник�
 - **Interlock with the quest pipeline.** Hook 2 today captures the beats that exist for **improvised** contracts (pitch/accept/outcome). When the [emergent-quest pipeline](2026-07-12-emergent-quests-design.md) lands (its `src:"sift"` arcs, `arc.beat` transitions), the **same** `quest/told` hook simply gains the extra beats it already emits — **twist reveal** (`arc.beat="twisted"`, sibling §5 Step 5) and **foreshadow** — with no journal change: the reveal string that already goes to the player's screen is captured verbatim like any other. No coupling, no migration.
 - **Deferred:** cross-referencing (click a person → filter their events); search; export; any backfill of pre-journal history; and using the journal as LLM-retrieval context (it stays a pure UI log — `pc.memory` remains the retrieval store).
 
-## 10. Open questions
+## 10. Resolved questions (user-decided 2026-07-13)
 
-- **Person-fact volume.** Every `about=[pid]` overheard line appends a person row — busy taverns could fill the Люди tab with gossip. Cap per-pid, or let `journal_cap` global prune handle it? (Spec assumes global cap only.)
-- **`refs` for ambient events.** Overheard L2 lines store `refs=[]` today (no reliable subject id). Should the speaker's pid go in `refs` so События can group by who was overheard, at the cost of implying the player "knows" the source? (Spec assumes `[]` — honest ambiguity.)
-- **place `refs` granularity** — building id (`bid`) only, or also the containing node id, for a future map cross-link? (Spec assumes `[bid]`.)
+- **Person-fact volume** — **global cap only** (`journal_cap=2000`, no per-pid limit): what you heard is what's written; a chatty town yields a chatty chronicle, and the Люди tab stays scannable through per-pid grouping.
+- **`refs` for ambient overheard lines** — **`refs=[]`, honest ambiguity**: an overheard fragment stores words, not an entity link (you heard a voice, not necessarily whose); События shows it unattributed, like real eavesdropping.
+- **Place `refs` granularity** — **building id only** (`refs=[bid]`), matching the `seen|` flag exactly; a future map cross-link resolves `bid→node` when that UI exists.

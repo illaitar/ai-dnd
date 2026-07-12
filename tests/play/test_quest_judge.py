@@ -59,3 +59,12 @@ def test_judge_llm_unavailable_propagates():
 
     with pytest.raises(LLMUnavailable):
         F.judge(_seeds(), _DEEDS, _NAMES, _Boom())
+
+
+def test_render_evidence_strips_deed_prefix():
+    """seeds.py anchors carry deed:-prefix — the judge must still see the fact."""
+    seed = {"sid": "s1", "pattern": "kin_debt", "giver_name": "Дунн",
+            "cast": {"villain": "npc:ralf"}, "evidence": ["deed:d123"]}
+    deeds = {"d123": {"actor": "npc:ralf", "verb": "promise", "data": {"what": "обещал вернуть гроссбух"}}}
+    out = F.render_evidence(seed, deeds, {"npc:ralf": "Ральф"})
+    assert "обещал вернуть гроссбух" in out and "Ральф" in out

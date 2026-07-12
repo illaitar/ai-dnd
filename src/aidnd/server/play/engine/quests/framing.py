@@ -28,7 +28,7 @@ def render_evidence(seed: dict, deeds: dict, names: dict) -> str:
     head += f" (речь о {prize})." if prize else "."
     facts = []
     for i in seed.get("evidence", []):
-        d = deeds.get(i)
+        d = deeds.get(i.split(":", 1)[1] if i.startswith("deed:") else i)   # anchors carry deed:-prefix (seeds.py)
         if not d:
             continue
         what = d.get("data", {}).get("what") or d.get("verb")

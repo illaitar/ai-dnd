@@ -449,6 +449,7 @@
           <span id="magtargetwrap" style="display:none">цель: <select id="magtarget"></select></span>
           <button class="castbtn" id="magcast" onclick="doCast()">замкнуть круг</button>
           <button class="gtile" onclick="clearCircle()">сброс</button>
+          <span id="enchwrap" style="margin-left:8px">в вещь: <select id="enchtarget"></select> <button class="gtile" onclick="doEnchant()">вплести</button></span>
         </div>
         <div class="magsec">стихии</div>
         <div class="gtiles" id="magelems"></div>
@@ -1221,7 +1222,7 @@ function bagItem(it){
   const mods=(it.mods&&it.mods.length)?` · <span class="imod">${it.mods.map(m=>esc(m.target)+(m.amount?('+'+m.amount):'')).join(' ')}</span>`:'';
   const canRepair=it.condition&&it.condition.ratio<1&&mode==='dialogue'&&CARD&&CARD.crafter;
   const acts=[`<button onclick="itemAct('${it.id}','inspect')">осмотреть</button>`];
-  if(it.kind==='consumable')acts.push(`<button onclick="itemAct('${it.id}','use')">применить</button>`);
+  if(it.kind==='consumable'||it.enchant)acts.push(`<button onclick="itemAct('${it.id}','use')">применить</button>`);
   else if(it.condition)acts.push(`<button onclick="itemAct('${it.id}','use')">испытать</button>`);
   if(canRepair)acts.push(`<button onclick="itemAct('${it.id}','repair')">починить</button>`);
   if(mode==='dialogue'&&CARD&&CARD.crafter&&it.kind!=='key')
@@ -1231,13 +1232,14 @@ function bagItem(it){
   if(mode==='dialogue'&&cur)acts.push(`<button onclick="giveItem('${it.id}')">отдать</button>`);
   return `<div class="bagitem2">
     <div class="bn">${esc(it.name)}${q}</div>
-    <div class="bw">${esc(it.kind)} · ${worth}${qual}${cond}${mk}${mods}</div>
+    <div class="bw">${esc(it.kind)} · ${worth}${qual}${cond}${mk}${mods}${it.enchant?` · <span class="imod">✦«${esc(it.enchant.name)}»${it.enchant.charges?(' ×'+it.enchant.charges):''}</span>`:''}</div>
     ${(it.facts&&it.facts.length)?`<div class="bf">${it.facts.map(esc).join('; ')}</div>`:''}
     <div class="acts">${acts.join('')}</div></div>`;
 }
 async function itemAct(id,act){
   if(act==='inspect')return inspectItem(id);
   if(act==='use'){const r=await api('/api/play/use',{item:id});if(r.error){push('sys',esc(r.error));return;}
+    if(r.activated){(r.narr||[]).forEach(n=>push('narr',esc(n)));if(r.hp!=null)setHp(r.hp);if(r.mana!=null)setMana(r.mana,r.mana_cap);if(r.gt!=null){GT=r.gt;setClock();}if(r.combat){CB=r.combat;renderCombat();renderTarget();}if(r.refresh)loadMap();await refreshInv();return;}
     if(r.consumed){const fx=(r.effects&&r.effects.length)?(' — '+r.effects.join(', ')):'';push('narr','Ты пускаешь «'+esc(r.name)+'» в дело'+esc(fx)+'.');if(r.hp!=null)setHp(r.hp);if(r.mana!=null)setMana(r.mana,r.mana_cap);await refreshInv();return;}
     const e=r.event;push(e.broke?'sys':'narr',e.broke?('«'+esc(r.item.name)+'» с треском ломается ('+esc(e.break_behavior)+')!'):('Ты пускаешь «'+esc(r.item.name)+'» в дело — '+esc(e.label)+'.'));await refreshInv();}
   if(act==='repair'){const r=await api('/api/play/repair',{item:id,npc:cur});if(r.error){push('sys',esc(r.error));return;}
@@ -1611,7 +1613,7 @@ async function openMagic(){
   MAG.known=new Set(g.known||[]);
   DRAW.rate=(g.draw&&g.draw.rate)||1.5;
   setMana(g.mana,g.mana_cap,g.fatigue);
-  renderPalette(g);resetDraw();renderTarget();
+  renderPalette(g);resetDraw();renderTarget();fillEnchTargets();
   const gr=await safeApi('/api/play/grimoire');renderGrimoire((gr&&gr.laws)||[]);
   const t=await safeApi('/api/play/teachers');renderTeachers((t&&t.teachers)||[]);
 }
@@ -1793,6 +1795,22 @@ async function doCast(){
   const tg=combatTarget();if(tg)body.target=tg;
   stopMelt();$('magcast').disabled=true;
   finishCast(await api('/api/play/cast',body),fatBefore);
+}
+function fillEnchTargets(){
+  const sel=$('enchtarget');if(!sel)return;
+  sel.innerHTML=(INV||[]).map(i=>`<option value="${i.id}">${esc(i.name)}</option>`).join('')||'<option value="">— нет вещей —</option>';
+}
+async function doEnchant(){
+  const sel=$('enchtarget'),item=sel&&sel.value;
+  if(!item){push('sys','нет вещи для чар');return;}
+  if(!MAG.circle.length){push('sys','сначала начерти круг');return;}
+  const body={item,drawing:MAG.circle.map(p=>({...p}))};
+  if(DRAW.lit&&!DRAW.mastered)body.draw_ms=Math.max(0,Math.round(performance.now()-DRAW.t0));
+  const r=await api('/api/play/enchant',body);
+  if(r.error){push('sys',esc(r.error));return;}
+  (r.narr||[]).forEach(n=>push('narr',esc(n)));
+  if(r.mana!=null)setMana(r.mana,r.mana_cap);
+  clearCircle();await refreshInv();fillEnchTargets();
 }
 function gutterOut(){                         // свеча погасла посреди черчения — вынужденный выброс
   if(!MAG.circle.length)return;

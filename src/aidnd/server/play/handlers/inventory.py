@@ -201,6 +201,9 @@ async def use_item(request: Request):
     it = _store().get_item(iid)
     if not it:
         return {"error": "нет предмета"}
+    if it.get("enchant"):
+        from aidnd.server.play.handlers.magic import _activate_enchant
+        return _activate_enchant(it)
     if it.get("kind") == "consumable" or not it.get("durability"):
         fx = _apply_consumable(it)                          # heal / mana from attrs (banded, code-owned)
         _store().inv_move(_wid(), iid, "used")              # drunk/consumed — item is gone

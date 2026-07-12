@@ -158,6 +158,8 @@ PB = {
     "mana_grow_frac": 0.1,
     "mana_sleep_mult": 3,  # sleep fills candle faster
     "mana_per_band": 3.0,  # a mana draught restores (special:mana band) × this to the pool
+    "enchant_chara_k": 10.0,  # item holds a bound law up to (чара ÷ this) power budget
+    "enchant_charges": 3,     # a bound enchant fires this many times before it's spent
     "fatigue_div": 8,
     "fatigue_min_per_pt": 24,  # fatigue: 1+burned/8 to stats, fades over time
     # DRAWING (M-5.2): candle drains ~drain/sec (softer from Int+Wis) + glyph weight when inscribed;

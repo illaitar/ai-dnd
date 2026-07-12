@@ -386,6 +386,84 @@ async def cast(request: Request):
     return res
 
 
+# ---------------------------------------------------------- ENCHANT (bound law) --- #
+_LAW_KEYS = ("name", "flavor", "sensory", "kind", "power", "target", "range", "duration",
+             "mech", "law", "taboo", "hash")
+
+
+def _enchant_cap(it: dict) -> float:
+    """Max law budget an item can hold — from its чара (arcane capacity). No чара → not enchantable."""
+    chara = ((it.get("attrs") or {}).get("чара") or {}).get("true", 0)
+    return chara / PB["enchant_chara_k"]
+
+
+def _activate_enchant(it: dict) -> dict:
+    """Fire an item's bound law via the spell runner (_apply_law) — deterministic, no LLM. Decrements
+    charges; the enchant is spent (removed) at 0, the item remains. In combat, targets a standing foe."""
+    _city, people, crof, _cr2b, loc = _play()
+    en = it["enchant"]
+    out: dict = {"narr": []}
+    cb = _S.get("combat")
+    target = None
+    if cb and cb.get("enc"):
+        target = next((u.id for u in cb["enc"].units.values() if u.side == "foes" and not u.down()), None)
+    _apply_law(en, target, out, people, crof, loc)
+    en["charges"] = int(en.get("charges", 1)) - 1
+    if en["charges"] <= 0:
+        it.pop("enchant", None)
+        out["narr"].append("Чары иссякли — вещь снова проста.")
+    _store().save_item(it)
+    _pc_save()
+    res = {"activated": True, "name": it["name"], "narr": out["narr"], "refresh": out.get("refresh"),
+           "hp": _pc_hp(), "mana": _mana(), "mana_cap": _mana_cap(),
+           "charges": (it.get("enchant") or {}).get("charges", 0), "gt": _gt()}
+    if out.get("combat_refresh") and cb:
+        res["combat"] = cb["enc"].view()
+    return res
+
+
+@router.post("/api/play/enchant")
+async def enchant_item(request: Request):
+    """Bind a drawn circle's LAW into an item instead of casting it (reuses the cast pipeline). The
+    item's чара caps the law's budget; binding costs mana like a cast; the law fires later on «применить»."""
+    _city, people, crof, _cr2b, loc = _play()
+    body = await request.json()
+    iid = body.get("item")
+    it = _store().get_item(iid)
+    if not it or not any(r["item_id"] == iid for r in _store().inventory(_wid(), "pc")):
+        return {"error": "нет такой вещи"}
+    cap = _enchant_cap(it)
+    if cap <= 0:
+        return {"error": f"«{it['name']}» не держит чар — в ней нет чары."}
+    comp = magic_normalize(body.get("drawing") or body.get("glyphs") or [])
+    locked = sorted({p["id"] for p in comp if p["id"] not in set(_glyphs_known())})
+    if locked:
+        g = magic_load()
+        return {"error": "Ты не владеешь глифом: " + ", ".join(g["all"][c].get("ru", c) for c in locked)}
+    cls = classify(comp)
+    if cls["kind"] == "empty":
+        return {"error": f"Круг не сходится — {cls['reason']}."}
+    if cls["kind"] == "wild":
+        return {"error": "Круг противоречив — такой закон не вплести в вещь."}
+    budget = power_budget(comp)
+    if budget > cap:
+        return {"error": f"«{it['name']}» не удержит столь мощный закон — нужна чара покрепче."}
+    is_known = _grimoire_get(circle_hash(comp)) is not None
+    cost = _cast_cost(comp, body.get("draw_ms"), is_known)
+    if _mana() < cost:
+        return {"error": f"Маны мало: нужно {cost:g}, есть {_mana():g}. Отдохни."}
+    _mana_spend(cost)
+    _mana_grow(cost)
+    _gt_add(PB["act_min"])
+    law, _fresh = _inscribe_law(comp, cls)                  # LLM on a novel circle; grimoire-cached is DET
+    it["enchant"] = {**{k: law.get(k) for k in _LAW_KEYS}, "charges": PB["enchant_charges"]}
+    _store().save_item(it)
+    _pc_save()
+    return {"enchanted": True, "name": it["name"], "law": law["name"], "charges": PB["enchant_charges"],
+            "narr": [f"✦ «{law['name']}» вплетён в «{it['name']}» — {PB['enchant_charges']} закл."],
+            "mana": _mana(), "mana_cap": _mana_cap(), "gt": _gt()}
+
+
 @router.get("/api/play/glyphs")
 def glyphs_list():
     """Magic palette: all basis + mark known (player owns) vs locked (learn from mage/scribe)."""

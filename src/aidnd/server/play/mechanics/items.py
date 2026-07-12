@@ -582,6 +582,8 @@ def _item_card(it: dict, known) -> dict:
     v["condition"] = item_condition(it)
     v["make"] = it.get("make")
     v["rarity"] = it.get("rarity", "common")  # rarity axis for UI/price
+    en = it.get("enchant")
+    v["enchant"] = {"name": en.get("name"), "charges": en.get("charges")} if en else None
     return v
 
 

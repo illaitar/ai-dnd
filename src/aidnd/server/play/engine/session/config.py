@@ -160,6 +160,15 @@ PB = {
     "mana_per_band": 3.0,  # a mana draught restores (special:mana band) × this to the pool
     "enchant_chara_k": 10.0,  # item holds a bound law up to (чара ÷ this) power budget
     "enchant_charges": 3,     # a bound enchant fires this many times before it's spent
+    # NPC↔NPC trade & haggle (emergent): value corridor + multi-tick negotiation, settled in the store
+    "haggle_patience": 4,     # negotiation rounds before the parties walk away
+    "haggle_gap_eps": 1.0,    # offers within this many coins → strike the deal at their mean
+    "haggle_s_base": 0.55,    # seller concession base per round (toward the midpoint)
+    "haggle_b_base": 0.35,    # buyer concession base per round
+    "haggle_min_coins": 3,    # a buyer needs at least this many coins to bother trading
+    "haggle_want_need": 0.45, # wealth-need at/above which a buyer counts as economically driven
+    "haggle_wants": 0.6,      # how much a driven buyer wants a co-present good (raises what he'll pay)
+    "haggle_open_p": 0.22,    # chance a willing buyer opens a deal this tick (not every 3-minute turn)
     "fatigue_div": 8,
     "fatigue_min_per_pt": 24,  # fatigue: 1+burned/8 to stats, fades over time
     # DRAWING (M-5.2): candle drains ~drain/sec (softer from Int+Wis) + glyph weight when inscribed;

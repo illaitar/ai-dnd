@@ -616,6 +616,97 @@ def _select_actors(ranked_imp: list, impulses: dict, lv: dict) -> list:
     return [p for p in ranked_imp if p in keep]                    # impulse order preserved for waves
 
 
+def _npc_trade_step(people, order, lv, feed) -> None:
+    """Emergent NPC↔NPC trade + haggle (spec: 2026-07-12-npc-trade-haggle-design).
+    (1) OPEN a deal between a co-present economically-driven buyer (coins + a commercial agenda/need)
+    and a seller holding a good, when a value corridor exists. (2) ADVANCE each open haggle one round —
+    both offers voiced as speech, converging by trait-driven concession — and SETTLE it in the real store
+    (coins + item move) or walk away. Numbers are code-owned; the digest only voices them."""
+    from aidnd.server.play.mechanics.haggle import (
+        concession,
+        deal_corridor,
+        haggle_tick,
+        open_deal,
+        settle,
+    )
+
+    haggles = lv.setdefault("haggle", {})
+    present, store, wid = set(order), _store(), _wid()
+
+    def _best_good(pid):
+        rows = [(r["item_id"], store.get_item(r["item_id"])) for r in store.inventory(wid, pid)]
+        goods = [(i, it) for i, it in rows if it and it.get("kind") not in ("key", "coin", "document")]
+        return max(goods, key=lambda x: x[1].get("worth", 1)) if goods else None
+
+    def _gname(it):                                        # some items carry a dict/odd name — show clean
+        nm = it.get("name")
+        return nm if isinstance(nm, str) else (nm.get("item", "вещь") if isinstance(nm, dict) else str(nm))
+
+    in_deal = {d["buyer"] for d in haggles.values()} | {d["seller"] for d in haggles.values()}
+    for buyer in order:                                    # (1) open new deals from opportunities
+        if buyer in in_deal or buyer not in people:
+            continue
+        stb = people[buyer].state
+        coins = store.purse_get(wid, buyer)
+        if coins < PB["haggle_min_coins"]:
+            continue
+        ag = (stb.agendas[0].summary if stb.agendas else "").lower()
+        driven = (stb.needs.get("wealth", 0.0) >= PB["haggle_want_need"]
+                  or any(k in ag for k in ("куп", "выкуп", "накоп", "монет", "долг", "лавк", "дело", "товар")))
+        if not driven:
+            continue
+        if random.Random(f"trade|{buyer}|{lv['clock']}").random() > PB["haggle_open_p"]:
+            continue                                       # a deal doesn't start on every 3-minute tick
+        for seller in order:
+            if seller == buyer or seller in in_deal or seller not in people:
+                continue
+            good = _best_good(seller)
+            if not good:
+                continue
+            iid, it = good
+            sts = people[seller].state
+            cor = deal_corridor(it.get("worth", 1), sts.needs, sts.config.traits,
+                                stb.needs, stb.config.traits, PB["haggle_wants"])
+            if not cor or coins < cor[0]:
+                continue
+            deal = open_deal(cor[0], cor[1], PB["haggle_patience"])
+            deal.update({"buyer": buyer, "seller": seller, "item_id": iid, "good": _gname(it),
+                         "s_conc": concession(sts.needs, sts.config.traits, "seller",
+                                              PB["haggle_s_base"], PB["haggle_b_base"]),
+                         "b_conc": concession(stb.needs, stb.config.traits, "buyer",
+                                              PB["haggle_s_base"], PB["haggle_b_base"])})
+            haggles[f"{buyer}|{seller}|{iid}"] = deal
+            in_deal.update((buyer, seller))
+            break                                          # one deal per buyer per pass
+
+    for key in list(haggles):                              # (2) advance each open deal one round
+        deal = haggles[key]
+        buyer, seller, iid = deal["buyer"], deal["seller"], deal["item_id"]
+        if (buyer not in present or seller not in present
+                or not any(r["item_id"] == iid for r in store.inventory(wid, seller))):
+            del haggles[key]                               # a party left, or the good is gone → deal dies
+            continue
+        s_disp, b_disp = _display(seller, people), _display(buyer, people)
+        feed.append({"k": "speech", "who": s_disp, "tier": 1, "to": b_disp,
+                     "text": f"— За «{deal['good']}»? {int(round(deal['ask']))}."})
+        feed.append({"k": "speech", "who": b_disp, "tier": 1, "to": s_disp,
+                     "text": f"— {int(round(deal['bid']))}, не больше."})
+        status, price = haggle_tick(deal, deal["s_conc"], deal["b_conc"], PB["haggle_gap_eps"])
+        if status == "settle" and store.purse_get(wid, buyer) >= price:
+            settle(store, wid, buyer, seller, iid, price)
+            feed.append({"k": "deed", "who": b_disp,
+                         "text": f"отсчитывает {price} зм — «{deal['good']}» переходит из рук в руки"})
+            people[buyer].state.memory.add(f"купил «{deal['good']}» за {price} зм", lv["clock"], 0.5)
+            people[seller].state.memory.add(f"продал «{deal['good']}» за {price} зм", lv["clock"], 0.5)
+            del haggles[key]
+        elif status == "settle":
+            feed.append({"k": "deed", "who": b_disp, "text": "шарит по карманам — монет не хватило, сделка сорвалась"})
+            del haggles[key]
+        elif status == "walk":
+            feed.append({"k": "deed", "who": "зал", "text": f"{b_disp} и {s_disp} не сошлись в цене — расходятся"})
+            del haggles[key]
+
+
 def _live_tick(people) -> tuple:
     from aidnd.server.play.engine import deeds as _deeds
 
@@ -1088,6 +1179,7 @@ def _live_tick(people) -> tuple:
         does = (d.get("does") or "").strip()
         if does and not said:  # line itself carries moment — don't duplicate
             feed.append({"k": "deed", "who": who, "text": does[:150]})
+    _npc_trade_step(people, order, lv, feed)  # emergent NPC↔NPC trade + haggle, settled in the store
     if lv.pop("murmur", 0):  # someone spoke too far off to make out — no longer gated to every 3rd tick
         feed.append({"k": "deed", "who": "зал", "text": "за столами гудит негромкий говор"})
     if not feed:  # idle backstop: nothing surfaced this tick — soundscape fills the silence

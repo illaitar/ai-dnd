@@ -8,4 +8,3 @@ def test_inc2_quest_pb_present():
     assert PB["quest_w_peak"] == 1.0
     assert PB["quest_w_near"] == 0.6
     assert PB["quest_w_fresh"] == 0.8
-    assert PB["quest_twist_p"] == 0.7

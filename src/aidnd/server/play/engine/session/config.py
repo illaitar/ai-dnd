@@ -64,7 +64,6 @@ PB = {
     "quest_w_peak": 1.0,      # salience weight — cast affinity/deed peak
     "quest_w_near": 0.6,      # salience weight — giver↔player proximity
     "quest_w_fresh": 0.8,     # salience weight — evidence freshness
-    "quest_twist_p": 0.7,     # probability a qualifying twist candidate is planted
     "merchant_float": 30,
     "hostile_aff": -0.2,
     # NPC schedule — from NEEDS (aidnd.society), not from role probabilities (see society/*)

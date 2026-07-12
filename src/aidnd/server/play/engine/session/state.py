@@ -63,6 +63,15 @@ class _SessProxy:
     def update(self, *a, **kw):
         self._d().update(*a, **kw)
 
+    def clear(self):
+        """Reset to a FRESH session, keeping the current wid/seed (test isolation —
+        wipes hook state like 'seen'/'dlg' without corrupting the shared world-1 slot
+        that other tests reusing the default session depend on)."""
+        d = self._d()
+        wid, seed = d.get("wid", 1), d.get("seed", 1)
+        d.clear()
+        d.update(_fresh_sess(wid, seed))
+
 
 _S = _SessProxy()
 

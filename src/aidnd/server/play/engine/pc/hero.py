@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from aidnd.items import Capability
 from aidnd.mind import NpcConfig, NpcState
+from aidnd.server.play.engine.journal import j_place
 
 from ..session.config import PB, PLAYER
 from ..session.persist import _store
@@ -179,3 +180,5 @@ def _mark_seen(bid: str | None) -> None:
     if bid and bid not in _seen():
         _S["seen"].add(bid)
         _store().flag_set(_wid(), f"seen|{bid}")
+        from aidnd.server.play.engine.core import _binfo  # deferred: core imports hero (cycle)
+        j_place(f"впервые вошёл в {_binfo(bid)['name']}", bid)

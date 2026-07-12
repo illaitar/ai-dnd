@@ -30,6 +30,7 @@ from aidnd.server.play.engine.core import (
     _S,
     PB,
     PLAYER,
+    _binfo,
     _emo,
     _gt,
     _gt_add,
@@ -43,6 +44,7 @@ from aidnd.server.play.engine.core import (
     _topics_for,
     router,
 )
+from aidnd.server.play.engine.journal import j_person
 from aidnd.server.play.engine.resolve import _voice
 from aidnd.server.play.engine.world import _play, _world_tick
 from aidnd.server.play.mechanics.contracts import _contract_offer, _contract_on_talk
@@ -83,6 +85,9 @@ async def talk(request: Request):
         st.memory.add("незнакомец (игрок) подошёл и заговорил со мной", _mt(), 0.4, about=[PLAYER])
         _pc_remember(f"я познакомился с {p.name} ({p.role})", 0.45, about=[npc])
         _npc_save(npc)
+        place = (_binfo(_S.get("inside"))["name"] if _S.get("inside")
+                 else ((_S.get("live") or {}).get("place") or ""))
+        j_person("saw", f"встретил {p.name} — {p.role}, {place}", npc)
     _materialize_npc(npc, "visible")  # visible (gear+keys) — real items
     rel = st.relationships.get(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     per = p.persona or {}

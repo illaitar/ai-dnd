@@ -50,14 +50,23 @@
   .workpanel.on{display:flex}
   /* ── focus modes: the active work panel spans the two left slots, chat keeps the right
         slot, conditions tucks away. explore & dialogue keep all three visible. ── */
-  body.view-map .left,body.view-inv .left,body.view-magic .left{flex-grow:2}
-  body.view-map .center,body.view-inv .center,body.view-magic .center{flex-grow:1}
-  body.view-map .right,body.view-inv .right,body.view-magic .right{flex-grow:0.0001;opacity:0;pointer-events:none}
+  body.view-map .left,body.view-inv .left,body.view-magic .left,body.view-journal .left{flex-grow:2}
+  body.view-map .center,body.view-inv .center,body.view-magic .center,body.view-journal .center{flex-grow:1}
+  body.view-map .right,body.view-inv .right,body.view-magic .right,body.view-journal .right{flex-grow:0.0001;opacity:0;pointer-events:none}
   body.view-dialogue .left{flex-grow:0.6}
   body.view-dialogue .center{flex-grow:2.2}                          /* повествование вперёд */
   body.view-dialogue .right{flex-grow:0.95}
   .invlist{flex:1 1 auto;overflow:auto;padding:2px 12px 12px;display:flex;flex-direction:column;gap:7px}
   .magbody{flex:1 1 auto;overflow:auto;padding:10px 14px 16px}
+  .jtabs{display:flex;gap:4px;padding:6px 12px;flex:0 0 auto}
+  .jtab{background:none;border:1px solid var(--faint);color:var(--faint);border-radius:10px;padding:2px 10px;cursor:pointer;font-size:12px}
+  .jtab.on{color:var(--gold);border-color:var(--gold)}
+  .jbody{flex:1 1 auto;min-height:0;overflow:auto;padding:0 12px 12px}
+  .jrow{padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px;line-height:1.4}
+  .jmark{color:var(--gold);margin-right:6px}
+  .jfrag{font-style:italic;color:var(--faint)}
+  .jgrp{color:var(--gold);font-size:12px;margin:8px 0 2px}
+  .jempty{color:var(--faint);padding:10px 0}
   body.view-magic #combat{display:none}   /* drawing a circle mid-combat: reveal the panel, keep combat state */
   #genwrap{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
     background:rgba(8,10,10,.9)}
@@ -407,7 +416,7 @@
 <div class="top">
   <span class="brand">&#10022; AI-DnD</span>
   <span class="loc"><b id="locname">Трактир</b><span class="sep">·</span><span id="locdist"></span></span>
-  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="mana" title="мана" style="cursor:pointer;color:var(--gold)" onclick="openMagic()">&#10022; 12/14</span><span id="coins">12 зм</span><a title="начать новый мир — стереть прогресс и сгенерировать город заново" style="color:var(--faint);text-decoration:none;cursor:pointer" onclick="newWorld()">&#10227; новый мир</a><a id="dbglog" href="/api/play/debuglog?download=1" title="скачать подробный лог сессии для отладки" style="color:var(--faint);text-decoration:none;cursor:pointer" onclick="event.preventDefault();downloadLog()">&#8681; лог</a></span>
+  <span class="right"><span id="clock">вечер, 19:40</span><span>дождь</span><span id="hp">&#9829; 18/18</span><span id="mana" title="мана" style="cursor:pointer;color:var(--gold)" onclick="openMagic()">&#10022; 12/14</span><span id="coins">12 зм</span><a title="начать новый мир — стереть прогресс и сгенерировать город заново" style="color:var(--faint);text-decoration:none;cursor:pointer" onclick="newWorld()">&#10227; новый мир</a><a title="Хроника — что я видел, слышал, делал" style="color:var(--faint);text-decoration:none;cursor:pointer" onclick="setView('journal')">&#10022; хроника</a><a id="dbglog" href="/api/play/debuglog?download=1" title="скачать подробный лог сессии для отладки" style="color:var(--faint);text-decoration:none;cursor:pointer" onclick="event.preventDefault();downloadLog()">&#8681; лог</a></span>
 </div>
 
 <div class="stage">
@@ -462,6 +471,16 @@
         <div class="magsec">гримуар <span id="magrimn" style="color:var(--faint)"></span></div>
         <div id="magrim"><span class="hint">пока пусто — сотвори чистый круг, и закон впишется сюда</span></div>
       </div>
+    </div>
+    <div id="journalpanel" class="workpanel">
+      <div class="cap">&#10022; Хроника <span onclick="setView('explore')" style="cursor:pointer;color:var(--faint);float:right">✕</span></div>
+      <div class="jtabs" id="jtabs">
+        <button class="jtab on" data-k="event" onclick="jTab('event')">События</button>
+        <button class="jtab" data-k="person" onclick="jTab('person')">Люди</button>
+        <button class="jtab" data-k="quest" onclick="jTab('quest')">Дела</button>
+        <button class="jtab" data-k="place" onclick="jTab('place')">Места</button>
+      </div>
+      <div class="jbody" id="jbody"></div>
     </div>
   </div>
 
@@ -639,21 +658,23 @@ function setView(name){
   morphTo(()=>{
     VIEW=name;
     document.body.className='view-'+name;
-    const wp={inv:'invpanel',magic:'magicpanel'}[name]||'mapwrap';      // which work panel fills the left column
-    ['mapwrap','invpanel','magicpanel'].forEach(id=>{const e=$(id);if(e)e.classList.toggle('on',id===wp);});
+    const wp={inv:'invpanel',magic:'magicpanel',journal:'journalpanel'}[name]||'mapwrap';  // which work panel fills the left column
+    ['mapwrap','invpanel','magicpanel','journalpanel'].forEach(id=>{const e=$(id);if(e)e.classList.toggle('on',id===wp);});
   });
   if(MAP){Z=Math.min(MAXZ,Math.max(minZ(),Z));applyVB();      // режим сменил границы зума и аспект окна —
     setTimeout(()=>{if(MAP)applyVB();},370);}                 // пере-клампим сразу и после морфа
   if(name==='inv')refreshInv();
+  if(name==='journal')renderJournal();
 }
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'&&(VIEW==='map'||VIEW==='inv'||VIEW==='magic')){setView('explore');e.preventDefault();}
+  if(e.key==='Escape'&&(VIEW==='map'||VIEW==='inv'||VIEW==='magic'||VIEW==='journal')){setView('explore');e.preventDefault();}
 });
 // freeform → view: a pure "show me my …" is UI navigation — morph instantly, no world tick,
 // no LLM round-trip. Any real action verb wins and falls through to the arbiter (which ticks).
 const VIEW_INTENTS=[
   {re:/(сумк|инвентар|рюкзак|карман|припас|пожитк|мешок|что у меня|чем я)/i, v:'inv', ack:'заглядываешь в сумку'},
   {re:/(карт[ауые]|план\s*город|где я|окрестност|местност)/i, v:'map', ack:'разворачиваешь карту'},
+  {re:/(хроник|дневник|журнал|летопис|записк)/i, v:'journal', ack:'открываешь хронику'},
 ];
 // manipulation verbs (take-from / put-in / hand-over) anchored to word start, so a line that
 // operates ON the bag ("достаю меч из сумки") routes to the arbiter — but "посмотреть сумку"
@@ -1253,6 +1274,26 @@ async function acceptContract(id,btn){
   push('narr','Вы ударяете по рукам.'+(r.note?(' '+esc(r.note)):''));
   if(r.note)await refreshInv();
   renderJobs();
+}
+let JTAB='event';
+const JMARK={saw:'✦',heard1:'◐',heard2:'◐',told:'◌'};   // ✦ ◐ ◐ ◌
+function jTab(k){JTAB=k;document.querySelectorAll('.jtab').forEach(b=>b.classList.toggle('on',b.dataset.k===k));renderJournal();}
+async function renderJournal(){
+  const el=$('jbody');if(!el)return;
+  const r=await api('/api/play/journal?kind='+encodeURIComponent(JTAB)+'&limit=400');
+  const rows=(r.entries||[]);
+  if(!rows.length){el.innerHTML='<div class="jempty">пока пусто — хроника пишется по ходу игры</div>';return;}
+  const line=e=>{const m=JMARK[e.prov]||'';
+    const t=e.prov==='heard2'?`<span class="jfrag">${esc(e.text)}</span>`:esc(e.text);
+    return `<div class="jrow"><span class="jmark">${m}</span>${t}</div>`;};
+  if(JTAB==='person'||JTAB==='place'){                       // group by refs-entity (newest-first within group)
+    const seen=[],by={};
+    rows.forEach(e=>{const k=(e.refs&&e.refs[0])||'—';if(!(k in by)){by[k]=[];seen.push(k);}by[k].push(e);});
+    el.innerHTML=seen.map(k=>`<div class="jgrp">${esc(by[k][0].text.split(' — ')[0].replace(/^впервые вошёл в /,''))}</div>`
+      +by[k].map(line).join('')).join('');
+  }else{
+    el.innerHTML=rows.map(line).join('');
+  }
 }
 async function renderJobs(){
   const el=$('jobs');if(!el)return;

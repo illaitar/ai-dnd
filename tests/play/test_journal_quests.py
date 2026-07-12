@@ -70,3 +70,24 @@ def test_complete_writes_quest_saw(wired, monkeypatch):
     r = wired.journal_list(1, kind="quest")
     assert len(r) == 1 and r[0]["prov"] == "saw" and r[0]["refs"] == ["ct:odo:1"]
     assert r[0]["text"] == "выполнено для Одо: бочонок сидра доставлен"
+
+
+def test_complete_writes_quest_saw_no_none_for_wantless_contract(wired, monkeypatch):
+    # kind "dead" contract with no `want`/`target_name` — summary must never render "None"
+    people = {"odo": SimpleNamespace(name="Одо", state=SimpleNamespace(
+        rel=lambda who: {"trust": 0.0, "affinity": 0.0},
+        memory=SimpleNamespace(add=lambda *a, **k: None)))}
+    core._S["people"] = people
+    monkeypatch.setattr(ct_mod, "_materialize_npc", lambda *a, **k: None)
+    monkeypatch.setattr(ct_mod, "_npc_save", lambda *a, **k: None)
+    monkeypatch.setattr(ct_mod, "_pc_remember", lambda *a, **k: None)
+    monkeypatch.setattr(ct_mod, "_mt", lambda: 516, raising=False)
+    import aidnd.server.play.engine.deeds as dd
+    monkeypatch.setattr(dd, "record", lambda *a, **k: None, raising=False)
+    wired.purse_add(1, "odo", 50)
+    ct = {"id": "ct:odo:2", "giver": "odo", "kind": "dead", "reward": 5}
+    ct_mod._contract_complete(ct)
+    r = wired.journal_list(1, kind="quest")
+    row = next(x for x in r if x["refs"] == ["ct:odo:2"])
+    assert "None" not in row["text"]
+    assert row["text"] == "выполнено для Одо: цель устранена"

@@ -78,3 +78,21 @@ def test_person_rows_accumulate_by_ref(wired):
     journal.j_person("heard1", "слышал про Одо: он в долгах", "odo")   # a later fact about odo
     r = wired.journal_list(1, kind="person")
     assert len(r) == 2 and all(x["refs"] == ["odo"] for x in r)        # grouped by the same pid
+
+
+# --- Hook 3: jmet| gate — decoupled from `_met()`/relationships (live-play regression) ---------
+
+def test_j_person_once_writes_on_first_talk_regardless_of_prior_sight(wired):
+    # simulates the live bug: the NPC is already "met" via sight-appraisal (relationships
+    # populated) BEFORE any talk — j_person_once must still journal on the first real TALK
+    journal.j_person_once("odo", "встретил Одо — трактирщик, Трактир «Пьяный вол»")
+    r = wired.journal_list(1, kind="person")
+    assert len(r) == 1 and r[0]["refs"] == ["odo"] and r[0]["prov"] == "saw"
+    assert wired.flag_get(1, "jmet|odo")
+
+
+def test_j_person_once_writes_nothing_on_second_talk(wired):
+    journal.j_person_once("odo", "встретил Одо — трактирщик")
+    journal.j_person_once("odo", "встретил Одо — трактирщик")   # second talk — flag already set
+    r = wired.journal_list(1, kind="person")
+    assert len(r) == 1

@@ -10,6 +10,7 @@ from aidnd.mind import Body, Item, NpcConfig, NpcState, World
 from aidnd.mind.agenda import Agenda, Milestone
 from aidnd.server.play.engine import core
 from aidnd.server.play.engine import deeds as dd
+from aidnd.server.play.engine.session import persist
 from aidnd.server.play.mechanics import contracts
 from aidnd.worldgen import WorldStore
 
@@ -29,6 +30,9 @@ class _P:
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     st = WorldStore(str(tmp_path / "live.db"))
+    # root-patch persist._STORE (the base every lazy _store() resolver hits, including journal's
+    # own lazy import inside _contract_complete) so no journal_add call can leak into real live.db
+    monkeypatch.setattr(persist, "_STORE", st)
     for mod in (core, contracts, dd):
         monkeypatch.setattr(mod, "_store", lambda: st, raising=False)
         monkeypatch.setattr(mod, "_wid", lambda: 1, raising=False)

@@ -268,6 +268,12 @@ _KIND_VERB = {
     "dead": "покончить с",
 }
 
+_KIND_DONE_TEXT = {  # completion summary for want-less contracts (no bring/deliver "want", no target)
+    "dead": "цель устранена",
+    "visit": "поручение исполнено",
+    "befriend": "дружба сведена",
+}
+
 
 def _ct_steps(ct: dict) -> list:
     """Contract steps. Old single-step contract (no steps) — wrap in one step."""
@@ -326,9 +332,13 @@ def _contract_complete(ct: dict) -> str:
     )
     from aidnd.server.play.engine.journal import j_quest
 
-    _suf = " доставлен" if ct.get("kind") in ("bring", "deliver") else ""
-    j_quest("saw", f"выполнено для {p.name}: "
-                   f"{ct.get('want') or ct.get('target_name')}{_suf}", ct["id"])
+    what = ct.get("want") or ct.get("target_name")
+    if what:
+        _suf = " доставлен" if ct.get("kind") in ("bring", "deliver") else ""
+        summary = f"{what}{_suf}"
+    else:
+        summary = _KIND_DONE_TEXT.get(ct.get("kind"), "исполнено")
+    j_quest("saw", f"выполнено для {p.name}: {summary}", ct["id"])
     p.state.rel(PLAYER)["trust"] = min(1.0, p.state.rel(PLAYER)["trust"] + PB["complete_trust"])
     p.state.rel(PLAYER)["affinity"] = min(1.0, p.state.rel(PLAYER)["affinity"] + PB["complete_aff"])
     p.state.memory.add("чужак исполнил мою просьбу. Надёжный человек", _mt(), 0.85, about=[PLAYER])

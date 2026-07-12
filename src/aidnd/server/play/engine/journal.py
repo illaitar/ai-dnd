@@ -48,6 +48,23 @@ def j_person(prov: str, text: str, pid: str) -> None:
     return _emit("person", prov, [pid], text)
 
 
+def j_person_once(pid: str, text: str) -> None:
+    """First-meeting person entry, gated on a dedicated jmet|<pid> flag — NOT on `_met()`/
+    relationships, which the player's sight-appraisal populates for every co-present NPC each
+    tick (Hook 3 must fire on the first actual TALK, not on merely having been seen)."""
+    try:
+        wid = _wid()
+        store = _store()
+    except Exception:  # noqa: BLE001 — no live session: capture is best-effort, never fatal
+        return None
+    if wid is None or store is None:
+        return None
+    if store.flag_get(wid, f"jmet|{pid}"):
+        return None
+    store.flag_set(wid, f"jmet|{pid}")
+    j_person("saw", text, pid)
+
+
 def j_place(text: str, bid: str) -> None:
     return _emit("place", "saw", [bid], text)
 

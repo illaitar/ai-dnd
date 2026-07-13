@@ -7,6 +7,7 @@ relationships. See docs/superpowers/specs/2026-07-13-npc-geo-knowledge-design.md
 
 from __future__ import annotations
 
+import json
 import re
 
 from aidnd import society
@@ -249,9 +250,10 @@ def acquaintances(pid: str, from_node) -> list[dict]:
     return out
 
 
-# where-question intent — spec §3.2 (где|куда|как найти|как пройти|где купить|у кого)
+# where-question intent — spec §3.2 (где|куда|как найти|как пройти|где купить|у кого).
+# Negative lookahead on где/куда excludes «где-то»/«куда-то» (vague-hearsay, not a where-question).
 _GEO_RE = re.compile(
-    r"\b(где|куда|как\s+найти|как\s+пройти|как\s+добраться|где\s+купить|у\s+кого)\b",
+    r"\b(где(?!-)|куда(?!-)|как\s+найти|как\s+пройти|как\s+добраться|где\s+купить|у\s+кого)\b",
     re.IGNORECASE,
 )
 
@@ -299,3 +301,68 @@ def geo_answer(pid: str, text: str, from_node) -> dict | None:
         "reveal": {"bid": place["bid"],
                    "text": f"{tname} рассказал(а) дорогу к {place['name']}"},
     }
+
+
+_ROUTER_SYS = (
+    "Ты — {name} ({role}). Нрав: {nrav}. Перед тобой ЧУЖАК. Твоё отношение к нему: "
+    "приязнь={aff:.2f}, доверие={trust:.2f}, страх={fear:.2f}. Что помнишь о нём: {mem}. "
+    "Он спрашивает: «{q}». МЕСТА, КОТОРЫЕ ТЫ ЗНАЕШЬ (выбирай ТОЛЬКО из них, не выдумывай):\n{places}\n"
+    "КОГО МОЖЕШЬ ПОСОВЕТОВАТЬ, если места нет: {acq}. "
+    "Реши ПО СВОЕМУ НРАВУ И ОТНОШЕНИЮ: помочь ли, и если да — какое МЕСТО из списка назвать "
+    "(bid), или кого посоветовать (refer_pid). Ответь СТРОГО JSON: "
+    '{{"help":"да|нет|уклончиво","bid":"<id из списка или null>",'
+    '"refer_pid":"<id из совета или null>","манера":"<1 фраза, как ты это скажешь>"}}'
+)
+
+
+def _parse_json(content: str):
+    i, j = content.find("{"), content.rfind("}")
+    if 0 <= i < j:
+        try:
+            return json.loads(content[i:j + 1])
+        except (json.JSONDecodeError, ValueError):
+            return None
+    return None
+
+
+def route_geo_ask(pid: str, question: str, from_node) -> dict:
+    """The ONE mind-call: the router IS the mind, deciding BOTH willingness AND which place/person,
+    from persona + relationship + memories, bounded to code-provided sets. No PB willingness key,
+    no roll (constraint §8). Code clamps the chosen ids before anything is spoken or revealed."""
+    from .core import _model
+    people = _S.get("people") or {}
+    p = people.get(pid)
+    places = known_places(pid)
+    acq = acquaintances(pid, from_node)
+    deflect = {"kind": "deflect", "place": None, "refer": None, "манера": ""}
+    if p is None:
+        return deflect
+    rel = (getattr(p.state, "relationships", {}) or {}).get("pc", {})
+    mems = [m.text for m in p.state.memory.items if "pc" in (m.about or [])][-3:]
+    place_lines = "\n".join(
+        f"  - {e['name']} · {e['kind']}" + (f" · {e['goods']}" if e["goods"] else "") for e in places
+    ) or "  (ты не знаешь мест)"
+    acq_line = ", ".join(f"{a['name']} ({a['role']})" for a in acq) or "никого"
+    sys = _ROUTER_SYS.format(
+        name=p.name, role=p.role, nrav=(p.persona or {}).get("нрав", "обычный"),
+        aff=rel.get("affinity", 0.0), trust=rel.get("trust", 0.0), fear=rel.get("fear", 0.0),
+        mem="; ".join(mems) or "ничего", q=question, places=place_lines, acq=acq_line,
+    )
+    resp = _model().call("narrator", [{"role": "system", "content": sys},
+                                      {"role": "user", "content": question}],
+                         options={"temperature": 0.2})
+    d = _parse_json((resp.get("content") if resp else "") or "")
+    if not isinstance(d, dict):
+        return deflect
+    bid = d.get("bid")
+    refer_pid = d.get("refer_pid")
+    manera = str(d.get("манера") or "")
+    place = next((e for e in places if e["bid"] == bid), None)          # clamp bid ∈ set
+    refer = next((a for a in acq if a["pid"] == refer_pid), None)       # clamp refer_pid ∈ acq
+    if d.get("help") == "нет":
+        return {"kind": "refuse", "place": None, "refer": None, "манера": manera}
+    if place is not None:
+        return {"kind": "share", "place": place, "refer": None, "манера": manera}
+    if refer is not None:
+        return {"kind": "refer", "place": None, "refer": refer, "манера": manera}
+    return {"kind": "deflect", "place": None, "refer": None, "манера": manera}

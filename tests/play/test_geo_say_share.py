@@ -102,3 +102,10 @@ def test_geo_question_regex():
     assert geo.geo_question("как пройти к храму")
     assert geo.geo_question("где я могу купить оружие")
     assert not geo.geo_question("как твои дела")
+
+
+def test_geo_question_excludes_vague_hearsay():
+    assert not geo.geo_question("где-то слышал об этом")
+    assert not geo.geo_question("куда-то дел свой нож")
+    assert geo.geo_question("где кузница?")
+    assert geo.geo_question("куда мне идти?")

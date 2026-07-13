@@ -40,7 +40,7 @@ _OPENERS = frozenset({
 })
 
 _FRAMER_SYS = (
-    "Ты пишешь ТРИ короткие фразы для городского поручения. Используй ТОЛЬКО названных людей и вещи — "
+    "Ты пишешь ТРИ короткие фразы для городского поручения, СТРОГО ПО-РУССКИ. Используй ТОЛЬКО названных людей и вещи — "
     "никого и ничего нового не выдумывай. Верни СТРОГО JSON: "
     '{"pitch":"<просьба в характере, 1-2 фразы, с сутью и наградой>", '
     '"foreshadow":"<что гложет заказчика, 1 фраза, до предложения>", '
@@ -179,6 +179,8 @@ def valid_entities(text: str, allowed: set) -> bool:
             continue
         cands.append(word)
     for c in cands:
+        if not _ru_words(c):
+            continue                      # pure function-word candidate («За…») — nothing to validate
         if not _all_tokens_match(c, allow_tok):
             log.info("quests: валидатор отверг «%s» (текст: %s…)", c, text[:90])
             return False

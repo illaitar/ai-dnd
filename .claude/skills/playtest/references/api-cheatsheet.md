@@ -35,6 +35,16 @@ exact error strings, and end your run — do not spend budget probing «broken»
 - `GET  /api/play/combat` — state: grid w/h, units[] (id, x, y, hp, ac), order, turn, status
 - `POST /api/play/combat_act` — one action per your turn: `{"type":"move","x":X,"y":Y}` · `{"type":"attack","target":"<unit id>"}` · `{"type":"dodge"}` · `{"type":"flee"}` · `{"type":"end"}`. Bad payloads return an error naming the accepted shapes. Repeat GET → act until status ≠ active.
 
+## Items & person-to-person trade (BUYING FROM A PERSON WORKS — use these, not /give)
+- `GET  /api/play/inventory` — your bag
+- `GET  /api/play/wares?npc=<pid>` — what that NPC will sell you, with THEIR prices
+- `POST /api/play/buy {"npc":"<pid>","item":"<item id from wares>"}` — buy it (price shifts with affinity/greed)
+- `POST /api/play/sell {"npc":..,"item":..}` · `POST /api/play/offer {..}` — sell/haggle to them
+- `POST /api/play/inspect {"item":..}` — closer look (may reveal hidden qualities)
+- `POST /api/play/use {"item":..}` — eat/drink/apply
+- `POST /api/play/loot {"container":..}` — take from a container revealed in the room
+- `POST /api/play/commission {..}` / `repair` — order crafting/fixing from an artisan
+
 ## Money & misc
 - coins visible in /scene; buy/sell at market venues: `POST /api/play/market/buy|sell` (see venue context)
 - SLEEP: no /rest endpoint — use freeform: `POST /api/play/act {"text":"снимаю тюфяк и ложусь спать до утра"}` where lodging exists (таверна); costs ~2 монеты, jumps to morning

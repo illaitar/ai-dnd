@@ -2,13 +2,15 @@
 
 Key functions
 -------------
-_voice(p, rel, kind, player_text=None, has_offer=False, offer_pitch=None) -> str : NPC speaks
-    in-character (LLM narrator) — folds in persona, memory of the player, grudges and
+_voice(p, rel, kind, player_text=None, has_offer=False, offer_pitch=None, twist_line=None) -> str :
+    NPC speaks in-character (LLM narrator) — folds in persona, memory of the player, grudges and
     world-lookup facts; records the player's tone. has_offer hints (greet only) that the NPC has
     a pending errand to mention. offer_pitch — the NPC's REAL pending errand (emergent sift
     offer or stashed improvised one) so her spoken words, when she does talk about it, line up
     with the actual contract instead of improvising a different task (reveal-gate unchanged:
-    this only grounds WHAT she says, it does not force her to say it).
+    this only grounds WHAT she says, it does not force her to say it). twist_line — a one-time
+    emergent-quest reveal (quests/twist.py) stashed for THIS conversation; unlike offer_pitch it
+    is FORCED into the opening words (spoken once, then popped by the caller).
 _topics_for(p) -> list : Conversation topics — from PERSONA (rumors/wants), not from role table.
 _spurns(p) -> bool : Doesn't want to deal with you: enmity or fresh targeted anger.
 _DM_SYS : System prompt for the DM-narrator fallback (non-mechanical player actions).
@@ -44,7 +46,8 @@ _STANCE = {
 
 
 def _voice(
-    p, rel, kind, player_text=None, has_offer: bool = False, offer_pitch: str | None = None
+    p, rel, kind, player_text=None, has_offer: bool = False, offer_pitch: str | None = None,
+    twist_line: str | None = None,
 ) -> str:
     from ..core import (  # lazy: core.py imports narrator.voice at module top
         _binfo,
@@ -134,6 +137,11 @@ def _voice(
             f"У ТЕБЯ ЕСТЬ НАСТОЯЩЕЕ ДЕЛО/ПРОСЬБА К НЕМУ: {offer_pitch}. Если разговор коснётся "
             "твоих забот или дела — держись именно ЭТОЙ просьбы (не выдумывай другую, не путай "
             "суть). Раскрывай её только когда уместно по ходу разговора."
+        )
+    if twist_line:  # a one-time emergent reveal — FORCE it into her opening words (spoken once)
+        bits.append(
+            f"У ТЕБЯ ЕСТЬ СВЕЖАЯ ВЕСТЬ ПО ВАШЕМУ ДЕЛУ, И ТЫ ОБЯЗАН(А) ЕЁ СКАЗАТЬ ПРЯМО СЕЙЧАС: "
+            f"{twist_line}"
         )
     if kind == "greet" and has_offer:  # a pending errand — hint it, don't dump it (player must ask)
         user += (

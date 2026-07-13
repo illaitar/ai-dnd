@@ -57,6 +57,16 @@ def _ensure_milestone(seed: dict) -> None:
     seed["evidence"].append(f"agenda:{seed['giver']}:{idx}")   # anchor for bridge._anchor_idx
 
 
+def _gate_twist(seed: dict, cid: str) -> None:
+    """PB['quest_twist_p'] gates whether a qualifying twist candidate is actually planted (spec §4/§5
+    Step 5): not every villain-anchored seed carries a second fact, or every reveal would feel
+    mechanical. Deterministic, seeded by the eventual contract id (house pattern) so the same world
+    replays identically. Must run BEFORE framer() — framer only writes the reveal artifact when
+    seed['twist'] is still truthy (framing.py:229-230)."""
+    if seed.get("twist") and random.Random(f"twist|{cid}").random() >= PB["quest_twist_p"]:
+        seed["twist"] = None
+
+
 def _names() -> dict:
     return {pid: p.name for pid, p in (_S.get("people") or {}).items()}
 
@@ -214,6 +224,8 @@ def quest_morning() -> list[str]:
     if admitted is None:
         return news
     seed = admitted
+    cid = f"ct:sift:{seed['giver']}:{gt}"
+    _gate_twist(seed, cid)                            # PB['quest_twist_p'] — before framer (needs seed['twist'])
     try:
         art = framing.framer(seed, _allowed(seed), core._model())
     except LLMUnavailable:
@@ -233,7 +245,6 @@ def quest_morning() -> list[str]:
     from aidnd.mind.agenda import Milestone
     m = Milestone(desc="", kind=seed["goal"]["kind"], target=seed["goal"]["target"],
                   done=dict(seed["goal"]["done"]))
-    cid = f"ct:sift:{seed['giver']}:{gt}"
     roles = {"giver": seed["giver"], "villain": seed["cast"].get("villain"),
              "prize": seed["cast"].get("prize")}
     data = {"giver": seed["giver"], "giver_name": seed["giver_name"],

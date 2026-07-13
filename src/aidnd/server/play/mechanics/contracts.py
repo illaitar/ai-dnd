@@ -447,6 +447,10 @@ def _contract_on_move(loc: int) -> str | None:
         cur = _ct_cur(ct)
         if cur.get("kind") == "visit" and cur.get("target") == loc:
             return _ct_advance(ct, "Место осмотрено.")
+    from aidnd.server.play.engine.quests import twist as _twist
+
+    node_of = (_S.get("crof") or {}).get
+    _twist.on_visit(loc, node_of)                       # emergent twist reveal on villain-node visit
     return None
 
 

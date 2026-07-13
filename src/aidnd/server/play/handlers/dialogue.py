@@ -42,7 +42,9 @@ from aidnd.server.play.engine.core import (
     _pc_hp,
     _pc_remember,
     _portrait_url,
+    _store,
     _topics_for,
+    _wid,
     router,
 )
 from aidnd.server.play.engine.journal import j_person_once
@@ -122,6 +124,14 @@ async def talk(request: Request):
         pending[npc] = offer  # stashed — say() reveals it once the player asks about work
     has_offer = bool(pending.get(npc))
     offer_pitch = (pending.get(npc) or {}).get("pitch") or None
+    gnl = None
+    for _ct in _store().contracts(_wid(), "active"):
+        if _ct.get("src") == "sift" and _ct.get("giver") == npc and _ct.get("giver_next_line"):
+            gnl = _ct["giver_next_line"]
+            data = {k: v for k, v in _ct.items() if k not in ("id", "status")}
+            data.pop("giver_next_line", None)           # spoken once
+            _store().save_contract(_wid(), _ct["id"], "active", data)
+            break
     return {
         "name": p.name,
         "role": p.role,
@@ -143,7 +153,9 @@ async def talk(request: Request):
         "known": known,
         "gt": _gt(),
         "topics": _topics_for(p),
-        "line": _voice(p, rel, "greet", has_offer=has_offer, offer_pitch=offer_pitch),
+        "line": _voice(p, rel, "greet", has_offer=has_offer, offer_pitch=offer_pitch,
+                       twist_line=gnl),
+        "twist_line": gnl,
     }
 
 

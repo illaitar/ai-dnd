@@ -1,7 +1,8 @@
 """Live-playtest bug: public emergent (src='sift') board postings were invisible on
 GET /api/play/board and could not be taken via board_take (only guild-board ads were handled).
 board() now merges them into a 'postings' list; board_take() accepts them through the same
-_accept_contract path as contract_accept, so beat/journal bookkeeping never diverges."""
+_accept_contract path as contract_accept, so beat/journal bookkeeping never diverges (via
+j_beat, prov='accept')."""
 import asyncio
 
 import pytest
@@ -22,6 +23,12 @@ class _Req:
         return self._b
 
 
+class _Voice:
+    """Stub narrator so j_beat's single model call resolves without a live LLM."""
+    def call(self, role, messages, **kw):
+        return {"content": "принял дело"}
+
+
 @pytest.fixture
 def wired(tmp_path, monkeypatch):
     st = WorldStore(str(tmp_path / "live.db"))
@@ -30,6 +37,7 @@ def wired(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "_wid", lambda: 1, raising=False)
     monkeypatch.setattr(journal, "_gt", lambda: 100)
     monkeypatch.setattr(board_mod, "_play", lambda: None, raising=False)
+    monkeypatch.setattr(core, "_model", lambda: _Voice(), raising=False)
     d = core._S._d()
     saved = dict(d)                    # snapshot the shared world-1 session blob...
     try:
@@ -81,7 +89,7 @@ def test_board_take_accepts_posting_active_and_journals_once(wired):
     ct = next(c for c in wired.contracts(1, "active") if c["id"] == cid)
     assert ct["arc"]["beat"] == "active"
     j = wired.journal_list(1, kind="quest")
-    told = [e for e in j if e["prov"] == "told" and e["refs"] == [cid]]
+    told = [e for e in j if e["prov"] == "accept" and e["refs"] == [cid]]
     assert len(told) == 1
     # posting no longer sits in 'board' status
     assert not [c for c in wired.contracts(1, "board") if c["id"] == cid]

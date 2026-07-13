@@ -42,7 +42,7 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.engine.journal import j_quest, journal_feed
+from aidnd.server.play.engine.journal import journal_feed
 from aidnd.server.play.engine.loop.routine import _apply_routine as _apply_routine
 from aidnd.server.play.engine.loop.routine import _world_events as _world_events
 from aidnd.server.play.engine.loop.tick import _world_tick as _world_tick
@@ -203,7 +203,12 @@ def _accept_contract(cid: str, ct: dict) -> str | None:
         note = f"«{ct['want']}» ложится в твою сумку — доставь по адресу."
     summary = _accept_summary(ct)
     _pc_remember(summary, 0.6, about=[ct["giver"]])
-    j_quest("told", summary, cid)
+    from aidnd.server.play.engine.journal import j_beat
+    j_beat(cid, "accept", {
+        "kind": ct.get("kind"), "want": ct.get("want"), "target_name": ct.get("target_name"),
+        "where": ct.get("where", ""), "reward": ct.get("reward"),
+        "giver_name": ct.get("giver_name") or _S["people"][ct["giver"]].name,
+    })
     return note
 
 

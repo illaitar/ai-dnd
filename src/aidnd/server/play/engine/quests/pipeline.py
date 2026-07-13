@@ -313,15 +313,15 @@ def _expire_stale() -> list[str]:
     return news
 
 
-def _j_quest_overtaken(text: str, cid: str) -> None:
-    """Guarded journal call (house pattern, twist.py:10) — active/accepted overtaken quests get a
-    closing beat in the player's log; queued/offered/board never reached the player's journal yet."""
+def _j_beat_overtaken(cid: str, line: str, giver_name: str) -> None:
+    """Guarded journal call (house pattern, twist.py:10): active/accepted overtaken quests get a
+    closing beat; queued/offered/board never reached the player's journal yet."""
     try:
-        from aidnd.server.play.engine.journal import j_quest
+        from aidnd.server.play.engine.journal import j_beat
     except ImportError:
         return
     try:
-        j_quest("saw", text, cid)
+        j_beat(cid, "overtaken", {"giver_line": line, "giver_name": giver_name})
     except Exception:  # noqa: BLE001
         pass
 
@@ -371,5 +371,5 @@ def _recheck_overtaken() -> list[str]:
             line = f"{ct.get('giver_name', 'кто-то')}: спасибо, но дело уж улажено — поздно"
             news.append(line)
             if status == "active":
-                _j_quest_overtaken(line, ct["id"])     # player already carried this in his journal
+                _j_beat_overtaken(ct["id"], line, ct.get("giver_name", "кто-то"))
     return news

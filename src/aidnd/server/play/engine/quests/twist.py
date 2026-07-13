@@ -7,14 +7,14 @@ from __future__ import annotations
 from aidnd.server.play.engine.core import _store, _wid
 
 
-def _j_quest(prov, text, cid):
+def _j_beat(cid, beat, facts):
     try:
-        from aidnd.server.play.engine.journal import j_quest
+        from aidnd.server.play.engine.journal import j_beat
     except ImportError:
         return
     try:
-        j_quest(prov, text, cid)
-    except Exception:  # noqa: BLE001
+        j_beat(cid, beat, facts)
+    except Exception:  # noqa: BLE001 — journaling is best-effort, never breaks the twist
         pass
 
 
@@ -38,6 +38,6 @@ def on_visit(loc: int, node_of) -> str | None:
         data["arc"] = {"beat": "twisted"}
         data["giver_next_line"] = reveal                # giver voices it in the next conversation
         _store().save_contract(_wid(), ct["id"], "active", data)
-        _j_quest("told", reveal, ct["id"])           # prov ∈ journal's closed set (saw|heard1|heard2|told)
+        _j_beat(ct["id"], "twist", {"reveal": reveal})   # single twist beat (see decision above)
         return reveal
     return None

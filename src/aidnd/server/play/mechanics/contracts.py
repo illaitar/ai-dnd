@@ -311,6 +311,11 @@ def _ct_advance(ct: dict, step_narr: str) -> str:
     data = {k: v for k, v in ct.items() if k not in ("id", "status")}
     data["step"] = nstep
     _store().save_contract(_wid(), ct["id"], "active", data)
+    from aidnd.server.play.engine.journal import j_beat
+    j_beat(ct["id"], "step", {
+        "step_narr": step_narr, "next": _step_desc(steps[nstep]),
+        "n": nstep + 1, "total": len(steps),
+    })
     return f"{step_narr} Шаг {nstep} из {len(steps)}. Дальше: {_step_desc(steps[nstep])}."
 
 
@@ -331,15 +336,16 @@ def _contract_complete(ct: dict) -> str:
     if ct.get("src") == "sift":  # honest bridge's arc: the act is over, the giver's card stops gnawing
         data["arc"] = {**(data.get("arc") or {}), "beat": "closed"}
     _store().save_contract(_wid(), ct["id"], "done", data)
-    from aidnd.server.play.engine.journal import j_quest
-
     what = ct.get("want") or ct.get("target_name")
     if what:
         _suf = " доставлен" if ct.get("kind") in ("bring", "deliver") else ""
         summary = f"{what}{_suf}"
     else:
         summary = _KIND_DONE_TEXT.get(ct.get("kind"), "исполнено")
-    j_quest("saw", f"выполнено для {p.name}: {summary}", ct["id"])
+    from aidnd.server.play.engine.journal import j_beat
+    j_beat(ct["id"], "done", {
+        "giver_name": p.name, "what": summary, "kind": ct.get("kind"),
+    })
     p.state.rel(PLAYER)["trust"] = min(1.0, p.state.rel(PLAYER)["trust"] + PB["complete_trust"])
     p.state.rel(PLAYER)["affinity"] = min(1.0, p.state.rel(PLAYER)["affinity"] + PB["complete_aff"])
     p.state.memory.add("чужак исполнил мою просьбу. Надёжный человек", _mt(), 0.85, about=[PLAYER])

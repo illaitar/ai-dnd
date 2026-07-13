@@ -79,8 +79,14 @@ def test_missing_giver_is_overtaken(monkeypatch):
 
 def test_active_accepted_quest_journals_on_overtaken(monkeypatch):
     """Игрок уже принял дело (active) — обгон закрывает контракт И кладёт закрывающую реплику в
-    журнал через j_quest (spec: 'saw' beat), а не только в новостную строку морнинга."""
+    журнал через j_beat (prov='overtaken'), а не только в новостную строку морнинга."""
     st = _store(monkeypatch)
+
+    class _Voice:
+        def call(self, role, messages, **kw):
+            return {"content": "дело уладилось без меня"}
+
+    monkeypatch.setattr(core, "_model", lambda: _Voice())
     core._S["people"] = {"npc:dunn": _dunn(cursor=1)}       # обогнан уже во время активного дела
     cid = "ct:sift:npc:dunn:4320"
     st.save_contract(core._wid(), cid, "active",
@@ -94,7 +100,7 @@ def test_active_accepted_quest_journals_on_overtaken(monkeypatch):
     assert closed["arc"]["beat"] == "overtaken"
     assert not st.contracts(core._wid(), "active")
     rows = st.journal_list(core._wid(), kind="quest")
-    assert any(r.get("prov") == "saw" and cid in (r.get("refs") or []) for r in rows)
+    assert any(r.get("prov") == "overtaken" and cid in (r.get("refs") or []) for r in rows)
 
 
 def test_composted_bumped_row_not_double_closed(monkeypatch):

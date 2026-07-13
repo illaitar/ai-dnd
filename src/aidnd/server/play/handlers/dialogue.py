@@ -265,9 +265,14 @@ async def say(request: Request):
     if _WORK_INTEREST_RE.search(text):  # player asked about work — reveal the stashed errand, if any
         contract = (_S.get("pending_offer") or {}).pop(npc, None)
         if contract:                    # the pitch is now SHOWN as the «Уговор» card → journal it
-            from aidnd.server.play.engine.journal import j_quest
+            from aidnd.server.play.engine.journal import j_beat
 
-            j_quest("told", contract.get("pitch") or "", contract["id"])
+            look = (getattr(p, "persona", None) or {}).get("look") or {}
+            j_beat(contract["id"], "offer", {
+                "giver_name": p.name, "giver_role": p.role,
+                "appearance": look.get("clothing") or "",
+                "pitch": contract.get("pitch") or "",
+            })
     # the addressed NPC's reply (`line`) was produced synchronously above; only the CROWD tick
     # defers to the client's next /live (streamed) so /say stays snappy in a crowd
     t = _world_tick_fast()

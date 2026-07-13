@@ -62,6 +62,31 @@ _DISRUPTIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# a violent/lethal act the intent parser failed to recognize as verb=="attack" — the free-narration
+# fallback must NOT describe an unrolled kill; catch it here and route into the duel branch instead.
+_LETHAL_RE = re.compile(
+    r"б[ьъ]ю\b|убива\w*|убить\b|режу\b|заре[зж]\w*|душу\b|душ[иу]\w*|добива\w*|вонза\w*"
+    r"|пытаюсь удар\w*|пытаюсь убить|наношу удар|перере[зж]\w*|ломаю (кости|шею)"
+    r"|сворачиваю шею|проткну\w*|заруба\w*|бью кулаком по (лиц|голов)",
+    re.IGNORECASE,
+)
+
+
+def _lethal_present_npc(text: str, npc: str | None, people: dict, loc, crof) -> str | None:
+    """A present (REAL, in-scene) NPC the violent text targets, if any — used to redirect
+    unrecognized attack phrasings away from free narration and into the duel branch."""
+    if not text or not _LETHAL_RE.search(text):
+        return None
+    if npc and npc in people:
+        return npc
+    from aidnd.server.play.engine.core import _here
+
+    low = text.lower()
+    return next(
+        (pid for pid in _here(loc, crof) if pid in people and people[pid].name.lower() in low),
+        None,
+    )
+
 
 def _say_aloud(text: str, sc: dict) -> dict:
     """Player speaks with no specific target: the room hears it (pc_said/pc_spoke feed the world
@@ -69,6 +94,11 @@ def _say_aloud(text: str, sc: dict) -> dict:
     world's reaction grounded in the live scene snapshot (never invented). Shared by /act's
     non-verb fallback and /api/play/say when the player addresses no one in particular."""
     out: dict = {"narr": []}
+    if _S.get("combat"):
+        # a live encounter is already resolving — never free-narrate its outcome
+        out["narr"].append("Бой уже идёт — действуй в бою.")
+        out["combat"] = True
+        return out
     if not text:
         out["narr"].append("Ничего не происходит.")
         return out
@@ -431,32 +461,46 @@ def _attempt(intent: dict, sc: dict) -> dict:
         return out
 
     if verb == "attack" and npc:
-        p = people[npc]
-        _materialize_npc(npc, "visible")
-        foe = _combatant_from_npc(npc, p)
-        foe.side = "foes"
-        enc = Encounter([_pc_combatant()], [foe], seed=f"duel|{npc}|{_mt()}", w=9, h=7)
-        _S["combat"] = {
-            "enc": enc,
-            "npc": npc,
-            "loc": loc,
-            "head": {
-                "name": f"Стычка: {p.name}",
-                "sub": _binfo(cr2b.get(loc))["name"] if cr2b.get(loc) else "улица",
-            },
-        }
-        _witness_crime(
-            people, crof, loc, npc, "бросился на меня с оружием", weight=PB["crime_assault"]
-        )
-        _lv = _S.get("live")
-        if _lv is not None:
-            _lv["salient"] = f"чужак выхватил оружие на {p.name}!"
-        out["combat"] = True
-        out["narr"].append(f"Ты бросаешься на {p.name}. Назад дороги нет.")
-        return out
+        return _start_duel(npc, people, crof, loc, cr2b, out)
 
     text = str(intent.get("_text") or detail or "")
+    if _S.get("combat"):  # a live encounter is already resolving — never free-narrate around it
+        out["narr"].append("Бой уже идёт — действуй в бою.")
+        out["combat"] = True
+        return out
+    lethal_npc = _lethal_present_npc(text, npc, people, loc, crof)
+    if lethal_npc:  # unrecognized violent phrasing toward a real present NPC — no free narration
+        return _start_duel(lethal_npc, people, crof, loc, cr2b, out)
     return _say_aloud(text, sc)
+
+
+def _start_duel(npc: str, people: dict, crof: dict, loc, cr2b: dict, out: dict) -> dict:
+    """Enter combat against a present NPC (shared by verb=="attack" and the lethal-phrasing
+    catch in the free-narration fallback — either way, the outcome is decided by the fight,
+    never narrated as a fait accompli)."""
+    p = people[npc]
+    _materialize_npc(npc, "visible")
+    foe = _combatant_from_npc(npc, p)
+    foe.side = "foes"
+    enc = Encounter([_pc_combatant()], [foe], seed=f"duel|{npc}|{_mt()}", w=9, h=7)
+    _S["combat"] = {
+        "enc": enc,
+        "npc": npc,
+        "loc": loc,
+        "head": {
+            "name": f"Стычка: {p.name}",
+            "sub": _binfo(cr2b.get(loc))["name"] if cr2b.get(loc) else "улица",
+        },
+    }
+    _witness_crime(
+        people, crof, loc, npc, "бросился на меня с оружием", weight=PB["crime_assault"]
+    )
+    _lv = _S.get("live")
+    if _lv is not None:
+        _lv["salient"] = f"чужак выхватил оружие на {p.name}!"
+    out["combat"] = True
+    out["narr"].append(f"Ты бросаешься на {p.name}. Назад дороги нет.")
+    return out
 
 
 def _run_plan(steps: list, sc: dict, text: str) -> dict:

@@ -605,6 +605,14 @@ async def combat_act(request: Request):
             err = enc.act_flee(cur)
         elif a == "end":
             enc.end_turn()
+        else:
+            return {
+                "combat": enc.view(),
+                "error": (
+                    f"неизвестное действие «{a}» — принимаются: "
+                    "move {x,y}, attack {target}, dodge, flee, end"
+                ),
+            }
         if err:
             return {"combat": enc.view(), "error": err}
         if a in ("attack", "dodge", "flee"):

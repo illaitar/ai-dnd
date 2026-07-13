@@ -155,7 +155,10 @@ def _all_tokens_match(phrase: str, allow_tok: set) -> bool:
     toks = _ru_words(phrase)
     if not toks:
         return False
-    return all(w[:4] in allow_tok for w in toks)
+    def hit(w):
+        # 4-char stem equality, or prefix-match for short-name inflections («Рэну» vs stem «рэн»)
+        return w[:4] in allow_tok or any(len(a) >= 3 and w.startswith(a) for a in allow_tok)
+    return all(hit(w) for w in toks)
 
 
 def valid_entities(text: str, allowed: set) -> bool:

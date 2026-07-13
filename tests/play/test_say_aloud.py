@@ -43,7 +43,7 @@ def wired(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "_wid", lambda: 1, raising=False)
     monkeypatch.setattr(dlg_mod, "_play", lambda: (None, {}, None, None, None), raising=False)
     monkeypatch.setattr(dlg_mod, "_scene_dict", lambda *a, **k: {}, raising=False)
-    monkeypatch.setattr(dlg_mod, "_world_tick", lambda: {"feed": [], "address": []}, raising=False)
+    monkeypatch.setattr(dlg_mod, "_world_tick_fast", lambda: {"feed": [], "address": [], "live_pending": True}, raising=False)
     monkeypatch.setattr(core, "_gt", lambda: 514, raising=False)
     d = core._S._d()
     saved = dict(d)                    # snapshot the shared world-1 session blob...

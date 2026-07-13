@@ -66,7 +66,7 @@ def _wire_dialogue(monkeypatch, npc_obj):
     crof = {"npc:yuna": "loc:square"}
     monkeypatch.setattr(dlg_mod, "_play", lambda: (None, people, crof, None, "loc:square"))
     monkeypatch.setattr(dlg_mod, "_contract_on_talk", lambda npc: None)
-    monkeypatch.setattr(dlg_mod, "_world_tick", lambda: {})
+    monkeypatch.setattr(dlg_mod, "_world_tick_fast", lambda: {})
     monkeypatch.setattr(dlg_mod, "_pc_coins", lambda: 0)
     core._S["people"] = people
 

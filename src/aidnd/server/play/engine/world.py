@@ -46,6 +46,7 @@ from aidnd.server.play.engine.journal import j_quest, journal_feed
 from aidnd.server.play.engine.loop.routine import _apply_routine as _apply_routine
 from aidnd.server.play.engine.loop.routine import _world_events as _world_events
 from aidnd.server.play.engine.loop.tick import _world_tick as _world_tick
+from aidnd.server.play.engine.loop.tick import _world_tick_fast as _world_tick_fast
 from aidnd.server.play.engine.resolve import _STANCE, _VOICE, _world_lookup
 from aidnd.server.play.engine.scene.view import _scene_ambient as _scene_ambient
 from aidnd.server.play.engine.scene.view import _scene_dict as _scene_dict

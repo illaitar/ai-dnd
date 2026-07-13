@@ -42,7 +42,7 @@ from aidnd.server.play.engine.world import (
     _apply_routine,
     _play,
     _scene_dict,
-    _world_tick,
+    _world_tick_fast,
 )
 from aidnd.server.play.mechanics.combat import _combatant_from_npc, _pc_combatant
 from aidnd.server.play.mechanics.contracts import _contract_on_give, _sift_maybe_close
@@ -557,5 +557,6 @@ async def act(request: Request):
         return {"narr": ["(мир задумался и не понял — попробуй иначе)"], "gt": _gt()}
     res = _run_plan(it.get("plan") or [it], sc, text)
     _pc_remember(f"я: {text[:80]}", 0.2)
-    t = _world_tick() if not res.get("combat") else {"feed": [], "address": []}
+    # crowd reaction defers to the client's next /live (streamed) — /act stays snappy in a crowd
+    t = _world_tick_fast() if not res.get("combat") else {"feed": [], "address": []}
     return {**res, **t, "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}

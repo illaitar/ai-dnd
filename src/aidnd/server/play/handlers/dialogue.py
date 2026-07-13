@@ -49,7 +49,7 @@ from aidnd.server.play.engine.core import (
 )
 from aidnd.server.play.engine.journal import j_person_once
 from aidnd.server.play.engine.resolve import _voice
-from aidnd.server.play.engine.world import _play, _scene_dict, _world_tick
+from aidnd.server.play.engine.world import _play, _scene_dict, _world_tick_fast
 from aidnd.server.play.handlers.freeform import _say_aloud
 from aidnd.server.play.mechanics.contracts import _contract_offer, _contract_on_talk
 from aidnd.server.play.mechanics.items import _ROLE_NODE, _materialize_npc, _pc_coins
@@ -197,7 +197,7 @@ async def say(request: Request):
         sc = _scene_dict(_city, people, crof_, _cr2b, loc_)
         res = _say_aloud(text, sc)
         _pc_remember(f"я: {text[:80]}", 0.2)
-        t = _world_tick()
+        t = _world_tick_fast()  # crowd reaction defers to the client's next /live (streamed)
         return {**res, **t, "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}
     if npc not in people:
         return {"error": "нет такого — рядом никого с таким именем"}
@@ -268,7 +268,9 @@ async def say(request: Request):
             from aidnd.server.play.engine.journal import j_quest
 
             j_quest("told", contract.get("pitch") or "", contract["id"])
-    t = _world_tick()  # line = world turn (turn-based)
+    # the addressed NPC's reply (`line`) was produced synchronously above; only the CROWD tick
+    # defers to the client's next /live (streamed) so /say stays snappy in a crowd
+    t = _world_tick_fast()
     return {
         **t,
         "line": line,

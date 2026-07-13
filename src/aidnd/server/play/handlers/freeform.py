@@ -72,6 +72,22 @@ _LETHAL_RE = re.compile(
 )
 
 
+def _door_node(city, bid: str):
+    """Walkable approach (door) node for ANY building id — key building or residential house.
+    Matches what geom keys use (kb.node) and what the front's goto expects; never the interior."""
+    kb = getattr(city, "key_buildings", {}).get(bid)
+    if kb is not None:
+        return kb.node
+    ho = getattr(city, "houses", {}).get(bid)
+    return ho.node if ho is not None else None
+
+
+def _route_len(city, from_node, bid: str) -> float:
+    """Route length from_node → bid for nearest-of-several tie-breaking; unreachable sorts last."""
+    r = city.route(from_node, bid)
+    return r.length if getattr(r, "found", False) else 1e30
+
+
 def _lethal_present_npc(text: str, npc: str | None, people: dict, loc, crof) -> str | None:
     """A present (REAL, in-scene) NPC the violent text targets, if any — used to redirect
     unrecognized attack phrasings away from free narration and into the duel branch."""
@@ -195,6 +211,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
 
     if verb == "move" and intent.get("place"):
         want = str(intent["place"]).lower()
+        # (1) geom landmarks — the existing path
         tgt = next(
             (
                 k
@@ -205,9 +222,26 @@ def _attempt(intent: dict, sc: dict) -> dict:
         )
         if tgt:
             out["goto"] = tgt["node"]  # front will execute normal move (with walking)
-        else:
-            out["narr"].append("Ты не знаешь, где это. Спроси у людей.")
-            out["fail"] = True
+            return out
+        # (2) buildings the player has been SHOWN (seen|<bid>) — reveal from a share/board-take.
+        # Name match on the factsheet name (both directions, like the label match); door node from
+        # the city (key-building OR residential house) — never invented.
+        from aidnd.server.play.engine.pc.hero import _seen
+
+        matches = []
+        for bid in _seen():
+            nm = _binfo(bid)["name"].lower()
+            if nm and (nm in want or want in nm):
+                nd = _door_node(city, bid)
+                if nd is not None:
+                    matches.append((bid, nd))
+        if matches:
+            if len(matches) > 1:  # several revealed buildings match the phrase → nearest by route
+                matches.sort(key=lambda bn: _route_len(city, loc, bn[0]))
+            out["goto"] = matches[0][1]
+            return out
+        out["narr"].append("Ты не знаешь, где это. Спроси у людей.")
+        out["fail"] = True
         return out
 
     if verb == "take" and intent.get("container"):

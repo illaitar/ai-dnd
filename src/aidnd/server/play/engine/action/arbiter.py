@@ -107,6 +107,16 @@ def assemble_context(sc: dict) -> str:
         for r in _store().inventory(_wid(), "pc")
     ) or "пусто"
     keys_pl = ", ".join(k["label"] for k in _S["geom"]["keys"])
+    from aidnd.server.play.engine.pc.hero import _seen
+
+    from ..core import _binfo
+    _lm_bids = {k.get("bid") for k in _S["geom"]["keys"]}
+    seen_names = [
+        _binfo(b)["name"] for b in _seen()
+        if b not in _lm_bids and b != "board:plaza"
+    ]
+    if seen_names:  # revealed non-landmark buildings the player can walk to (F4)
+        keys_pl = (keys_pl + ", " if keys_pl else "") + ", ".join(seen_names)
     from aidnd.server.play.engine.world import _scene_zones
 
     zones_line = "; ".join(f"{z['id']}={z['name']}" for z in _scene_zones()) or "нет"

@@ -326,8 +326,14 @@ def _norm_name(s) -> str:
     return str(s or "").strip().strip("«»\"'").strip().lower()
 
 
+def _strip_id(v) -> str:
+    """Models echo the rendered format — strip [brackets], «quotes», whitespace before clamping."""
+    return str(v or "").strip().strip("[]«»\"' ")
+
+
 def _resolve_place(bid, places: list[dict]) -> dict | None:
     """Clamp bid ∈ known places — by id equality OR exact (normalized) name match, never invented."""
+    bid = _strip_id(bid)
     if not bid:
         return None
     hit = next((e for e in places if e["bid"] == bid), None)
@@ -339,6 +345,7 @@ def _resolve_place(bid, places: list[dict]) -> dict | None:
 
 def _resolve_refer(refer_pid, acq: list[dict]) -> dict | None:
     """Clamp refer_pid ∈ acquaintances — by id equality OR exact (normalized) name match."""
+    refer_pid = _strip_id(refer_pid)
     if not refer_pid:
         return None
     hit = next((a for a in acq if a["pid"] == refer_pid), None)

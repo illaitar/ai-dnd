@@ -117,3 +117,13 @@ def test_prompt_lists_only_known_places(town, monkeypatch):
     _, stub = _run(monkeypatch, '{"help":"да","bid":"b_smithy","refer_pid":null,"манера":"x"}')
     sys = stub.calls[-1][0]["content"]
     assert "кузница «Молот и мех»" in sys and "b_castle" not in sys
+
+
+def test_resolver_strips_bracketed_id():
+    """Live finding: the model echoes the rendered format — "[key:9]" must resolve to key:9."""
+    from aidnd.server.play.engine.geo import _resolve_place, _resolve_refer
+    places = [{"bid": "key:9", "name": "Оружейная у моста", "kind": "лавка", "goods": "оружие", "node": 5, "why_known": "все знают"}]
+    assert _resolve_place("[key:9]", places)["bid"] == "key:9"
+    assert _resolve_place("«Оружейная у моста»", places)["bid"] == "key:9"
+    acq = [{"pid": "pool:0007", "name": "Сельма Косой", "role": "горожанин", "home": 3, "where_line": "рядом"}]
+    assert _resolve_refer("[pool:0007]", acq)["pid"] == "pool:0007"

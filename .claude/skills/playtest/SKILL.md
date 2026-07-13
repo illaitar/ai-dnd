@@ -64,6 +64,38 @@ tightens, cut exploration, never the НИТЬ. Navigation: don't lattice-walk no
 after ~6 moves, ask NPCs directions or return to a known hub (players have the visual map; API
 agents don't — wandering findings are harness artifacts, not game bugs).
 
+## Coverage matrix (full playtests MUST report every row)
+
+The report gets a `## ПОКРЫТИЕ` table — one line per aspect: `tested → verdict` or `skipped — why`.
+A skipped row with no reason is a report defect. For focused presets, mark out-of-scope rows `n/a`.
+
+| Aspect | Minimum probe |
+|---|---|
+| диалог+персоны | ≥2 NPCs, ≥2 exchanges each; coherence under a probing question |
+| слухи | watch ≥3 /live ticks; do rumors evolve/connect? |
+| freeform | ≥3 classes of /act (mundane/sensory/physical/sneaky/object) |
+| квесты | discovery → accept → **pursue → complete or name the exact blocker** |
+| гео | ask a PERSON «где …?» (never lattice-walk); then check map mark + journal told-row |
+| экономика | THREE separate probes: NPC↔NPC observed · player BUY (market/buy or confirmed sale) · gift (/give) — they are different mechanics |
+| контейнеры/крафт/еда | ≥1 attempt each via /act; quote the exact reply |
+| сон/цикл дня | sleep once; verify morning batch fired (new offers/board) |
+| хроника-аудит | see chronicle rules below |
+| бой+последствия | through combat API only; afterwards check witnesses/wanted/flags |
+
+## Infra vs game (rule learned from a false «всё сломано» report)
+
+If ≥2 consecutive LLM-backed calls (/live /say /act /talk) error — STOP testing. Controller greps
+the server log for `402|Payment|5xx|Insufficient`. Provider outage ⇒ every dependent verdict is
+**BLOCKED (infra)**, never FAIL; movement, geo shares, and ticks all ride on LLM calls, so «goto
+не работает» during an outage is an artifact, not a finding.
+
+## Chronicle-audit rules
+
+- `gt` is monotonic world time (compare with current gt via /scene) — recent-looking gt ≠ «ancient».
+- The journal is CAPPED (PB journal_cap, oldest pruned regardless of kind): absence of an old event
+  is prune-suspect, not «never recorded» — controller confirms against DB before a FAIL.
+- Audit per kind (`?kind=person|place|quest|event`), not one flat limit=100 read.
+
 ## False alarms (check before reporting these as bugs)
 
 | Player says | Reality check first |
@@ -73,10 +105,24 @@ agents don't — wandering findings are harness artifacts, not game bugs).
 | «NPC мёртв / пропал (со слов другого NPC)» | gossip lies — check `flags dead\|<pid>` + placements |
 | «квест не закрылся, хотя я его убил» | narration kills no one — check the combat log actually ran |
 | «в хронике чужие записи» | persistent world — the character has a past |
+| «купил, но товар не пришёл» | `/give` is a GIFT — a purchase is market/buy or an executed sale; report which affordance was actually used |
+| «навигация сломана: goto стоит, loc не меняется» | movement executes on /live ticks — did the ticks run (LLM up)? |
+| «хроника пишет чужое/древнее время» | gt is current world time; check journal cap pruning first |
 
 ## Scenario presets
 
 `quest` (find→accept→pursue→complete→aftermath) · `journal` (witness fidelity: overheard tiers,
 no-omniscience) · `trade` (NPC market, haggle observation) · `combat` (duel through combat_act,
-consequences: witnesses/wanted) · `free` (wander, report what feels alive/dead). Args after the
-preset = focus notes woven into the protocol.
+consequences: witnesses/wanted) · `free` (wander, report what feels alive/dead) · `grand`
+(everything, 50+ ticks). Args after the preset = focus notes woven into the protocol.
+
+## Grand preset (multi-phase, one adventurer)
+
+Fresh world, exact player start (no debug skips, no funding). Chain 3-4 agents SEQUENTIALLY, each
+a phase of ONE adventurer's life: A narrative/freeform → B quests → C items/economy → D combat/
+consequences/chronicle-audit. Each dispatch inherits the exact end-state of the previous (loc,
+coins, hp, active contracts, notable memories — paste the predecessor's «итоговое состояние»).
+Each phase reports its tick count («тиков: N») and full НИТЬ. Controller peeks the DB between
+phases (purse, contracts, journal counts) so drift is caught at the seam, not in the finale. If a
+phase agent dies mid-run, the world state persists — re-dispatch a continuation agent with the
+same inherited-life block. Full coverage matrix applies across the UNION of phases.

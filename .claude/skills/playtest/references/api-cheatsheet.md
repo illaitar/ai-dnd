@@ -2,6 +2,9 @@
 
 All JSON over http://127.0.0.1:8098. Use `curl --max-time 240` on /live /talk /say /act (LLM-backed).
 
+IF 2+ consecutive LLM-backed calls return errors: STOP playing, report «BLOCKED (infra?)» with the
+exact error strings, and end your run — do not spend budget probing «broken» systems during an outage.
+
 ## Moving & looking
 - `GET  /api/play/scene` — where you are: loc, inside, here[] (people: id, name), enterable {bid,name}, ambient, gt, coins, hp
 - `POST /api/play/move {"to":<node int>}` · `POST /api/play/enter {"id":"<bid>"}` · `POST /api/play/exit {}`
@@ -21,8 +24,12 @@ All JSON over http://127.0.0.1:8098. Use `curl --max-time 240` on /live /talk /s
 
 ## Doing things
 - `POST /api/play/act {"text":"<free Russian action>"}` — freeform: search, climb, threaten, steal, inspect… Violence toward a present person STARTS A DUEL (response carries combat:true — then use the combat API below; free text never kills anyone by itself)
-- `POST /api/play/give {"npc":"<pid>","coins":N}` — give N coins (gift; can complete money-quests on the spot)
+- `POST /api/play/give {"npc":"<pid>","coins":N}` — give N coins (a GIFT, not a purchase — the NPC
+  owes you nothing back; it can complete money-quests on the spot). Buying = market/buy at a venue.
+  If you «pay» for goods via /give and get nothing, report WHICH affordance you used — that's the finding.
 - give an ITEM: `POST /api/play/give {"npc":"<pid>","item":"<name>"}`
+- DIRECTIONS: lost? Ask a PERSON: `/say {"npc":..,"text":"где <место>?"}` — a shared answer marks
+  your map and writes a journal told-row. Never search by walking node numbers.
 
 ## Combat (the part testers keep missing)
 - `GET  /api/play/combat` — state: grid w/h, units[] (id, x, y, hp, ac), order, turn, status

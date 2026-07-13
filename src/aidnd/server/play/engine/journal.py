@@ -18,6 +18,7 @@ journal_feed(feed)             : Hook 1 pass — one event row per witnessed spe
 
 from __future__ import annotations
 
+from aidnd.inference.client import LLMUnavailable
 from aidnd.server.play.engine.session.persist import _store
 from aidnd.server.play.engine.session.state import _wid
 from aidnd.server.play.engine.session.time import _gt
@@ -83,3 +84,69 @@ def journal_feed(feed: list) -> None:
                 j_event("heard2", e.get("text", ""), refs=[])
         elif e.get("k") == "deed" and e.get("pid"):
             j_event("saw", e.get("text", ""), refs=[e["pid"]])
+
+
+_BEATS = {"offer", "accept", "step", "twist", "reveal", "done", "overtaken", "failed"}
+
+_J_SYS = (
+    "Ты — герой этой истории, ведёшь дневник дел. Опиши событие ниже ОДНОЙ короткой "
+    "фразой: от ПЕРВОГО лица, в ПРОШЕДШЕМ времени, по-русски, только по фактам — "
+    "ничего не домысливай и не добавляй. Верни ТОЛЬКО фразу, без кавычек и пояснений."
+)
+
+
+def _facts_ru(beat: str, f: dict) -> str:
+    """Render the code-built facts dict into one RU description for the narrator. Pure string
+    assembly — no invention; every value comes from the caller (the contract/giver)."""
+    if beat == "offer":
+        role = f" ({f['giver_role']})" if f.get("giver_role") else ""
+        app = f", {f['appearance']}" if f.get("appearance") else ""
+        return (f"ко мне обратился(лась) {f.get('giver_name', 'кто-то')}{role}{app}; "
+                f"его(её) просьба: {f.get('pitch', '')}")
+    if beat == "accept":
+        where = f", место: {f['where']}" if f.get("where") else ""
+        what = f.get("want") or f.get("target_name") or "поручение"
+        return (f"я согласился взяться за дело для {f.get('giver_name', 'заказчика')}: "
+                f"{what}{where}; награда: {f.get('reward', '?')}")
+    if beat == "step":
+        return (f"я выполнил шаг ({f.get('step_narr', '')}); осталось: {f.get('next', '')} "
+                f"— шаг {f.get('n', '?')} из {f.get('total', '?')}")
+    if beat in ("twist", "reveal"):
+        return f"вскрылось: {f.get('reveal', 'новый поворот в этом деле')}"
+    if beat == "done":
+        return (f"дело для {f.get('giver_name', 'заказчика')} завершено: {f.get('what', 'исполнено')} "
+                f"(тип: {f.get('kind', '')})")
+    if beat == "overtaken":
+        return (f"дело уладилось без меня, я опоздал — {f.get('giver_name', 'заказчик')} сказал(а): "
+                f"«{f.get('giver_line', 'поздно')}»")
+    if beat == "failed":
+        return f"дело для {f.get('giver_name', 'заказчика')} не удалось: {f.get('reason', '')}"
+    return "; ".join(f"{k}: {v}" for k, v in (f or {}).items())
+
+
+def j_beat(cid: str, beat: str, facts: dict) -> None:
+    """One thread line for a quest event. beat ∈ {offer,accept,step,twist,reveal,done,overtaken,failed}.
+    Builds an RU facts block, makes ONE narrator call (temp 0.4), appends kind='quest' prov=beat
+    refs=[cid]. BEST-EFFORT: LLMUnavailable / empty / any error → returns without writing; NEVER
+    raises to the caller (the quest transaction has already committed). No canned fallback line."""
+    try:
+        wid = _wid()
+        store = _store()
+    except Exception:  # noqa: BLE001 — no live session: journaling is best-effort, never fatal
+        return None
+    if wid is None or store is None:
+        return None
+    try:
+        from aidnd.server.play.engine.core import _model  # deferred: avoid load-time cycle
+        msgs = [{"role": "system", "content": _J_SYS},
+                {"role": "user", "content": f"Событие ({beat}): {_facts_ru(beat, facts)}."}]
+        resp = _model().call("narrator", msgs, options={"temperature": 0.4})
+    except LLMUnavailable:
+        return None                                          # no model → no row, no stub (no-LLM-fallback)
+    except Exception:  # noqa: BLE001 — journaling never breaks a committed quest
+        return None
+    line = ((resp.get("content") if resp else "") or "").strip().strip('"').strip()
+    if not line:
+        return None                                          # empty/garbled → no row
+    store.journal_add(wid, "quest", beat, [cid], line, _gt())
+    return None

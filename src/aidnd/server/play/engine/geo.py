@@ -253,7 +253,7 @@ def acquaintances(pid: str, from_node) -> list[dict]:
 # where-question intent — spec §3.2 (где|куда|как найти|как пройти|где купить|у кого).
 # Negative lookahead on где/куда excludes «где-то»/«куда-то» (vague-hearsay, not a where-question).
 _GEO_RE = re.compile(
-    r"\b(где(?!-)|куда(?!-)|как\s+найти|как\s+пройти|как\s+добраться|где\s+купить|у\s+кого)\b",
+    r"\b(где(?!-то)|куда(?!-то)|как\s+найти|как\s+пройти|как\s+добраться|где\s+купить|у\s+кого)\b",
     re.IGNORECASE,
 )
 
@@ -356,7 +356,7 @@ def route_geo_ask(pid: str, question: str, from_node) -> dict:
         return deflect
     bid = d.get("bid")
     refer_pid = d.get("refer_pid")
-    manera = str(d.get("манера") or "")
+    manera = str(d.get("манера") or "")[:220].replace("\n", " ")
     place = next((e for e in places if e["bid"] == bid), None)          # clamp bid ∈ set
     refer = next((a for a in acq if a["pid"] == refer_pid), None)       # clamp refer_pid ∈ acq
     if d.get("help") == "нет":

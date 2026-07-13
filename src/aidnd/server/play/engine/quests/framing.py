@@ -302,6 +302,19 @@ def framer(seed: dict, allowed: set, manager, reward: int | float | None = None)
         if (required_ok and not any(_has_raw_id(v) for v in art.values())
                 and all(valid_entities(v, allowed) for v in art.values())
                 and all(valid_numbers(v, true_nums) for v in art.values())):
+            from aidnd.server.play.engine import geo
+            from aidnd.server.play.engine.session.state import _S
+            places = geo.known_places(seed["giver"]) if seed.get("giver") else []
+            # stem-match (not exact substring) — Russian declension bends the giver's known-place
+            # name inside the pitch sentence ("кузница" → "в кузницу"), so a literal `in` check
+            # misses it; reuse the same stem-token machinery valid_entities() already relies on.
+            pitch_tok = _stem4(art.get("pitch") or "")
+            named = next((e for e in places if e["name"] and _all_tokens_match(e["name"], pitch_tok)),
+                        None)
+            if named is not None:
+                dline = geo.direction_line(_S.get("loc"), named["bid"])
+                if dline and dline != "это на другом конце города" and dline not in art["pitch"]:
+                    art["pitch"] = (art["pitch"].rstrip() + f" ({dline})")[:220]
             return art
     log.warning("quests: фреймер назвал чужую сущность или число дважды — пропуск этим утром")
     return None

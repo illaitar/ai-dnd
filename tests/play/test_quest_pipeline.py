@@ -48,7 +48,7 @@ def _person(pid, name, role, agendas=(), rels=None):
     st = NpcState.from_config(NpcConfig(id=pid, name=name, role=role))
     st.agendas = list(agendas)
     st.relationships = dict(rels or {})
-    return SimpleNamespace(name=name, role=role, state=st, persona={}, work=None)
+    return SimpleNamespace(name=name, role=role, state=st, persona={}, work=None, home=None)
 
 
 @pytest.fixture

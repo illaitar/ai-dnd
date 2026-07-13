@@ -124,6 +124,9 @@ def _allowed(seed: dict) -> set:
             out.add(giver.role)
         if getattr(giver, "work", None):
             out.add(_binfo(giver.work)["name"])
+        from aidnd.server.play.engine import geo
+        for e in geo.known_places(seed["giver"]):     # the giver can honestly name places he knows
+            out.add(e["name"])
     target = seed.get("goal", {}).get("target")
     if isinstance(target, str) and target:
         out.add(target)

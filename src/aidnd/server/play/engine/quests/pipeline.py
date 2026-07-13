@@ -41,6 +41,8 @@ def _ensure_milestone(seed: dict) -> None:
     if st.agendas is None:
         st.agendas = []
     villain = seed["cast"].get("villain")
+    villain_name = ((_S.get("people") or {}).get(villain).name if villain in (_S.get("people") or {})
+                    else villain)
     done = dict(seed["goal"]["done"])                # the intended revenge predicate (real _met dict)
     for i, ag in enumerate(st.agendas):              # idempotent: reuse a matching live revenge agenda
         if getattr(ag, "status", "active") == "active" and ag.current() and ag.current().done == done:
@@ -48,11 +50,11 @@ def _ensure_milestone(seed: dict) -> None:
             if tag not in seed["evidence"]:
                 seed["evidence"].append(tag)
             return
-    ms = Milestone(desc=f"свести счёты с обидчиком ({villain})", kind="harm",
+    ms = Milestone(desc=f"свести счёты с обидчиком ({villain_name})", kind="harm",
                    target=villain, done=done)
     idx = len(st.agendas)
     # seed["summary"] IS this exact grievance text (seeds.py:_revenge_summary) — single source of truth
-    st.agendas.append(Agenda(summary=seed.get("summary") or f"расквитаться с {villain} за нарушенное слово",
+    st.agendas.append(Agenda(summary=seed.get("summary") or f"расквитаться с {villain_name} за нарушенное слово",
                              kind="revenge", importance=0.8, milestones=[ms]))
     seed["evidence"].append(f"agenda:{seed['giver']}:{idx}")   # anchor for bridge._anchor_idx
 

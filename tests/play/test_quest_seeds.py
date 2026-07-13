@@ -64,6 +64,23 @@ def test_broken_promise_goal_is_real_met_dict():
     assert seed["evidence"] == ["deed:d123"]
 
 
+def test_broken_promise_summary_names_villain_never_pid():
+    """PID leak fix: _revenge_summary must carry the villain's NAME (here fixture's "Ральф Ли") —
+    never a raw pid like "npc:ralf" — since this text flows into the inserted revenge Agenda,
+    pipeline._allowed, and the framer prompt verbatim."""
+    people, deeds, gt = _fixture()
+    seed = next(s for s in S.sift(people, deeds, gt) if s["pattern"] == "broken_promise")
+    assert "Ральф" in seed["summary"]
+    assert "npc:" not in seed["summary"]
+
+
+def test_unanswered_blood_summary_names_villain_never_pid():
+    people, deeds, gt = _blood_fixture()
+    seed = next(s for s in S.sift(people, deeds, gt) if s["pattern"] == "unanswered_blood")
+    assert "Векс" in seed["summary"]
+    assert "npc:" not in seed["summary"]
+
+
 def test_twist_candidate_from_second_fact_touching_cast():
     people, deeds, gt = _fixture()
     seed = next(s for s in S.sift(people, deeds, gt) if s["pattern"] == "kin_debt")

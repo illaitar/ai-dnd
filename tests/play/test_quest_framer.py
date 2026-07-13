@@ -86,6 +86,22 @@ def test_framer_no_manager_returns_none():
     assert F.framer(_seed(), ALLOWED, None) is None
 
 
+def test_framer_rejects_raw_pid_leak():
+    """Belt-and-suspenders: a raw internal id in the pitch is a hard reject even if it would
+    otherwise pass the entity validator (live bug: «расквитаться с pool:0007» leaked to the player)."""
+    bad = ('{"pitch":"Помоги расквитаться с pool:0007 за нарушенное слово.",'
+           '"foreshadow":"Тебя гложет обида.","reveal":""}')
+    stub = _Stub([bad, bad])
+    seed = dict(_seed(), twist=None)
+    assert F.framer(seed, ALLOWED | {"pool:0007"}, stub) is None
+    assert stub.n == 2
+
+
+def test_opener_2nd_person_verb_allowed_sentence_initial():
+    assert F.valid_entities("Поможешь мне с долгом?", set())
+    assert not F.valid_entities("Гримберт ждёт.", set())
+
+
 def test_framer_reveal_optional_when_seed_has_no_twist():
     seed = dict(_seed(), twist=None)   # legal per seeds.py — not every seed carries a twist
     good = ('{"pitch":"Верни Дунну долг.","foreshadow":"Тебя гложет вина.","reveal":""}')

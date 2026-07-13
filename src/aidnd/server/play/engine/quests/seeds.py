@@ -60,10 +60,13 @@ def _twist_for(villain: str | None, deeds: list, exclude=()) -> dict | None:
     return None
 
 
-def _revenge_summary(villain: str) -> str:
+def _revenge_summary(villain_name: str) -> str:
     """The grievance text (sim-authored, honest) used both as the seed's own summary AND — verbatim —
-    as the inserted revenge Agenda's summary (pipeline._ensure_milestone), so the two never drift."""
-    return f"расквитаться с {villain} за нарушенное слово"
+    as the inserted revenge Agenda's summary (pipeline._ensure_milestone), so the two never drift.
+    Takes the villain's NAME (never his pid) — this text flows into the inserted Agenda, into
+    pipeline._allowed, and into the framer prompt, so a raw pid here would leak straight into the
+    player-facing pitch."""
+    return f"расквитаться с {villain_name} за нарушенное слово"
 
 
 def _seed(pattern, giver, people, done, villain=None, prize=None, evidence=None, twist=None,
@@ -117,7 +120,7 @@ def pat_broken_promise(people, deeds, gt) -> list[dict]:
         out.append(_seed("broken_promise", victim, people, {"type": "dead", "id": promiser},
                          villain=promiser, prize=None, evidence=[f"deed:{d['id']}"],
                          twist=_twist_for(promiser, deeds, exclude={d["id"]}),
-                         summary=_revenge_summary(promiser)))
+                         summary=_revenge_summary(people[promiser].name)))
     return out
 
 
@@ -185,7 +188,7 @@ def pat_unanswered_blood(people, deeds, gt, flag_get=None) -> list[dict]:
         out.append(_seed("unanswered_blood", giver, people, {"type": "dead", "id": villain},
                          villain=villain, prize=victim, evidence=[f"deed:{d['id']}"],
                          twist=_twist_for(villain, deeds, exclude={d["id"]}),
-                         summary=_revenge_summary(villain)))
+                         summary=_revenge_summary(people[villain].name)))
     return out
 
 

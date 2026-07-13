@@ -25,6 +25,11 @@ _OPENERS = frozenset({
     "верни", "найди", "принеси", "отнеси", "помоги", "разыщи", "забери", "добудь", "достань",
     "узнай", "выясни", "скажи", "спроси", "поговори", "приходи", "загляни", "поспеши", "берегись",
     "помни", "знай", "сделай", "будь",
+    # 2nd-person quest-register verbs/predicatives (live rejection: «Поможешь ...» —
+    # sentence-initial 2sg future/perfective not covered by the imperatives above)
+    "поможешь", "сможешь", "возьмёшься", "выручишь", "согласишься", "хочешь", "желаешь",
+    "готов", "готова", "справишься", "успеешь", "принесёшь", "найдёшь", "вернёшь", "убьёшь",
+    "проследишь", "сходишь",
     # address & the FULL pronoun paradigm (foreshadow speaks in the giver's first person —
     # live rejection: «Меня гложет…»)
     "чужак", "странник", "он", "она", "они", "оно", "ты", "вы", "я", "мы",
@@ -203,6 +208,21 @@ def valid_entities(text: str, allowed: set) -> bool:
     return True
 
 
+_RAW_ID = re.compile(r"\b(?:pool|npc|ct):\S+")
+
+
+def _has_raw_id(text: str) -> bool:
+    """Belt-and-suspenders (spec review): a raw internal id (pool:0007 / npc:.. / ct:..) must never
+    reach the player — this is a hard reject regardless of `allowed`, catching any leak upstream
+    (e.g. an un-resolved pid slipping into a seed's summary) before it hits the pitch."""
+    m = _RAW_ID.search(text or "")
+    if m:
+        log.warning("quests: валидатор отверг сырой id «%s» в артефакте (текст: %s…)",
+                    m.group(), (text or "")[:90])
+        return True
+    return False
+
+
 _NUM = re.compile(r"\d+")
 
 
@@ -275,7 +295,8 @@ def framer(seed: dict, allowed: set, manager, reward: int | float | None = None)
             continue
         required_ok = bool(art["pitch"]) and bool(art["foreshadow"]) and (
             bool(art["reveal"]) if seed.get("twist") else True)
-        if (required_ok and all(valid_entities(v, allowed) for v in art.values())
+        if (required_ok and not any(_has_raw_id(v) for v in art.values())
+                and all(valid_entities(v, allowed) for v in art.values())
                 and all(valid_numbers(v, true_nums) for v in art.values())):
             return art
     log.warning("quests: фреймер назвал чужую сущность или число дважды — пропуск этим утром")

@@ -133,6 +133,94 @@ def test_window_one_holds_across_mornings(town):
     assert len(fresh) == 1 and fresh[0]["id"] != first["id"]
 
 
+def test_occupied_weak_candidate_blocks_no_llm(town, monkeypatch):
+    """(a) window occupied, next morning's best fresh candidate is far below k×in-flight → quiet
+    morning, incumbent untouched, and — crucially — NO LLM call at all (the judge is gated on the
+    pure-code salience comparison BEFORE it would ever run)."""
+    P.quest_morning()
+    first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
+
+    class _NoCallStub:
+        def call(self, role, messages, **kw):                    # pragma: no cover — must never run
+            raise AssertionError("LLM must not be called on a weak occupied morning")
+
+    monkeypatch.setattr(core, "_model", lambda: _NoCallStub())
+    monkeypatch.setattr(P.salience, "score", lambda s, ctx: s.__setitem__("score", 0.01) or 0.01)
+
+    news = P.quest_morning()
+    assert not any("зреет дело" in n for n in news)
+    offered = [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"]
+    assert len(offered) == 1 and offered[0]["id"] == first["id"]
+    assert offered[0]["arc"]["beat"] == "offered"                 # untouched, not bumped
+
+
+def test_occupied_strong_candidate_interrupts(town, monkeypatch):
+    """(b) window occupied, a fresh candidate clears k×in-flight → INTERRUPT: the incumbent (Дунн,
+    private/offered) returns to waiting ('queued', not composted); the strong new seed (Марта's
+    broken_promise, public) proceeds through judge→framer→cast→persist→surface; exactly one
+    offered/board sift contract remains at the end."""
+    P.quest_morning()
+    first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
+    assert first["giver"] == "npc:dunn"
+
+    orig_score = P.salience.score
+
+    def _boost(seed, ctx):
+        s = orig_score(seed, ctx)
+        if seed["pattern"] == "broken_promise":
+            s = seed["score"] = s * 1000.0               # dominates any k×in-flight threshold
+        return s
+
+    monkeypatch.setattr(P.salience, "score", _boost)
+    news = P.quest_morning()
+    assert any("зреет дело" in n for n in news)
+
+    bumped = next(c for c in town.contracts(core._wid(), "queued") if c["id"] == first["id"])
+    assert bumped["arc"]["beat"] == "foreshadow-pending"          # waiting, not composted
+
+    offered = [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"]
+    board = [c for c in town.contracts(core._wid(), "board") if c.get("src") == "sift"]
+    live = offered + board
+    assert len(live) == 1                                         # exactly one live emergent offer
+    assert live[0]["giver"] == "npc:marta" and live[0]["id"] != first["id"]
+    assert board and board[0]["id"] == live[0]["id"]
+
+
+def test_bumped_contract_resurfaces_when_window_frees(town, monkeypatch):
+    """(c) after the interrupt, composting the interrupter frees the window; the next morning the
+    bumped Дунн material comes back through the ordinary sift/judge/framer path (the code does not
+    keep a literal queued-row-replay — Task 14 scope — so this asserts the honest, actually-observed
+    behavior: a fresh Дунн offer surfaces again, and the still-waiting bumped row is untouched)."""
+    P.quest_morning()
+    first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
+
+    orig_score = P.salience.score
+
+    def _boost(seed, ctx):
+        s = orig_score(seed, ctx)
+        if seed["pattern"] == "broken_promise":
+            s = seed["score"] = s * 1000.0
+        return s
+
+    monkeypatch.setattr(P.salience, "score", _boost)
+    P.quest_morning()                                              # interrupt: Дунн bumped, Марта live
+    bumped = next(c for c in town.contracts(core._wid(), "queued") if c["id"] == first["id"])
+    assert bumped["arc"]["beat"] == "foreshadow-pending"
+
+    monkeypatch.setattr(P.salience, "score", orig_score)            # back to real salience weights
+    core._S["gt"] += (core.PB["quest_offer_days"] + 1) * 1440       # composts Марта's board offer
+    news = P.quest_morning()
+    assert any("зреет дело" in n for n in news)                     # window free → normal path resumed
+
+    live = [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"] + \
+           [c for c in town.contracts(core._wid(), "board") if c.get("src") == "sift"]
+    assert len(live) == 1 and live[0]["giver"] == "npc:dunn"        # Дунн's material re-surfaced
+    assert live[0]["id"] != first["id"]                             # via a fresh sift, not a row replay
+
+    still_bumped = next(c for c in town.contracts(core._wid(), "queued") if c["id"] == first["id"])
+    assert still_bumped["arc"]["beat"] == "foreshadow-pending"      # the old bumped row is untouched
+
+
 def test_llm_unavailable_in_quest_morning_returns_no_offer(town, monkeypatch):
     from aidnd.inference.client import LLMUnavailable
 

@@ -136,16 +136,6 @@ def _reward(seed: dict, cast: dict) -> tuple | None:
     return 0, item_id, it.get("name")
 
 
-def _sift_window_occupied() -> bool:
-    """Window=1 spans mornings, not just this call: an emergent offer already queued/offered/on the
-    board holds the window until accepted or composted by _expire_stale."""
-    for status in ("queued", "offered", "board"):
-        for ct in _store().contracts(_wid(), status):
-            if ct.get("src") == "sift":
-                return True
-    return False
-
-
 def _has_hook(persona: dict) -> bool:
     """Persona material a life-goal can hang on: something the NPC wants/covets (real fields written
     by worldgen persona_llm.py — wants/valuables), not a placeholder empty persona."""
@@ -197,10 +187,10 @@ def quest_morning() -> list[str]:
     if not people:
         return []
     news = _expire_stale()                            # compost first — frees the window this morning
-    if _sift_window_occupied():
-        return news
     gt = _gt()
-    _seed_agendas(people, gt)                          # NPCs without a live agenda get one (quest_plan_n)
+    occupied = director.window_occupied()             # beat-aware — a bumped waiter never blocks it
+    if not occupied:
+        _seed_agendas(people, gt)                      # NPCs without a live agenda get one (quest_plan_n)
     raw = _store().deeds(_wid(), since_gt=gt - salience.FRESH_DAYS * 1440, limit=60)
     deeds_by_id = {d["id"]: d for d in raw}
     pool = seeds.sift(people, raw, gt, flag_get=lambda k: _store().flag_get(_wid(), k))
@@ -210,6 +200,8 @@ def quest_morning() -> list[str]:
     for s in pool:
         salience.score(s, ctx)
     pool.sort(key=lambda s: -s["score"])
+    if occupied and not director.would_interrupt(pool[0]["score"]):
+        return news                                   # quiet morning — no judge/framer LLM calls at all
     topk = pool[:PB["quest_topk"]]
     try:
         kept = framing.judge(topk, deeds_by_id, _names(), core._model())
@@ -221,6 +213,8 @@ def quest_morning() -> list[str]:
     admitted = director.admit(kept)                  # window/interrupt decision (replaces [:1])
     if admitted is None:
         return news
+    if occupied:
+        director.bump_weakest()                       # interrupt fired — incumbent returns to waiting
     seed = admitted
     try:
         art = framing.framer(seed, _allowed(seed), core._model())

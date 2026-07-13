@@ -58,14 +58,12 @@
   body.view-dialogue .right{flex-grow:0.95}
   .invlist{flex:1 1 auto;overflow:auto;padding:2px 12px 12px;display:flex;flex-direction:column;gap:7px}
   .magbody{flex:1 1 auto;overflow:auto;padding:10px 14px 16px}
-  .jtabs{display:flex;gap:4px;padding:6px 12px;flex:0 0 auto}
-  .jtab{background:none;border:1px solid var(--faint);color:var(--faint);border-radius:10px;padding:2px 10px;cursor:pointer;font-size:12px}
-  .jtab.on{color:var(--gold);border-color:var(--gold)}
   .jbody{flex:1 1 auto;min-height:0;overflow:auto;padding:0 12px 12px}
   .jrow{padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px;line-height:1.4}
   .jmark{color:var(--gold);margin-right:6px}
   .jfrag{font-style:italic;color:var(--faint)}
-  .jgrp{color:var(--gold);font-size:12px;margin:8px 0 2px}
+  .jgrp{color:var(--gold);font-size:12px;margin:8px 0 2px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.08)}
+  .jdela.jdone{color:var(--faint);border-bottom-style:dashed}
   .jempty{color:var(--faint);padding:10px 0}
   body.view-magic #combat{display:none}   /* drawing a circle mid-combat: reveal the panel, keep combat state */
   #genwrap{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
@@ -473,13 +471,7 @@
       </div>
     </div>
     <div id="journalpanel" class="workpanel">
-      <div class="cap">&#10022; Хроника <span onclick="setView('explore')" style="cursor:pointer;color:var(--faint);float:right">✕</span></div>
-      <div class="jtabs" id="jtabs">
-        <button class="jtab on" data-k="event" onclick="jTab('event')">События</button>
-        <button class="jtab" data-k="person" onclick="jTab('person')">Люди</button>
-        <button class="jtab" data-k="quest" onclick="jTab('quest')">Дела</button>
-        <button class="jtab" data-k="place" onclick="jTab('place')">Места</button>
-      </div>
+      <div class="cap">&#10022; Хроника — дела <span onclick="setView('explore')" style="cursor:pointer;color:var(--faint);float:right">✕</span></div>
       <div class="jbody" id="jbody"></div>
     </div>
   </div>
@@ -1277,26 +1269,26 @@ async function acceptContract(id,btn){
   if(r.note)await refreshInv();
   renderJobs();
 }
-let JTAB='event';
-const JMARK={saw:'✦',heard1:'◐',heard2:'◐',told:'◌'};   // ✦ ◐ ◐ ◌
-function jTab(k){JTAB=k;document.querySelectorAll('.jtab').forEach(b=>b.classList.toggle('on',b.dataset.k===k));renderJournal();}
+const JBEAT={offer:'✦',accept:'◆',step:'·',twist:'✕',reveal:'✕',done:'✓',overtaken:'—',failed:'✕'};
+const JSTATUS={active:'в деле',done:'завершено',closed:'закрыто',offered:'предложено',board:'на доске',queued:'зреет',unknown:''};
+let JOPEN={};                                              // cid → thread expanded?
 async function renderJournal(){
   const el=$('jbody');if(!el)return;
-  const r=await api('/api/play/journal?kind='+encodeURIComponent(JTAB)+'&limit=400');
-  const rows=(r.entries||[]);
-  if(!rows.length){el.innerHTML='<div class="jempty">пока пусто — хроника пишется по ходу игры</div>';return;}
-  const line=e=>{const m=JMARK[e.prov]||'';
-    const t=e.prov==='heard2'?`<span class="jfrag">${esc(e.text)}</span>`:esc(e.text);
-    return `<div class="jrow"><span class="jmark">${m}</span>${t}</div>`;};
-  if(JTAB==='person'||JTAB==='place'){                       // group by refs-entity (newest-first within group)
-    const seen=[],by={};
-    rows.forEach(e=>{const k=(e.refs&&e.refs[0])||'—';if(!(k in by)){by[k]=[];seen.push(k);}by[k].push(e);});
-    el.innerHTML=seen.map(k=>`<div class="jgrp">${esc(by[k][0].text.split(' — ')[0].replace(/^впервые вошёл в /,''))}</div>`
-      +by[k].map(line).join('')).join('');
-  }else{
-    el.innerHTML=rows.map(line).join('');
-  }
+  const r=await api('/api/play/journal');
+  const dela=(r.dela||[]);
+  if(!dela.length){el.innerHTML='<div class="jempty">пока пусто — дела впишутся сюда по ходу игры</div>';return;}
+  el.innerHTML=dela.map(d=>{
+    const open=!!JOPEN[d.cid], done=(d.status==='done'||d.status==='closed');
+    const head=`<div class="jgrp jdela${done?' jdone':''}" style="cursor:pointer" onclick="toggleDela('${esc(d.cid)}')">`
+      +`<span class="jmark">${open?'▾':'▸'}</span>${esc(d.title||'дело')}`
+      +`<span class="ctw" style="margin-left:6px">${JSTATUS[d.status]||''}</span></div>`;
+    const body=open
+      ? d.thread.map(t=>`<div class="jrow"><span class="jmark">${JBEAT[t.beat]||'·'}</span>${esc(t.text)}</div>`).join('')
+      : '';
+    return head+body;
+  }).join('');
 }
+function toggleDela(cid){JOPEN[cid]=!JOPEN[cid];renderJournal();}
 async function renderJobs(){
   const el=$('jobs');if(!el)return;
   const r=await api('/api/play/contracts');

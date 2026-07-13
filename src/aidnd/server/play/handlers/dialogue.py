@@ -225,7 +225,19 @@ async def say(request: Request):
         if _ct.get("src") == "sift" and _ct.get("giver") == npc and _ct.get("pitch"):
             active_pitch = _ct["pitch"]
             break
-    line = _voice(p, rel, "reply", text, offer_pitch=offer_pitch, active_pitch=active_pitch)
+    geo_line = None
+    from aidnd.server.play.engine import geo
+
+    ga = geo.geo_answer(npc, text, _S.get("loc"))
+    if ga:
+        geo_line = ga["geo_line"]
+        rv = ga.get("reveal")
+        if rv:                                            # share only — reveal + told journal row
+            from aidnd.server.play.engine.pc.hero import _mark_seen
+
+            _mark_seen(rv["bid"], prov="told", text=rv["text"])
+    line = _voice(p, rel, "reply", text, offer_pitch=offer_pitch, active_pitch=active_pitch,
+                  geo_line=geo_line)
     tone = _S.get("last_tone", "neutral")  # tone of player's words — from NPC's own lips
     if tone == "friendly":
         rel["affinity"] = min(1.0, rel["affinity"] + PB["tone_friendly_aff"])

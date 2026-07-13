@@ -7,6 +7,8 @@ relationships. See docs/superpowers/specs/2026-07-13-npc-geo-knowledge-design.md
 
 from __future__ import annotations
 
+import re
+
 from aidnd import society
 
 from .session.config import PB
@@ -245,3 +247,55 @@ def acquaintances(pid: str, from_node) -> list[dict]:
         out.append({"pid": other, "name": op.name, "role": op.role,
                     "home": op.home, "where_line": where})
     return out
+
+
+# where-question intent — spec §3.2 (где|куда|как найти|как пройти|где купить|у кого)
+_GEO_RE = re.compile(
+    r"\b(где|куда|как\s+найти|как\s+пройти|как\s+добраться|где\s+купить|у\s+кого)\b",
+    re.IGNORECASE,
+)
+
+
+def geo_question(text: str) -> bool:
+    return bool(_GEO_RE.search(text or ""))
+
+
+def _stem_tokens(s: str) -> set[str]:
+    return {w[:5] for w in re.findall(r"[а-яё]+", (s or "").lower()) if len(w) >= 4}
+
+
+def match_known_place(pid: str, text: str) -> dict | None:
+    """Inc 1 exact-name matcher: the known_places entry whose name/kind shares a 4+ char token
+    with the question. Longest-name match wins (most specific). Superseded by the router in Inc 2."""
+    q = _stem_tokens(text)
+    best, score = None, 0
+    for e in known_places(pid):
+        hit = len(_stem_tokens(e["name"] + " " + e["kind"]) & q)
+        if hit > score:
+            best, score = e, hit
+    return best if score else None
+
+
+def geo_answer(pid: str, text: str, from_node) -> dict | None:
+    """Stable say() seam. None → not a geo question (say() runs unchanged). Otherwise a dict with
+    a geo_line for _voice and an optional reveal {bid,text} to _mark_seen. Inc 1 body = exact-name
+    matcher → share or deflect; Inc 2 rewrites this body to the persona-driven router."""
+    if not geo_question(text):
+        return None
+    place = match_known_place(pid, text)
+    if place is None:
+        return {"geo_line": "ты уклончив и не выдаёшь точных мест — отговорись общими словами",
+                "reveal": None}
+    dline = direction_line(from_node, place["bid"])
+    if dline == "это на другом конце города":
+        return {"geo_line": f"ты знаешь про {place['kind']} «{place['name']}», но это далеко: "
+                            f"{dline} — так и скажи",
+                "reveal": None}
+    teller = (_S.get("people") or {}).get(pid)
+    tname = teller.name if teller is not None else "NPC"
+    return {
+        "geo_line": f"ты знаешь место {place['kind']} «{place['name']}»: {dline} — посоветуй "
+                    "дорогу игроку по-своему",
+        "reveal": {"bid": place["bid"],
+                   "text": f"{tname} рассказал(а) дорогу к {place['name']}"},
+    }

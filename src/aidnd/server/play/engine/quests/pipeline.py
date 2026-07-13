@@ -196,7 +196,8 @@ def quest_morning() -> list[str]:
     people = _S.get("people") or {}
     if not people:
         return []
-    news = _expire_stale()                            # compost first — frees the window this morning
+    news = director.tick_morning()                    # expire-compost + overtaken-recheck — EVERY
+                                                        # morning, even ones that surface no new quest
     gt = _gt()
     occupied = director.window_occupied()             # beat-aware — a bumped waiter never blocks it
     if not occupied:
@@ -264,7 +265,7 @@ def quest_morning() -> list[str]:
     _store().flag_set(_wid(), f"qrecent|{seed['pattern']}",
                       str(int(_store().flag_get(_wid(), f"qrecent|{seed['pattern']}") or 0) + 1))
     news.append(f"в городе зреет дело: {seed['giver_name']} ищет, кому довериться")
-    return news + director.tick_morning()
+    return news                                        # tick_morning already ran at top-of-function
 
 
 def _surface(cid: str, ct: dict) -> None:

@@ -414,6 +414,40 @@ def test_expire_compost_closes_offer_and_keeps_agenda(town):
     assert core._S["people"]["npc:dunn"].state.agendas[0].cursor == 0   # агенда цела — сам займётся
 
 
+def test_quiet_morning_still_rechecks_overtaken(town, monkeypatch):
+    """FIX regression: the overtaken recheck used to run only at the tail of the FULL success path
+    (a new quest surfacing) — every early return (no pool, quiet-occupied, judge-veto, admit-None,
+    poor-giver, framer-fail) skipped it, so a live incumbent whose giver already resolved his own
+    milestone stayed 'offered' forever unless some OTHER morning also produced a fresh quest. Drive
+    it through the real quest_morning() entry: Дунн's incumbent offer is live, his agenda then
+    advances past its anchoring milestone (self-resolved), and the morning has NO new candidates at
+    all (sift patched empty) — an honest quiet morning. quest_morning() must still return the
+    overtaken closing line and close the contract, with zero LLM calls anywhere in the turn."""
+    P.quest_morning()
+    _advance_foreshadow()
+    first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
+    assert first["giver"] == "npc:dunn"
+
+    # Дунн сам раздобыл гроссбух — его агенда шагнула дальше пройденной вехи
+    core._S["people"]["npc:dunn"].state.agendas[0].cursor = 1
+
+    class _NoCallStub:
+        def call(self, role, messages, **kw):                    # pragma: no cover — must never run
+            raise AssertionError("LLM must not be called on a quiet overtaken-only morning")
+
+    monkeypatch.setattr(core, "_model", lambda: _NoCallStub())
+    monkeypatch.setattr(P, "_seed_agendas", lambda people, gt: None)   # no agenda-less seeding this morning
+    monkeypatch.setattr(P.seeds, "sift", lambda *a, **k: [])            # no new candidates whatsoever
+
+    news = P.quest_morning()
+    assert any("улажено" in n or "поздно" in n for n in news)           # overtaken close still fires
+    assert not any("зреет дело" in n for n in news)                     # honestly quiet — nothing new
+
+    assert not [c for c in town.contracts(core._wid(), "offered") if c["id"] == first["id"]]
+    closed = next(c for c in town.contracts(core._wid(), "closed") if c["id"] == first["id"])
+    assert closed["arc"]["beat"] == "overtaken"
+
+
 def test_allowed_widens_with_seed_summary_role_and_target(town):
     """The starvation bug: a wealth-milestone plain_need seed's ONLY villain/prize-derived allowed
     names are {giver, гильдия} — no LLM can pitch «накопить 15 монет» without naming the giver's own

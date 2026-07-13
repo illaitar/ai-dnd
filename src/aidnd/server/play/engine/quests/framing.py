@@ -196,7 +196,11 @@ def valid_entities(text: str, allowed: set) -> bool:
         while i >= 0 and text[i] in " \t\n":
             i -= 1
         sentence_initial = i < 0 or text[i] in ".!?"
-        if sentence_initial and (word.lower() in _OPENERS or _all_tokens_match(word, allow_tok)):
+        wl = word.lower()
+        # 2sg verb morphology: no Russian proper name ends in -ешь/-ёшь/-ишь («Получишь», «Выбьешь») —
+        # the productive class that kept escaping the enumerated openers
+        verb_2sg = wl.endswith(("ешь", "ёшь", "ишь"))
+        if sentence_initial and (wl in _OPENERS or verb_2sg or _all_tokens_match(word, allow_tok)):
             continue
         cands.append(word)
     for c in cands:

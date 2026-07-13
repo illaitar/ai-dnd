@@ -307,6 +307,63 @@ def _expire_stale() -> list[str]:
     return news
 
 
+def _j_quest_overtaken(text: str, cid: str) -> None:
+    """Guarded journal call (house pattern, twist.py:10) — active/accepted overtaken quests get a
+    closing beat in the player's log; queued/offered/board never reached the player's journal yet."""
+    try:
+        from aidnd.server.play.engine.journal import j_quest
+    except ImportError:
+        return
+    try:
+        j_quest("saw", text, cid)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _milestone_still_open(giver_state, anchor: dict) -> bool:
+    """True if some ACTIVE agenda's CURRENT milestone still carries the anchoring done predicate
+    (spec §6 'still open'). A giver who advanced past it himself — the mind's advance_agendas bumps
+    the cursor whenever `_met` holds, entirely independent of any contract (agenda.py:86) — no longer
+    carries it; neither does a giver whose matching agenda was abandoned/replaced/finished."""
+    for ag in giver_state.agendas or []:
+        if getattr(ag, "status", "active") != "active":
+            continue
+        m = ag.current() if hasattr(ag, "current") else None
+        if m is not None and dict(m.done) == dict(anchor):
+            return True
+    return False
+
+
 def _recheck_overtaken() -> list[str]:
-    """Morning evidence re-check per live seed (filled in Task 14)."""
-    return []
+    """Morning evidence re-check (spec §6 / §3a EVID node): for every LIVE emergent (src:'sift')
+    contract — queued/offered/board (not yet accepted) AND active (accepted) — verify the anchored
+    milestone (done_any[0]) still anchors an open agenda for the giver. If the giver already advanced
+    past it himself, or he's simply gone (dead/departed — absent from the live pool), the offer/quest
+    is MOOT: close 'overtaken' with an honest in-fiction giver line; the giver keeps whatever agenda
+    he already has (private grief never leaks to a board).
+
+    A currently-true predicate the giver's OWN agenda hasn't consumed yet is not moot — that's a
+    genuine completion and fires honestly through _sift_maybe_close on the player's next
+    give/move/talk action (contracts.py:400); this recheck never preempts that route.
+
+    Ordering note: tick_morning() runs _expire_stale() before this (director.py:85), so a bumped
+    queued row already composted by age is already 'closed' by the time this queries the store fresh
+    — it is never seen here, so it can't be double-closed."""
+    people = _S.get("people") or {}
+    news = []
+    for status in ("queued", "offered", "board", "active"):
+        for ct in _store().contracts(_wid(), status):
+            if ct.get("src") != "sift":
+                continue
+            giver = people.get(ct.get("giver"))
+            anchor = (ct.get("done_any") or [{}])[0]
+            if giver is not None and _milestone_still_open(giver.state, anchor):
+                continue                              # milestone still open — offer/quest stands
+            data = {k: v for k, v in ct.items() if k not in ("id", "status")}
+            data["arc"] = {"beat": "overtaken"}
+            _store().save_contract(_wid(), ct["id"], "closed", data)
+            line = f"{ct.get('giver_name', 'кто-то')}: спасибо, но дело уж улажено — поздно"
+            news.append(line)
+            if status == "active":
+                _j_quest_overtaken(line, ct["id"])     # player already carried this in his journal
+    return news

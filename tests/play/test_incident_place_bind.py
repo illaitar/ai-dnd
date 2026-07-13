@@ -90,3 +90,39 @@ def test_board_take_marks_incident_building_seen(world, monkeypatch):
     monkeypatch.setattr(B, "_play", lambda: (None, {}, {}, {}, 50))
     asyncio.run(B.board_take(_Req()))
     assert "house:medovar" in _seen()                    # map flag set — no journal row (QJ rework)
+
+
+def test_board_take_incident_writes_accept_beat(world, monkeypatch):
+    """Guild-board take of a city incident's job must start a «Хроника» thread — not just
+    stamp the map flag. Uses the same stub-narrator pattern as test_journal_beat.py."""
+    from aidnd.server.play.handlers import board as B
+
+    world.save_contract(1, "inc|0|vermin", "incident", {
+        "type": "vermin", "goal": "clear", "cr": 1.5, "title": "твари в подполе",
+        "pitch": "зов", "patron": "p_med", "reward": 8, "bid": "house:medovar", "node": 372})
+    job = {"id": "ct:inc:inc|0|vermin", "lair": "inc|0|vermin", "name": "твари в подполе",
+           "cr": 1.5, "reward": 8, "kind": "clear", "pitch": "зов",
+           "incident": True, "bid": "house:medovar"}
+    monkeypatch.setattr(B, "_guild_board", lambda: [job])
+    monkeypatch.setattr(B, "_guild_gate", lambda cr: None)
+    monkeypatch.setattr(B, "_accept_contract", lambda *a, **k: "")
+    monkeypatch.setattr(B, "_pc_remember", lambda *a, **k: None)
+
+    class _StubOK:
+        def call(self, role, messages, **kw):
+            return {"content": "Взялся разобраться с тварями в подполе."}
+
+    monkeypatch.setattr(core, "_model", lambda: _StubOK())
+
+    import asyncio
+
+    class _Req:
+        async def json(self):
+            return {"id": "ct:inc:inc|0|vermin"}
+
+    monkeypatch.setattr(B, "_play", lambda: (None, {}, {}, {}, 50))
+    asyncio.run(B.board_take(_Req()))
+    rows = [r for r in world.journal_list(1, kind="quest")]
+    assert len(rows) == 1
+    assert rows[0]["prov"] == "accept"
+    assert "ct:inc:inc|0|vermin" in rows[0]["refs"]

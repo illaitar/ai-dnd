@@ -159,6 +159,10 @@ async def board_take(request: Request):
 
         _mark_seen(job["bid"], prov="told",
                    text=f"взялся за дело: {job['name']} — знаю, где искать")
+    from aidnd.server.play.engine.journal import j_beat
+
+    j_beat(jid, "accept", {"giver_name": job.get("giver_name") or "гильдия", "kind": job.get("kind"),
+                           "what": job.get("name"), "reward": job.get("reward")})
     stolen = bool(gate and gate.get("ok_stolen"))  # passed with someone else's badge — credit doesn't count
     return {
         "taken": True,

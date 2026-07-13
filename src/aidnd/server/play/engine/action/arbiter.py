@@ -111,10 +111,12 @@ def assemble_context(sc: dict) -> str:
 
     from ..core import _binfo
     _lm_bids = {k.get("bid") for k in _S["geom"]["keys"]}
-    seen_names = [
+    # _seen() is an unordered set; sort by name and cap at 12 so a long-lived world doesn't
+    # bloat every prompt with an ever-growing list of revealed buildings.
+    seen_names = sorted(
         _binfo(b)["name"] for b in _seen()
-        if b not in _lm_bids and b != "board:plaza"
-    ]
+        if b not in _lm_bids
+    )[:12]
     if seen_names:  # revealed non-landmark buildings the player can walk to (F4)
         keys_pl = (keys_pl + ", " if keys_pl else "") + ", ".join(seen_names)
     from aidnd.server.play.engine.world import _scene_zones

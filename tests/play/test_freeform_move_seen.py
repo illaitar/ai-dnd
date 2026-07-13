@@ -79,3 +79,29 @@ def test_arbiter_context_names_seen_buildings(tmp_path):
         assert "дом Медовара" in ctx                     # revealed house is offered to the parser
     finally:
         d.clear(); d.update(saved)
+
+
+def test_arbiter_seen_names_capped_at_12(tmp_path):
+    # F4 review Minor: unbounded seen-list bloats every prompt in a long-lived world — cap it.
+    from aidnd.server.play.engine.session import persist
+    from aidnd.server.play.engine.session import state as _state
+    from aidnd.worldgen import WorldStore
+
+    st = WorldStore(str(tmp_path / "live3.db"))
+    d = _state._S._d(); saved = dict(d)
+    try:
+        d.clear()
+        seen_bids = {f"house:{i}" for i in range(15)}
+        d.update(wid=1, loc=50, seen=seen_bids,
+                 geom={"keys": [{"node": 48, "label": "кузня", "bid": "key:1"}]},
+                 live={}, zone=None)
+        persist._STORE = st
+        for i in range(15):
+            st.save_building(1, f"house:{i}", False, 372 + i, f"дом {i}", {"name": f"дом {i}"})
+        sc = {"here": [], "location": {"name": "улица", "containers": []}, "ambient": {}}
+        ctx = arbiter.assemble_context(sc)
+        mesta = ctx.split("МЕСТА ГОРОДА: ")[1].split(". ЗОНЫ:")[0]
+        seen_present = [f"дом {i}" for i in range(15) if f"дом {i}" in mesta]
+        assert len(seen_present) <= 12
+    finally:
+        d.clear(); d.update(saved)

@@ -174,11 +174,11 @@ def _seen() -> set:
     return _S["seen"]
 
 
-def _mark_seen(bid: str | None) -> None:
-    """Fog of war: location becomes known (map marker) when player LEARNS it —
-    came themselves or heard from people/info."""
+def _mark_seen(bid: str | None, *, prov: str = "saw", text: str | None = None) -> None:
+    """Fog of war: location becomes known (map marker) when player LEARNS it — came themselves
+    (prov='saw') or heard from people (prov='told'). Journals ONE place row with that provenance."""
     if bid and bid not in _seen():
         _S["seen"].add(bid)
         _store().flag_set(_wid(), f"seen|{bid}")
         from aidnd.server.play.engine.core import _binfo  # deferred: core imports hero (cycle)
-        j_place(f"впервые вошёл в {_binfo(bid)['name']}", bid)
+        j_place(text or f"впервые вошёл в {_binfo(bid)['name']}", bid, prov=prov)

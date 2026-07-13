@@ -65,8 +65,8 @@ def j_person_once(pid: str, text: str) -> None:
     j_person("saw", text, pid)
 
 
-def j_place(text: str, bid: str) -> None:
-    return _emit("place", "saw", [bid], text)
+def j_place(text: str, bid: str, prov: str = "saw") -> None:
+    return _emit("place", prov, [bid], text)
 
 
 def journal_feed(feed: list) -> None:

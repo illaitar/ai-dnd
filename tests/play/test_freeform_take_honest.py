@@ -34,12 +34,16 @@ def world(tmp_path, monkeypatch):
     # inv_move is an UPDATE, so the item needs a starting holder to be "picked up" from)
     st.save_item({"id": "it:mug", "name": "кружка", "kind": "vessel", "worth": 1})
     st.inv_add(1, "it:mug", holder="zone:z1")
+    # a second REAL zone item with a short 3-letter noun name, for the short-noun tests
+    st.save_item({"id": "it:knife", "name": "Зазубренный нож мясника", "kind": "weapon", "worth": 3})
+    st.inv_add(1, "it:knife", holder="zone:z1")
     d = core._S._d(); saved = dict(d)
     try:
         d.clear()
         d.update(wid=1, gt=514, zone="z1",
                  live={"zone_names": {"z1": "у стойки"},
-                       "zone_items": {"у стойки": {"кружка": "it:mug"}},
+                       "zone_items": {"у стойки": {"кружка": "it:mug",
+                                                    "Зазубренный нож мясника": "it:knife"}},
                        "zone_fixed": {}, "workers": {}})
         yield st
     finally:
@@ -111,3 +115,47 @@ def test_declension_form_still_transfers(world, monkeypatch):
     assert any(r["item_id"] == "it:mug" for r in world.inventory(1, "pc"))
     assert not res.get("fail")
     assert not stub.called
+
+
+def test_short_noun_mismatch_refused_without_transfer(world, monkeypatch):
+    """F7b finding 1: «нож» is a 3-char Russian noun — before the fix, _content_tokens dropped
+    it (floor was 4 chars) so the mismatch guard no-op'd and the mug transferred anyway. The
+    parser resolved item=it:mug (a REAL zone item, the mug) but the player named «нож» — a
+    completely different object. Must refuse, not substitute the mug."""
+    stub = _Stub()
+    monkeypatch.setattr(freeform, "_model", lambda: stub, raising=False)
+    res = freeform._attempt(
+        {"verb": "take", "item": "it:mug", "_text": "беру нож со стола"}, {}
+    )
+    assert res.get("fail") is True
+    assert not stub.called
+    assert world.inventory(1, "pc") == []
+
+
+def test_short_noun_legit_take_transfers(world, monkeypatch):
+    """The same short noun «нож», when it stem-matches the resolved item's actual name
+    («Зазубренный нож мясника»), must transfer normally — short nouns aren't just refused
+    outright, they're compared like any other named token."""
+    stub = _Stub()
+    monkeypatch.setattr(freeform, "_model", lambda: stub, raising=False)
+    res = freeform._attempt(
+        {"verb": "take", "item": "it:knife", "_text": "беру нож со стола"}, {}
+    )
+    assert any(r["item_id"] == "it:knife" for r in world.inventory(1, "pc"))
+    assert not res.get("fail")
+    assert not stub.called
+
+
+def test_mismatch_refusal_does_not_reroute_into_pickpocket(world, monkeypatch):
+    """F7b finding 2 (latent, defensive): the mismatch-refusal recursion must null npc too —
+    if a parser step carried both item and npc for a take, it must not fall through into the
+    take+npc pickpocket branch, which would roll a real theft against a person that (here)
+    doesn't even exist in `people`."""
+    stub = _Stub()
+    monkeypatch.setattr(freeform, "_model", lambda: stub, raising=False)
+    res = freeform._attempt(
+        {"verb": "take", "item": "it:mug", "npc": "p_x", "_text": "беру перстень"}, {}
+    )
+    assert res.get("fail") is True
+    assert not stub.called
+    assert world.inventory(1, "pc") == []

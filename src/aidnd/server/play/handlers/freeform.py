@@ -129,25 +129,35 @@ def _say_aloud(text: str, sc: dict) -> dict:
 _TAKE_STOP = {
     "беру", "бери", "взять", "поднимаю", "подбираю", "хватаю", "предмет", "вещь", "штука",
     "полезное", "ценное", "какой", "нибудь", "стола", "стол", "пола", "пол", "стойки", "земли",
+    "два", "три", "мой", "моя", "моё", "сам", "сво", "всё", "все", "что", "как", "где", "тут",
+    "там", "вон", "эту", "это", "тот",
 }
 
 
 def _content_tokens(text: str) -> list:
-    """Lowercased ≥4-char tokens from a raw player phrase with generic take/location words
+    """Lowercased ≥3-char tokens from a raw player phrase with generic take/location words
     (and their declensions) dropped by stem-prefix match against _TAKE_STOP — what's left is
-    what the player actually NAMED, if anything."""
+    what the player actually NAMED, if anything. The floor is 3 (not 4) so short Russian item
+    nouns («нож», «меч», «лук», «щит», «эль») register as named tokens too."""
     toks = re.findall(r"[а-яёa-z0-9]+", (text or "").lower())
-    return [w for w in toks if len(w) >= 4 and not any(w.startswith(s[:4]) for s in _TAKE_STOP)]
+    return [w for w in toks if len(w) >= 3 and not any(w.startswith(s[:3]) for s in _TAKE_STOP)]
 
 
 def _stem_hits_name(tokens: list, name: str) -> bool:
-    """A named token from the player's phrase stem-matches (≥4-char common prefix) some word
-    of the resolved item's name — declensions pass («кружку»↔«кружка»), unrelated names don't
-    («перстень»↔«тряпка»)."""
+    """A named token from the player's phrase stem-matches some word of the resolved item's
+    name — declensions pass («кружку»↔«кружка»), unrelated names don't («перстень»↔«тряпка»).
+    Match rule: common prefix length ≥ min(4, len(token)) — so short nouns like «нож» (3 chars)
+    still match «нож»/«ножа» in «Зазубренный нож мясника» via their full 3-char prefix, while
+    staying strict enough not to match unrelated short tokens."""
     name_toks = re.findall(r"[а-яёa-z0-9]+", (name or "").lower())
-    return any(
-        len(t) >= 4 and len(n) >= 4 and t[:4] == n[:4] for t in tokens for n in name_toks
-    )
+    for t in tokens:
+        if len(t) < 3:
+            continue
+        need = min(4, len(t))
+        for n in name_toks:
+            if len(n) >= need and t[:need] == n[:need]:
+                return True
+    return False
 
 
 def _attempt(intent: dict, sc: dict) -> dict:
@@ -220,8 +230,9 @@ def _attempt(intent: dict, sc: dict) -> dict:
             if named and not _stem_hits_name(named, nm):
                 # player named a SPECIFIC thing that doesn't stem-match what the parser
                 # resolved to («поднимаю золотой перстень» → «Тряпка засаленная») — don't
-                # substitute; fall through to the honest take-refusal below.
-                return _attempt({**intent, "item": None, "_text": raw_text}, sc)
+                # substitute; fall through to the honest take-refusal below. Null npc too:
+                # the refusal path must not re-route into any other take branch (pickpocket).
+                return _attempt({**intent, "item": None, "npc": None, "_text": raw_text}, sc)
             wrk = next((wp for wp in (lv.get("workers") or {}) if wp in people), None)
             caught = False
             if wrk and manner == "stealthily":       # stealthily with owner present — dexterity against eyes

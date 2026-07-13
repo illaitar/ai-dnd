@@ -432,20 +432,31 @@ def _metrics(rooms, edges) -> dict:
             "deadends": len(dead), "bad_deadends": bad}
 
 
+_SALTS = 7                            # deterministic outer salt attempts before giving up
+
+
 def generate(seed: str, env: str = "Ruin", cr: float = 1.0, brief: dict | None = None,
              small: bool = False) -> dict:
     """Dungeon from seed: sub-seeds until quality filter passes (deterministic chain);
     skeleton FILLED immediately (stock — B/X quotas + machines + faction), brief from pool (if
-    given) assigns names/descriptions/lore clues to rooms (apply_brief, deterministically)."""
-    for i in range(RETRY):
-        d = _attempt(f"{seed}|{i}", env, small)
-        if d is not None:
-            stock(d, cr)
-            if brief:
-                from .dungeonlore import apply_brief
-                apply_brief(d, brief, random.Random(f"brief|{seed}"))
-            return d
-    raise ValueError(f"данж не собрался за {RETRY} под-сидов: {seed}")  # practically unreachable
+    given) assigns names/descriptions/lore clues to rooms (apply_brief, deterministically).
+
+    Some seeds deterministically exhaust all RETRY sub-seeds (rare but reachable, e.g. certain
+    env/cr/small combos on Caverns) — outer loop retries with a deterministic salted seed
+    (f"{seed}#s{k}") before giving up, so the same input seed still always yields the same
+    dungeon (or the same failure)."""
+    for k in range(_SALTS + 1):
+        salted = seed if k == 0 else f"{seed}#s{k}"
+        for i in range(RETRY):
+            d = _attempt(f"{salted}|{i}", env, small)
+            if d is not None:
+                stock(d, cr)
+                if brief:
+                    from .dungeonlore import apply_brief
+                    apply_brief(d, brief, random.Random(f"brief|{seed}"))
+                return d
+    raise ValueError(
+        f"данж не собрался за {RETRY} под-сидов: {seed} (после {_SALTS} солей)")
 
 
 _MCAT: dict | None = None

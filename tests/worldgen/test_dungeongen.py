@@ -10,6 +10,15 @@ def test_deterministic():
     assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
 
 
+def test_hard_seed_salvaged_via_salt():
+    """inc|1|inc|1|vermin (Caverns, cr=0.61, small) exhausts all RETRY sub-seeds on the base
+    seed — the outer salt loop must salvage it instead of raising, and stay deterministic."""
+    d1 = generate("inc|1|inc|1|vermin", "Caverns", cr=0.61, brief=None, small=True)
+    assert d1["rooms"]
+    d2 = generate("inc|1|inc|1|vermin", "Caverns", cr=0.61, brief=None, small=True)
+    assert len(d1["rooms"]) == len(d2["rooms"])
+
+
 def test_batch_guarantees():
     for i in range(30):
         d = generate(f"t|{i}", ["Ruin", "Caverns", "Forest"][i % 3])

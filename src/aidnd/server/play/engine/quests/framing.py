@@ -162,8 +162,15 @@ def _all_tokens_match(phrase: str, allow_tok: set) -> bool:
     if not toks:
         return False
     def hit(w):
-        # 4-char stem equality, or prefix-match for short-name inflections («Рэну» vs stem «рэн»)
-        return w[:4] in allow_tok or any(len(a) >= 3 and w.startswith(a) for a in allow_tok)
+        # common-prefix rule scaled by token length: two tokens match when they share
+        # max(2, min(len)-1) leading chars — bridges Russian case endings even inside the
+        # stem window («Юна»↔«Юну», «Ирма»↔«Ирмы», «Дунн»↔«Дунну»). Collision radius is
+        # deliberately loose (validator = second line of defense; the prompt is the first).
+        for a in allow_tok:
+            m = max(2, min(len(w), len(a)) - 1)
+            if w[:m] == a[:m]:
+                return True
+        return False
     return all(hit(w) for w in toks)
 
 

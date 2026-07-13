@@ -262,45 +262,38 @@ def geo_question(text: str) -> bool:
     return bool(_GEO_RE.search(text or ""))
 
 
-def _stem_tokens(s: str) -> set[str]:
-    return {w[:5] for w in re.findall(r"[а-яё]+", (s or "").lower()) if len(w) >= 4}
-
-
-def match_known_place(pid: str, text: str) -> dict | None:
-    """Inc 1 exact-name matcher: the known_places entry whose name/kind shares a 4+ char token
-    with the question. Longest-name match wins (most specific). Superseded by the router in Inc 2."""
-    q = _stem_tokens(text)
-    best, score = None, 0
-    for e in known_places(pid):
-        hit = len(_stem_tokens(e["name"] + " " + e["kind"]) & q)
-        if hit > score:
-            best, score = e, hit
-    return best if score else None
-
-
 def geo_answer(pid: str, text: str, from_node) -> dict | None:
     """Stable say() seam. None → not a geo question (say() runs unchanged). Otherwise a dict with
-    a geo_line for _voice and an optional reveal {bid,text} to _mark_seen. Inc 1 body = exact-name
-    matcher → share or deflect; Inc 2 rewrites this body to the persona-driven router."""
+    a geo_line for _voice and an optional reveal {bid,text} to _mark_seen. Inc 2 body: the ONE
+    mind-router decides share/refer/refuse/deflect; code builds the always-true geo_line and reveals
+    ONLY on a validated share."""
     if not geo_question(text):
         return None
-    place = match_known_place(pid, text)
-    if place is None:
-        return {"geo_line": "ты уклончив и не выдаёшь точных мест — отговорись общими словами",
-                "reveal": None}
-    dline = direction_line(from_node, place["bid"])
-    if dline == "это на другом конце города":
-        return {"geo_line": f"ты знаешь про {place['kind']} «{place['name']}», но это далеко: "
-                            f"{dline} — так и скажи",
-                "reveal": None}
+    dec = route_geo_ask(pid, text, from_node)
+    manera = f" (манера: {dec['манера']})" if dec.get("манера") else ""
     teller = (_S.get("people") or {}).get(pid)
     tname = teller.name if teller is not None else "NPC"
-    return {
-        "geo_line": f"ты знаешь место {place['kind']} «{place['name']}»: {dline} — посоветуй "
-                    "дорогу игроку по-своему",
-        "reveal": {"bid": place["bid"],
-                   "text": f"{tname} рассказал(а) дорогу к {place['name']}"},
-    }
+
+    if dec["kind"] == "share":
+        place = dec["place"]
+        dline = direction_line(from_node, place["bid"])
+        if dline == "это на другом конце города":
+            return {"geo_line": f"ты знаешь про {place['kind']} «{place['name']}», но это далеко: "
+                                f"{dline} — так и скажи{manera}", "reveal": None}
+        return {
+            "geo_line": f"ты знаешь место {place['kind']} «{place['name']}»: {dline} — посоветуй "
+                        f"дорогу игроку по-своему{manera}",
+            "reveal": {"bid": place["bid"], "text": f"{tname} рассказал(а) дорогу к {place['name']}"},
+        }
+    if dec["kind"] == "refer":
+        r = dec["refer"]
+        return {"geo_line": f"места ты не знаешь, но посоветуй спросить {r['name']} ({r['role']}), "
+                            f"он {r['where_line']}{manera}", "reveal": None}
+    if dec["kind"] == "refuse":
+        return {"geo_line": f"ты решил НЕ помогать — по своему нраву, отбрось вопрос{manera}",
+                "reveal": None}
+    return {"geo_line": f"ты уклончив и не выдаёшь точных мест — отговорись общими словами{manera}",
+            "reveal": None}
 
 
 _ROUTER_SYS = (

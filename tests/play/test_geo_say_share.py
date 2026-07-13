@@ -24,8 +24,12 @@ class _Req:
 
 class _Voice:
     def call(self, role, messages, **kw):
-        # echo whether a geo-fact reached the prompt, so the test can assert wiring
         sys = messages[0]["content"]
+        # route_geo_ask's router prompt is distinguishable by its own fixed wording; answer it
+        # with a canned share so geo_answer() can build the geo_line for the real voice call below.
+        if "МЕСТА, КОТОРЫЕ ТЫ ЗНАЕШЬ" in sys:
+            return {"content": '{"help":"да","bid":"b_smithy","refer_pid":null,"манера":"x"}'}
+        # echo whether a geo-fact reached the prompt, so the test can assert wiring
         say = "Ступай к кузнице." if "ГЕО-ФАКТ" in sys else "Не знаю, о чём ты."
         return {"content": f'{{"say": "{say}", "player_tone": "neutral"}}'}
 

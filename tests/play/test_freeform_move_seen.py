@@ -105,3 +105,32 @@ def test_arbiter_seen_names_capped_at_12(tmp_path):
         assert len(seen_present) <= 12
     finally:
         d.clear(); d.update(saved)
+
+
+def test_arbiter_seen_names_rank_generic_fallback_last(tmp_path):
+    # Review Finding 2: a plain Unicode sort puts fallback «Здание» (capital З) before all
+    # lowercase real names, so ≥12 generic houses (no factsheet) evict a named, enriched
+    # incident house from МЕСТА ГОРОДА — real names must never be crowded out by placeholders.
+    from aidnd.server.play.engine.session import persist
+    from aidnd.server.play.engine.session import state as _state
+    from aidnd.worldgen import WorldStore
+
+    st = WorldStore(str(tmp_path / "live_fallback.db"))
+    d = _state._S._d(); saved = dict(d)
+    try:
+        d.clear()
+        seen_bids = {f"house:blank:{i}" for i in range(13)} | {"house:medovar"}
+        d.update(wid=1, loc=50, seen=seen_bids,
+                 geom={"keys": [{"node": 48, "label": "кузня", "bid": "key:1"}]},
+                 live={}, zone=None)
+        persist._STORE = st
+        for i in range(13):                          # no factsheet data → _binfo falls back to «Здание»
+            st.save_building(1, f"house:blank:{i}", False, 372 + i, None, {})
+        st.save_building(1, "house:medovar", False, 500, "дом Медовара",
+                         {"name": "дом Медовара", "type": "жилой дом"})
+        sc = {"here": [], "location": {"name": "улица", "containers": []}, "ambient": {}}
+        ctx = arbiter.assemble_context(sc)
+        mesta = ctx.split("МЕСТА ГОРОДА: ")[1].split(". ЗОНЫ:")[0]
+        assert "дом Медовара" in mesta
+    finally:
+        d.clear(); d.update(saved)

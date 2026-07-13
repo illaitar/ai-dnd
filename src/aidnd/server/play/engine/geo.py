@@ -34,6 +34,9 @@ _GOODS = (
 _LANDMARK_WORDS = ("колод", "гильди", "ворот", "мельниц")
 _LANDMARK_SOC = {"tavern", "temple", "market"}
 _ROUTINE_KINDS = ("tavern", "temple", "market")   # rule 3 routine-venue approximation
+# unroutable-pair fallback sentence — exported so callers (e.g. incidents.py) compare against
+# this constant instead of a duplicated literal string
+FAR_LINE = "это на другом конце города"
 
 
 def _goods_for(info: dict) -> str:
@@ -204,7 +207,7 @@ def direction_line(from_node, bid: str) -> str:
     city = _S.get("city")
     r = city.route(from_node, bid) if city is not None else None
     if r is None or not r.found:
-        return "это на другом конце города"
+        return FAR_LINE
     steps = max(1, len(r.nodes) - 1)
     parts = [f"{_minutes_phrase(steps)} ходу"]
     if r.bearing and r.bearing in _SIDE:
@@ -277,7 +280,7 @@ def geo_answer(pid: str, text: str, from_node) -> dict | None:
     if dec["kind"] == "share":
         place = dec["place"]
         dline = direction_line(from_node, place["bid"])
-        if dline == "это на другом конце города":
+        if dline == FAR_LINE:
             return {"geo_line": f"ты знаешь про {place['kind']} «{place['name']}», но это далеко: "
                                 f"{dline} — так и скажи{manera}", "reveal": None}
         return {

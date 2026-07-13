@@ -62,7 +62,10 @@ def test_west_two_steps(wired):
 
 
 def test_disconnected_target(wired):
-    assert geo.direction_line(50, "b_nowhere") == "это на другом конце города"
+    # Review Finding 3: incidents.py compares against geo.FAR_LINE, not a duplicated literal —
+    # pin the module constant to the exact sentence direction_line returns when unroutable.
+    assert geo.FAR_LINE == "это на другом конце города"
+    assert geo.direction_line(50, "b_nowhere") == geo.FAR_LINE
 
 
 def test_bearing_all_eight_winds():

@@ -74,11 +74,15 @@ def _place_binding(inc: dict, t: dict) -> tuple[str | None, int | None]:
         bid = p.work if p is not None else None
         return bid, (keynode.get(bid) if bid else None)
     if victim in ("home", "dead_home"):
-        # dead_home stores the dead resident's name; the home node is that resident's .home
+        # dead_home stores the dead resident's vid (set in _try_build) — the home node is
+        # that exact resident's .home; surname scan is only a fallback for legacy data
+        # missing "vid" (two households sharing a surname would otherwise mis-bind).
         pid = inc.get("patron") if victim == "home" else None
         if victim == "dead_home":
-            pid = next((k for k, pp in people.items()
-                        if _fam(pp.name) == _fam(inc.get("dead_name", ""))), None) or inc.get("patron")
+            pid = inc.get("vid") or next(
+                (k for k, pp in people.items()
+                 if _fam(pp.name) == _fam(inc.get("dead_name", ""))), None
+            ) or inc.get("patron")
         p = people.get(pid)
         node = getattr(p, "home", None) if p is not None else None
         return (cr2b.get(node) if node is not None else None), node
@@ -127,6 +131,7 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
             return None
         inc["place"] = f"дом, где жил {vic.name}"
         inc["dead_name"] = vic.name
+        inc["vid"] = vid
         kin = [pid for pid, p in alive.items()
                if _fam(p.name) == _fam(vic.name) and pid != vid]
         inc["patron"] = kin[0] if kin else None
@@ -228,7 +233,7 @@ def incident_jobs() -> list:
         bid = inc.get("bid")
         if bid and loc is not None:                    # append the true way there (F5)
             d = geo.direction_line(loc, bid)
-            if d and d != "это на другом конце города":
+            if d and d != geo.FAR_LINE:
                 pitch = f"{pitch} — {d}"
         out.append({"id": f"ct:inc:{inc['id']}", "lair": inc["id"], "name": inc["title"],
                     "cr": inc["cr"], "reward": inc.get("reward", 4),

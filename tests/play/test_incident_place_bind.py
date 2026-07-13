@@ -36,6 +36,35 @@ def world(tmp_path, monkeypatch):
         d.clear(); d.update(saved)
 
 
+def test_dead_home_binds_by_vid_not_surname_scan(tmp_path, monkeypatch):
+    """Review Finding 1: two unrelated households sharing a surname «Медовар» must not collide —
+    _place_binding must use the exact vid _try_build recorded, not a dict-order surname scan."""
+    st = WorldStore(str(tmp_path / "live_vid.db"))
+    monkeypatch.setattr(persist, "_STORE", st)
+    st.save_building(1, "house:medovar1", False, 100, "дом семьи Медовар (1)",
+                     {"name": "дом семьи Медовар (1)", "type": "жилой дом"})
+    st.save_building(1, "house:medovar2", False, 200, "дом семьи Медовар (2)",
+                     {"name": "дом семьи Медовар (2)", "type": "жилой дом"})
+    people = {
+        "p_dead1": _person("p_dead1", "Ольд Медовар", "пасечник", 100, None),
+        "p_dead2": _person("p_dead2", "Марта Медовар", "швея", 200, None),
+    }
+    cr2b = {100: "house:medovar1", 200: "house:medovar2"}
+    d = core._S._d(); saved = dict(d)
+    try:
+        d.clear()
+        d.update(wid=1, gt=600, people=people, cr2b=cr2b, keynode={}, loc=50, city=None)
+        # dead_name refers to the SECOND household (vid explicit) — binding must follow vid,
+        # not the first dict-order match on surname (which would wrongly hit p_dead1's house).
+        inc = {"dead_name": "Марта Медовар", "vid": "p_dead2"}
+        t = {"victim": "dead_home"}
+        bid, node = incidents._place_binding(inc, t)
+        assert bid == "house:medovar2"
+        assert node == 200
+    finally:
+        d.clear(); d.update(saved)
+
+
 def test_home_incident_binds_bid_and_node(world):
     t = {"key": "vermin", "goal": "clear", "env": "cellar", "cr": [1, 2], "victim": "home",
          "foe": "beasts", "title": "твари в подполе — {place}", "pitch": "{patron} зовёт на подмогу"}

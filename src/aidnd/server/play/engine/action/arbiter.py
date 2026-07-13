@@ -113,9 +113,10 @@ def assemble_context(sc: dict) -> str:
     _lm_bids = {k.get("bid") for k in _S["geom"]["keys"]}
     # _seen() is an unordered set; sort by name and cap at 12 so a long-lived world doesn't
     # bloat every prompt with an ever-growing list of revealed buildings.
+    # настоящие имена важнее болванок — иначе размеченный дом дела вылетает из промпта
     seen_names = sorted(
-        _binfo(b)["name"] for b in _seen()
-        if b not in _lm_bids
+        (_binfo(b)["name"] for b in _seen() if b not in _lm_bids),
+        key=lambda n: (n == "Здание", n),
     )[:12]
     if seen_names:  # revealed non-landmark buildings the player can walk to (F4)
         keys_pl = (keys_pl + ", " if keys_pl else "") + ", ".join(seen_names)

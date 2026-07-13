@@ -59,7 +59,10 @@ string VERBATIM (full, uncut), in play order; player actions as `〔…〕` stag
 as `ИМЯ. текст`, yours as `ТЫ. текст`. No JSON, no coordinates, no failed-payload noise — only what
 a human at the screen would read. Collect it AS YOU PLAY (append after every call), not from memory.
 ЛОГ is the compact mechanical trace (one line per call, replies ≤80 chars). Analysis goes ONLY in
-the sections after.
+the sections after. Budget discipline: НИТЬ entries after EVERY call — when the call budget
+tightens, cut exploration, never the НИТЬ. Navigation: don't lattice-walk node numbers — if lost
+after ~6 moves, ask NPCs directions or return to a known hub (players have the visual map; API
+agents don't — wandering findings are harness artifacts, not game bugs).
 
 ## False alarms (check before reporting these as bugs)
 

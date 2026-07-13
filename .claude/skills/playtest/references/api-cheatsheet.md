@@ -30,4 +30,4 @@ All JSON over http://127.0.0.1:8098. Use `curl --max-time 240` on /live /talk /s
 
 ## Money & misc
 - coins visible in /scene; buy/sell at market venues: `POST /api/play/market/buy|sell` (see venue context)
-- `POST /api/play/rest {}` where lodging exists — sleep to morning
+- SLEEP: no /rest endpoint — use freeform: `POST /api/play/act {"text":"снимаю тюфяк и ложусь спать до утра"}` where lodging exists (таверна); costs ~2 монеты, jumps to morning

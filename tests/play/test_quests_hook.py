@@ -72,6 +72,8 @@ def test_sift_completion_writes_back_cursor(world, monkeypatch):
     contracts._contract_complete(ct)
     assert people["npc:dunn"].state.agendas[0].cursor == 1     # real agenda advanced
     assert st.contracts(1, "active") == []                     # contract closed
+    done_ct = next(c for c in st.contracts(1, "done") if c["id"] == "ct:dunn:1")
+    assert done_ct["arc"]["beat"] == "closed"                  # bug fix: was left "active"
 
 
 def test_improvised_completion_never_writes_back(world, monkeypatch):

@@ -327,9 +327,10 @@ def _contract_complete(ct: dict) -> str:
         _store().purse_add(_wid(), giver, -reward)
         coins = _store().purse_add(_wid(), "pc", reward)
         paid = f"{p.name} отсыпает тебе {reward} зм (кошель: {coins})"
-    _store().save_contract(
-        _wid(), ct["id"], "done", {k: v for k, v in ct.items() if k not in ("id", "status")}
-    )
+    data = {k: v for k, v in ct.items() if k not in ("id", "status")}
+    if ct.get("src") == "sift":  # honest bridge's arc: the act is over, the giver's card stops gnawing
+        data["arc"] = {**(data.get("arc") or {}), "beat": "closed"}
+    _store().save_contract(_wid(), ct["id"], "done", data)
     from aidnd.server.play.engine.journal import j_quest
 
     what = ct.get("want") or ct.get("target_name")

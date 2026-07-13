@@ -165,7 +165,9 @@ def framer(seed: dict, allowed: set, manager) -> dict | None:
     one regenerate on failure, else honest absence (mirrors _build_step's reject-don't-repair)."""
     if manager is None:
         return None
-    user = (f"ЗАКАЗЧИК: {seed['giver_name']}. Суть: {seed.get('why', '')}\n"
+    # summary IS the giver's real life-goal (plan_agenda-authored, sim truth) — write ABOUT it, not
+    # just around the giver's name; the judge's `why` is flavor-only fallback when a seed carries none.
+    user = (f"ЗАКАЗЧИК: {seed['giver_name']}. Суть: {seed.get('summary') or seed.get('why', '')}\n"
             f"МОЖНО НАЗЫВАТЬ: {', '.join(sorted(allowed))}.")
     for _attempt in range(2):                      # generate → validate → regenerate once → skip
         resp = manager.call("narrator",

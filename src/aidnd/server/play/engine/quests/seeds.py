@@ -60,14 +60,22 @@ def _twist_for(villain: str | None, deeds: list, exclude=()) -> dict | None:
     return None
 
 
+def _revenge_summary(villain: str) -> str:
+    """The grievance text (sim-authored, honest) used both as the seed's own summary AND — verbatim —
+    as the inserted revenge Agenda's summary (pipeline._ensure_milestone), so the two never drift."""
+    return f"расквитаться с {villain} за нарушенное слово"
+
+
 def _seed(pattern, giver, people, done, villain=None, prize=None, evidence=None, twist=None,
-          motivation=None):
+          motivation=None, summary=None):
     p = people[giver]
-    m = _open_milestone(p)[1]
+    ag, m, cur = _open_milestone(p)
     goal = {"kind": (m.kind if m else "harm"), "target": (m.target if m else villain), "done": done}
     return {"pattern": pattern, "giver": giver, "giver_name": p.name, "goal": goal,
             "cast": {"villain": villain, "prize": prize}, "motivation": motivation or _MOTIV[pattern],
-            "twist": twist, "evidence": list(evidence or []), "score": 0.0}
+            "twist": twist, "evidence": list(evidence or []), "score": 0.0,
+            # sim-authored truth (plan_agenda's own words) — never invented, widens the framer's allowed set
+            "summary": summary if summary is not None else (getattr(ag, "summary", "") or "")}
 
 
 def pat_kin_debt(people, deeds, gt) -> list[dict]:
@@ -108,7 +116,8 @@ def pat_broken_promise(people, deeds, gt) -> list[dict]:
             continue
         out.append(_seed("broken_promise", victim, people, {"type": "dead", "id": promiser},
                          villain=promiser, prize=None, evidence=[f"deed:{d['id']}"],
-                         twist=_twist_for(promiser, deeds, exclude={d["id"]})))
+                         twist=_twist_for(promiser, deeds, exclude={d["id"]}),
+                         summary=_revenge_summary(promiser)))
     return out
 
 
@@ -175,7 +184,8 @@ def pat_unanswered_blood(people, deeds, gt, flag_get=None) -> list[dict]:
             continue
         out.append(_seed("unanswered_blood", giver, people, {"type": "dead", "id": villain},
                          villain=villain, prize=victim, evidence=[f"deed:{d['id']}"],
-                         twist=_twist_for(villain, deeds, exclude={d["id"]})))
+                         twist=_twist_for(villain, deeds, exclude={d["id"]}),
+                         summary=_revenge_summary(villain)))
     return out
 
 

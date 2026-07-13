@@ -14,7 +14,7 @@ from aidnd.inference.client import LLMUnavailable
 from aidnd.mind import World as MWorld
 from aidnd.mind.llm_agent import plan_agenda
 from aidnd.server.play.engine import core
-from aidnd.server.play.engine.core import _S, PB, _gt, _store, _wid
+from aidnd.server.play.engine.core import _S, PB, _binfo, _gt, _store, _wid
 from aidnd.server.play.engine.quests import bridge, casting, framing, salience, seeds
 
 log = logging.getLogger("aidnd.quests")
@@ -51,7 +51,8 @@ def _ensure_milestone(seed: dict) -> None:
     ms = Milestone(desc=f"свести счёты с обидчиком ({villain})", kind="harm",
                    target=villain, done=done)
     idx = len(st.agendas)
-    st.agendas.append(Agenda(summary=f"расквитаться с {villain} за нарушенное слово",
+    # seed["summary"] IS this exact grievance text (seeds.py:_revenge_summary) — single source of truth
+    st.agendas.append(Agenda(summary=seed.get("summary") or f"расквитаться с {villain} за нарушенное слово",
                              kind="revenge", importance=0.8, milestones=[ms]))
     seed["evidence"].append(f"agenda:{seed['giver']}:{idx}")   # anchor for bridge._anchor_idx
 
@@ -86,6 +87,11 @@ def _ctx(chosen_deeds: dict, gt: int) -> dict:
 
 
 def _allowed(seed: dict) -> set:
+    """Sim-authored truth only, never invention (spec: no mechanical gates). The judge's `why` is
+    ONE editorial flourish per spec §5 Step 3 — it never widened `allowed` (nothing to whitelist from
+    it). A plain_need seed's real content is the giver's own life-goal (Agenda.summary from
+    plan_agenda), his role, his home/work venue, and the milestone's target — all honest sim state
+    the framer needs in order to write ABOUT the goal instead of just naming the giver."""
     names = _names()
     out = {seed["giver_name"]}
     for r in ("villain", "prize"):
@@ -96,6 +102,19 @@ def _allowed(seed: dict) -> set:
     if done.get("type") == "have" and done.get("item"):
         out.add(str(done["item"]))
     out.add("гильдия")
+    summary = seed.get("summary")
+    if summary:
+        out.add(summary)                              # tokenizes via _stem4 — whitelists its words
+    people = _S.get("people") or {}
+    giver = people.get(seed["giver"])
+    if giver is not None:
+        if getattr(giver, "role", None):
+            out.add(giver.role)
+        if getattr(giver, "work", None):
+            out.add(_binfo(giver.work)["name"])
+    target = seed.get("goal", {}).get("target")
+    if isinstance(target, str) and target:
+        out.add(target)
     return out
 
 

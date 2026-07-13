@@ -156,6 +156,19 @@ def test_pat_plain_need_goal_and_cast_shape():
     assert seed2["motivation"] == "wealth"                            # wealth → wealth
 
 
+def test_pat_plain_need_carries_agenda_summary_as_seed_summary():
+    """A plain_need seed's `summary` is the giver's own Agenda.summary (plan_agenda-authored, sim
+    truth) — the honest material pipeline._allowed widens with so the framer can write about the
+    actual life-goal instead of starving for lack of nameable cast."""
+    wealth_ms = Milestone("купить кинжал", "need", "wealth", {}, {"type": "wealth", "value": 15})
+    rogue = _person("npc:pit", "Ушлый Пит", "бродяга",
+                    agendas=[Agenda("Скопив денег, купить у кузнеца Айвора кинжал",
+                                    "wealth", 0.6, [wealth_ms])])
+    people = {"npc:pit": rogue}
+    seed = next(s for s in S.sift(people, [], 3 * 1440) if s["giver"] == "npc:pit")
+    assert seed["summary"] == "Скопив денег, купить у кузнеца Айвора кинжал"
+
+
 def test_pat_plain_need_does_not_double_bind_a_giver_already_seeded_by_a_flavored_pattern():
     # Дунн — уже связан kin_debt в основной фикстуре; plain_need не должен добавить второй seed
     # на ту же веху/дающего.

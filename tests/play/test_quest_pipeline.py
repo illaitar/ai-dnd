@@ -233,3 +233,26 @@ def test_expire_compost_closes_offer_and_keeps_agenda(town):
     closed = next(c for c in town.contracts(core._wid(), "closed") if c["id"] == ct["id"])
     assert closed["arc"]["beat"] == "expired"
     assert core._S["people"]["npc:dunn"].state.agendas[0].cursor == 0   # агенда цела — сам займётся
+
+
+def test_allowed_widens_with_seed_summary_role_and_target(town):
+    """The starvation bug: a wealth-milestone plain_need seed's ONLY villain/prize-derived allowed
+    names are {giver, гильдия} — no LLM can pitch «накопить 15 монет» without naming the giver's own
+    trade/venue/goal. _allowed must widen with sim-authored truth: the seed's summary (the giver's
+    real Agenda.summary), his role, and the milestone target — never invented material."""
+    core._S["people"]["npc:pit"] = _person(
+        "npc:pit", "Ушлый Пит", "кузнец",
+        agendas=[Agenda("Скопив денег, купить у кузнеца Айвора кинжал", "wealth", 0.6,
+                        [Milestone("купить кинжал", "need", "wealth", {},
+                                   {"type": "wealth", "value": 15})])])
+    from aidnd.server.play.engine.quests import seeds as S
+    seed = next(s for s in S.sift(core._S["people"], [], core._S["gt"])
+                if s["giver"] == "npc:pit")
+    allowed = P._allowed(seed)
+    assert seed["summary"] == "Скопив денег, купить у кузнеца Айвора кинжал"
+    assert allowed & {"кузнец", "кузнеца"}                       # role AND/OR summary tokens land
+    assert any(a for a in allowed if "Айвор" in a)                # summary carries the named smith
+    assert any(a for a in allowed if "кинжал" in a)               # summary carries the target item
+    from aidnd.server.play.engine.quests import framing as F
+    pitch = "Чужак, помоги мне — я коплю на кинжал у Айвора, кузнеца."
+    assert F.valid_entities(pitch, allowed)

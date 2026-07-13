@@ -8,8 +8,11 @@ morning; the director in Inc 3 replaces this). No LLM at either seam → honest 
 from __future__ import annotations
 
 import logging
+import random
 
 from aidnd.inference.client import LLMUnavailable
+from aidnd.mind import World as MWorld
+from aidnd.mind.llm_agent import plan_agenda
 from aidnd.server.play.engine import core
 from aidnd.server.play.engine.core import _S, PB, _gt, _store, _wid
 from aidnd.server.play.engine.quests import bridge, casting, framing, salience, seeds
@@ -123,6 +126,50 @@ def _sift_window_occupied() -> bool:
     return False
 
 
+def _has_hook(persona: dict) -> bool:
+    """Persona material a life-goal can hang on: something the NPC wants/covets (real fields written
+    by worldgen persona_llm.py — wants/valuables), not a placeholder empty persona."""
+    return bool((persona or {}).get("wants")) or bool((persona or {}).get("valuables"))
+
+
+def _has_grudge(state) -> bool:
+    return any(rel.get("affinity", 0.0) < -0.2 for rel in (state.relationships or {}).values())
+
+
+def _plan_candidates(people: dict, gt: int) -> list[str]:
+    """Up to quest_plan_n agenda-less NPCs with persona material (wants/valuables) or a grudge
+    (affinity edge < -0.2) — deterministic order seeded by the day, no live agenda already."""
+    day = gt // 1440
+    pool = [pid for pid, p in sorted(people.items())
+            if not any(getattr(ag, "status", "active") == "active" for ag in (p.state.agendas or []))
+            and (_has_hook(p.persona) or _has_grudge(p.state))]
+    random.Random(f"plan|{day}").shuffle(pool)
+    return pool[:PB["quest_plan_n"]]
+
+
+def _seed_agendas(people: dict, gt: int) -> None:
+    """Morning agenda seeding: give up to quest_plan_n agenda-less NPCs a life-goal so the sifter has
+    material to work with (patterns need an OPEN milestone — seeds.py:_open_milestone). Mirrors
+    _make_contract's lazy plan_agenda call (contracts.py:172-175) exactly: same MWorld() stub, same
+    ctx shape. Populates state.agendas in memory only — same lifecycle as deals.py:155 (no new
+    persistence; save_npc_state deliberately never writes agendas)."""
+    cands = _plan_candidates(people, gt)
+    if not cands:
+        return
+    mgr = core._model()
+    for pid in cands:
+        p = people[pid]
+        try:
+            ag = plan_agenda(p.state, MWorld(), {"roles": {pid: p.role}}, mgr)
+        except LLMUnavailable:
+            log.info("quests: LLM недоступен — посев агенд прерван на %s", pid)
+            return
+        if ag:
+            if p.state.agendas is None:
+                p.state.agendas = []
+            p.state.agendas.append(ag)
+
+
 def quest_morning() -> list[str]:
     people = _S.get("people") or {}
     if not people:
@@ -131,6 +178,7 @@ def quest_morning() -> list[str]:
     if _sift_window_occupied():
         return news
     gt = _gt()
+    _seed_agendas(people, gt)                          # NPCs without a live agenda get one (quest_plan_n)
     raw = _store().deeds(_wid(), since_gt=gt - salience.FRESH_DAYS * 1440, limit=60)
     deeds_by_id = {d["id"]: d for d in raw}
     pool = seeds.sift(people, raw, gt, flag_get=lambda k: _store().flag_get(_wid(), k))

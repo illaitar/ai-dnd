@@ -147,6 +147,82 @@ def test_llm_unavailable_in_quest_morning_returns_no_offer(town, monkeypatch):
     assert not [c for c in town.contracts(core._wid(), "queued") if c.get("src") == "sift"]
 
 
+class _PlanStub(_Stub):
+    """Extends _Stub with the planner branch (_PLAN_SYS text) so quest_morning's new agenda-seeding
+    step (pipeline._seed_agendas) gets a real milestone back — a delegatable 'acquire/have' goal that
+    blocked_rival (seeds.py:pat_blocked_rival) can pick up (needs an OPEN delegatable milestone)."""
+
+    def __init__(self):
+        self.plan_calls = 0
+
+    def call(self, role, messages, **kw):
+        sys = messages[0]["content"]
+        if "планировщик" in sys:
+            self.plan_calls += 1
+            return {"content": json.dumps({
+                "summary": "разжиться кошелем", "kind": "predation", "importance": 0.8,
+                "milestones": [{"desc": "стащить кошель", "goal": "acquire", "target": "кошель",
+                                "meta": {}, "done": {"type": "have", "item": "кошель"}}],
+            }, ensure_ascii=False)}
+        return super().call(role, messages, **kw)
+
+
+class _DownDuringPlanStub(_Stub):
+    """Planner branch raises LLMUnavailable; judge/framer branches behave like _Stub (so the rest
+    of the morning — sift over the fixture's pre-existing hooks — proceeds unaffected)."""
+
+    def __init__(self):
+        self.plan_calls = 0
+
+    def call(self, role, messages, **kw):
+        sys = messages[0]["content"]
+        if "планировщик" in sys:
+            self.plan_calls += 1
+            from aidnd.inference.client import LLMUnavailable
+            raise LLMUnavailable("no model")
+        return super().call(role, messages, **kw)
+
+
+def test_morning_seeds_agendas_for_agenda_less_npcs(town, monkeypatch):
+    """(a) Two agenda-less rivals with a mutual grudge get planned via _seed_agendas; the planted
+    delegatable milestone lets blocked_rival fire and the sift/judge/framer chain bind a contract."""
+    stub = _PlanStub()
+    monkeypatch.setattr(core, "_model", lambda: stub)
+    core._S["people"]["npc:dunn"].state.agendas = []     # neutralize kin_debt/broken_promise/
+    core._S["people"]["npc:ralf"].state.relationships = {"npc:marta": {"affinity": -0.4}}
+    core._S["people"]["npc:marta"].state.relationships = {"npc:ralf": {"affinity": -0.3}}
+    news = P.quest_morning()
+    assert stub.plan_calls >= 1                          # at least one agenda-less NPC was planned
+    got_agenda = any((p.state.agendas or []) for p in core._S["people"].values())
+    assert got_agenda
+    assert news                                            # sift/judge/framer bound the planted hook
+
+
+def test_morning_skips_planning_for_npcs_with_live_agendas(town, monkeypatch):
+    """(b) All three already carry a live agenda → _seed_agendas finds no candidates, no planner
+    calls made (judge/framer calls from the normal sift path still happen)."""
+    stub = _PlanStub()
+    monkeypatch.setattr(core, "_model", lambda: stub)
+    dummy = Milestone("держаться подальше", "need", "wealth", {}, {"type": "wealth", "value": 999})
+    for p in core._S["people"].values():
+        p.state.agendas = [Agenda("что-то своё", "ambition", 0.5, [dummy])]
+    P.quest_morning()
+    assert stub.plan_calls == 0
+
+
+def test_morning_llm_unavailable_during_planning_does_not_crash(town, monkeypatch):
+    """(c) Planner raises LLMUnavailable for the first agenda-less candidate → seeding stops quietly,
+    no partial agenda is left on that NPC, and the morning continues (no crash; pre-existing hooks
+    still produce the usual private offer)."""
+    stub = _DownDuringPlanStub()
+    monkeypatch.setattr(core, "_model", lambda: stub)
+    news = P.quest_morning()
+    assert stub.plan_calls >= 1
+    assert not (core._S["people"]["npc:marta"].state.agendas or [])
+    assert not (core._S["people"]["npc:ralf"].state.agendas or [])
+    assert news                                            # dunn's pre-existing hook still surfaces
+
+
 def test_expire_compost_closes_offer_and_keeps_agenda(town):
     P.quest_morning()
     ct = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")

@@ -44,13 +44,23 @@ _JUDGE_SYS = (
 )
 
 
-def render_evidence(seed: dict, deeds: dict, names: dict) -> str:
-    """One seed → plain-Russian header (only evidence facts + personas, no predicates leak)."""
-    gv = seed["giver_name"]
-    vil = names.get(seed["cast"].get("villain"), "кто-то")
-    prize = names.get(seed["cast"].get("prize"))
-    head = f"{seed['sid']} [{seed['pattern']}]: {gv} против {vil}"
-    head += f" (речь о {prize})." if prize else "."
+_WANT_RU = {"have": "раздобыть", "wealth": "накопить денег", "affinity": "наладить дела",
+            "dead": "свести счёты"}
+
+
+def _plain_want(seed: dict, names: dict) -> str:
+    """Villain-less header text — names the milestone's want, not a predicate/target internals."""
+    done = seed["goal"]["done"] or {}
+    verb = _WANT_RU.get(done.get("type"), "разобраться со своим делом")
+    if done.get("type") == "have" and done.get("item"):
+        return f"{verb} «{done['item']}»"
+    if done.get("type") in ("affinity", "dead"):
+        who = names.get(done.get("id"))
+        return f"{verb} с {who}" if who else verb
+    return verb
+
+
+def _evidence_facts(seed: dict, deeds: dict, names: dict) -> list:
     facts = []
     for i in seed.get("evidence", []):
         d = deeds.get(i.split(":", 1)[1] if i.startswith("deed:") else i)   # anchors carry deed:-prefix (seeds.py)
@@ -58,6 +68,23 @@ def render_evidence(seed: dict, deeds: dict, names: dict) -> str:
             continue
         what = d.get("data", {}).get("what") or d.get("verb")
         facts.append(f"{names.get(d.get('actor'), 'кто-то')}: {what}")
+    return facts
+
+
+def render_evidence(seed: dict, deeds: dict, names: dict) -> str:
+    """One seed → plain-Russian header (only evidence facts + personas, no predicates leak).
+    Villain-less (plain_need) seeds get a dedicated header — "против кто-то" would misrepresent
+    a seed with no antagonist at all."""
+    gv = seed["giver_name"]
+    villain = seed["cast"].get("villain")
+    facts = _evidence_facts(seed, deeds, names)
+    if villain is None:
+        head = f"{seed['sid']} [{seed['pattern']}]: {gv} хочет {_plain_want(seed, names)}."
+        return head + ("\n  Факты: " + "; ".join(facts) if facts else "")
+    vil = names.get(villain, "кто-то")
+    prize = names.get(seed["cast"].get("prize"))
+    head = f"{seed['sid']} [{seed['pattern']}]: {gv} против {vil}"
+    head += f" (речь о {prize})." if prize else "."
     return head + ("\n  Факты: " + "; ".join(facts) if facts else "")
 
 

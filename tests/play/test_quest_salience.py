@@ -39,6 +39,40 @@ def test_score_A_gt_B_number_for_number(monkeypatch):
     assert a > b
 
 
+def _plain_seed(giver):
+    return {"pattern": "plain_need", "giver": giver, "cast": {"villain": None},
+            "evidence": ["agenda:npc:znah:0"]}
+
+
+def test_plain_need_scores_below_flavored_patterns(monkeypatch):
+    """seeds.py:pat_plain_need must not drown the flavored patterns: no villain edge (peak's
+    abs(affinity) term = 0) and no deed in evidence (dw = 0, freshness default = 0) means only
+    rarity + proximity contribute. Even with best-case rarity=1.0 (first-of-kind) and best-case
+    proximity=1.0 (same node as player), the plain seed scores 1.0·1.0 + 1.0·0.0 + 0.6·1.0 + 0.8·0.0
+    = 1.6 — below both kin_debt's A=3.14 and broken_promise's B=2.60."""
+    from aidnd.server.play.engine.core import PB
+    for k, v in {"quest_w_rare": 1.0, "quest_w_peak": 1.0, "quest_w_near": 0.6,
+                 "quest_w_fresh": 0.8}.items():
+        monkeypatch.setitem(PB, k, v)
+    gt = 3 * 1440
+    ctx = {"recent": {"kin_debt": 0, "broken_promise": 1, "plain_need": 0},
+           "aff_edges": {("npc:dunn", "npc:ralf"): -0.4, ("npc:marta", "npc:ralf"): -0.6},
+           "deeds": _deeds(gt), "prox": {"npc:dunn": 1.0, "npc:marta": 0.6, "npc:znah": 1.0},
+           "now_gt": gt}
+    a = SAL.score(_seed("kin_debt", "npc:dunn", "npc:ralf"), ctx)
+    b = SAL.score(_seed("broken_promise", "npc:marta", "npc:ralf"), ctx)
+    p = SAL.score(_plain_seed("npc:znah"), ctx)
+    assert math.isclose(p, 1.6, abs_tol=1e-9)
+    assert p < b < a
+
+
+def test_peak_and_score_handle_missing_villain_without_crash():
+    assert SAL.peak(0.0, []) == 0.0                     # abs(aff_edges default 0.0) + no deed-weight
+    ctx = {"recent": {}, "aff_edges": {}, "deeds": {}, "prox": {}, "now_gt": 0}
+    s = SAL.score(_plain_seed("npc:znah"), ctx)          # no KeyError on villain=None lookups
+    assert isinstance(s, float)
+
+
 def test_score_resolves_prefixed_deed_and_ignores_agenda_anchor():
     ctx = {"recent": {}, "aff_edges": {}, "deeds": _deeds(1440), "prox": {}, "now_gt": 1440}
     bare = SAL.score(_seed("kin_debt", "npc:dunn", "npc:ralf"), ctx)

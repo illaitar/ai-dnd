@@ -356,7 +356,7 @@ def _contract_complete(ct: dict) -> str:
         from aidnd.server.play.engine.quests import bridge as _qb
 
         try:
-            _qb.quest_writeback(ct, _giver_world(ct), _S.get("model"))
+            _qb.quest_writeback(ct, _giver_world(ct), _model())
         except Exception:  # noqa: BLE001 — writeback must NEVER break the payout it follows
             pass
     return f"Уговор исполнен! {paid}."

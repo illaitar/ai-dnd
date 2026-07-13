@@ -31,6 +31,19 @@ def test_validator_quoted_phrase_requires_every_token_to_match():
     assert F.valid_entities("Верни «гроссбух Марты»", {"гроссбух", "Марта"})
 
 
+def test_render_evidence_villain_less_seed_has_no_protiv_kto_to():
+    """plain_need seeds carry cast.villain=None — the header must not read '... против кто-то'
+    (that would misrepresent a seed with no antagonist at all)."""
+    seed = {"sid": "seed_znah_plainneed", "pattern": "plain_need", "giver_name": "Знахарка Тэс",
+            "cast": {"villain": None, "prize": None},
+            "goal": {"done": {"type": "have", "item": "herbs"}},
+            "evidence": ["agenda:npc:znah:0"]}
+    text = F.render_evidence(seed, {}, {})
+    assert "против" not in text
+    assert "кто-то" not in text
+    assert "Знахарка Тэс" in text and "herbs" in text
+
+
 class _Stub:
     def __init__(self, seq):
         self.seq, self.n = seq, 0

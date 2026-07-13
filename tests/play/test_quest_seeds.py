@@ -105,6 +105,65 @@ def test_unanswered_blood_abstains_when_dead_flag_set():
     assert not any(s["pattern"] == "unanswered_blood" for s in got)   # мир уже отметил злодея мёртвым
 
 
+def _plain_fixture(gt=3 * 1440):
+    # знахарка: открытая веха have|herbs — просто хочет расплатиться с кузнецом (docs/quests.md:
+    # "квест = делегированная нужда"), никакого злодея/deed не требуется
+    znah_ms = Milestone("расплатиться с кузнецом", "acquire", "npc:smith", {},
+                        {"type": "have", "item": "herbs"})
+    znah = _person("npc:znah", "Знахарка Тэс", "знахарка",
+                   agendas=[Agenda("расплатиться с кузнецом", "ambition", 0.6, [znah_ms])])
+    # ушлый: открытая веха wealth|50 — купить кинжал
+    wealth_ms = Milestone("купить кинжал", "need", "wealth", {}, {"type": "wealth", "value": 50})
+    rogue = _person("npc:rogue", "Ушлый Пит", "бродяга",
+                    agendas=[Agenda("купить кинжал", "wealth", 0.6, [wealth_ms])])
+    # праздный: открытая веха at|market — patrol/travel goal, NOT delegatable
+    at_ms = Milestone("дойти до рынка", "goto", "market", {}, {"type": "at", "place": "market"})
+    idle = _person("npc:idle", "Праздный Джо", "зевака",
+                   agendas=[Agenda("сходить на рынок", "ambition", 0.5, [at_ms])])
+    # закрытый: агенда есть, но не активна (status='done') — не подходит
+    closed_ms = Milestone("давно исполнено", "acquire", "x", {}, {"type": "have", "item": "x"})
+    closed_ag = Agenda("старое дело", "ambition", 0.5, [closed_ms])
+    closed_ag.status = "done"
+    closed = _person("npc:closed", "Закрытый Кэл", "рыбак", agendas=[closed_ag])
+    people = {"npc:znah": znah, "npc:rogue": rogue, "npc:idle": idle, "npc:closed": closed}
+    return people, [], gt
+
+
+def test_pat_plain_need_binds_have_and_wealth_milestones():
+    people, deeds, gt = _plain_fixture()
+    got = {(s["pattern"], s["giver"]) for s in S.sift(people, deeds, gt)}
+    assert ("plain_need", "npc:znah") in got
+    assert ("plain_need", "npc:rogue") in got
+
+
+def test_pat_plain_need_abstains_for_at_milestone_and_closed_agenda():
+    people, deeds, gt = _plain_fixture()
+    got = {(s["pattern"], s["giver"]) for s in S.sift(people, deeds, gt)}
+    assert ("plain_need", "npc:idle") not in got     # 'at' — never sifted (§4 table)
+    assert ("plain_need", "npc:closed") not in got   # no active agenda at all
+
+
+def test_pat_plain_need_goal_and_cast_shape():
+    people, deeds, gt = _plain_fixture()
+    seed = next(s for s in S.sift(people, deeds, gt) if s["giver"] == "npc:znah")
+    assert seed["goal"]["done"] == {"type": "have", "item": "herbs"}   # дословно из вехи
+    assert seed["cast"]["villain"] is None
+    assert seed["evidence"] == ["agenda:npc:znah:0"]
+    assert seed["twist"] is None
+    assert seed["motivation"] == "equipment"                          # have → equipment
+    seed2 = next(s for s in S.sift(people, deeds, gt) if s["giver"] == "npc:rogue")
+    assert seed2["goal"]["done"] == {"type": "wealth", "value": 50}
+    assert seed2["motivation"] == "wealth"                            # wealth → wealth
+
+
+def test_pat_plain_need_does_not_double_bind_a_giver_already_seeded_by_a_flavored_pattern():
+    # Дунн — уже связан kin_debt в основной фикстуре; plain_need не должен добавить второй seed
+    # на ту же веху/дающего.
+    people, deeds, gt = _fixture()
+    got = [s for s in S.sift(people, deeds, gt) if s["giver"] == "npc:dunn"]
+    assert len(got) == 1 and got[0]["pattern"] == "kin_debt"
+
+
 def test_unanswered_blood_abstains_without_living_kin():
     victim = _person("npc:tam", "Тэм Ли", "фермер")
     villain = _person("npc:vex", "Векс Дорн", "бродяга")

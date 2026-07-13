@@ -45,6 +45,18 @@ def test_reward_clamped_when_poor(monkeypatch):
     assert out["reward"] == 12                      # min(30, 12)
 
 
+def test_cast_handles_villain_less_plain_need_seed(monkeypatch):
+    """plain_need seeds have no villain — casting.cast(..., villain_state=None, ...) must fall back
+    to a base DC / default danger rather than crashing on a None villain_state."""
+    st = _store(monkeypatch)
+    giver = NpcState.from_config(NpcConfig(id="npc:znah", name="Знахарка"))
+    seed = {"motivation": "equipment",
+            "goal": {"kind": "acquire", "target": "npc:smith", "done": {"type": "have", "item": "herbs"}}}
+    out = C.cast(seed, giver, None, st, core._wid())
+    assert out["dc"] == C._DC_BASE + round(0.3 * 10)   # default malice fallback (matches _villain(weak))
+    assert out["danger"] == 0.3
+
+
 def test_dc_rises_with_villain_malice(monkeypatch):
     st = _store(monkeypatch)
     giver = NpcState.from_config(NpcConfig(id="npc:dunn", name="Дунн"))

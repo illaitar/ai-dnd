@@ -20,6 +20,10 @@ DELEGATABLE = {"have", "dead", "wealth", "affinity"}   # "at" is never sifted (�
 _MOTIV = {"kin_debt": "serenity", "broken_promise": "justice", "blocked_rival": "recognition",
           "unanswered_blood": "justice", "courtship_wall": "protection"}
 
+# plain_need has no fixed pattern-tone — motivation follows the milestone kind instead (§ below)
+_MOTIV_BY_DONE_TYPE = {"have": "equipment", "wealth": "wealth", "affinity": "reputation",
+                       "dead": "conquest"}
+
 
 def _fam(name: str) -> str:
     return (name or "").split()[-1]
@@ -56,12 +60,13 @@ def _twist_for(villain: str | None, deeds: list, exclude=()) -> dict | None:
     return None
 
 
-def _seed(pattern, giver, people, done, villain=None, prize=None, evidence=None, twist=None):
+def _seed(pattern, giver, people, done, villain=None, prize=None, evidence=None, twist=None,
+          motivation=None):
     p = people[giver]
     m = _open_milestone(p)[1]
     goal = {"kind": (m.kind if m else "harm"), "target": (m.target if m else villain), "done": done}
     return {"pattern": pattern, "giver": giver, "giver_name": p.name, "goal": goal,
-            "cast": {"villain": villain, "prize": prize}, "motivation": _MOTIV[pattern],
+            "cast": {"villain": villain, "prize": prize}, "motivation": motivation or _MOTIV[pattern],
             "twist": twist, "evidence": list(evidence or []), "score": 0.0}
 
 
@@ -187,21 +192,49 @@ def pat_courtship_wall(people, deeds, gt) -> list[dict]:
     return out
 
 
+def pat_plain_need(people, deeds, gt) -> list[dict]:
+    """LAST-resort pattern: «Quest = delegated NPC need» (docs/quests.md) made literal — ANY giver
+    with an open delegatable milestone binds, no villain/deed required. This is what keeps
+    aspiration-only worlds (morning agenda seeding with no antagonist material) from producing
+    zero seeds forever. Salience naturally keeps these from drowning the flavored patterns: peak's
+    giver→villain edge is 0 (cast has no villain) and there is no deed-weight in evidence — only
+    rarity/proximity contribute, so a plain seed scores well below any villain-anchored one under
+    the same PB weights (see test_quest_salience.py dominance test)."""
+    out = []
+    for gid, g in people.items():
+        ag, m, cur = _open_milestone(g)
+        if not m:
+            continue
+        motivation = _MOTIV_BY_DONE_TYPE.get((m.done or {}).get("type"), "necessity")
+        out.append(_seed("plain_need", gid, people, dict(m.done), motivation=motivation,
+                         evidence=[f"agenda:{gid}:{cur}"], twist=_twist_for(None, deeds)))
+    return out
+
+
 PATTERNS = [pat_kin_debt, pat_broken_promise, pat_blocked_rival, pat_unanswered_blood,
-            pat_courtship_wall]
+            pat_courtship_wall, pat_plain_need]
 
 
 def sift(people: dict, deeds: list, gt: int, flag_get=None) -> list[dict]:
-    """Run all 5 patterns; dedup identical (pattern, giver, villain, goal-type). `flag_get`
+    """Run all 6 patterns; dedup identical (pattern, giver, villain, goal-type). `flag_get`
     (optional, e.g. `lambda k: store.flag_get(wid, k)`) lets unanswered_blood see the world's
-    `dead|<pid>` flags; omit it in pure/tests contexts — the arrest-deed check alone still applies."""
-    seen, out = set(), []
+    `dead|<pid>` flags; omit it in pure/tests contexts — the arrest-deed check alone still applies.
+    plain_need runs LAST and skips any giver a flavored pattern already bound this sift (its own
+    dedup key never collides with a flavored seed's, since villain/goal-type usually differ — so
+    this second guard is needed to avoid double-seeding the same giver/milestone)."""
+    seen, out, bound_givers = set(), [], set()
     for pat in PATTERNS:
-        raw = pat(people, deeds, gt, flag_get) if pat is pat_unanswered_blood else pat(people, deeds, gt)
+        if pat is pat_unanswered_blood:
+            raw = pat(people, deeds, gt, flag_get)
+        elif pat is pat_plain_need:
+            raw = [s for s in pat(people, deeds, gt) if s["giver"] not in bound_givers]
+        else:
+            raw = pat(people, deeds, gt)
         for s in raw:
             key = (s["pattern"], s["giver"], s["cast"]["villain"], s["goal"]["done"].get("type"))
             if key in seen:
                 continue
             seen.add(key)
             out.append(s)
+            bound_givers.add(s["giver"])
     return out

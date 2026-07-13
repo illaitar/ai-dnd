@@ -79,7 +79,8 @@ def _ctx(chosen_deeds: dict, gt: int) -> dict:
     prox = {pid: salience.proximity(crof.get(pid), loc, _adjacent(city, crof.get(pid), loc))
             for pid in people}
     recent = {}
-    for pat in ("kin_debt", "broken_promise", "blocked_rival", "unanswered_blood", "courtship_wall"):
+    for pat in ("kin_debt", "broken_promise", "blocked_rival", "unanswered_blood", "courtship_wall",
+                "plain_need"):
         recent[pat] = int(_store().flag_get(_wid(), f"qrecent|{pat}") or 0)
     return {"recent": recent, "aff_edges": aff, "deeds": chosen_deeds, "prox": prox, "now_gt": gt}
 

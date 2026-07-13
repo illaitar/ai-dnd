@@ -121,6 +121,7 @@ async def talk(request: Request):
     if offer:
         pending[npc] = offer  # stashed — say() reveals it once the player asks about work
     has_offer = bool(pending.get(npc))
+    offer_pitch = (pending.get(npc) or {}).get("pitch") or None
     return {
         "name": p.name,
         "role": p.role,
@@ -142,7 +143,7 @@ async def talk(request: Request):
         "known": known,
         "gt": _gt(),
         "topics": _topics_for(p),
-        "line": _voice(p, rel, "greet", has_offer=has_offer),
+        "line": _voice(p, rel, "greet", has_offer=has_offer, offer_pitch=offer_pitch),
     }
 
 
@@ -173,7 +174,13 @@ async def say(request: Request):
         zplace = lv["world"].bodies[PLAYER].place if PLAYER in lv["world"].bodies else None
         conv_note_say(lv, PLAYER, npc, text[:100], zplace)
     _gt_add(PB["talk_min"])
-    line = _voice(p, rel, "reply", text)
+    stashed = (_S.get("pending_offer") or {}).get(npc)
+    if stashed is None:  # not stashed by talk() in this session (e.g. say() called directly) —
+        from aidnd.server.play.engine.quests.offer import emergent_offer  # look up the real offer
+
+        stashed = emergent_offer(npc)
+    offer_pitch = (stashed or {}).get("pitch") or None
+    line = _voice(p, rel, "reply", text, offer_pitch=offer_pitch)
     tone = _S.get("last_tone", "neutral")  # tone of player's words — from NPC's own lips
     if tone == "friendly":
         rel["affinity"] = min(1.0, rel["affinity"] + PB["tone_friendly_aff"])

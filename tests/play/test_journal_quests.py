@@ -48,7 +48,37 @@ def test_accept_writes_quest_told(wired, monkeypatch):
     asyncio.run(world_mod.contract_accept(_Req({"id": "ct:odo:1"})))
     r = wired.journal_list(1, kind="quest")
     assert len(r) == 1 and r[0]["prov"] == "told" and r[0]["refs"] == ["ct:odo:1"]
-    assert r[0]["text"] == "взялся за дело для Одо: bring — бочонок сидра (погреб)"
+    assert r[0]["text"] == "взялся за дело для Одо: принести — бочонок сидра (погреб)"
+
+
+def test_accept_writes_quest_told_emergent_pitch(wired, monkeypatch):
+    # emergent (src=sift) contract: summary speaks through its own pitch, no bare English
+    # kind, no "None" (live-playtest bug: "bring — None" leaked when want/target_name absent)
+    monkeypatch.setattr(world_mod, "_play", lambda: None, raising=False)
+    wired.save_contract(
+        1, "ct:yuna:1", "offered",
+        {"giver": "yuna", "giver_name": "Юна Вересковый", "kind": "bring", "src": "sift",
+         "pitch": "накопить на долг кузнецу за починку кадила"},
+    )
+    asyncio.run(world_mod.contract_accept(_Req({"id": "ct:yuna:1"})))
+    r = wired.journal_list(1, kind="quest")
+    assert len(r) == 1
+    assert r[0]["text"] == (
+        "взялся за дело для Юна Вересковый: накопить на долг кузнецу за починку кадила"
+    )
+    assert "None" not in r[0]["text"] and "bring" not in r[0]["text"]
+
+
+def test_accept_writes_quest_told_no_want_no_none(wired, monkeypatch):
+    # improvised contract with no want/target_name (e.g. "dead" kind) must never render "None"
+    monkeypatch.setattr(world_mod, "_play", lambda: None, raising=False)
+    wired.save_contract(1, "ct:odo:3", "offered",
+                        {"giver": "odo", "giver_name": "Одо", "kind": "dead"})
+    asyncio.run(world_mod.contract_accept(_Req({"id": "ct:odo:3"})))
+    r = wired.journal_list(1, kind="quest")
+    row = next(x for x in r if x["refs"] == ["ct:odo:3"])
+    assert row["text"] == "взялся за дело для Одо: устранить"
+    assert "None" not in row["text"]
 
 
 def test_complete_writes_quest_saw(wired, monkeypatch):

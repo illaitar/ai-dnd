@@ -159,6 +159,34 @@ async def ad_take(request: Request):
     return {"taken": True}
 
 
+_KIND_RU = {  # improvised-contract kind → Russian verb (accept summary, no bare English leaking)
+    "bring": "принести",
+    "deliver": "доставить",
+    "visit": "посетить",
+    "befriend": "подружиться",
+    "dead": "устранить",
+}
+
+
+def _accept_summary(ct: dict) -> str:
+    """Russian-first accept line: emergent (sift) contracts speak through their own pitch;
+    improvised ones get a Russian kind word and drop the want part when there is none
+    (never leaks a bare English kind or the literal "None")."""
+    giver_name = ct.get("giver_name", "")
+    pitch = (ct.get("pitch") or "").strip()
+    if pitch:
+        return f"взялся за дело для {giver_name}: {pitch[:120]}"
+    kind_ru = _KIND_RU.get(ct.get("kind"), ct.get("kind") or "")
+    want = ct.get("want") or ct.get("target_name")
+    where = ct.get("where") or ""
+    out = f"взялся за дело для {giver_name}: {kind_ru}"
+    if want:
+        out += f" — {want}"
+    if where:
+        out += f" ({where})"
+    return out
+
+
 @router.post("/api/play/contract_accept")
 async def contract_accept(request: Request):
     cid = (await request.json()).get("id")
@@ -173,9 +201,7 @@ async def contract_accept(request: Request):
     if ct.get("kind") == "deliver" and ct.get("deliver_item"):  # package handed immediately
         _store().inv_move(_wid(), ct["deliver_item"], "pc")
         note = f"«{ct['want']}» ложится в твою сумку — доставь по адресу."
-    where = ct.get("where") or ""
-    summary = (f"взялся за дело для {ct.get('giver_name', '')}: {ct.get('kind')} — "
-               f"{ct.get('want') or ct.get('target_name')}" + (f" ({where})" if where else ""))
+    summary = _accept_summary(ct)
     _pc_remember(summary, 0.6, about=[ct["giver"]])
     j_quest("told", summary, cid)
     return {"accepted": True, "note": note}

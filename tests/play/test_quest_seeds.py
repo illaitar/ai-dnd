@@ -194,6 +194,91 @@ def test_pat_plain_need_does_not_double_bind_a_giver_already_seeded_by_a_flavore
     assert len(got) == 1 and got[0]["pattern"] == "kin_debt"
 
 
+def _courtship_name_fixture(gt=3 * 1440):
+    """LLM-planned courtship agenda whose done.id is a display NAME (agenda.py:courtship_agenda
+    writes the beloved's name, not her pid) — this is the live shape that produced an
+    uncompletable courtship_wall quest (done.id keyed by name, _met reads real pids)."""
+    ms = Milestone("расположить к себе Мойру", "affiliate", "Мойра Кожемяка", {},
+                   {"type": "affinity", "id": "Мойра Кожемяка", "value": 0.3})
+    suitor = _person("npc:suitor", "Иво Тарн", "кузнец",
+                     agendas=[Agenda("завоевать расположение — Мойра Кожемяка", "courtship", 0.8, [ms])])
+    moira = _person("npc:moira", "Мойра Кожемяка", "ткачиха")
+    people = {"npc:suitor": suitor, "npc:moira": moira}
+    return people, [], gt
+
+
+def test_courtship_wall_resolves_name_id_to_giver_pid():
+    people, deeds, gt = _courtship_name_fixture()
+    seed = next(s for s in S.sift(people, deeds, gt) if s["pattern"] == "courtship_wall")
+    assert seed["goal"]["done"] == {"type": "affinity", "id": "npc:moira", "value": 0.3}
+    assert seed["cast"]["prize"] == "npc:moira"
+    assert seed["target_name"] == "Мойра Кожемяка"
+
+
+def test_courtship_wall_abstains_when_name_unresolvable():
+    ms = Milestone("расположить к себе", "affiliate", "Незнакомка", {},
+                   {"type": "affinity", "id": "Незнакомка", "value": 0.3})
+    suitor = _person("npc:suitor", "Иво Тарн", "кузнец",
+                     agendas=[Agenda("завоевать расположение", "courtship", 0.8, [ms])])
+    people = {"npc:suitor": suitor}
+    got = S.sift(people, [], 3 * 1440)
+    assert not any(s["pattern"] == "courtship_wall" for s in got)   # honest absence, no uncompletable quest
+
+
+def test_courtship_wall_leaves_already_real_pid_unchanged():
+    ms = Milestone("расположить к себе", "affiliate", "npc:moira", {},
+                   {"type": "affinity", "id": "npc:moira", "value": 0.5})
+    suitor = _person("npc:suitor", "Иво Тарн", "кузнец",
+                     agendas=[Agenda("завоевать расположение", "courtship", 0.8, [ms])])
+    moira = _person("npc:moira", "Мойра Кожемяка", "ткачиха")
+    people = {"npc:suitor": suitor, "npc:moira": moira}
+    seed = next(s for s in S.sift(people, [], 3 * 1440) if s["pattern"] == "courtship_wall")
+    assert seed["goal"]["done"] == {"type": "affinity", "id": "npc:moira", "value": 0.5}
+
+
+def test_courtship_wall_resolves_partial_first_name_when_unambiguous():
+    ms = Milestone("расположить", "affiliate", "Мойра", {},
+                   {"type": "affinity", "id": "Мойра", "value": 0.4})
+    suitor = _person("npc:suitor", "Иво Тарн", "кузнец",
+                     agendas=[Agenda("завоевать расположение", "courtship", 0.8, [ms])])
+    moira = _person("npc:moira", "Мойра Кожемяка", "ткачиха")
+    people = {"npc:suitor": suitor, "npc:moira": moira}
+    seed = next(s for s in S.sift(people, [], 3 * 1440) if s["pattern"] == "courtship_wall")
+    assert seed["goal"]["done"]["id"] == "npc:moira"
+
+
+def test_courtship_wall_abstains_on_ambiguous_partial_match():
+    ms = Milestone("расположить", "affiliate", "Мойра", {},
+                   {"type": "affinity", "id": "Мойра", "value": 0.4})
+    suitor = _person("npc:suitor", "Иво Тарн", "кузнец",
+                     agendas=[Agenda("завоевать расположение", "courtship", 0.8, [ms])])
+    moira1 = _person("npc:moira1", "Мойра Кожемяка", "ткачиха")
+    moira2 = _person("npc:moira2", "Мойра Свищ", "пряха")
+    people = {"npc:suitor": suitor, "npc:moira1": moira1, "npc:moira2": moira2}
+    got = S.sift(people, [], 3 * 1440)
+    assert not any(s["pattern"] == "courtship_wall" for s in got)
+
+
+def test_courtship_wall_name_resolved_seed_completes_via_bridge():
+    """End-to-end: a name-keyed courtship milestone, once resolved by the sifter, is a genuinely
+    completable quest — done_any_met fires when the GIVER's own relationships carry the resolved
+    pid at the required affinity (exactly the live bug: done.id used to be a name that could never
+    match state.relationships, keyed by pid)."""
+    from aidnd.mind import Body, World
+    from aidnd.server.play.engine.quests import bridge
+
+    people, deeds, gt = _courtship_name_fixture()
+    seed = next(s for s in S.sift(people, deeds, gt) if s["pattern"] == "courtship_wall")
+    m = Milestone("", kind=seed["goal"]["kind"], target=seed["goal"]["target"],
+                  done=dict(seed["goal"]["done"]))
+    ct = {"src": "sift", "giver": "npc:suitor", "done_any": bridge.make_done_any(m)}
+    suitor_state = people["npc:suitor"].state
+    suitor_state.relationships["npc:moira"] = {"affinity": 0.3}
+    world = World()
+    world.add(Body(id="npc:suitor", place="дом"))
+    assert bridge.done_any_met(ct, (suitor_state, world)) is True
+
+
 def test_unanswered_blood_abstains_without_living_kin():
     victim = _person("npc:tam", "Тэм Ли", "фермер")
     villain = _person("npc:vex", "Векс Дорн", "бродяга")

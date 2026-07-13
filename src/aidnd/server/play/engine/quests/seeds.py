@@ -33,6 +33,43 @@ def _aff(person, other: str) -> float:
     return (person.state.relationships.get(other) or {}).get("affinity", 0.0)
 
 
+def _resolve_person_id(raw: str, people: dict) -> str | None:
+    """Resolve a possibly-NAME id to a real pid (LLM-planned agendas — agenda.py:courtship_agenda/
+    revenge_agenda — sometimes write the target's display name, not her pid, into Milestone.done).
+    Already a known pid -> itself. Exact full-name match -> that pid (None if ambiguous — two people
+    sharing a name). Else an unambiguous partial match by shared name token (first/last name) ->
+    that pid. Otherwise None — unresolvable/ambiguous, the caller must abstain."""
+    if raw in people:
+        return raw
+    exact = [pid for pid, p in people.items() if p.name == raw]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return None
+    tokens = set((raw or "").split())
+    if not tokens:
+        return None
+    partial = [pid for pid, p in people.items() if set(p.name.split()) & tokens]
+    return partial[0] if len(partial) == 1 else None
+
+
+def _resolve_done(done: dict, people: dict) -> dict | None:
+    """Affinity/dead predicates carry an 'id' that _met (agenda.py:59-76) reads as a real pid
+    (state.relationships / world.bodies) — but the id lifted verbatim from a giver's live Milestone
+    can be a display NAME instead (see _resolve_person_id). Non-id-bearing types (have/wealth/at/
+    never) pass through unchanged. Resolvable -> a REWRITTEN COPY (id -> pid); the giver's own
+    Milestone is never mutated, only this seed-local copy. Unresolvable/ambiguous -> None (the
+    pattern abstains for this milestone — honest absence beats an uncompletable quest)."""
+    if done.get("type") not in ("affinity", "dead") or "id" not in done:
+        return dict(done)
+    pid = _resolve_person_id(done["id"], people)
+    if pid is None:
+        return None
+    out = dict(done)
+    out["id"] = pid
+    return out
+
+
 def _open_milestone(person):
     """Current, delegatable milestone of the giver's first active agenda (or None)."""
     for ag in person.state.agendas or []:
@@ -71,14 +108,21 @@ def _revenge_summary(villain_name: str) -> str:
 
 def _seed(pattern, giver, people, done, villain=None, prize=None, evidence=None, twist=None,
           motivation=None, summary=None):
+    resolved = _resolve_done(done, people)
+    if resolved is None:                              # unresolvable/ambiguous id — abstain (seeds.py:_resolve_done)
+        return None
+    done = resolved
     p = people[giver]
     ag, m, cur = _open_milestone(p)
     goal = {"kind": (m.kind if m else "harm"), "target": (m.target if m else villain), "done": done}
-    return {"pattern": pattern, "giver": giver, "giver_name": p.name, "goal": goal,
+    seed = {"pattern": pattern, "giver": giver, "giver_name": p.name, "goal": goal,
             "cast": {"villain": villain, "prize": prize}, "motivation": motivation or _MOTIV[pattern],
             "twist": twist, "evidence": list(evidence or []), "score": 0.0,
             # sim-authored truth (plan_agenda's own words) — never invented, widens the framer's allowed set
             "summary": summary if summary is not None else (getattr(ag, "summary", "") or "")}
+    if done.get("type") in ("affinity", "dead") and done.get("id") in people:
+        seed["target_name"] = people[done["id"]].name    # resolved pid's display name (casting/framing)
+    return seed
 
 
 def pat_kin_debt(people, deeds, gt) -> list[dict]:
@@ -97,9 +141,11 @@ def pat_kin_debt(people, deeds, gt) -> list[dict]:
                 continue
             if _fam(people[victim].name) != _fam(g.name) or _aff(g, creditor) >= 0:
                 continue
-            out.append(_seed("kin_debt", gid, people, dict(m.done), villain=creditor, prize=victim,
-                             evidence=[f"deed:{d['id']}", f"agenda:{gid}:{cur}"],
-                             twist=_twist_for(creditor, deeds, exclude={d["id"]})))
+            s = _seed("kin_debt", gid, people, dict(m.done), villain=creditor, prize=victim,
+                      evidence=[f"deed:{d['id']}", f"agenda:{gid}:{cur}"],
+                      twist=_twist_for(creditor, deeds, exclude={d["id"]}))
+            if s is not None:
+                out.append(s)
     return out
 
 
@@ -135,9 +181,10 @@ def pat_blocked_rival(people, deeds, gt) -> list[dict]:
             if rid == gid:
                 continue
             if _aff(g, rid) < -0.2 and _aff(r, gid) < -0.2:   # mutual only
-                out.append(_seed("blocked_rival", gid, people, dict(m.done), villain=rid,
-                                 evidence=[f"agenda:{gid}:{cur}"],
-                                 twist=_twist_for(rid, deeds)))
+                s = _seed("blocked_rival", gid, people, dict(m.done), villain=rid,
+                          evidence=[f"agenda:{gid}:{cur}"], twist=_twist_for(rid, deeds))
+                if s is not None:
+                    out.append(s)
     return out
 
 
@@ -193,15 +240,23 @@ def pat_unanswered_blood(people, deeds, gt, flag_get=None) -> list[dict]:
 
 
 def pat_courtship_wall(people, deeds, gt) -> list[dict]:
-    """A stalled courtship: giver's open milestone is an affinity goal toward a beloved."""
+    """A stalled courtship: giver's open milestone is an affinity goal toward a beloved. The
+    milestone's done.id may be the beloved's display NAME (LLM-planned courtship agendas —
+    agenda.py:courtship_agenda) rather than her pid; resolve it BEFORE casting the prize so
+    cast['prize'] (used by casting/framing) names the real pid, not a raw name."""
     out = []
     for gid, g in people.items():
         ag, m, cur = _open_milestone(g)
         if not m or (m.done or {}).get("type") != "affinity":
             continue
-        beloved = m.done.get("id")
-        out.append(_seed("courtship_wall", gid, people, dict(m.done), prize=beloved,
-                         evidence=[f"agenda:{gid}:{cur}"], twist=None))
+        resolved = _resolve_done(dict(m.done), people)
+        if resolved is None:                          # unresolvable/ambiguous beloved — abstain
+            continue
+        beloved = resolved.get("id")
+        s = _seed("courtship_wall", gid, people, resolved, prize=beloved,
+                  evidence=[f"agenda:{gid}:{cur}"], twist=None)
+        if s is not None:
+            out.append(s)
     return out
 
 
@@ -219,8 +274,10 @@ def pat_plain_need(people, deeds, gt) -> list[dict]:
         if not m:
             continue
         motivation = _MOTIV_BY_DONE_TYPE.get((m.done or {}).get("type"), "necessity")
-        out.append(_seed("plain_need", gid, people, dict(m.done), motivation=motivation,
-                         evidence=[f"agenda:{gid}:{cur}"], twist=_twist_for(None, deeds)))
+        s = _seed("plain_need", gid, people, dict(m.done), motivation=motivation,
+                  evidence=[f"agenda:{gid}:{cur}"], twist=_twist_for(None, deeds))
+        if s is not None:
+            out.append(s)
     return out
 
 

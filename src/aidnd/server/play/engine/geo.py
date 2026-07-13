@@ -182,7 +182,17 @@ _LM_WORD = {"river": "у реки", "wall": "у городской стены", 
 
 def _minutes_phrase(steps: int) -> str:
     m = max(1, steps) * int(PB["step_min"])
-    return _MIN_WORD.get(m, f"минут {m}")
+    if m in _MIN_WORD:
+        return _MIN_WORD[m]
+    # beyond the word table: the RU approximation idiom is an inverted ROUND numeral
+    # («минут двадцать»), so bucket to the nearest natural round value — grammatical for any m
+    if m <= 17:
+        return "минут пятнадцать"
+    if m <= 25:
+        return "минут двадцать"
+    if m <= 40:
+        return "с полчаса"
+    return "добрый час, не меньше"
 
 
 def direction_line(from_node, bid: str) -> str:

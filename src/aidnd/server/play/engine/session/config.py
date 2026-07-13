@@ -65,6 +65,10 @@ PB = {
     "quest_w_near": 0.6,      # salience weight — giver↔player proximity
     "quest_w_fresh": 0.8,     # salience weight — evidence freshness
     "quest_plan_n": 3,        # NPCs given a life-goal each morning so the sifter has material
+    "quest_active_max": 1,        # emergent quests in the surfacing window at once (director)
+    "quest_interrupt_k": 2.0,     # a new seed must score ≥ k× queued to jump the window
+    "quest_foreshadow_ticks": 2,  # ticks of mind-impulse foreshadow before the offer
+    "quest_twist_p": 0.7,         # probability a qualifying twist candidate is planted
     "merchant_float": 30,
     "hostile_aff": -0.2,
     # NPC schedule — from NEEDS (aidnd.society), not from role probabilities (see society/*)

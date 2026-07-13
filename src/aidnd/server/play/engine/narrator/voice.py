@@ -50,7 +50,7 @@ _STANCE = {
 
 def _voice(
     p, rel, kind, player_text=None, has_offer: bool = False, offer_pitch: str | None = None,
-    twist_line: str | None = None, active_pitch: str | None = None,
+    twist_line: str | None = None, active_pitch: str | None = None, geo_line: str | None = None,
 ) -> str:
     from ..core import (  # lazy: core.py imports narrator.voice at module top
         _binfo,
@@ -146,6 +146,11 @@ def _voice(
             f"ОН УЖЕ ВЗЯЛСЯ ПОМОЧЬ ТЕБЕ С ЭТИМ ДЕЛОМ: {active_pitch}. Вы УЖЕ уговорились — это твоя "
             "живая забота, о которой вы условились; помни о ней, не выдумывай других поручений и не "
             "забывай, о чём просил(а). Спроси, как продвигается, или подскажи — по ходу разговора."
+        )
+    if geo_line:  # code-computed geo facts — the voice wraps them in character but MUST NOT alter
+        bits.append(
+            f"ГЕО-ФАКТ (это ИСТИНА от кода — передай суть, НЕ меняй направление, минуты и ориентир, "
+            f"не выдумывай своих): {geo_line}"
         )
     if twist_line:  # a one-time emergent reveal — FORCE it into her opening words (spoken once)
         bits.append(

@@ -79,7 +79,8 @@ def test_one_seed_surfaces_private(town):
     ct = emergent[0]
     assert ct["giver"] == "npc:dunn" and ct["arc"]["beat"] == "offered"
     assert ct["done_any"] == [{"type": "have", "item": "гроссбух"}]  # done_any[0] = дословная веха
-    assert ct["step"]["kind"] == "bring"
+    assert ct["step"] == 0
+    assert ct["steps"][0]["kind"] == "bring"
 
 
 def test_public_pattern_goes_to_board(town, monkeypatch):
@@ -95,6 +96,55 @@ def test_public_pattern_goes_to_board(town, monkeypatch):
     assert marta_ag and marta_ag[-1].kind == "revenge"
     assert marta_ag[-1].current().done == {"type": "dead", "id": "npc:ralf"}
     assert f"agenda:npc:marta:{len(marta_ag) - 1}" in board[0]["seed"]["evidence"]
+
+
+def test_accepted_emergent_contract_survives_give_and_talk(town):
+    """CRITICAL regression: an accepted (status→'active') emergent contract used to persist
+    step=<dict> — every legacy reader (_ct_cur/_ct_advance) treats 'step' as an int index, so
+    min(dict, 0) crashed on the very next give/move/talk while the contract was active."""
+    from aidnd.server.play.mechanics import contracts as C
+
+    P.quest_morning()
+    ct = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
+    assert ct["step"] == 0                            # int, as _make_contract persists it
+    # mirror contract_accept (world.py:162-178): flip status to active, data untouched
+    town.save_contract(core._wid(), ct["id"], "active",
+                       {k: v for k, v in ct.items() if k not in ("id", "status")})
+    # unrelated item/npc drive the improvised-contract triggers — must not raise
+    assert C._contract_on_give("npc:ralf", {"name": "морковь", "kind": "misc"}) is None
+    assert C._contract_on_talk("npc:ralf") is None
+    still = next(c for c in town.contracts(core._wid(), "active") if c["id"] == ct["id"])
+    assert still["step"] == 0                          # untouched — improvised machinery intact
+
+
+def test_window_one_holds_across_mornings(town):
+    news1 = P.quest_morning()
+    assert news1
+    first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
+    news2 = P.quest_morning()                          # next morning — window still occupied
+    assert not any("зреет дело" in n for n in news2)
+    offered = [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"]
+    assert len(offered) == 1 and offered[0]["id"] == first["id"]
+    core._S["gt"] += (core.PB["quest_offer_days"] + 1) * 1440   # compost frees the window
+    news3 = P.quest_morning()
+    assert any("зреет дело" in n for n in news3)
+    fresh = [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"] + \
+            [c for c in town.contracts(core._wid(), "board") if c.get("src") == "sift"]
+    assert len(fresh) == 1 and fresh[0]["id"] != first["id"]
+
+
+def test_llm_unavailable_in_quest_morning_returns_no_offer(town, monkeypatch):
+    from aidnd.inference.client import LLMUnavailable
+
+    class _DownStub:
+        def call(self, role, messages, **kw):
+            raise LLMUnavailable("no model")
+
+    monkeypatch.setattr(core, "_model", lambda: _DownStub())
+    news = P.quest_morning()
+    assert news == []
+    assert not [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"]
+    assert not [c for c in town.contracts(core._wid(), "queued") if c.get("src") == "sift"]
 
 
 def test_expire_compost_closes_offer_and_keeps_agenda(town):

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 
+from aidnd.inference.client import LLMUnavailable
 from aidnd.server.play.engine import core
 from aidnd.server.play.engine.core import _S, PB, _gt, _store, _wid
 from aidnd.server.play.engine.quests import bridge, casting, framing, salience, seeds
@@ -112,27 +113,47 @@ def _reward(seed: dict, cast: dict) -> tuple | None:
     return 0, item_id, it.get("name")
 
 
+def _sift_window_occupied() -> bool:
+    """Window=1 spans mornings, not just this call: an emergent offer already queued/offered/on the
+    board holds the window until accepted or composted by _expire_stale."""
+    for status in ("queued", "offered", "board"):
+        for ct in _store().contracts(_wid(), status):
+            if ct.get("src") == "sift":
+                return True
+    return False
+
+
 def quest_morning() -> list[str]:
     people = _S.get("people") or {}
     if not people:
         return []
+    news = _expire_stale()                            # compost first — frees the window this morning
+    if _sift_window_occupied():
+        return news
     gt = _gt()
     raw = _store().deeds(_wid(), since_gt=gt - salience.FRESH_DAYS * 1440, limit=60)
     deeds_by_id = {d["id"]: d for d in raw}
     pool = seeds.sift(people, raw, gt, flag_get=lambda k: _store().flag_get(_wid(), k))
     if not pool:
-        return []
+        return news
     ctx = _ctx(deeds_by_id, gt)
     for s in pool:
         salience.score(s, ctx)
     pool.sort(key=lambda s: -s["score"])
     topk = pool[:PB["quest_topk"]]
-    kept = framing.judge(topk, deeds_by_id, _names(), core._model())   # LLMUnavailable propagates
+    try:
+        kept = framing.judge(topk, deeds_by_id, _names(), core._model())
+    except LLMUnavailable:
+        log.info("quests: LLM недоступен — судья пропущен, утро без нового дела")
+        return news
     if not kept:
-        return []
-    news = []
+        return news
     for seed in kept[:1]:                            # Inc 2 window=1 — exactly one seed
-        art = framing.framer(seed, _allowed(seed), core._model())
+        try:
+            art = framing.framer(seed, _allowed(seed), core._model())
+        except LLMUnavailable:
+            log.info("quests: LLM недоступен — фреймер пропущен, утро без нового дела")
+            return news
         if not art:
             continue
         _ensure_milestone(seed)                      # grievance patterns: materialize a real milestone
@@ -151,7 +172,7 @@ def quest_morning() -> list[str]:
         roles = {"giver": seed["giver"], "villain": seed["cast"].get("villain"),
                  "prize": seed["cast"].get("prize")}
         data = {"giver": seed["giver"], "giver_name": seed["giver_name"],
-                "step": c["step"], "steps": [c["step"]], **c["step"],
+                "step": 0, "steps": [c["step"]], **c["step"],
                 "reward": reward, "reward_item": reward_item, "reward_name": reward_name,
                 "pitch": art["pitch"], "why": seed["giver_name"],
                 "src": "sift", "seed": seed, "arc": {"beat": "foreshadow"}, "roles": roles,
@@ -162,7 +183,7 @@ def quest_morning() -> list[str]:
                           str(int(_store().flag_get(_wid(), f"qrecent|{seed['pattern']}") or 0) + 1))
         _surface(cid, {"id": cid, "status": "queued", **data})
         news.append(f"в городе зреет дело: {seed['giver_name']} ищет, кому довериться")
-    return news + _expire_stale()
+    return news
 
 
 def _surface(cid: str, ct: dict) -> None:

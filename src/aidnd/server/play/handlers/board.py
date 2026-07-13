@@ -33,7 +33,13 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.engine.world import _apply_routine, _play, _scene_dict, _watch_check
+from aidnd.server.play.engine.world import (
+    _accept_contract,
+    _apply_routine,
+    _play,
+    _scene_dict,
+    _watch_check,
+)
 from aidnd.server.play.mechanics.combat import (
     _combatant_from_npc,
     _guild_bid,
@@ -48,6 +54,25 @@ from aidnd.server.play.mechanics.combat import (
 from aidnd.server.play.mechanics.items import _pc_coins
 
 
+def _board_postings() -> list:
+    """Public emergent (src:'sift') contracts sitting in board status — grievance/bounty postings
+    surfaced by the director (pipeline._surface, PUBLIC_PATTERNS). Step-shape-safe: these contracts
+    carry step/steps/flattened current-step fields, but the pitch/reward/giver are top-level."""
+    out = []
+    for ct in _store().contracts(_wid(), "board"):
+        if ct.get("src") != "sift":
+            continue
+        out.append(
+            {
+                "id": ct["id"],
+                "title": (ct.get("pitch") or "").strip()[:160],
+                "reward": ct.get("reward"),
+                "giver": ct.get("giver_name"),
+            }
+        )
+    return out
+
+
 @router.get("/api/play/board")
 def board():
     _play()
@@ -60,6 +85,7 @@ def board():
         "guild": (_binfo(gb)["name"] if gb else None),
         "jobs": _guild_board(),
         "lairs": _lairs(),
+        "postings": _board_postings(),
         "status": _guild_status(),
         "joined": joined,
     }
@@ -92,6 +118,13 @@ async def guild_redeem(request: Request):
 async def board_take(request: Request):
     _play()
     jid = (await request.json()).get("id")
+    posting = next(
+        (c for c in _store().contracts(_wid(), "board") if c["id"] == jid and c.get("src") == "sift"),
+        None,
+    )
+    if posting:
+        note = _accept_contract(jid, posting)
+        return {"taken": True, "note": note}
     job = next((j for j in _guild_board() if j["id"] == jid), None)
     if not job:
         return {"error": "этого заказа уже нет"}

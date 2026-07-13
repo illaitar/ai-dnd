@@ -1445,11 +1445,17 @@ function renderBoard(){
   el.innerHTML+= `<div class="subcap" style="margin-top:10px">доска гильдии</div>`+rankline+news+
     ((BOARD.jobs||[]).map(j=>`<div class="boardjob">${esc(j.name)} — ${esc(j.foe)}&times;${j.n} (CR ${j.cr}) · ${j.reward} зм
       <button data-i="${j.id}" data-l="${j.lair}" onclick="takeJob(this.dataset.i,this.dataset.l)">взяться</button></div>`).join('')
-     ||'<div class="bagempty">заказов нет — всё зачищено</div>');
+     ||'<div class="bagempty">заказов нет — всё зачищено</div>')
+   +`<div class="subcap" style="margin-top:10px">прошения</div>`
+   +((BOARD.postings||[]).map(p=>`<div class="boardjob"><b>${esc(p.giver||'')}</b>: ${esc(p.title||'')} · ${p.reward} зм
+      <button data-i="${p.id}" onclick="takeJob(this.dataset.i)">взяться</button></div>`).join('')
+     ||'<div class="bagempty">прошений нет</div>');
 }
 async function refreshBoard(){
   const s=await api('/api/play/scene');
   if(s.guild_board){BOARD={jobs:s.guild_board,news:s.guild_news,status:s.guild_status};renderLoc(s.location);}
+  const b=await api('/api/play/board');
+  if(BOARD)BOARD.postings=b.postings||[];
 }
 async function takeJob(id,lair){
   const r=await api('/api/play/board_take',{id});

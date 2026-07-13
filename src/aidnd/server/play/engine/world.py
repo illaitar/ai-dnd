@@ -187,12 +187,11 @@ def _accept_summary(ct: dict) -> str:
     return out
 
 
-@router.post("/api/play/contract_accept")
-async def contract_accept(request: Request):
-    cid = (await request.json()).get("id")
-    ct = next((c for c in _store().contracts(_wid(), "offered") if c["id"] == cid), None)
-    if not ct:
-        return {"error": "уговора нет"}
+def _accept_contract(cid: str, ct: dict) -> str | None:
+    """Shared accept path (offered/board): flips status→active, bumps sift arc to 'active',
+    hands over an immediate delivery package, and writes the one true journal/remember line.
+    Both contract_accept (private offers) and board_take (public sift postings) call this so the
+    beat/journal bookkeeping never diverges between the two entry points."""
     data = {k: v for k, v in ct.items() if k not in ("id", "status")}
     if ct.get("src") == "sift":
         data["arc"] = {"beat": "active"}             # emergent: foreshadow/offered → active
@@ -204,6 +203,16 @@ async def contract_accept(request: Request):
     summary = _accept_summary(ct)
     _pc_remember(summary, 0.6, about=[ct["giver"]])
     j_quest("told", summary, cid)
+    return note
+
+
+@router.post("/api/play/contract_accept")
+async def contract_accept(request: Request):
+    cid = (await request.json()).get("id")
+    ct = next((c for c in _store().contracts(_wid(), "offered") if c["id"] == cid), None)
+    if not ct:
+        return {"error": "уговора нет"}
+    note = _accept_contract(cid, ct)
     return {"accepted": True, "note": note}
 
 

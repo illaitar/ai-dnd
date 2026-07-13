@@ -57,6 +57,9 @@ then your appendix:
 ```
 
 ## Known sharp edges
+- ALL servers share `data/live.db` regardless of port — `newworld` on a throwaway 8097 server
+  DESTROYS the world your 8098 playtest is running in. Never call newworld from a side server;
+  only the controller resets worlds, deliberately.
 - Test fixtures that touch `_contract_complete`/journal MUST root-patch `session.persist._STORE`
   or rows leak into the real `data/live.db` — if the journal/contracts show `npc:marta`-style
   fixture ids, that's a test leak, clean it and note the offending test.

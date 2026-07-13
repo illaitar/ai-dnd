@@ -22,6 +22,8 @@ written to `data/debug/playtests/YYYY-MM-DD-HHMM-<slug>.md` and summarized in ch
    - the FULL affordance cheat-sheet from [references/api-cheatsheet.md](references/api-cheatsheet.md)
      pasted in (players fail on missing affordances, not missing skill);
    - the world-truths block (verbatim, below);
+   - the **immersion taxonomy + ЖИВОСТЬ rubric** (verbatim, below) — the player reads as a
+     demanding reader first, mechanic second;
    - the scenario protocol (phases + call budget ~30);
    - the **report contract** (below) — the log format is the deliverable.
 4. **Verify before believing.** Every mechanical claim in the report (deaths, completions, rewards,
@@ -51,8 +53,11 @@ written to `data/debug/playtests/YYYY-MM-DD-HHMM-<slug>.md` and summarized in ch
 ## ЛОГ — механика
 [gt 1950] → talk pool:0246 · [gt 1955] → say · [gt 1961] → give coins:50 → done, +30
 ## ВЕРДИКТЫ   (one line per scenario objective: PASS/FAIL/BLOCKED + why)
+## ЖИВОСТЬ    (four lines, each PASS/FAIL + one proving quote — see rubric)
+## ТРЕЩИНЫ    (EVERY immersion break: exact quote + break class from the taxonomy; «трещин нет» must be earned, not defaulted)
 ## НАХОДКИ    (numbered, severe-first; quote the exact game string for each)
 ## ЖИВОЕ      (1-3 quoted moments that felt alive)
+## МЁРТВОЕ    (1-3 quoted moments that felt canned, static, or template — or «не было»)
 ```
 **НИТЬ is the primary artifact** — the frontend experience: every rendered narr/line/feed/digest
 string VERBATIM (full, uncut), in play order; player actions as `〔…〕` stage directions; NPC lines
@@ -63,6 +68,35 @@ the sections after. Budget discipline: НИТЬ entries after EVERY call — whe
 tightens, cut exploration, never the НИТЬ. Navigation: don't lattice-walk node numbers — if lost
 after ~6 moves, ask NPCs directions or return to a known hub (players have the visual map; API
 agents don't — wandering findings are harness artifacts, not game bugs).
+
+## Иммерсия — главная линза (paste the taxonomy into every player prompt)
+
+The player is not a QA bot but a DEMANDING READER: play for the fiction, and log the exact string
+every time the spell breaks. НИТЬ doubles as the evidence base — a break with no verbatim quote
+doesn't count. Hunt actively; a report claiming zero cracks over 15+ ticks is suspect.
+
+**Таксономия трещин** (class → what to catch):
+
+| класс | что ловить |
+|---|---|
+| язык | грамматика, украинизмы/англицизмы, кривые числительные («минут 21»), канцелярит, обрубленные фразы |
+| механика сквозь ткань | id в прозе (pool:0123, [key:9], ct:…), JSON-остатки, системные слова («контракт», «тик», «валидатор») в устах NPC |
+| повторы/шаблоны | одна фраза у разных NPC, одинаковые приветствия, зацикленная сцена, рыночный гул как метроном |
+| противоречия | NPC против своей персоны/своих же слов, двое врут по-разному об одном ПРОВЕРЯЕМОМ факте, мертвец говорит |
+| всезнание | NPC знает то, чего не видел/не слышал (о игроке, о событиях за стеной) |
+| статика | эмоция/отношение не сдвинулись после сильного события; сцена не заметила поступок игрока |
+| тон | современные словечки, мета-язык, анахронизмы, ломающий стиль юмор |
+| время/пространство | день/ночь путается, внутри/снаружи, NPC телепортируется, погода скачет |
+
+**Рубрика ЖИВОСТЬ** (each line needs its proving quote):
+- **свои-дела** — NPC живут собственной жизнью, когда игрок молчит (дела, споры, торг не про игрока)
+- **память-мира** — мир помнит прошлые тики/дни (callbacks: «та треснутая кружка…»)
+- **реакция** — поступок игрока меняет сцену (встали, замолчали, запомнили, донесли)
+- **развитие** — слухи/события эволюционируют между тиками, а не крутятся на месте
+
+Controller triage: language/tone cracks → берём как есть (experience claims); contradiction/
+omniscience/static cracks → verify against DB first (was the fact real? did the emotion value
+actually not move?) — a lying NPC is a feature, a contradicting WORLD is a bug.
 
 ## Coverage matrix (full playtests MUST report every row)
 

@@ -203,9 +203,46 @@ def valid_entities(text: str, allowed: set) -> bool:
     return True
 
 
-def framer(seed: dict, allowed: set, manager) -> dict | None:
-    """ONE artifact set (pitch/foreshadow/reveal); apophenia validator rejects unknown entities;
-    one regenerate on failure, else honest absence (mirrors _build_step's reject-don't-repair)."""
+_NUM = re.compile(r"\d+")
+
+
+def _true_numbers(seed: dict, reward: int | float | None) -> set:
+    """Numbers code actually owns for this seed (spec: pitch figures are never the LLM's invention).
+    wealth predicates carry a real target amount (seed['goal']['done']['value']); any real reward
+    counts too; 0 and single-digit flavor numbers ("через 2 дня") are trivially harmless."""
+    nums = {0}
+    done = seed.get("goal", {}).get("done") or {}
+    if done.get("type") == "wealth" and done.get("value") is not None:
+        try:
+            nums.add(int(round(float(done["value"]))))
+        except (TypeError, ValueError):
+            pass
+    if reward:
+        try:
+            nums.add(int(round(float(reward))))
+        except (TypeError, ValueError):
+            pass
+    return nums
+
+
+def valid_numbers(text: str, true_nums: set) -> bool:
+    """Every standalone digit-run in `text` must be one of `true_nums` or a trivially small
+    (≤9) flavor number — numbers are code's domain, not the LLM's invention (mirrors
+    valid_entities: a fabricated figure fails the whole artifact)."""
+    for m in _NUM.finditer(text or ""):
+        n = int(m.group())
+        if n in true_nums or n <= 9:
+            continue
+        log.info("quests: валидатор отверг число «%d» (текст: %s…)", n, (text or "")[:90])
+        return False
+    return True
+
+
+def framer(seed: dict, allowed: set, manager, reward: int | float | None = None) -> dict | None:
+    """ONE artifact set (pitch/foreshadow/reveal); apophenia validator rejects unknown entities AND
+    fabricated numbers; one regenerate on failure, else honest absence (mirrors _build_step's
+    reject-don't-repair). `reward` (coin reward, when already known at call time) is fed into the
+    prompt and the number-validator alongside the seed's own true target value."""
     if manager is None:
         return None
     # summary IS the giver's real life-goal (plan_agenda-authored, sim truth) — write ABOUT it, not
@@ -213,8 +250,18 @@ def framer(seed: dict, allowed: set, manager) -> dict | None:
     # advertise only Cyrillic material — raw predicate keywords (wealth/have) stay in `allowed`
     # for validation but must not be parroted into a Russian pitch («помоги накопить wealth»)
     advertised = sorted(a for a in allowed if re.search(r"[а-яА-ЯёЁ]", a))
-    user = (f"ЗАКАЗЧИК: {seed['giver_name']}. Суть: {seed.get('summary') or seed.get('why', '')}\n"
-            f"МОЖНО НАЗЫВАТЬ: {', '.join(advertised or sorted(allowed))}.")
+    lines = [f"ЗАКАЗЧИК: {seed['giver_name']}. Суть: {seed.get('summary') or seed.get('why', '')}",
+             f"МОЖНО НАЗЫВАТЬ: {', '.join(advertised or sorted(allowed))}."]
+    done = seed.get("goal", {}).get("done") or {}
+    if done.get("type") == "wealth" and done.get("value") is not None:
+        # numbers are code's domain — the true target goes IN the prompt so the LLM can't invent one
+        lines.append(f"ЦЕЛЬ: не хватает {int(round(float(done['value'])))} монет.")
+    elif done.get("type") == "have" and done.get("item"):
+        lines.append(f"ЦЕЛЬ: раздобыть «{done['item']}».")
+    if reward:
+        lines.append(f"НАГРАДА: {int(round(float(reward)))} монет.")
+    user = "\n".join(lines)
+    true_nums = _true_numbers(seed, reward)
     for _attempt in range(2):                      # generate → validate → regenerate once → skip
         resp = manager.call("narrator",
                             [{"role": "system", "content": _FRAMER_SYS},
@@ -228,7 +275,8 @@ def framer(seed: dict, allowed: set, manager) -> dict | None:
             continue
         required_ok = bool(art["pitch"]) and bool(art["foreshadow"]) and (
             bool(art["reveal"]) if seed.get("twist") else True)
-        if required_ok and all(valid_entities(v, allowed) for v in art.values()):
+        if (required_ok and all(valid_entities(v, allowed) for v in art.values())
+                and all(valid_numbers(v, true_nums) for v in art.values())):
             return art
-    log.warning("quests: фреймер назвал чужую сущность дважды — пропуск этим утром")
+    log.warning("quests: фреймер назвал чужую сущность или число дважды — пропуск этим утром")
     return None

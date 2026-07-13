@@ -226,22 +226,24 @@ def quest_morning() -> list[str]:
     seed = admitted
     cid = f"ct:sift:{seed['giver']}:{gt}"
     _gate_twist(seed, cid)                            # PB['quest_twist_p'] — before framer (needs seed['twist'])
-    try:
-        art = framing.framer(seed, _allowed(seed), core._model())
-    except LLMUnavailable:
-        log.info("quests: LLM недоступен — фреймер пропущен, утро без нового дела")
-        return news
-    if not art:
-        return news
-    _ensure_milestone(seed)                          # grievance patterns: materialize a real milestone
     giver = people[seed["giver"]]
     villain = people.get(seed["cast"].get("villain"))
+    # cast/reward computed BEFORE framer (moved up from below) so a real coin reward — not just the
+    # seed's own true target value — can be fed into the pitch prompt and its number-validator
     c = casting.cast(seed, giver.state, villain.state if villain else None, _store(), _wid())
     rw = _reward(seed, c)
     if rw is None:                                   # poor private giver, no item — honest skip
         log.info("quests: seed %s пропущен — заказчику нечем платить", seed.get("sid"))
         return news
     reward, reward_item, reward_name = rw
+    try:
+        art = framing.framer(seed, _allowed(seed), core._model(), reward=reward if not reward_item else None)
+    except LLMUnavailable:
+        log.info("quests: LLM недоступен — фреймер пропущен, утро без нового дела")
+        return news
+    if not art:
+        return news
+    _ensure_milestone(seed)                          # grievance patterns: materialize a real milestone
     from aidnd.mind.agenda import Milestone
     m = Milestone(desc="", kind=seed["goal"]["kind"], target=seed["goal"]["target"],
                   done=dict(seed["goal"]["done"]))

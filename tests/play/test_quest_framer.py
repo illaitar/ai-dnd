@@ -93,6 +93,41 @@ def test_framer_reveal_optional_when_seed_has_no_twist():
     assert art is not None and art["reveal"] == ""
 
 
+def _wealth_seed():
+    return {"sid": "seed_dunn_wealth", "pattern": "plain_need", "giver": "npc:dunn",
+            "giver_name": "Дунн", "why": "нужда",
+            "goal": {"done": {"type": "wealth", "value": 50}},
+            "cast": {"villain": None, "prize": None}}
+
+
+def test_framer_rejects_fabricated_wealth_number():
+    """live bug: LLM invented «200 монет» for a wealth|50 seed — the true target is 50, not 200."""
+    bad = ('{"pitch":"Принеси мне 200 монет.","foreshadow":"Тебя гложет нужда в деньгах.",'
+           '"reveal":""}')
+    stub = _Stub([bad, bad])
+    seed = dict(_wealth_seed(), twist=None)
+    assert F.framer(seed, {"Дунн", "гильдия"}, stub) is None
+    assert stub.n == 2                                     # regenerated once, still bad → skip
+
+
+def test_framer_accepts_true_wealth_number():
+    good = ('{"pitch":"Принеси мне 50 монет.","foreshadow":"Тебя гложет нужда в деньгах.",'
+            '"reveal":""}')
+    stub = _Stub([good])
+    seed = dict(_wealth_seed(), twist=None)
+    art = F.framer(seed, {"Дунн", "гильдия"}, stub)
+    assert art is not None and "50" in art["pitch"]
+
+
+def test_framer_accepts_true_reward_number_when_passed():
+    good = ('{"pitch":"Принеси мне 50 монет, получишь 30 монет награды.",'
+            '"foreshadow":"Тебя гложет нужда в деньгах.","reveal":""}')
+    stub = _Stub([good])
+    seed = dict(_wealth_seed(), twist=None)
+    art = F.framer(seed, {"Дунн", "гильдия"}, stub, reward=30)
+    assert art is not None and "30" in art["pitch"]
+
+
 def test_framer_artifacts_are_plain_strings_no_predicate_leak():
     good = ('{"pitch":"Верни гроссбух Марты.",'
             '"foreshadow":"Тебя гложет долг — гроссбух у Ральфа.",'

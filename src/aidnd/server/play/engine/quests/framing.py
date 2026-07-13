@@ -17,6 +17,17 @@ log = logging.getLogger("aidnd.quests")
 _CAP_RU = re.compile(r"[А-ЯЁ][а-яё]+")
 _QUOTED = re.compile(r"«([^»]+)»")
 
+# Sentence-initial capitalization is Russian orthography, not a properness signal — but a
+# sentence-initial word can still BE the injected entity ("Гримберт ждёт тебя у моста." as the
+# whole sentence). So only a curated set of common openers (imperatives/pronouns/discourse
+# words that routinely start quest lines) get a free pass; anything else sentence-initial is
+# still checked like any other candidate.
+_OPENERS = frozenset({
+    "верни", "найди", "принеси", "отнеси", "помоги", "разыщи", "забери", "чужак", "странник",
+    "он", "она", "они", "оно", "тебя", "тебе", "твой", "твоя", "здесь", "если", "когда", "там",
+    "вот", "это", "есть", "прошу", "слушай", "говорят",
+})
+
 _FRAMER_SYS = (
     "Ты пишешь ТРИ короткие фразы для городского поручения. Используй ТОЛЬКО названных людей и вещи — "
     "никого и ничего нового не выдумывай. Верни СТРОГО JSON: "
@@ -80,29 +91,44 @@ def judge(seeds: list, deeds: dict, names: dict, manager) -> list[dict]:
 
 def _stem4(word: str) -> set:
     """A coarser prefix (4 chars, not _tokens_ru's 5) so short names still match their case
-    endings ("Дунн"↔"Дунну", "Марта"↔"Марты") — _tokens_ru alone is too fine for 4-5 letter names."""
+    endings ("Дунн"↔"Дунну", "Марта"↔"Марты") — _tokens_ru alone is too fine for 4-5 letter names.
+    Trade-off accepted: a 4-char radius also admits first-4 collisions between unrelated names
+    ("Мартин"↔"Марта"); the prompt's МОЖНО НАЗЫВАТЬ list is the first line of defense, this
+    validator is the second, coarser one."""
     return {t[:4] for t in _tokens_ru(word)}
+
+
+def _all_tokens_match(phrase: str, allow_tok: set) -> bool:
+    """Every meaningful token of `phrase` (predlogs/short words already dropped by _tokens_ru)
+    must stem-match an allowed name — a phrase isn't known just because ONE of its words is."""
+    toks = _tokens_ru(phrase)
+    if not toks:
+        return False
+    return all(t[:4] in allow_tok for t in toks)
 
 
 def valid_entities(text: str, allowed: set) -> bool:
     """Every «quoted» phrase and Capitalized Cyrillic word must share a stem with some allowed
     name (mirrors _build_step contracts.py:60 — an unknown entity fails the whole artifact).
-    A capitalized word at the very start of a sentence is skipped — that capitalization is
-    Russian orthography (sentence-initial), not a signal of properness, so it can't be evidence
-    of an injected entity either way."""
+    A capitalized word at the very start of a sentence is only skipped when it's a common opener
+    (imperative/pronoun/discourse word) or already matches an allowed name — sentence-initial
+    capitalization is Russian orthography, but the word itself can still be the injected entity."""
     text = text or ""
     allow_tok = set()
     for a in allowed:
         allow_tok |= _stem4(a)
     cands = list(_QUOTED.findall(text))
     for m in _CAP_RU.finditer(text):
+        word = m.group()
         i = m.start() - 1
         while i >= 0 and text[i] in " \t\n":
             i -= 1
-        if i >= 0 and text[i] not in ".!?":
-            cands.append(m.group())
+        sentence_initial = i < 0 or text[i] in ".!?"
+        if sentence_initial and (word.lower() in _OPENERS or _all_tokens_match(word, allow_tok)):
+            continue
+        cands.append(word)
     for c in cands:
-        if not (_stem4(c) & allow_tok):
+        if not _all_tokens_match(c, allow_tok):
             return False
     return True
 
@@ -125,7 +151,9 @@ def framer(seed: dict, allowed: set, manager) -> dict | None:
             art = {k: str(d.get(k, ""))[:220] for k in ("pitch", "foreshadow", "reveal")}
         except (json.JSONDecodeError, ValueError):
             continue
-        if all(art.values()) and all(valid_entities(v, allowed) for v in art.values()):
+        required_ok = bool(art["pitch"]) and bool(art["foreshadow"]) and (
+            bool(art["reveal"]) if seed.get("twist") else True)
+        if required_ok and all(valid_entities(v, allowed) for v in art.values()):
             return art
     log.warning("quests: фреймер назвал чужую сущность дважды — пропуск этим утром")
     return None

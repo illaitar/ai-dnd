@@ -80,17 +80,11 @@ def town(tmp_path, monkeypatch):
         d.clear(); d.update(saved)
 
 
-def _place_rows(st):
-    return [r for r in st.journal_list(1) if r["kind"] == "place"]
-
-
 def test_where_question_shares_direction_and_reveals(town):
     res = asyncio.run(dlg.say(_Req({"npc": "npc:oda", "text": "где кузница?"})))
     assert res["line"] == "Ступай к кузнице."                # geo fact reached the voice
     from aidnd.server.play.engine.pc.hero import _seen
     assert "b_smithy" in _seen()                             # map reveal
-    rows = _place_rows(town)
-    assert rows and rows[-1]["prov"] == "told" and "b_smithy" in rows[-1]["refs"]
 
 
 def test_ordinary_line_no_geo_no_mark(town):
@@ -98,7 +92,6 @@ def test_ordinary_line_no_geo_no_mark(town):
     assert res["line"] == "Не знаю, о чём ты."               # no geo fact injected
     from aidnd.server.play.engine.pc.hero import _seen
     assert "b_smithy" not in _seen()
-    assert _place_rows(town) == []
 
 
 def test_geo_question_regex():

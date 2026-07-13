@@ -37,7 +37,6 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.engine.journal import j_event
 from aidnd.server.play.engine.world import _play
 from aidnd.server.play.handlers.freeform import _attempt
 from aidnd.server.play.mechanics.items import (
@@ -124,14 +123,9 @@ async def inspect_item(request: Request):
         cap, observer, by = _npc_cap(people[npc]), npc, people[npc].name
     else:
         cap, observer, by = _PC_CAP, "pc", "ты"
-    known0 = set(known)                                        # snapshot BEFORE growth
     res = item_inspect(it, cap, via, observer=observer, known=known)
     known |= {h["prop"] for h in res["revealed"]} | set(res.get("attr_groups", []))
     _store().inv_set_known(_wid(), iid, known)
-    new_attrs = known - known0                                 # what this inspection revealed
-    if new_attrs:                                              # nothing new → no duplicate row
-        j_event("saw", f"{it.get('name', 'предмет')}: открылось — "
-                       f"{', '.join(sorted(new_attrs))}", refs=[iid])
     return {
         "item": _item_card(it, known),
         "via": via,

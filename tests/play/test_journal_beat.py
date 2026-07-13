@@ -85,6 +85,30 @@ def test_empty_output_writes_no_row(store, monkeypatch):
     assert _quest_rows(store) == []
 
 
+def test_multiparagraph_line_is_clamped_to_one_short_phrase(store, monkeypatch):
+    no_punct_run = "слово за слово " * 20                     # long single "sentence", no . ! ?
+    stub = _StubOK(f"{no_punct_run}\nВторой абзац тут, он вообще не должен попасть в строку.")
+    monkeypatch.setattr(core, "_model", lambda: stub)
+    j_beat("c1", "accept", {"giver_name": "Роза Медовар"})
+    rows = _quest_rows(store)
+    assert len(rows) == 1
+    text = rows[0]["text"]
+    assert "\n" not in text and "Второй абзац" not in text
+    assert len(text) <= 200
+    assert not text.endswith(" ")                              # clean word boundary, not mid-word cut
+
+
+class _StubNonDict:
+    def call(self, role, messages, **kw):
+        return "просто строка, не словарь"
+
+
+def test_non_dict_response_writes_no_row_and_does_not_raise(store, monkeypatch):
+    monkeypatch.setattr(core, "_model", lambda: _StubNonDict())
+    j_beat("c1", "accept", {"giver_name": "Роза Медовар"})    # must NOT raise
+    assert _quest_rows(store) == []
+
+
 def test_no_session_is_a_safe_noop(monkeypatch):
     # no wid/store bound → best-effort no-op, never raises
     saved = dict(core._S._d()); d = core._S._d()

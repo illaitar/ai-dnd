@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from aidnd.items import Capability
 from aidnd.mind import NpcConfig, NpcState
-from aidnd.server.play.engine.journal import j_place
 
 from ..session.config import PB, PLAYER
 from ..session.persist import _store
@@ -175,10 +174,9 @@ def _seen() -> set:
 
 
 def _mark_seen(bid: str | None, *, prov: str = "saw", text: str | None = None) -> None:
-    """Fog of war: location becomes known (map marker) when player LEARNS it — came themselves
-    (prov='saw') or heard from people (prov='told'). Journals ONE place row with that provenance."""
+    """Fog of war: location becomes known (map marker) when the player learns it — came themselves
+    or heard from people. The persistent JOURNAL no longer records this (quest-only journal);
+    prov/text are accepted for call-site compatibility but no row is written."""
     if bid and bid not in _seen():
         _S["seen"].add(bid)
         _store().flag_set(_wid(), f"seen|{bid}")
-        from aidnd.server.play.engine.core import _binfo  # deferred: core imports hero (cycle)
-        j_place(text or f"впервые вошёл в {_binfo(bid)['name']}", bid, prov=prov)

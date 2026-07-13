@@ -1,19 +1,14 @@
-"""Player-journal capture helpers — thin, LLM-free wrappers over WorldStore.journal_add.
-
-Each wrapper resolves world-id / store / game-time internally and is a SAFE NO-OP
-(returns None, never raises) when no live session/store is available. Called from the
-five capture hooks at existing render sites; also hosts journal_feed (Hook 1 pass).
+"""Player-journal — quest chronicle only. One writer (`j_beat`) and one one-shot migration
+(`purge_legacy_once`); the old ambient capture hooks (person/place/event) are gone (Task 3):
+the journal now records deeds only, not everything the player saw or heard.
 
 Import the id/store/time resolvers from the SESSION LEAF modules (not core) so a
 top-level import from any hook site cannot form a load-time cycle.
 
 Key functions
 -------------
-j_event(prov, text, refs=None) : kind=event row (overheard line, witnessed deed, item reveal).
-j_quest(prov, text, cid)       : kind=quest row, refs=[cid] (pitch/accept=told, outcome=saw).
-j_person(prov, text, pid)      : kind=person row, refs=[pid] (first meeting, later facts).
-j_place(text, bid)             : kind=place row, prov=saw, refs=[bid] (first visit).
-journal_feed(feed)             : Hook 1 pass — one event row per witnessed speech/deed (Task 3).
+j_beat(cid, beat, facts)   : kind=quest row, prov=beat, refs=[cid] — the single journal writer.
+purge_legacy_once(wid)     : one-shot compost of pre-existing non-quest rows for a world.
 """
 
 from __future__ import annotations
@@ -24,66 +19,20 @@ from aidnd.server.play.engine.session.state import _wid
 from aidnd.server.play.engine.session.time import _gt
 
 
-def _emit(kind: str, prov: str, refs: list, text: str) -> None:
-    """One row via journal_add — silent no-op if there's no live world/store."""
+def purge_legacy_once(wid) -> None:
+    """One-shot legacy compost: drop all non-quest rows for this world, guarded by a journal_purged
+    flag so it runs exactly once after deploy. Best-effort no-op with no live store."""
     try:
-        wid = _wid()
         store = _store()
-    except Exception:  # noqa: BLE001 — no live session: capture is best-effort, never fatal
+    except Exception:  # noqa: BLE001
         return None
     if wid is None or store is None:
         return None
-    store.journal_add(wid, kind, prov, list(refs or []), text, _gt())
+    if store.flag_get(wid, "journal_purged"):
+        return None
+    store.journal_purge_nonquest(wid)
+    store.flag_set(wid, "journal_purged")
     return None
-
-
-def j_event(prov: str, text: str, refs: list | None = None) -> None:
-    return _emit("event", prov, refs or [], text)
-
-
-def j_quest(prov: str, text: str, cid: str) -> None:
-    return _emit("quest", prov, [cid], text)
-
-
-def j_person(prov: str, text: str, pid: str) -> None:
-    return _emit("person", prov, [pid], text)
-
-
-def j_person_once(pid: str, text: str) -> None:
-    """First-meeting person entry, gated on a dedicated jmet|<pid> flag — NOT on `_met()`/
-    relationships, which the player's sight-appraisal populates for every co-present NPC each
-    tick (Hook 3 must fire on the first actual TALK, not on merely having been seen)."""
-    try:
-        wid = _wid()
-        store = _store()
-    except Exception:  # noqa: BLE001 — no live session: capture is best-effort, never fatal
-        return None
-    if wid is None or store is None:
-        return None
-    if store.flag_get(wid, f"jmet|{pid}"):
-        return None
-    store.flag_set(wid, f"jmet|{pid}")
-    j_person("saw", text, pid)
-
-
-def j_place(text: str, bid: str, prov: str = "saw") -> None:
-    return _emit("place", prov, [bid], text)
-
-
-def journal_feed(feed: list) -> None:
-    """Hook 1 pass over one tick's feed: the feed IS the witnessed scene.
-    speech tier 1 → event/heard1 (full) · tier 2 → event/heard2 (cutout fragment) ·
-    tier 3 & murmur → skip. deed with a real actor pid → event/saw refs=[pid] ·
-    ambient/'зал' deed (no pid) → skip. text is copied exactly, never rewritten."""
-    for e in feed or []:
-        if e.get("k") == "speech":
-            tier = e.get("tier")
-            if tier == 1:
-                j_event("heard1", e.get("text", ""), refs=[])
-            elif tier == 2:
-                j_event("heard2", e.get("text", ""), refs=[])
-        elif e.get("k") == "deed" and e.get("pid"):
-            j_event("saw", e.get("text", ""), refs=[e["pid"]])
 
 
 _BEATS = {"offer", "accept", "step", "twist", "reveal", "done", "overtaken", "failed"}
@@ -141,12 +90,28 @@ def j_beat(cid: str, beat: str, facts: dict) -> None:
         msgs = [{"role": "system", "content": _J_SYS},
                 {"role": "user", "content": f"Событие ({beat}): {_facts_ru(beat, facts)}."}]
         resp = _model().call("narrator", msgs, options={"temperature": 0.4})
+        line = ((resp.get("content") if resp else "") or "").strip().strip('"').strip()
     except LLMUnavailable:
         return None                                          # no model → no row, no stub (no-LLM-fallback)
-    except Exception:  # noqa: BLE001 — journaling never breaks a committed quest
-        return None
-    line = ((resp.get("content") if resp else "") or "").strip().strip('"').strip()
+    except Exception:  # noqa: BLE001 — journaling never breaks a committed quest (defensive:
+        return None   # covers a non-dict resp too — .get() raising must not escape j_beat)
     if not line:
         return None                                          # empty/garbled → no row
+    line = _clamp_line(line)                                  # журнальная строка — одна фраза, дисплейный бюджет
+    if not line:
+        return None
     store.journal_add(wid, "quest", beat, [cid], line, _gt())
     return None
+
+
+def _clamp_line(line: str) -> str:
+    """Cut to the first sentence or 200 chars, whichever is shorter — the journal shows one
+    short phrase, not a narrator ramble. Never cuts mid-word past the 200-char budget."""
+    line = line.split("\n")[0]
+    ends = [i for i in (line.find("."), line.find("!"), line.find("?")) if i != -1]
+    if ends:
+        line = line[: min(ends) + 1]
+    if len(line) > 200:
+        cut = line.rfind(" ", 0, 200)
+        line = line[:cut] if cut > 0 else line[:200]
+    return line.strip()

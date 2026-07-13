@@ -360,7 +360,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             return out
         p = people[npc]
         _store().purse_add(_wid(), "pc", -amount)
-        npc_total = _store().purse_add(_wid(), npc, amount)
+        _store().purse_add(_wid(), npc, amount)
         rel = p.state.rel(PLAYER)
         rel["affinity"] = min(
             1.0,
@@ -371,9 +371,6 @@ def _attempt(intent: dict, sc: dict) -> dict:
         _pc_remember(f"дал {p.name} {amount} зм", 0.4, about=[npc])
         _npc_save(npc)
         _gt_add(PB["give_min"])
-        from aidnd.server.play.engine.journal import j_event
-
-        j_event("gave", f"отдал {p.name} {amount} зм (у {p.name}: {npc_total})")
         done = _sift_maybe_close()  # a coin gift may satisfy a wealth predicate → close on the spot
         out["narr"].append(
             f"Ты отсчитываешь {amount} монет и вкладываешь в ладонь {p.name}."

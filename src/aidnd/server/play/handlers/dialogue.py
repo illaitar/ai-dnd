@@ -30,7 +30,6 @@ from aidnd.server.play.engine.core import (
     _S,
     PB,
     PLAYER,
-    _binfo,
     _emo,
     _gt,
     _gt_add,
@@ -47,7 +46,6 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.engine.journal import j_person_once
 from aidnd.server.play.engine.resolve import _voice
 from aidnd.server.play.engine.world import _play, _scene_dict, _world_tick_fast
 from aidnd.server.play.handlers.freeform import _say_aloud
@@ -112,12 +110,6 @@ async def talk(request: Request):
         st.memory.add("незнакомец (игрок) подошёл и заговорил со мной", _mt(), 0.4, about=[PLAYER])
         _pc_remember(f"я познакомился с {p.name} ({p.role})", 0.45, about=[npc])
         _npc_save(npc)
-    # journal "met" gated on its own jmet| flag — decoupled from `first`/_met(), since the
-    # player's sight-appraisal already populates relationships for every co-present NPC each
-    # tick, so `first` is almost always False by the time the player actually talks
-    place = (_binfo(_S.get("inside"))["name"] if _S.get("inside")
-             else ((_S.get("live") or {}).get("place") or ""))
-    j_person_once(npc, f"встретил {p.name} — {p.role}, {place}")
     _materialize_npc(npc, "visible")  # visible (gear+keys) — real items
     rel = st.relationships.get(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})
     per = p.persona or {}

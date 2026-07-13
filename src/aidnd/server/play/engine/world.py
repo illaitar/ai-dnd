@@ -42,7 +42,6 @@ from aidnd.server.play.engine.core import (
     _wid,
     router,
 )
-from aidnd.server.play.engine.journal import journal_feed
 from aidnd.server.play.engine.loop.routine import _apply_routine as _apply_routine
 from aidnd.server.play.engine.loop.routine import _world_events as _world_events
 from aidnd.server.play.engine.loop.tick import _world_tick as _world_tick
@@ -1302,7 +1301,6 @@ def _live_tick(people) -> tuple:
         amb = _idle_ambient(w, zones_l, order, lv["zone_ids"])
         if amb:
             feed.append({"k": "deed", "who": "зал", "text": amb})
-    journal_feed(feed)  # Hook 1: capture witnessed speech & deeds into the chronicle
     if zones_l:
         for pid in order:
             zmap[pid] = lv["zone_ids"].get(w.bodies[pid].place)

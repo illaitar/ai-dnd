@@ -268,6 +268,13 @@ class WorldStore:
         return [{"gt": r[0], "kind": r[1], "prov": r[2],
                  "refs": json.loads(r[3] or "[]"), "text": r[4]} for r in rows]
 
+    def journal_purge_nonquest(self, world_id: int) -> int:
+        """One-time migration: delete all non-quest journal rows for a world (person/place/event).
+        Returns the number of rows removed. Protects the shared journal_cap from stale ambience."""
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM journal WHERE world_id=? AND kind!='quest'", (world_id,))
+            return cur.rowcount
+
     def save_person(self, pid: str, role: str, name: str, charisma: float, appearance: float,
                     mech: dict, persona: dict, portraits: dict, seed: int) -> None:
         with self._conn() as c:

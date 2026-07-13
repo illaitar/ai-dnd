@@ -62,6 +62,10 @@ def town(tmp_path, monkeypatch):
     _b("b_house_gorm", "дом Горма", "жилой дом")
     _b("b_house_pekka", "дом Пёкка", "жилой дом")
     _b("b_house_vetl", "дом Ветла", "жилой дом")   # arbitrary far house — MUST be excluded
+    # a HOUSE whose type text contains a landmark keyword ("колодец") — NOT in keynode, so it
+    # must never enter rule 4 (real keynode holds only key buildings, never houses; reviewer note)
+    st.save_building(1, "b_house_lake", True, 99, "дом у колодца",
+                      {"name": "дом у колодца", "type": "жилой дом у колодца"})
     # adjacency: Ода's home 42 neighbours 43 (Пёкка, 1 hop) and 41; 90 is far (unreachable in 2 hops)
     adj = {42: {41, 43}, 43: {42}, 41: {42}, 90: {91}, 91: {90}}
     people = {
@@ -113,3 +117,11 @@ def test_kin_home_included_neighbor_home_included(town):
 def test_far_arbitrary_house_excluded(town):
     bids = {e["bid"] for e in geo.known_places("p_oda")}
     assert "b_house_vetl" not in bids                          # not home/work/kin/neighbor/landmark
+
+
+def test_house_with_landmark_keyword_not_in_keynode_excluded(town):
+    """Carried from T1 review: a house whose type text matches a landmark keyword ("колодец")
+    must NOT be pulled in by rule 4 — real keynode holds only key buildings, never houses, so
+    keynode membership (not the keyword match alone) gates the landmark rule."""
+    bids = {e["bid"] for e in geo.known_places("p_oda")}
+    assert "b_house_lake" not in bids

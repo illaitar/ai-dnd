@@ -164,3 +164,74 @@ def known_places(pid: str) -> list[dict]:
     for bid in _neighbor_home_bids(p):                  # rule 6 — neighbors
         add(bid, "соседи")
     return list(out.values())
+
+
+# minutes → RU numeral word for small counts (spec §10 resolved: numeral words 1–10, else «минут N»)
+_MIN_WORD = {
+    1: "минуту", 2: "в паре минут", 3: "минуты три", 4: "минуты четыре", 5: "минут пять",
+    6: "минут шесть", 7: "минут семь", 8: "минут восемь", 9: "минут девять", 10: "минут десять",
+}
+# City._heading 8-wind code → RU "к <side>" (graph.py:399 dirs order)
+_SIDE = {
+    "С": "к северу", "СВ": "к северо-востоку", "В": "к востоку", "ЮВ": "к юго-востоку",
+    "Ю": "к югу", "ЮЗ": "к юго-западу", "З": "к западу", "СЗ": "к северо-западу",
+}
+# landmark tag (Route.landmarks) → RU clause appended after the near_target
+_LM_WORD = {"river": "у реки", "wall": "у городской стены", "gate": "у ворот", "bridge": "у моста"}
+
+
+def _minutes_phrase(steps: int) -> str:
+    m = max(1, steps) * int(PB["step_min"])
+    return _MIN_WORD.get(m, f"минут {m}")
+
+
+def direction_line(from_node, bid: str) -> str:
+    """One always-true RU sentence for the route from_node → bid. Thin formatter over City.route:
+    minutes (steps × step_min) + compass side + nearest landmark. Voice may wrap, never alter."""
+    city = _S.get("city")
+    r = city.route(from_node, bid) if city is not None else None
+    if r is None or not r.found:
+        return "это на другом конце города"
+    steps = max(1, len(r.nodes) - 1)
+    parts = [f"{_minutes_phrase(steps)} ходу"]
+    if r.bearing and r.bearing in _SIDE:
+        parts.append(_SIDE[r.bearing])
+    # "за рыночной площадью" reads better for an open square; "у <name>" for a point landmark.
+    # Spec §5 uses «за рыночной площадью» for the market and «у колодца» for the well.
+    tail = ""
+    if r.near_target is not None:
+        name = r.near_target.name
+        prep = "за" if ("площад" in name or "рынок" in name or "рыноч" in name) else "у"
+        tail = f", {prep} {_loc_form(name, prep)}"
+    lm = next((_LM_WORD[t] for t in (r.landmarks or []) if t in _LM_WORD), "")
+    sentence = " ".join(parts) + tail
+    if lm:
+        sentence += f", {lm}"
+    return sentence
+
+
+def _loc_form(name: str, prep: str) -> str:
+    """Instrumental/prepositional case for the landmark noun phrase. The citygraph names are fixed
+    strings; map the few real forms, fall back to the raw name (voice smooths any rough edge)."""
+    forms = {
+        ("за", "рыночная площадь"): "рыночной площадью",
+        ("у", "колодец"): "колодца",
+        ("у", "рыночная площадь"): "рыночной площади",
+    }
+    return forms.get((prep, name), name)
+
+
+def acquaintances(pid: str, from_node) -> list[dict]:
+    """Referrable people — kin/friend/coworker whose HOME the NPC knows — with a where_line the NPC
+    can speak. Bounds the router's refer_pid choice (spec §4.2 validation)."""
+    people = _S.get("people") or {}
+    out = []
+    for other in _kin_and_friends(pid):
+        op = people.get(other)
+        if op is None or getattr(op, "home", None) is None:
+            continue
+        hb = _home_bid(other)
+        where = direction_line(from_node, hb) if hb else "где-то в городе"
+        out.append({"pid": other, "name": op.name, "role": op.role,
+                    "home": op.home, "where_line": where})
+    return out

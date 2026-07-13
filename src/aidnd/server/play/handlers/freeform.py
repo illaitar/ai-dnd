@@ -628,10 +628,17 @@ def _run_plan(steps: list, sc: dict, text: str) -> dict:
 @router.post("/api/play/act")
 async def act(request: Request):
     """Free-form action: text → LLM-intent → single resolver. No verb buttons."""
-    city, people, crof, cr2b, loc = _play()
     text = str((await request.json()).get("text") or "").strip()
     if not text:
         return {"narr": []}
+    if _S.get("dungeon") and not _S.get("combat"):
+        # a dungeon crawl is its own contour (dungeon_move/_loot/_exit) — the outside-world
+        # arbiter (_play/_scene_dict/resolve) knows nothing about being underground and would
+        # narrate the surface scene inside the dungeon (context bleed); no such freeform-inside-
+        # dungeon path exists yet, so refuse honestly instead of narrating a phantom room.
+        return {"narr": ["Ты в подземелье — здесь действуют ходы: осмотреться, идти в проём, "
+                         "взять, выйти."], "fail": True, "gt": _gt()}
+    city, people, crof, cr2b, loc = _play()
     sc = _scene_dict(city, people, crof, cr2b, loc)
     it = resolve(text, sc)
     if it is None:

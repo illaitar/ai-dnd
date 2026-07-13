@@ -10,8 +10,6 @@ import json
 import logging
 import re
 
-from aidnd.server.play.engine.core import _tokens_ru
-
 log = logging.getLogger("aidnd.quests")
 
 _CAP_RU = re.compile(r"[А-ЯЁ][а-яё]+")
@@ -129,22 +127,35 @@ def judge(seeds: list, deeds: dict, names: dict, manager) -> list[dict]:
     return kept
 
 
+_FUNC_RU = frozenset({
+    "и", "а", "но", "же", "не", "ни", "или", "для", "под", "над", "при", "без", "про",
+    "от", "до", "по", "за", "на", "в", "во", "с", "со", "у", "о", "об", "к", "ко", "из", "то",
+})
+
+
+def _ru_words(s: str) -> list:
+    """Own tokenizer for the validator: _tokens_ru drops ≤3-letter words, which silently killed
+    SHORT NAMES on both sides (live: giver «Рэн» rejected as unknown). Keep every ≥2-char word
+    that isn't a function word."""
+    return [w for w in re.findall(r"[а-яёa-z0-9]+", s.lower()) if len(w) >= 2 and w not in _FUNC_RU]
+
+
 def _stem4(word: str) -> set:
-    """A coarser prefix (4 chars, not _tokens_ru's 5) so short names still match their case
-    endings ("Дунн"↔"Дунну", "Марта"↔"Марты") — _tokens_ru alone is too fine for 4-5 letter names.
+    """A coarser prefix (4 chars) so short names still match their case
+    endings ("Дунн"↔"Дунну", "Марта"↔"Марты"); short names («Рэн») survive whole.
     Trade-off accepted: a 4-char radius also admits first-4 collisions between unrelated names
     ("Мартин"↔"Марта"); the prompt's МОЖНО НАЗЫВАТЬ list is the first line of defense, this
     validator is the second, coarser one."""
-    return {t[:4] for t in _tokens_ru(word)}
+    return {w[:4] for w in _ru_words(word)}
 
 
 def _all_tokens_match(phrase: str, allow_tok: set) -> bool:
-    """Every meaningful token of `phrase` (predlogs/short words already dropped by _tokens_ru)
+    """Every meaningful token of `phrase` (function words dropped by _ru_words)
     must stem-match an allowed name — a phrase isn't known just because ONE of its words is."""
-    toks = _tokens_ru(phrase)
+    toks = _ru_words(phrase)
     if not toks:
         return False
-    return all(t[:4] in allow_tok for t in toks)
+    return all(w[:4] in allow_tok for w in toks)
 
 
 def valid_entities(text: str, allowed: set) -> bool:

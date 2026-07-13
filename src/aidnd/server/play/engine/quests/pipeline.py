@@ -1,0 +1,198 @@
+"""Morning orchestration (spec §3a/§5). Inc 2: window=1 hardcoded (exactly one seed surfaces per
+morning; the director in Inc 3 replaces this). No LLM at either seam → honest absence, boards continue.
+
+  sift → salience → judge → framer → casting → save_contract(status='queued') → surface (private/public)
+  + expiry-compost of offers older than quest_offer_days (giver keeps his agenda; no board leak).
+"""
+
+from __future__ import annotations
+
+import logging
+
+from aidnd.server.play.engine import core
+from aidnd.server.play.engine.core import _S, PB, _gt, _store, _wid
+from aidnd.server.play.engine.quests import bridge, casting, framing, salience, seeds
+
+log = logging.getLogger("aidnd.quests")
+
+PUBLIC_PATTERNS = {"broken_promise", "unanswered_blood"}
+GRIEVANCE_PATTERNS = {"broken_promise", "unanswered_blood"}   # no pre-existing giver milestone
+
+
+def _ensure_milestone(seed: dict) -> None:
+    """Grievance patterns (broken_promise/unanswered_blood) name a revenge predicate but the giver
+    carries NO milestone for it. Insert a real revenge Agenda into the giver's LIVE state so
+    done_any[0] lifts verbatim from a real milestone and the Inc-1 writeback advances a real cursor
+    uniformly (spec §4 'each enforced disjunct is a real _met dict' + the honest bridge).
+
+    Persistence mirrors deals.py:155 EXACTLY: the agenda is inserted into the in-memory
+    _S["people"][giver].state.agendas and lives there for the session. save_npc_state intentionally
+    persists only relationships/needs/memory — NOT agendas — so deals.py's hired-agenda and this
+    revenge-agenda both survive purely on the live pool wrapper. No new persistence is invented."""
+    if seed["pattern"] not in GRIEVANCE_PATTERNS:
+        return                                       # milestone-anchored: giver already carries it
+    from aidnd.mind.agenda import Agenda, Milestone
+    giver = (_S.get("people") or {})[seed["giver"]]
+    st = giver.state
+    if st.agendas is None:
+        st.agendas = []
+    villain = seed["cast"].get("villain")
+    done = dict(seed["goal"]["done"])                # the intended revenge predicate (real _met dict)
+    for i, ag in enumerate(st.agendas):              # idempotent: reuse a matching live revenge agenda
+        if getattr(ag, "status", "active") == "active" and ag.current() and ag.current().done == done:
+            tag = f"agenda:{seed['giver']}:{i}"
+            if tag not in seed["evidence"]:
+                seed["evidence"].append(tag)
+            return
+    ms = Milestone(desc=f"свести счёты с обидчиком ({villain})", kind="harm",
+                   target=villain, done=done)
+    idx = len(st.agendas)
+    st.agendas.append(Agenda(summary=f"расквитаться с {villain} за нарушенное слово",
+                             kind="revenge", importance=0.8, milestones=[ms]))
+    seed["evidence"].append(f"agenda:{seed['giver']}:{idx}")   # anchor for bridge._anchor_idx
+
+
+def _names() -> dict:
+    return {pid: p.name for pid, p in (_S.get("people") or {}).items()}
+
+
+def _adjacent(city, a, b) -> bool:
+    if city is None or a is None or b is None:
+        return False
+    try:
+        return any({e.a, e.b} == {a, b} for e in city.edges())
+    except Exception:                               # noqa: BLE001 — graph shape guard
+        return False
+
+
+def _ctx(chosen_deeds: dict, gt: int) -> dict:
+    people = _S.get("people") or {}
+    crof, loc, city = _S.get("crof") or {}, _S.get("loc"), _S.get("city")
+    aff = {}
+    for pid, p in people.items():
+        for other, rel in (p.state.relationships or {}).items():
+            aff[(pid, other)] = rel.get("affinity", 0.0)
+    prox = {pid: salience.proximity(crof.get(pid), loc, _adjacent(city, crof.get(pid), loc))
+            for pid in people}
+    recent = {}
+    for pat in ("kin_debt", "broken_promise", "blocked_rival", "unanswered_blood", "courtship_wall"):
+        recent[pat] = int(_store().flag_get(_wid(), f"qrecent|{pat}") or 0)
+    return {"recent": recent, "aff_edges": aff, "deeds": chosen_deeds, "prox": prox, "now_gt": gt}
+
+
+def _allowed(seed: dict) -> set:
+    names = _names()
+    out = {seed["giver_name"]}
+    for r in ("villain", "prize"):
+        nm = names.get(seed["cast"].get(r))
+        if nm:
+            out.add(nm)
+    done = seed["goal"]["done"]
+    if done.get("type") == "have" and done.get("item"):
+        out.add(str(done["item"]))
+    out.add("гильдия")
+    return out
+
+
+def _reward(seed: dict, cast: dict) -> tuple | None:
+    """Reward shape (spec §5 Step 4 + carried review): coins from casting when the giver can pay;
+    a poor PRIVATE giver (purse < contract_poor_purse) pays with a real item from his own inventory,
+    mirroring _make_contract (contracts.py:180-188). Private giver with neither coins nor item →
+    None (seed skipped). Public patterns are community bounties — no personal-funding gate."""
+    giver = seed["giver"]
+    purse = _store().purse_get(_wid(), giver)
+    if seed["pattern"] in PUBLIC_PATTERNS or purse >= PB["contract_poor_purse"]:
+        return cast["reward"], None, None
+    rows = [(r["item_id"], _store().get_item(r["item_id"]))
+            for r in _store().inventory(_wid(), giver)]
+    rows = [(i, it) for i, it in rows if it and it.get("kind") != "key"]
+    if not rows:
+        return None
+    item_id, it = max(rows, key=lambda x: x[1].get("worth", 0))
+    return 0, item_id, it.get("name")
+
+
+def quest_morning() -> list[str]:
+    people = _S.get("people") or {}
+    if not people:
+        return []
+    gt = _gt()
+    raw = _store().deeds(_wid(), since_gt=gt - salience.FRESH_DAYS * 1440, limit=60)
+    deeds_by_id = {d["id"]: d for d in raw}
+    pool = seeds.sift(people, raw, gt, flag_get=lambda k: _store().flag_get(_wid(), k))
+    if not pool:
+        return []
+    ctx = _ctx(deeds_by_id, gt)
+    for s in pool:
+        salience.score(s, ctx)
+    pool.sort(key=lambda s: -s["score"])
+    topk = pool[:PB["quest_topk"]]
+    kept = framing.judge(topk, deeds_by_id, _names(), core._model())   # LLMUnavailable propagates
+    if not kept:
+        return []
+    news = []
+    for seed in kept[:1]:                            # Inc 2 window=1 — exactly one seed
+        art = framing.framer(seed, _allowed(seed), core._model())
+        if not art:
+            continue
+        _ensure_milestone(seed)                      # grievance patterns: materialize a real milestone
+        giver = people[seed["giver"]]
+        villain = people.get(seed["cast"].get("villain"))
+        c = casting.cast(seed, giver.state, villain.state if villain else None, _store(), _wid())
+        rw = _reward(seed, c)
+        if rw is None:                               # poor private giver, no item — honest skip
+            log.info("quests: seed %s пропущен — заказчику нечем платить", seed.get("sid"))
+            continue
+        reward, reward_item, reward_name = rw
+        from aidnd.mind.agenda import Milestone
+        m = Milestone(desc="", kind=seed["goal"]["kind"], target=seed["goal"]["target"],
+                      done=dict(seed["goal"]["done"]))
+        cid = f"ct:sift:{seed['giver']}:{gt}"
+        roles = {"giver": seed["giver"], "villain": seed["cast"].get("villain"),
+                 "prize": seed["cast"].get("prize")}
+        data = {"giver": seed["giver"], "giver_name": seed["giver_name"],
+                "step": c["step"], "steps": [c["step"]], **c["step"],
+                "reward": reward, "reward_item": reward_item, "reward_name": reward_name,
+                "pitch": art["pitch"], "why": seed["giver_name"],
+                "src": "sift", "seed": seed, "arc": {"beat": "foreshadow"}, "roles": roles,
+                "done_any": bridge.make_done_any(m),
+                "framer": art, "dc": c["dc"]}
+        _store().save_contract(_wid(), cid, "queued", data)
+        _store().flag_set(_wid(), f"qrecent|{seed['pattern']}",
+                          str(int(_store().flag_get(_wid(), f"qrecent|{seed['pattern']}") or 0) + 1))
+        _surface(cid, {"id": cid, "status": "queued", **data})
+        news.append(f"в городе зреет дело: {seed['giver_name']} ищет, кому довериться")
+    return news + _expire_stale()
+
+
+def _surface(cid: str, ct: dict) -> None:
+    """Promote a queued emergent contract to the player (Inc 2: immediately; Inc 3: director-timed).
+    Private → status 'offered' (dialogue's contract_accept picks it up); public grievance/bounty →
+    status 'board' (merges onto the shared board)."""
+    data = {k: v for k, v in ct.items() if k not in ("id", "status")}
+    data["arc"] = {"beat": "offered"}
+    if ct["seed"]["pattern"] in PUBLIC_PATTERNS:
+        _store().save_contract(_wid(), cid, "board", data)
+    else:
+        _store().save_contract(_wid(), cid, "offered", data)
+
+
+def _expire_stale() -> list[str]:
+    """Compost: an emergent offer unaccepted for quest_offer_days closes; the giver keeps his agenda
+    (he acts on it himself → new deeds → next sift). Private grief never leaks to a public board."""
+    gt, news = _gt(), []
+    for status in ("offered", "board"):
+        for ct in _store().contracts(_wid(), status):
+            if ct.get("src") != "sift":
+                continue
+            try:
+                born = int(str(ct["id"]).rsplit(":", 1)[-1])
+            except (ValueError, IndexError):
+                continue
+            if gt - born < PB["quest_offer_days"] * 1440:
+                continue
+            data = {k: v for k, v in ct.items() if k not in ("id", "status")}
+            data["arc"] = {"beat": "expired"}
+            _store().save_contract(_wid(), ct["id"], "closed", data)
+            news.append(f"{ct.get('giver_name', 'кто-то')} махнул рукой — займётся делом сам")
+    return news

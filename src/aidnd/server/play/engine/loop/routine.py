@@ -39,6 +39,13 @@ def _world_events() -> None:
     except Exception:  # noqa: BLE001 — board doesn't crash the world
         pass
     try:
+        from aidnd.server.play.engine.quests.pipeline import quest_morning
+        qn = quest_morning()
+        if qn:
+            _S["quest_news"] = (_S.get("quest_news") or [])[-3:] + qn
+    except Exception:  # noqa: BLE001 — no LLM / bad output → honest absence, morning continues
+        pass
+    try:
         if random.Random(f"caravan|{_gt() // 1440}|{_wid()}").random() < PB["caravan_chance"]:
             _merchant_restock(f"caravan|{_gt() // 1440}")
     except Exception:  # noqa: BLE001

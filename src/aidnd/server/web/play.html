@@ -1106,6 +1106,7 @@ function renderNpcCard(d){
     <div class="meter"><span class="ml">тепло</span>${bar(affF,'var(--gold)')}<span class="mv">${Math.round(affF*100)}%</span></div>
     <div class="meter"><span class="ml">доверие</span>${bar(trustF,'var(--green)')}<span class="mv">${Math.round(trustF*100)}%</span></div>
     <div class="meter"><span class="ml">страх</span>${bar(fearF,'var(--red)')}<span class="mv">${Math.round(fearF*100)}%</span></div>
+    ${d.gnaw?`<div class="kn" style="color:var(--dim)">— его гложет: ${esc(d.gnaw)}</div>`:''}
     <div class="subcap">известно</div>
     ${hist}
     <button class="end" onclick="closeNpcCard()">&#8592; назад</button>`;
@@ -1132,6 +1133,7 @@ async function talkNow(id){
       <div class="acts" style="justify-content:center;margin-top:6px"><button onclick="acceptContract('${ct.id}',this)">взяться</button></div></div>`);
   }
   npcMsg(id,n.line);
+  if(n.gnaw)push('sys',`<div class="hint" style="color:var(--dim)">— его гложет: ${esc(n.gnaw)}</div>`);
   const extras=[];
   if(n.crafter)extras.push(`<button onclick="commission()">&#9874; заказать: ${esc(n.recipe)}</button>`);
   (n.keys||[]).forEach(k=>extras.push(`<button data-k="${esc(k)}" onclick="askKey(this.dataset.k)">ключ: ${esc(k)}</button>`));

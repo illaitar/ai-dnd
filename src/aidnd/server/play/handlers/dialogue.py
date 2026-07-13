@@ -54,6 +54,29 @@ from aidnd.server.play.handlers.freeform import _say_aloud
 from aidnd.server.play.mechanics.contracts import _contract_offer, _contract_on_talk
 from aidnd.server.play.mechanics.items import _ROLE_NODE, _materialize_npc, _pc_coins
 
+_GNAW_BEATS = {"foreshadow", "offered", "active"}          # live-arc beats — not queued-pending/closed/expired
+_GNAW_STATUSES = ("queued", "offered", "board", "active")
+
+
+def _gnaw_for(npc: str) -> str | None:
+    """Card-level signal that `npc` is a live sift giver (severe playtest bug: the card read only
+    'спокойное' — zero visible clue). Foreshadow.open_lines() already feeds his TROUBLE into his mind
+    prompt (Fix D) — this is the cheap, honest CARD-level counterpart: the same foreshadow line
+    (or, failing that, the pitch's first clause) surfaced straight into the talk/card payload,
+    alongside the existing init/role/aff fields."""
+    for status in _GNAW_STATUSES:
+        for ct in _store().contracts(_wid(), status):
+            if ct.get("src") != "sift" or ct.get("giver") != npc:
+                continue
+            if (ct.get("arc") or {}).get("beat") not in _GNAW_BEATS:
+                continue
+            line = (ct.get("framer") or {}).get("foreshadow") or ct.get("pitch") or ""
+            if not line:
+                continue
+            return re.split(r"[.!?,]", line, maxsplit=1)[0].strip() or None
+    return None
+
+
 # Player's words signal interest in work/errands — gates the «Уговор» card reveal in say().
 _WORK_INTEREST_RE = re.compile(
     # asking about WORK/business — deliberately NOT bare "дел[оа]" (that matches the greeting "как дела")
@@ -160,6 +183,7 @@ async def talk(request: Request):
         "line": _voice(p, rel, "greet", has_offer=has_offer, offer_pitch=offer_pitch,
                        twist_line=gnl, active_pitch=active_pitch),
         "twist_line": gnl,
+        "gnaw": _gnaw_for(npc),
     }
 
 
@@ -271,4 +295,5 @@ async def npc_card(request: Request):
             "fear": round(rel.get("fear", 0.0), 2),
         },
         "history": history,
+        "gnaw": _gnaw_for(npc),
     }

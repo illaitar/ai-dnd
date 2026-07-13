@@ -186,11 +186,75 @@ def test_occupied_strong_candidate_interrupts(town, monkeypatch):
     assert board and board[0]["id"] == live[0]["id"]
 
 
+def test_occupied_strong_interrupt_framer_fails_keeps_incumbent(town, monkeypatch):
+    """(IMPORTANT fix) bump_weakest() must fire only after the interrupting seed's framer succeeds:
+    if the framer raises LLMUnavailable mid-interrupt, the incumbent must NOT have been demoted —
+    otherwise the window ends the morning with zero live offers and the demoted row is orphaned."""
+    P.quest_morning()
+    first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
+    assert first["giver"] == "npc:dunn"
+
+    orig_score = P.salience.score
+
+    def _boost(seed, ctx):
+        s = orig_score(seed, ctx)
+        if seed["pattern"] == "broken_promise":
+            s = seed["score"] = s * 1000.0               # dominates any k×in-flight threshold
+        return s
+
+    monkeypatch.setattr(P.salience, "score", _boost)
+
+    class _FramerDownStub(_Stub):
+        def call(self, role, messages, **kw):
+            sys = messages[0]["content"]
+            if "редактор" not in sys:                     # framer branch (judge already ranked it)
+                from aidnd.inference.client import LLMUnavailable
+                raise LLMUnavailable("no model")
+            return super().call(role, messages, **kw)
+
+    monkeypatch.setattr(core, "_model", lambda: _FramerDownStub())
+    news = P.quest_morning()
+    assert not any("зреет дело" in n for n in news)
+
+    still_offered = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
+    assert still_offered["id"] == first["id"]
+    assert still_offered["arc"]["beat"] == "offered"          # never bumped
+
+    offered = [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"]
+    board = [c for c in town.contracts(core._wid(), "board") if c.get("src") == "sift"]
+    assert len(offered + board) == 1                          # exactly one live row, no orphan
+    assert not [c for c in town.contracts(core._wid(), "queued") if c.get("src") == "sift"]
+
+
+def test_expire_composts_stale_bumped_row_but_not_fresh(town):
+    """(IMPORTANT fix) foreshadow-pending queued rows (bump_weakest's demoted incumbents) leak
+    forever unless _expire_stale composts them too: a row bumped long ago closes on the next check;
+    a freshly bumped row survives untouched."""
+    gt = core._gt()
+    old_cid = f"ct:sift:npc:dunn:{gt - (core.PB['quest_offer_days'] + 1) * 1440}"
+    town.save_contract(core._wid(), old_cid, "queued",
+                       {"src": "sift", "giver": "npc:dunn", "giver_name": "Дунн Ли",
+                        "arc": {"beat": "foreshadow-pending"},
+                        "seed": {"score": 1.0, "pattern": "kin_debt"}})
+    fresh_cid = f"ct:sift:npc:marta:{gt}"
+    town.save_contract(core._wid(), fresh_cid, "queued",
+                       {"src": "sift", "giver": "npc:marta", "giver_name": "Марта Ли",
+                        "arc": {"beat": "foreshadow-pending"},
+                        "seed": {"score": 1.0, "pattern": "broken_promise"}})
+    news = P._expire_stale()
+    assert any("протух" in n or "сам" in n for n in news)
+    closed = next(c for c in town.contracts(core._wid(), "closed") if c["id"] == old_cid)
+    assert closed["arc"]["beat"] == "expired"
+    still_queued = next(c for c in town.contracts(core._wid(), "queued") if c["id"] == fresh_cid)
+    assert still_queued["arc"]["beat"] == "foreshadow-pending"
+
+
 def test_bumped_contract_resurfaces_when_window_frees(town, monkeypatch):
     """(c) after the interrupt, composting the interrupter frees the window; the next morning the
     bumped Дунн material comes back through the ordinary sift/judge/framer path (the code does not
     keep a literal queued-row-replay — Task 14 scope — so this asserts the honest, actually-observed
-    behavior: a fresh Дунн offer surfaces again, and the still-waiting bumped row is untouched)."""
+    behavior: a fresh Дунн offer surfaces again. The old bumped row shares its birth gt with the
+    interrupted offer, so once the same quest_offer_days elapse it composts too — no orphan leak."""
     P.quest_morning()
     first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
 
@@ -217,8 +281,9 @@ def test_bumped_contract_resurfaces_when_window_frees(town, monkeypatch):
     assert len(live) == 1 and live[0]["giver"] == "npc:dunn"        # Дунн's material re-surfaced
     assert live[0]["id"] != first["id"]                             # via a fresh sift, not a row replay
 
-    still_bumped = next(c for c in town.contracts(core._wid(), "queued") if c["id"] == first["id"])
-    assert still_bumped["arc"]["beat"] == "foreshadow-pending"      # the old bumped row is untouched
+    old_bumped = next(c for c in town.contracts(core._wid(), "closed") if c["id"] == first["id"])
+    assert old_bumped["arc"]["beat"] == "expired"                   # composted, not left orphaned
+    assert not [c for c in town.contracts(core._wid(), "queued") if c["id"] == first["id"]]
 
 
 def test_llm_unavailable_in_quest_morning_returns_no_offer(town, monkeypatch):

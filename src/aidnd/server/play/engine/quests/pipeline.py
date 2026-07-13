@@ -213,8 +213,6 @@ def quest_morning() -> list[str]:
     admitted = director.admit(kept)                  # window/interrupt decision (replaces [:1])
     if admitted is None:
         return news
-    if occupied:
-        director.bump_weakest()                       # interrupt fired — incumbent returns to waiting
     seed = admitted
     try:
         art = framing.framer(seed, _allowed(seed), core._model())
@@ -245,6 +243,9 @@ def quest_morning() -> list[str]:
             "src": "sift", "seed": seed, "arc": {"beat": "foreshadow"}, "roles": roles,
             "done_any": bridge.make_done_any(m),
             "framer": art, "dc": c["dc"]}
+    if occupied:
+        director.bump_weakest()                       # everything that could fail has succeeded —
+                                                        # only now demote the incumbent to waiting
     _store().save_contract(_wid(), cid, "queued", data)
     _store().flag_set(_wid(), f"qrecent|{seed['pattern']}",
                       str(int(_store().flag_get(_wid(), f"qrecent|{seed['pattern']}") or 0) + 1))
@@ -267,12 +268,19 @@ def _surface(cid: str, ct: dict) -> None:
 
 def _expire_stale() -> list[str]:
     """Compost: an emergent offer unaccepted for quest_offer_days closes; the giver keeps his agenda
-    (he acts on it himself → new deeds → next sift). Private grief never leaks to a public board."""
+    (he acts on it himself → new deeds → next sift). Private grief never leaks to a public board.
+
+    Also composts bumped rows ('queued', arc.beat='foreshadow-pending'): bump_weakest() only demotes
+    them out of the director's window — nothing else ever re-surfaces or closes them, so without this
+    they'd sit forever as orphaned rows. Same age/compost semantics as a live offer; the giver keeps
+    his agenda either way."""
     gt, news = _gt(), []
-    for status in ("offered", "board"):
+    for status in ("offered", "board", "queued"):
         for ct in _store().contracts(_wid(), status):
             if ct.get("src") != "sift":
                 continue
+            if status == "queued" and (ct.get("arc") or {}).get("beat") != "foreshadow-pending":
+                continue                              # freshly queued (not yet surfaced) — leave alone
             try:
                 born = int(str(ct["id"]).rsplit(":", 1)[-1])
             except (ValueError, IndexError):

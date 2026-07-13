@@ -114,6 +114,57 @@ async def guild_redeem(request: Request):
     }
 
 
+def _take_incident(job_or_inc: dict) -> None:
+    """Guild-board take bookkeeping for a lair-clear OR city-incident job: active contract +
+    seen-mark (incidents with a bid) + journal accept beat. Shared by board_take (job dict from
+    _guild_board(), keys: id/lair/name/cr/reward/incident/bid/kind/giver_name) and delve's
+    inc| branch (raw inc dict from incidents_active(), keys: id/title/cr/reward/bid/goal/patron)
+    — reconciled here so both entry points leave the same trace, whichever shape called it."""
+    if "lair" in job_or_inc:                            # job dict from _guild_board(): id
+        inc_id, jid = job_or_inc["lair"], job_or_inc["id"]  # already "ct:guild:.."/"ct:inc:.."
+    else:                                                # raw inc dict (incidents_active())
+        inc_id, jid = job_or_inc["id"], f"ct:inc:{job_or_inc['id']}"
+    name = job_or_inc.get("name") or job_or_inc.get("title")
+    reward = job_or_inc.get("reward", 4)
+    bid = job_or_inc.get("bid")
+    giver_name = job_or_inc.get("giver_name")
+    if giver_name is None:
+        people = _S.get("people") or {}
+        pn = people.get(job_or_inc.get("patron"))
+        giver_name = pn.name if pn else None
+    gb = _guild_bid()
+    _store().save_contract(
+        _wid(),
+        jid,
+        "active",
+        {
+            "giver": "guild",
+            "giver_name": _binfo(gb)["name"] if gb else "Гильдия",
+            "kind": "clear",
+            "want": None,
+            "where": name,
+            "target": inc_id,
+            "target_name": name,
+            "reward": reward,
+            "reward_item": None,
+            "reward_name": None,
+            "pitch": "",
+            "why": "доска гильдии",
+        },
+    )
+    _pc_remember(f"взял с доски гильдии заказ: {name} (CR {job_or_inc.get('cr')}) "
+                 f"за {reward} зм", 0.5)
+    if bid:                                             # F5 — taking the job reveals its building
+        from aidnd.server.play.engine.pc.hero import _mark_seen
+
+        _mark_seen(bid, prov="told", text=f"взялся за дело: {name} — знаю, где искать")
+    from aidnd.server.play.engine.journal import j_beat
+
+    kind = job_or_inc.get("kind") or job_or_inc.get("goal")
+    j_beat(jid, "accept", {"giver_name": giver_name or "гильдия", "kind": kind,
+                           "what": name, "reward": reward})
+
+
 @router.post("/api/play/board_take")
 async def board_take(request: Request):
     _play()
@@ -131,38 +182,7 @@ async def board_take(request: Request):
     gate = _guild_gate(job["cr"])  # badge · rank by rank · lie check
     if gate and gate.get("error"):
         return {"error": gate["error"], "dice": gate.get("dice"), "status": _guild_status()}
-    gb = _guild_bid()
-    _store().save_contract(
-        _wid(),
-        jid,
-        "active",
-        {
-            "giver": "guild",
-            "giver_name": _binfo(gb)["name"] if gb else "Гильдия",
-            "kind": "clear",
-            "want": None,
-            "where": job["name"],
-            "target": job["lair"],
-            "target_name": job["name"],
-            "reward": job["reward"],
-            "reward_item": None,
-            "reward_name": None,
-            "pitch": "",
-            "why": "доска гильдии",
-        },
-    )
-    _pc_remember(
-        f"взял с доски гильдии заказ: {job['name']} (CR {job['cr']}) за {job['reward']} зм", 0.5
-    )
-    if job.get("incident") and job.get("bid"):         # F5 — taking the job reveals its building
-        from aidnd.server.play.engine.pc.hero import _mark_seen
-
-        _mark_seen(job["bid"], prov="told",
-                   text=f"взялся за дело: {job['name']} — знаю, где искать")
-    from aidnd.server.play.engine.journal import j_beat
-
-    j_beat(jid, "accept", {"giver_name": job.get("giver_name") or "гильдия", "kind": job.get("kind"),
-                           "what": job.get("name"), "reward": job.get("reward")})
+    _take_incident(job)
     stolen = bool(gate and gate.get("ok_stolen"))  # passed with someone else's badge — credit doesn't count
     return {
         "taken": True,
@@ -185,6 +205,9 @@ async def delve(request: Request):
             return {"error": "там уже разобрались"}
         if _pc_hp() <= 1:
             return {"error": "ты еле стоишь — сперва отлежись"}
+        taken = any(c.get("target") == inc["id"] for c in _store().contracts(_wid(), "active"))
+        if not taken:                                  # delved straight in — auto-take the job
+            _take_incident(inc)
         return incident_delve(inc)
     l = next((x for x in _lairs() if x["id"] == lid), None)
     if not l:

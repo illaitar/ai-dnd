@@ -182,8 +182,8 @@ flowchart TD
 | 1 | **home** | `placements_for(wid)` row `home` node → its building | `живу` | one entry |
 | 2 | **work** | placement `work` bid → `_binfo` | `работаю` | one entry, has `goods` from kind |
 | 3 | **routine venues** | approx: work + nearest tavern/temple/market via `worldsim._place_index`/`_candidates` (see §4.3) | `хожу` | 1–3 entries, bounded to his district |
-| 4 | **town landmarks** | `pool_buildings` filtered to landmark kinds (taverns, market, wells, guild, temple, gates, smithy) — `society/places.py:43` `PLACES` detect + `_TYPE_ROLE` | `все знают` | everyone knows these |
-| 5 | **kin & friend homes** | kin: `_fam(name)` surname match (`quests/seeds.py:28`); friend: `_aff(p,other) > PB[geo_friend_aff]=0.3` (`seeds.py:32`) → their `home` | `свои` | homes only |
+| 4 | **town landmarks** | `pool_buildings` filtered to landmark kinds (taverns, market, wells, guild, temple, gates, smithy, mills) — `society/places.py:43` `PLACES` detect + `_TYPE_ROLE` | `все знают` | everyone knows these |
+| 5 | **kin, friend & coworker homes** | kin: `_fam(name)` surname match (`quests/seeds.py:28`); friend: `_aff(p,other) > PB[geo_friend_aff]=0.3` (`seeds.py:32`); coworker: shared non-empty `work` bid → their `home` | `свои` | homes only (T1-review: coworker закреплён как третий источник) |
 | 6 | **neighbors** | buildings whose interior node is within `PB[geo_neighbor_hops]=2` graph hops of his home node | `соседи` | homes near home |
 
 Rule 4 `goods` hints derive from kind: кузница → «оружие, доспехи»; лавка/рынок → market wares; таверна → «выпивка, слухи»; храм → «свечи, благословение». **NOT in the set:** arbitrary houses, hidden places — referral covers those gaps (texture, not a bug).

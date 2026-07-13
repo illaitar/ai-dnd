@@ -173,14 +173,11 @@ async def contract_accept(request: Request):
     if ct.get("kind") == "deliver" and ct.get("deliver_item"):  # package handed immediately
         _store().inv_move(_wid(), ct["deliver_item"], "pc")
         note = f"«{ct['want']}» ложится в твою сумку — доставь по адресу."
-    _pc_remember(
-        f"взялся за дело для {ct.get('giver_name', '')}: {ct.get('kind')} — "
-        f"{ct.get('want') or ct.get('target_name')} ({ct.get('where', '')})",
-        0.6,
-        about=[ct["giver"]],
-    )
-    j_quest("told", f"взялся за дело для {ct.get('giver_name', '')}: {ct.get('kind')} — "
-                    f"{ct.get('want') or ct.get('target_name')} ({ct.get('where', '')})", cid)
+    where = ct.get("where") or ""
+    summary = (f"взялся за дело для {ct.get('giver_name', '')}: {ct.get('kind')} — "
+               f"{ct.get('want') or ct.get('target_name')}" + (f" ({where})" if where else ""))
+    _pc_remember(summary, 0.6, about=[ct["giver"]])
+    j_quest("told", summary, cid)
     return {"accepted": True, "note": note}
 
 

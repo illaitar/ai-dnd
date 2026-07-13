@@ -167,8 +167,11 @@ def framer(seed: dict, allowed: set, manager) -> dict | None:
         return None
     # summary IS the giver's real life-goal (plan_agenda-authored, sim truth) — write ABOUT it, not
     # just around the giver's name; the judge's `why` is flavor-only fallback when a seed carries none.
+    # advertise only Cyrillic material — raw predicate keywords (wealth/have) stay in `allowed`
+    # for validation but must not be parroted into a Russian pitch («помоги накопить wealth»)
+    advertised = sorted(a for a in allowed if re.search(r"[а-яА-ЯёЁ]", a))
     user = (f"ЗАКАЗЧИК: {seed['giver_name']}. Суть: {seed.get('summary') or seed.get('why', '')}\n"
-            f"МОЖНО НАЗЫВАТЬ: {', '.join(sorted(allowed))}.")
+            f"МОЖНО НАЗЫВАТЬ: {', '.join(advertised or sorted(allowed))}.")
     for _attempt in range(2):                      # generate → validate → regenerate once → skip
         resp = manager.call("narrator",
                             [{"role": "system", "content": _FRAMER_SYS},

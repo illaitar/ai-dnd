@@ -17,6 +17,9 @@ PB = {
     "start_gt": 19 * 60 + 40,
     "start_coins": 12,
     "step_min": 1,
+    # geo (NPC geographic knowledge) — geometric/social tunables, NOT willingness
+    "geo_neighbor_hops": 2,     # a home within this many graph hops of yours = "сосед"
+    "geo_friend_aff": 0.3,      # affinity above this = friend (reuses seeds.py:203 literal)
     "talk_min": 2,
     "loot_min": 2,
     "trade_min": 3,

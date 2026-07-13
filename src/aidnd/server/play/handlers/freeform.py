@@ -126,6 +126,30 @@ def _say_aloud(text: str, sc: dict) -> dict:
     return out
 
 
+_TAKE_STOP = {
+    "беру", "бери", "взять", "поднимаю", "подбираю", "хватаю", "предмет", "вещь", "штука",
+    "полезное", "ценное", "какой", "нибудь", "стола", "стол", "пола", "пол", "стойки", "земли",
+}
+
+
+def _content_tokens(text: str) -> list:
+    """Lowercased ≥4-char tokens from a raw player phrase with generic take/location words
+    (and their declensions) dropped by stem-prefix match against _TAKE_STOP — what's left is
+    what the player actually NAMED, if anything."""
+    toks = re.findall(r"[а-яёa-z0-9]+", (text or "").lower())
+    return [w for w in toks if len(w) >= 4 and not any(w.startswith(s[:4]) for s in _TAKE_STOP)]
+
+
+def _stem_hits_name(tokens: list, name: str) -> bool:
+    """A named token from the player's phrase stem-matches (≥4-char common prefix) some word
+    of the resolved item's name — declensions pass («кружку»↔«кружка»), unrelated names don't
+    («перстень»↔«тряпка»)."""
+    name_toks = re.findall(r"[а-яёa-z0-9]+", (name or "").lower())
+    return any(
+        len(t) >= 4 and len(n) >= 4 and t[:4] == n[:4] for t in tokens for n in name_toks
+    )
+
+
 def _attempt(intent: dict, sc: dict) -> dict:
     """Single resolver for all player actions: gates, rolls, transfers, memory, consequences.
     Returns {narr:[strings], open_talk?, refresh?}."""
@@ -191,6 +215,13 @@ def _attempt(intent: dict, sc: dict) -> dict:
         if iid in imap.values():
             it = _store().get_item(iid) or {}
             nm = it.get("name", "вещь")
+            raw_text = str(intent.get("_text") or "")
+            named = _content_tokens(raw_text)
+            if named and not _stem_hits_name(named, nm):
+                # player named a SPECIFIC thing that doesn't stem-match what the parser
+                # resolved to («поднимаю золотой перстень» → «Тряпка засаленная») — don't
+                # substitute; fall through to the honest take-refusal below.
+                return _attempt({**intent, "item": None, "_text": raw_text}, sc)
             wrk = next((wp for wp in (lv.get("workers") or {}) if wp in people), None)
             caught = False
             if wrk and manner == "stealthily":       # stealthily with owner present — dexterity against eyes

@@ -72,3 +72,42 @@ def test_take_null_item_refused(world, monkeypatch):
     res = freeform._attempt({"verb": "take", "item": None, "_text": "беру что-нибудь"}, {})
     assert res.get("fail") is True
     assert not stub.called
+
+
+def test_named_mismatch_refused_without_transfer(world, monkeypatch):
+    """F7b: parser resolved item=it:mug (a REAL zone item), but the player's raw text names a
+    completely different object («золотой перстень») — code must NOT substitute the mug; this
+    currently transfers (red before the F7b fix)."""
+    stub = _Stub()
+    monkeypatch.setattr(freeform, "_model", lambda: stub, raising=False)
+    res = freeform._attempt(
+        {"verb": "take", "item": "it:mug", "_text": "поднимаю с пола золотой перстень"}, {}
+    )
+    assert res.get("fail") is True
+    assert not stub.called
+    assert "холодную рукоять" not in " ".join(res["narr"])
+    assert world.inventory(1, "pc") == []
+
+
+def test_generic_take_phrase_still_transfers(world, monkeypatch):
+    """A generic phrase naming no specific object must keep delivering whatever's there."""
+    stub = _Stub()
+    monkeypatch.setattr(freeform, "_model", lambda: stub, raising=False)
+    res = freeform._attempt(
+        {"verb": "take", "item": "it:mug", "_text": "беру предмет со стола"}, {}
+    )
+    assert any(r["item_id"] == "it:mug" for r in world.inventory(1, "pc"))
+    assert not res.get("fail")
+    assert not stub.called
+
+
+def test_declension_form_still_transfers(world, monkeypatch):
+    """«кружку» (accusative) must still stem-match «кружка» — declensions aren't a mismatch."""
+    stub = _Stub()
+    monkeypatch.setattr(freeform, "_model", lambda: stub, raising=False)
+    res = freeform._attempt(
+        {"verb": "take", "item": "it:mug", "_text": "беру кружку со стойки"}, {}
+    )
+    assert any(r["item_id"] == "it:mug" for r in world.inventory(1, "pc"))
+    assert not res.get("fail")
+    assert not stub.called

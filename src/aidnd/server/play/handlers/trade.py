@@ -44,6 +44,18 @@ def _merchant(people, npc):
     return p if (p and p.role in _ROLE_NODE) else None
 
 
+def _wares_price(it: dict, seen: dict, rel: dict, greed: float) -> int:
+    """Sell-price arithmetic — shared by wares() and dialogue's price_line so the two paths
+    literally cannot drift apart (the merchant's spoken prices == what /wares actually charges)."""
+    return max(
+        1,
+        round(
+            rarity_price(seen["worth"], it.get("rarity", "common"))
+            * (PB["buy_base"] + PB["buy_greed"] * greed + PB["buy_aff"] * rel.get("affinity", 0))
+        ),
+    )
+
+
 @router.post("/api/play/askkey")
 async def askkey(request: Request):
     """Request an NPC's key. Gated by mechanics: affinity + trust vs. greed/caution — a cashier won't give a stranger their key (honest; path to obtain — theft/trade, phase 2)."""
@@ -184,17 +196,7 @@ def wares(npc: str):
         if not it or it["kind"] in ("key", "valuable"):
             continue  # keys and PERSONAL valuables are not for sale (those — steal)
         seen = _npc_sees(it, _npc_cap(p), npc)
-        price = max(
-            1,
-            round(
-                rarity_price(seen["worth"], it.get("rarity", "common"))
-                * (
-                    PB["buy_base"]
-                    + PB["buy_greed"] * greed
-                    + PB["buy_aff"] * rel.get("affinity", 0)
-                )
-            ),
-        )
+        price = _wares_price(it, seen, rel, greed)
         out.append({**_item_card(it, set()), "price": price})
     return {"items": out, "coins": _pc_coins()}
 

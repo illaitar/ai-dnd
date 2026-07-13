@@ -54,3 +54,23 @@ def test_no_geo_line_leaves_prompt_clean(wired, monkeypatch):
     V._voice(_npc(), {"affinity": 0.2}, "reply", "как дела?")
     sys = stub.calls[-1][0]["content"]
     assert "посоветуй дорогу" not in sys
+
+
+def test_price_line_injected(wired, monkeypatch):
+    stub = _Capture()
+    monkeypatch.setattr(core, "_model", lambda: stub)
+    pline = "ночлег: 2 зм за ночь"
+    line = V._voice(_npc(), {"affinity": 0.2}, "reply", "сколько стоит ночлег?",
+                    price_line=pline)
+    assert line == "Ступай к кузнице."
+    sys = stub.calls[-1][0]["content"]
+    assert "ЦЕНЫ (это ИСТИНА от кода" in sys
+    assert pline in sys
+
+
+def test_no_price_line_leaves_prompt_clean(wired, monkeypatch):
+    stub = _Capture()
+    monkeypatch.setattr(core, "_model", lambda: stub)
+    V._voice(_npc(), {"affinity": 0.2}, "reply", "как дела?")
+    sys = stub.calls[-1][0]["content"]
+    assert "ЦЕНЫ (это ИСТИНА от кода" not in sys

@@ -2,7 +2,8 @@
 
 Key functions
 -------------
-_voice(p, rel, kind, player_text=None, has_offer=False, offer_pitch=None, twist_line=None) -> str :
+_voice(p, rel, kind, player_text=None, has_offer=False, offer_pitch=None, twist_line=None,
+       active_pitch=None, geo_line=None, price_line=None) -> str :
     NPC speaks in-character (LLM narrator) — folds in persona, memory of the player, grudges and
     world-lookup facts; records the player's tone. has_offer hints (greet only) that the NPC has
     a pending errand to mention. offer_pitch — the NPC's REAL pending errand (emergent sift
@@ -13,7 +14,10 @@ _voice(p, rel, kind, player_text=None, has_offer=False, offer_pitch=None, twist_
     is FORCED into the opening words (spoken once, then popped by the caller). active_pitch — the
     pitch of a sift quest the giver has ALREADY accepted (status 'active'): unlike offer_pitch (a
     request not yet taken) this is framed as a deal in progress, so the giver keeps his own quest in
-    mind instead of forgetting it and improvising unrelated tasks.
+    mind instead of forgetting it and improvising unrelated tasks. price_line — code-computed
+    lodging/wares prices (same arithmetic as /wares) for the building the player is standing in,
+    ONLY when the NPC actually works there; the voice may phrase it in character but must not
+    change the numbers.
 _topics_for(p) -> list : Conversation topics — from PERSONA (rumors/wants), not from role table.
 _spurns(p) -> bool : Doesn't want to deal with you: enmity or fresh targeted anger.
 _DM_SYS : System prompt for the DM-narrator fallback (non-mechanical player actions).
@@ -51,6 +55,7 @@ _STANCE = {
 def _voice(
     p, rel, kind, player_text=None, has_offer: bool = False, offer_pitch: str | None = None,
     twist_line: str | None = None, active_pitch: str | None = None, geo_line: str | None = None,
+    price_line: str | None = None,
 ) -> str:
     from ..core import (  # lazy: core.py imports narrator.voice at module top
         _binfo,
@@ -151,6 +156,11 @@ def _voice(
         bits.append(
             f"ГЕО-ФАКТ (это ИСТИНА от кода — передай суть, НЕ меняй направление, минуты и ориентир, "
             f"не выдумывай своих): {geo_line}"
+        )
+    if price_line:  # code-computed prices — the voice wraps them in character but MUST NOT alter the numbers
+        bits.append(
+            f"ЦЕНЫ (это ИСТИНА от кода — назови эти числа, если зайдёт речь о цене/ночлеге; "
+            f"НЕ выдумывай другие): {price_line}"
         )
     if twist_line:  # a one-time emergent reveal — FORCE it into her opening words (spoken once)
         bits.append(

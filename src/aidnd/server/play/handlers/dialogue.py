@@ -49,8 +49,15 @@ from aidnd.server.play.engine.core import (
 from aidnd.server.play.engine.resolve import _voice
 from aidnd.server.play.engine.world import _play, _scene_dict, _world_tick_fast
 from aidnd.server.play.handlers.freeform import _say_aloud
+from aidnd.server.play.handlers.trade import _wares_price
 from aidnd.server.play.mechanics.contracts import _contract_offer, _contract_on_talk
-from aidnd.server.play.mechanics.items import _ROLE_NODE, _materialize_npc, _pc_coins
+from aidnd.server.play.mechanics.items import (
+    _ROLE_NODE,
+    _materialize_npc,
+    _npc_cap,
+    _npc_sees,
+    _pc_coins,
+)
 
 _GNAW_BEATS = {"foreshadow", "offered", "active"}          # live-arc beats — not queued-pending/closed/expired
 _GNAW_STATUSES = ("queued", "offered", "board", "active")
@@ -73,6 +80,35 @@ def _gnaw_for(npc: str) -> str | None:
                 continue
             return re.split(r"[.!?,]", line, maxsplit=1)[0].strip() or None
     return None
+
+
+def _price_line(p, cr2b, loc) -> str | None:
+    """Ground price/lodging talk in code truth (same arithmetic as /wares) — but ONLY for the NPC
+    who actually works at the building the player is standing in; random townsfolk keep free-speech
+    gossip, ungrounded (no injection, no lodging/wares talk)."""
+    bid = (cr2b or {}).get(loc)
+    if not bid or p.work != bid:
+        return None
+    clauses = []
+    data = (_store().get_building(_wid(), bid) or {}).get("data") or {}
+    if "lodging" in (data.get("services") or []):
+        clauses.append(f"ночлег: {PB['rest_cost']} зм за ночь")
+    if p.role in _ROLE_NODE:
+        _materialize_npc(p.id, "visible")
+        _materialize_npc(p.id, "pockets")
+        rel = p.state.relationships.get(PLAYER, {"affinity": 0.0})
+        greed = p.state.config.traits.get("greed", 0.5)
+        wares = []
+        for r in _store().inventory(_wid(), p.id):
+            it = _store().get_item(r["item_id"])
+            if not it or it["kind"] in ("key", "valuable"):
+                continue  # keys and personal valuables are not for sale — same as /wares
+            seen = _npc_sees(it, _npc_cap(p), p.id)
+            price = _wares_price(it, seen, rel, greed)
+            wares.append(f"{it['name']}: {price} зм")
+        if wares:
+            clauses.append(", ".join(wares[:3]))
+    return "; ".join(clauses) or None
 
 
 # Player's words signal interest in work/errands — gates the «Уговор» card reveal in say().
@@ -181,12 +217,12 @@ async def talk(request: Request):
 
 @router.post("/api/play/say")
 async def say(request: Request):
-    _city, people, crof_, _cr2b, loc_ = _play()
+    _city, people, crof_, cr2b, loc_ = _play()
     b = await request.json()
     npc = b.get("npc")
     text = str(b.get("text", ""))
     if not npc:  # no addressee — speak aloud to whoever's in earshot (same path as /act freeform speech)
-        sc = _scene_dict(_city, people, crof_, _cr2b, loc_)
+        sc = _scene_dict(_city, people, crof_, cr2b, loc_)
         res = _say_aloud(text, sc)
         _pc_remember(f"я: {text[:80]}", 0.2)
         t = _world_tick_fast()  # crowd reaction defers to the client's next /live (streamed)
@@ -228,8 +264,9 @@ async def say(request: Request):
             from aidnd.server.play.engine.pc.hero import _mark_seen
 
             _mark_seen(rv["bid"], prov="told", text=rv["text"])
+    price_line = _price_line(p, cr2b, loc_)
     line = _voice(p, rel, "reply", text, offer_pitch=offer_pitch, active_pitch=active_pitch,
-                  geo_line=geo_line)
+                  geo_line=geo_line, price_line=price_line)
     tone = _S.get("last_tone", "neutral")  # tone of player's words — from NPC's own lips
     if tone == "friendly":
         rel["affinity"] = min(1.0, rel["affinity"] + PB["tone_friendly_aff"])

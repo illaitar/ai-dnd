@@ -150,12 +150,39 @@ def deeds_list(limit: int = 12):
 
 
 @router.get("/api/play/journal")
-def journal_endpoint(kind: str | None = None, limit: int = 200):
-    """Player chronicle «Хроника»: journal rows newest-first (append-only capture; no LLM).
-    Optional kind ∈ person|event|quest|place filter; limit hard-capped at 500."""
+def journal_endpoint(limit: int = 500):
+    """Player chronicle «Хроника → дела»: quest rows grouped into per-quest first-person threads.
+    Returns {dela:[{cid,title,giver,status,thread:[{gt,beat,text}]}]}, дела newest-beat-first,
+    each thread oldest-beat-first (reads top-to-bottom as a story). No LLM on the read path."""
     _play()
     from aidnd.server.play.engine.core import _store, _wid
-    return {"entries": _store().journal_list(_wid(), kind=kind, limit=min(int(limit), 500))}
+    from aidnd.server.play.engine.journal import purge_legacy_once
+    wid = _wid()
+    purge_legacy_once(wid)                                    # one-shot legacy compost (guard flag)
+    rows = _store().journal_list(wid, kind="quest", limit=min(int(limit), 1000))
+    cmap = {c["id"]: c for c in _store().contracts(wid)}      # live contracts across ALL statuses
+    groups: dict = {}
+    for r in rows:
+        cid = (r.get("refs") or [None])[0]
+        if cid:
+            groups.setdefault(cid, []).append(r)
+    _KD = {"bring": "добыть", "deliver": "отнести", "visit": "наведаться",
+           "befriend": "расположить к себе", "clear": "зачистить"}
+    dela = []
+    for cid, thread in groups.items():
+        thread.sort(key=lambda r: r["gt"])                   # story order
+        c = cmap.get(cid) or {}
+        giver = c.get("giver_name") or ""
+        kind_ru = _KD.get(c.get("kind"), "дело")
+        title = (f"{kind_ru} для {giver}" if giver
+                 else (thread[0]["text"][:40] if thread else cid))
+        dela.append({
+            "cid": cid, "title": title, "giver": giver,
+            "status": c.get("status", "unknown"),
+            "thread": [{"gt": r["gt"], "beat": r["prov"], "text": r["text"]} for r in thread],
+        })
+    dela.sort(key=lambda g: g["thread"][-1]["gt"] if g["thread"] else 0, reverse=True)
+    return {"dela": dela}
 
 
 @router.post("/api/play/newworld")

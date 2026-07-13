@@ -50,3 +50,36 @@ def test_prompt_injects_foreshadow_like_oath():
     ctx = {"foreshadow": {"npc:dunn": "Тебя гложет долг Марты."}}
     text = _build_prompt_probe(npc, ctx)
     assert "Тебя гложет долг Марты." in text
+
+
+def _open_sift_ct(st, status, giver="npc:dunn"):
+    st.save_contract(core._wid(), f"ct:sift:{giver}:1", status,
+                     {"src": "sift", "giver": giver, "giver_name": "Дунн",
+                      "pitch": "выкупить долю у ростовщика, пока не отняли",
+                      "arc": {"beat": status}, "roles": {"giver": giver}})
+
+
+def test_open_lines_colors_giver_for_whole_open_arc(monkeypatch):
+    """FIX D: an OPEN sift quest (offered/active) keeps gnawing at its giver's mind — the trouble
+    line reaches build_prompt for the whole arc, not just the 2-tick foreshadow beat. A non-giver
+    present in the scene stays untouched."""
+    from aidnd.mind.llm_agent import _build_prompt_probe
+    st = _store(monkeypatch)
+    for status in ("offered", "active"):
+        _open_sift_ct(st, status)
+        lines = FS.open_lines(["npc:dunn", "npc:bystander"])
+        assert lines["npc:dunn"].startswith("выкупить долю")
+        assert "npc:bystander" not in lines               # only the giver is coloured
+        giver = NpcState.from_config(NpcConfig(id="npc:dunn", name="Дунн"))
+        assert "выкупить долю" in _build_prompt_probe(giver, {"foreshadow": lines})
+        st.save_contract(core._wid(), "ct:sift:npc:dunn:1", "closed",
+                         {"src": "sift", "giver": "npc:dunn"})  # clear before next status
+
+
+def test_open_lines_ignores_absent_giver_and_closed_quest(monkeypatch):
+    st = _store(monkeypatch)
+    _open_sift_ct(st, "active")
+    assert FS.open_lines(["npc:other"]) == {}              # giver not in the scene → no line
+    st.save_contract(core._wid(), "ct:sift:npc:dunn:1", "done",
+                     {"src": "sift", "giver": "npc:dunn"})
+    assert FS.open_lines(["npc:dunn"]) == {}               # closed → no longer gnaws

@@ -932,6 +932,9 @@ def _live_tick(people) -> tuple:
                 oaths_due.add(d_["actor"])
     from aidnd.server.play.engine.quests import foreshadow as _fore
     fore = _fore.lines(order)                          # {pid: line} for cast present this tick
+    fore_impulse = set(fore)                            # ONLY the foreshadow beat spikes the impulse
+    for _gpid, _gln in _fore.open_lines(order).items():  # offered/active givers: LINE for the whole
+        fore.setdefault(_gpid, _gln)                     # open arc (no impulse spike — like oaths)
     impulses: dict = {}
     for pid in order:
         st = w.npc_minds[pid]
@@ -943,7 +946,7 @@ def _live_tick(people) -> tuple:
             imp, why = 4.0, "долг ответа"
         elif pid in oaths_due:
             imp, why = 2.6, "слово"                    # deadline reached — given promise pulls
-        elif pid in fore:
+        elif pid in fore_impulse:
             imp, why = 2.4, "тень дела"                 # foreshadow pulls, below a live event/debt
         elif max(st.emotion.get("fear", 0), st.emotion.get("anger", 0)) >= 0.5:
             imp, why = 3.0, "эмоция"

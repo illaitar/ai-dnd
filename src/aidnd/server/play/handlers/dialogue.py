@@ -125,8 +125,12 @@ async def talk(request: Request):
     has_offer = bool(pending.get(npc))
     offer_pitch = (pending.get(npc) or {}).get("pitch") or None
     gnl = None
+    active_pitch = None
     for _ct in _store().contracts(_wid(), "active"):
-        if _ct.get("src") == "sift" and _ct.get("giver") == npc and _ct.get("giver_next_line"):
+        if _ct.get("src") != "sift" or _ct.get("giver") != npc:
+            continue
+        active_pitch = active_pitch or _ct.get("pitch")  # he's already agreed — keep his own quest in mind
+        if _ct.get("giver_next_line"):
             gnl = _ct["giver_next_line"]
             data = {k: v for k, v in _ct.items() if k not in ("id", "status")}
             data.pop("giver_next_line", None)           # spoken once
@@ -154,7 +158,7 @@ async def talk(request: Request):
         "gt": _gt(),
         "topics": _topics_for(p),
         "line": _voice(p, rel, "greet", has_offer=has_offer, offer_pitch=offer_pitch,
-                       twist_line=gnl),
+                       twist_line=gnl, active_pitch=active_pitch),
         "twist_line": gnl,
     }
 
@@ -192,7 +196,12 @@ async def say(request: Request):
 
         stashed = emergent_offer(npc)
     offer_pitch = (stashed or {}).get("pitch") or None
-    line = _voice(p, rel, "reply", text, offer_pitch=offer_pitch)
+    active_pitch = None  # a quest he's ALREADY accepted (status 'active') — keep it in his mind
+    for _ct in _store().contracts(_wid(), "active"):
+        if _ct.get("src") == "sift" and _ct.get("giver") == npc and _ct.get("pitch"):
+            active_pitch = _ct["pitch"]
+            break
+    line = _voice(p, rel, "reply", text, offer_pitch=offer_pitch, active_pitch=active_pitch)
     tone = _S.get("last_tone", "neutral")  # tone of player's words — from NPC's own lips
     if tone == "friendly":
         rel["affinity"] = min(1.0, rel["affinity"] + PB["tone_friendly_aff"])

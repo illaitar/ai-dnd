@@ -32,3 +32,24 @@ def lines(order: list) -> dict:
             data["arc"] = arc
             _store().save_contract(_wid(), ct["id"], "queued", data)
     return out
+
+
+def open_lines(order: list) -> dict:
+    """{giver_pid: gnaw line} for sift quests still OPEN after the foreshadow beat (status 'offered'
+    or 'active' — the giver has surfaced/accepted the trouble but it is not yet CLOSED). No-mechanical-
+    gates: the world piece (his real trouble) keeps coloring his mind for the whole open arc, so he
+    reads desperate, not calm. This is a LINE ONLY — no impulse spike (that stays foreshadow-only,
+    like oaths); the caller merges it into ctx without touching the impulse set."""
+    present = set(order)
+    out = {}
+    for status in ("offered", "active"):
+        for ct in _store().contracts(_wid(), status):
+            if ct.get("src") != "sift":
+                continue
+            giver = ct.get("giver")
+            if giver not in present:
+                continue
+            line = (ct.get("framer") or {}).get("foreshadow") or ct.get("pitch")
+            if line:
+                out.setdefault(giver, line)
+    return out

@@ -110,3 +110,47 @@ def test_talk_greeting_hint_also_grounded_in_the_real_pitch(wired, monkeypatch):
     assert stub.calls, "narrator LLM was never invoked"
     sys_content = stub.calls[-1][0]["content"]
     assert PITCH in sys_content
+
+
+def _active_sift_contract(st):
+    """A sift quest the giver has ALREADY accepted (status 'active') — emergent_offer() returns None
+    for it, so before FIX C the giver's voice forgot his own quest and improvised unrelated tasks."""
+    st.save_contract(
+        1, "ct:sift:npc:yuna:2", "active",
+        {"giver": "npc:yuna", "giver_name": "Юна Вересковый", "kind": "wealth", "src": "sift",
+         "pitch": PITCH, "reward": 12, "arc": {"beat": "active"}},
+    )
+
+
+def test_say_grounds_voice_in_the_accepted_active_pitch(wired, monkeypatch):
+    # FIX C: once a sift quest is ACTIVE the giver still keeps it in mind, framed as a deal in
+    # progress ("он уже взялся помочь тебе с …") rather than a fresh request.
+    st = wired
+    _active_sift_contract(st)
+    npc_obj = _npc()
+    _wire_dialogue(monkeypatch, npc_obj)
+    stub = _CaptureStub()
+    monkeypatch.setattr(core, "_model", lambda: stub)
+
+    asyncio.run(dlg_mod.say(_Req({"npc": "npc:yuna", "text": "Как дела?"})))
+
+    assert stub.calls, "narrator LLM was never invoked"
+    sys_content = stub.calls[-1][0]["content"]
+    assert PITCH in sys_content
+    assert "УЖЕ ВЗЯЛСЯ" in sys_content                     # framed as the accepted deal, not an offer
+
+
+def test_talk_grounds_voice_in_the_accepted_active_pitch(wired, monkeypatch):
+    st = wired
+    _active_sift_contract(st)
+    npc_obj = _npc()
+    _wire_dialogue(monkeypatch, npc_obj)
+    stub = _CaptureStub()
+    monkeypatch.setattr(core, "_model", lambda: stub)
+
+    asyncio.run(dlg_mod.talk(_Req({"npc": "npc:yuna"})))
+
+    assert stub.calls, "narrator LLM was never invoked"
+    sys_content = stub.calls[-1][0]["content"]
+    assert PITCH in sys_content
+    assert "УЖЕ ВЗЯЛСЯ" in sys_content

@@ -154,6 +154,11 @@ async def board_take(request: Request):
     _pc_remember(
         f"взял с доски гильдии заказ: {job['name']} (CR {job['cr']}) за {job['reward']} зм", 0.5
     )
+    if job.get("incident") and job.get("bid"):         # F5 — taking the job reveals its building
+        from aidnd.server.play.engine.pc.hero import _mark_seen
+
+        _mark_seen(job["bid"], prov="told",
+                   text=f"взялся за дело: {job['name']} — знаю, где искать")
     stolen = bool(gate and gate.get("ok_stolen"))  # passed with someone else's badge — credit doesn't count
     return {
         "taken": True,

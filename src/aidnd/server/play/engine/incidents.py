@@ -61,6 +61,30 @@ def _fam(name: str) -> str:
     return (name or "").split()[-1]
 
 
+def _place_binding(inc: dict, t: dict) -> tuple[str | None, int | None]:
+    """Resolve the incident's building id + door node from the victim/patron the generator already
+    knows. Prose place stays; this adds the machine binding F4/board need. vacant/stash → no bid."""
+    people = _S.get("people") or {}
+    cr2b = _S.get("cr2b") or {}
+    keynode = _S.get("keynode") or {}
+    victim = t.get("victim")
+    if victim == "work":
+        pid = inc.get("patron")
+        p = people.get(pid)
+        bid = p.work if p is not None else None
+        return bid, (keynode.get(bid) if bid else None)
+    if victim in ("home", "dead_home"):
+        # dead_home stores the dead resident's name; the home node is that resident's .home
+        pid = inc.get("patron") if victim == "home" else None
+        if victim == "dead_home":
+            pid = next((k for k, pp in people.items()
+                        if _fam(pp.name) == _fam(inc.get("dead_name", ""))), None) or inc.get("patron")
+        p = people.get(pid)
+        node = getattr(p, "home", None) if p is not None else None
+        return (cr2b.get(node) if node is not None else None), node
+    return None, None
+
+
 def incident_spawn() -> list:
     """Morning: world spawns an incident from city LIFE (≤2 active, chance per day)."""
     people = _S.get("people") or {}
@@ -146,6 +170,7 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
         inc["stash"] = 6 + int(cr * 8)
         inc["victims"] = list({d["obj"] for d in thefts if d["actor"] == thief
                                and d["obj"] in alive})[:3]
+    inc["bid"], inc["node"] = _place_binding(inc, t)   # machine binding for board/F4 (prose stays)
     pn = people.get(inc["patron"])
     subs = {"patron": pn.name if pn else "гильдия", "place": inc.get("place", ""),
             "dead": inc.get("dead_name", ""), "captive": inc.get("captive_name", "")}
@@ -191,15 +216,25 @@ def gang_morning() -> list:
 
 
 def incident_jobs() -> list:
-    """Format incidents as guild board quests (alongside lairs)."""
+    """Format incidents as guild board quests (alongside lairs) — with a real direction to the site."""
+    from aidnd.server.play.engine import geo
+
     people = _S.get("people") or {}
+    loc = _S.get("loc")
     out = []
     for inc in incidents_active():
         pn = people.get(inc.get("patron"))
+        pitch = inc["pitch"]
+        bid = inc.get("bid")
+        if bid and loc is not None:                    # append the true way there (F5)
+            d = geo.direction_line(loc, bid)
+            if d and d != "это на другом конце города":
+                pitch = f"{pitch} — {d}"
         out.append({"id": f"ct:inc:{inc['id']}", "lair": inc["id"], "name": inc["title"],
                     "cr": inc["cr"], "reward": inc.get("reward", 4),
-                    "kind": inc["goal"], "pitch": inc["pitch"],
-                    "giver_name": pn.name if pn else "гильдия", "incident": True})
+                    "kind": inc["goal"], "pitch": pitch,
+                    "giver_name": pn.name if pn else "гильдия", "incident": True,
+                    "bid": bid, "node": inc.get("node")})
     return out
 
 

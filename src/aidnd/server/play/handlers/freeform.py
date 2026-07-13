@@ -463,6 +463,14 @@ def _attempt(intent: dict, sc: dict) -> dict:
     if verb == "attack" and npc:
         return _start_duel(npc, people, crof, loc, cr2b, out)
 
+    if verb == "take":
+        # A take that reached here resolved NO real target (item not materialized in the zone,
+        # or item=null): honest refusal — NEVER let the narration arbiter describe a phantom
+        # pickup. Mechanics decide the transfer; narration only ever renders a real result.
+        out["narr"].append("Этого здесь нет — брать нечего.")
+        out["fail"] = True
+        return out
+
     text = str(intent.get("_text") or detail or "")
     if _S.get("combat"):  # a live encounter is already resolving — never free-narrate around it
         out["narr"].append("Бой уже идёт — действуй в бою.")

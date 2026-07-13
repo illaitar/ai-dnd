@@ -1,0 +1,74 @@
+"""F7: a take that resolves to a REAL zone item transfers it (inventory + narr); a take of an
+item not present in the zone (hallucinated / null) returns an honest refusal and NEVER reaches
+the free-narration arbiter (_say_aloud / _model). No sensory prose for a phantom pickup."""
+from __future__ import annotations
+
+import pytest
+
+from aidnd.server.play.engine import core
+from aidnd.server.play.engine.session import persist
+from aidnd.server.play.handlers import freeform
+from aidnd.worldgen import WorldStore
+
+
+class _Stub:
+    """Narrator manager — must NOT be called for a phantom take (routing, not narration)."""
+    def __init__(self):
+        self.called = False
+
+    def call(self, role, messages, **kw):
+        self.called = True
+        return {"content": "…ты хватаешь холодную рукоять…"}
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    st = WorldStore(str(tmp_path / "live.db"))
+    monkeypatch.setattr(persist, "_STORE", st)
+    for mod in (core, freeform):
+        monkeypatch.setattr(mod, "_store", lambda: st, raising=False)
+        monkeypatch.setattr(mod, "_wid", lambda: 1, raising=False)
+    monkeypatch.setattr(freeform, "_pc_remember", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(freeform, "_play", lambda: (None, {}, {}, {}, "loc:x"))
+    # one REAL zone item: a mug on the player's zone (must exist as an inventory row —
+    # inv_move is an UPDATE, so the item needs a starting holder to be "picked up" from)
+    st.save_item({"id": "it:mug", "name": "кружка", "kind": "vessel", "worth": 1})
+    st.inv_add(1, "it:mug", holder="zone:z1")
+    d = core._S._d(); saved = dict(d)
+    try:
+        d.clear()
+        d.update(wid=1, gt=514, zone="z1",
+                 live={"zone_names": {"z1": "у стойки"},
+                       "zone_items": {"у стойки": {"кружка": "it:mug"}},
+                       "zone_fixed": {}, "workers": {}})
+        yield st
+    finally:
+        d.clear(); d.update(saved)
+
+
+def test_real_zone_item_is_taken(world, monkeypatch):
+    stub = _Stub()
+    monkeypatch.setattr(freeform, "_model", lambda: stub, raising=False)
+    res = freeform._attempt({"verb": "take", "item": "it:mug"}, {})
+    assert any(r["item_id"] == "it:mug" for r in world.inventory(1, "pc"))   # really transferred
+    assert not res.get("fail")
+    assert not stub.called                                                  # no arbiter narration
+
+
+def test_phantom_item_refused_without_narration(world, monkeypatch):
+    stub = _Stub()
+    monkeypatch.setattr(freeform, "_model", lambda: stub, raising=False)
+    res = freeform._attempt({"verb": "take", "item": "it:ghost_knife",
+                             "_text": "беру ржавый нож со стола"}, {})
+    assert res.get("fail") is True
+    assert not stub.called                                                  # NEVER free-narrated
+    assert "холодную рукоять" not in " ".join(res["narr"])                  # no sensory prose
+    assert world.inventory(1, "pc") == []                                   # inventory unchanged
+
+
+def test_take_null_item_refused(world, monkeypatch):
+    stub = _Stub()
+    monkeypatch.setattr(freeform, "_model", lambda: stub, raising=False)
+    res = freeform._attempt({"verb": "take", "item": None, "_text": "беру что-нибудь"}, {})
+    assert res.get("fail") is True
+    assert not stub.called

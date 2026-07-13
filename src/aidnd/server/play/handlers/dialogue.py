@@ -108,7 +108,11 @@ async def talk(request: Request):
         if npc in (m.about or [])
     ]  # what the player KNOWS about this person
     try:
-        offer = _contract_offer(npc)  # he might have business with you (from agenda) — not shown yet
+        from aidnd.server.play.engine.quests.offer import emergent_offer
+
+        offer = emergent_offer(npc)             # emergent quest outranks improvised while live
+        if offer is None:
+            offer = _contract_offer(npc)  # he might have business with you (from agenda) — not shown yet
     except (LLMUnavailable, LLMBadOutput):  # without the model, we don't pretend (principle 1)
         raise
     except Exception:  # noqa: BLE001 — other request failures don't break dialogue

@@ -165,21 +165,22 @@ async def contract_accept(request: Request):
     ct = next((c for c in _store().contracts(_wid(), "offered") if c["id"] == cid), None)
     if not ct:
         return {"error": "уговора нет"}
-    _store().save_contract(
-        _wid(), cid, "active", {k: v for k, v in ct.items() if k not in ("id", "status")}
-    )
+    data = {k: v for k, v in ct.items() if k not in ("id", "status")}
+    if ct.get("src") == "sift":
+        data["arc"] = {"beat": "active"}             # emergent: foreshadow/offered → active
+    _store().save_contract(_wid(), cid, "active", data)
     note = None
     if ct.get("kind") == "deliver" and ct.get("deliver_item"):  # package handed immediately
         _store().inv_move(_wid(), ct["deliver_item"], "pc")
         note = f"«{ct['want']}» ложится в твою сумку — доставь по адресу."
     _pc_remember(
-        f"взялся за дело для {ct['giver_name']}: {ct.get('kind')} — "
-        f"{ct.get('want') or ct.get('target_name')} ({ct['where']})",
+        f"взялся за дело для {ct.get('giver_name', '')}: {ct.get('kind')} — "
+        f"{ct.get('want') or ct.get('target_name')} ({ct.get('where', '')})",
         0.6,
         about=[ct["giver"]],
     )
-    j_quest("told", f"взялся за дело для {ct['giver_name']}: {ct.get('kind')} — "
-                    f"{ct.get('want') or ct.get('target_name')} ({ct['where']})", cid)
+    j_quest("told", f"взялся за дело для {ct.get('giver_name', '')}: {ct.get('kind')} — "
+                    f"{ct.get('want') or ct.get('target_name')} ({ct.get('where', '')})", cid)
     return {"accepted": True, "note": note}
 
 

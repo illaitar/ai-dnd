@@ -302,7 +302,8 @@ _ROUTER_SYS = (
     "Он спрашивает: «{q}». МЕСТА, КОТОРЫЕ ТЫ ЗНАЕШЬ (выбирай ТОЛЬКО из них, не выдумывай):\n{places}\n"
     "КОГО МОЖЕШЬ ПОСОВЕТОВАТЬ, если места нет: {acq}. "
     "Реши ПО СВОЕМУ НРАВУ И ОТНОШЕНИЮ: помочь ли, и если да — какое МЕСТО из списка назвать "
-    "(bid), или кого посоветовать (refer_pid). Ответь СТРОГО JSON: "
+    "(bid), или кого посоветовать (refer_pid). Верни bid/refer_pid ТОЧНО как id в [квадратных "
+    "скобках] перед именем в списке. Ответь СТРОГО JSON: "
     '{{"help":"да|нет|уклончиво","bid":"<id из списка или null>",'
     '"refer_pid":"<id из совета или null>","манера":"<1 фраза, как ты это скажешь>"}}'
 )
@@ -316,6 +317,35 @@ def _parse_json(content: str):
         except (json.JSONDecodeError, ValueError):
             return None
     return None
+
+
+def _norm_name(s) -> str:
+    """Fold a model-echoed name to a bare comparison key: strip quotes/guillemets/whitespace,
+    lowercase. Used ONLY as a fallback match when the model didn't echo the [bid]/[pid] verbatim
+    (constraint: still no invention — no match at all → None)."""
+    return str(s or "").strip().strip("«»\"'").strip().lower()
+
+
+def _resolve_place(bid, places: list[dict]) -> dict | None:
+    """Clamp bid ∈ known places — by id equality OR exact (normalized) name match, never invented."""
+    if not bid:
+        return None
+    hit = next((e for e in places if e["bid"] == bid), None)
+    if hit is not None:
+        return hit
+    key = _norm_name(bid)
+    return next((e for e in places if _norm_name(e["name"]) == key), None) if key else None
+
+
+def _resolve_refer(refer_pid, acq: list[dict]) -> dict | None:
+    """Clamp refer_pid ∈ acquaintances — by id equality OR exact (normalized) name match."""
+    if not refer_pid:
+        return None
+    hit = next((a for a in acq if a["pid"] == refer_pid), None)
+    if hit is not None:
+        return hit
+    key = _norm_name(refer_pid)
+    return next((a for a in acq if _norm_name(a["name"]) == key), None) if key else None
 
 
 def route_geo_ask(pid: str, question: str, from_node) -> dict:
@@ -333,9 +363,10 @@ def route_geo_ask(pid: str, question: str, from_node) -> dict:
     rel = (getattr(p.state, "relationships", {}) or {}).get("pc", {})
     mems = [m.text for m in p.state.memory.items if "pc" in (m.about or [])][-3:]
     place_lines = "\n".join(
-        f"  - {e['name']} · {e['kind']}" + (f" · {e['goods']}" if e["goods"] else "") for e in places
+        f"  - [{e['bid']}] {e['name']} · {e['kind']}" + (f" · {e['goods']}" if e["goods"] else "")
+        for e in places
     ) or "  (ты не знаешь мест)"
-    acq_line = ", ".join(f"{a['name']} ({a['role']})" for a in acq) or "никого"
+    acq_line = ", ".join(f"{a['name']} [{a['pid']}] ({a['role']})" for a in acq) or "никого"
     sys = _ROUTER_SYS.format(
         name=p.name, role=p.role, nrav=(p.persona or {}).get("нрав", "обычный"),
         aff=rel.get("affinity", 0.0), trust=rel.get("trust", 0.0), fear=rel.get("fear", 0.0),
@@ -350,12 +381,14 @@ def route_geo_ask(pid: str, question: str, from_node) -> dict:
     bid = d.get("bid")
     refer_pid = d.get("refer_pid")
     manera = str(d.get("манера") or "")[:220].replace("\n", " ")
-    place = next((e for e in places if e["bid"] == bid), None)          # clamp bid ∈ set
-    refer = next((a for a in acq if a["pid"] == refer_pid), None)       # clamp refer_pid ∈ acq
+    place = _resolve_place(bid, places)          # clamp bid ∈ set (id match OR exact name match)
+    refer = _resolve_refer(refer_pid, acq)        # clamp refer_pid ∈ acq (id match OR exact name)
     if d.get("help") == "нет":
         return {"kind": "refuse", "place": None, "refer": None, "манера": manera}
     if place is not None:
         return {"kind": "share", "place": place, "refer": None, "манера": manera}
     if refer is not None:
         return {"kind": "refer", "place": None, "refer": refer, "манера": manera}
-    return {"kind": "deflect", "place": None, "refer": None, "манера": manera}
+    # deflect: манера is DROPPED — a failed/uncertain answer's residue (place names, directions
+    # the model tried to volunteer) must never leak into the spoken line via манера (FIX 2).
+    return {"kind": "deflect", "place": None, "refer": None, "манера": ""}

@@ -162,7 +162,7 @@ class WorldStore:
                         c.execute("SELECT item_id FROM inventory WHERE world_id=?", (world_id,))]:
                 c.execute("DELETE FROM items WHERE id=?", (iid,))   # item lives in one world
             for t in ("buildings", "placements", "inventory", "pc_state", "purse", "flags",
-                      "contracts", "npc_state", "item_pool", "unique_spawned"):
+                      "contracts", "npc_state", "item_pool", "unique_spawned", "journal"):
                 c.execute(f"DELETE FROM {t} WHERE world_id=?", (world_id,))
             c.execute("DELETE FROM user_worlds WHERE world_id=?", (world_id,))
 

@@ -87,6 +87,27 @@ def test_out_of_set_bid_clamps_to_deflect(town, monkeypatch):
     assert dec["kind"] == "deflect" and dec["place"] is None
 
 
+def test_bid_field_holding_the_place_name_resolves_to_share(town, monkeypatch):
+    """The model sometimes echoes the NAME instead of the [bid] tag — FIX 1 name-fallback clamp
+    must still resolve it to the real place (never invent, but don't collapse to deflect either)."""
+    dec, _ = _run(monkeypatch,
+                  '{"help":"да","bid":"кузница «Молот и мех»","refer_pid":null,"манера":"x"}')
+    assert dec["kind"] == "share" and dec["place"]["bid"] == "b_smithy"
+
+
+def test_garbage_name_in_bid_still_deflects(town, monkeypatch):
+    dec, _ = _run(monkeypatch, '{"help":"да","bid":"замок на горе","refer_pid":null,"манера":"x"}')
+    assert dec["kind"] == "deflect" and dec["place"] is None
+
+
+def test_deflect_drops_manera_even_if_model_wrote_one(town, monkeypatch):
+    """FIX 2: a deflect must never carry the model's leaked residue via манера."""
+    dec, _ = _run(monkeypatch,
+                  '{"help":"уклончиво","bid":"b_castle","refer_pid":null,'
+                  '"манера":"ну, это у кузницы «Молот и мех», иди на север"}')
+    assert dec["kind"] == "deflect" and dec["манера"] == ""
+
+
 def test_parse_failure_deflects(town, monkeypatch):
     dec, _ = _run(monkeypatch, "не JSON вовсе")
     assert dec["kind"] == "deflect" and dec["place"] is None and dec["refer"] is None

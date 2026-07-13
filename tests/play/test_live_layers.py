@@ -41,6 +41,21 @@ def test_background_crowd_rotates_across_ticks():
     assert a1 | a2 == set(imp)             # two ticks cover the whole crowd — nobody starves
 
 
+def test_high_need_is_not_salient_only_budget_many_think():
+    # REASON-based salience: «нужда» with a HIGH impulse (2.1) is NOT a must — it joins the
+    # rotating background. Only budget-many of the 20 are picked; a «долг ответа» always is.
+    imp = {f"n{i}": (2.1, "нужда") for i in range(20)}
+    imp["deb"] = (4.0, "долг ответа")
+    ranked = sorted(imp, key=lambda p: -imp[p][0])
+    lv: dict = {}
+    actors = _select_actors(ranked, imp, lv)
+    assert "deb" in actors                       # owed answer — always thinks
+    assert len(actors) == _active_budget(21)     # 6 — budget, not "all needy think"
+    assert lv["rot_cursor"] > 0                  # background rotation advanced
+    a2 = set(_select_actors(ranked, imp, lv))
+    assert set(actors) != a2                      # next tick rotates a different needy subset
+
+
 def test_salient_flood_bypasses_the_cap():
     # a brawl: everyone has a real reason — all think, budget does not gate real behavior
     imp = {f"n{i}": (3.5, "событие") for i in range(10)}

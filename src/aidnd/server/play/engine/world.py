@@ -621,6 +621,13 @@ def _gossip(actor_st, actor_name: str, target_st) -> None:
     target_st.memory.add(tale, _mt(), max(0.25, m.importance - 0.15), kind="gossip", about=m.about)
 
 
+# Salience by REASON, not by a numeric threshold: these impulse-labels mean the NPC has a
+# concrete reason to act THIS tick (a live event, an owed answer, a due promise, a foreshadow
+# beat, a hot emotion, or overhearing the player) → it always gets an LLM turn, never rotated
+# out. The rest («беседа»/«нужда»/«агенда»/«фон») join the staggered background round-robin.
+_MUST_WHY = frozenset({"событие", "долг ответа", "слово", "тень дела", "эмоция", "услышал чужака"})
+
+
 def _active_budget(present: int) -> int:
     """LOD: how many NPCs get an LLM decision this tick, by crowd size.
     ≤ live_full_upto → everyone; else ~ratio of the crowd, capped. (Salient actors bypass this.)"""
@@ -632,14 +639,17 @@ def _active_budget(present: int) -> int:
 
 
 def _select_actors(ranked_imp: list, impulses: dict, lv: dict) -> list:
-    """Pick this tick's LLM actors (LOD layers, docs/sound-attention.md). Salient NPCs
-    (impulse ≥ live_must_impulse) ALWAYS think; the low-impulse background crowd is staggered
-    round-robin via lv['rot_cursor'] so nobody starves. Returns actors in impulse order."""
+    """Pick this tick's LLM actors (LOD layers, docs/sound-attention.md). NPCs with a concrete
+    REASON to act (impulse label in _MUST_WHY — event/owed-answer/promise/foreshadow/emotion/
+    overheard-player) ALWAYS think; the reasonless background crowd («беседа»/«нужда»/«агенда»/
+    «фон») is staggered round-robin via lv['rot_cursor'] so nobody starves. This is
+    level-of-detail rotation, NOT a behavior cap — non-selected NPCs still live via the cheap
+    code path (needs/emotions/agendas advance). Returns actors in impulse order."""
     present = len(ranked_imp)
     budget = _active_budget(present)
     if present <= budget:
         return ranked_imp
-    must = {p for p in ranked_imp if impulses[p][0] >= PB["live_must_impulse"]}
+    must = {p for p in ranked_imp if impulses[p][1] in _MUST_WHY}
     bg = sorted((p for p in ranked_imp if p not in must), key=str)  # stable order for fair rotation
     slots = max(0, budget - len(must))
     if bg and slots < len(bg):

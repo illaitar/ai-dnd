@@ -27,11 +27,12 @@ PB = {
     "live_tick_min": 3,
     "live_gap_s": 6.0,
     # LOD layers: not everyone thinks (LLM) each tick — crowds rotate (docs/sound-attention.md).
-    # This is level-of-detail, not a behavior cap: salient actors (below) always think.
+    # This is level-of-detail, not a behavior cap: NPCs with a concrete REASON to act (impulse
+    # label in world._MUST_WHY — event/owed-answer/promise/foreshadow/emotion/overheard-player)
+    # always think; the reasonless background crowd is staggered round-robin so nobody starves.
     "live_full_upto": 3,        # ≤ this many present → EVERYONE thinks this tick
     "live_active_ratio": 0.5,   # else ~this fraction of the crowd thinks per tick
     "live_active_cap": 6,       # hard ceiling on LLM actors per tick (latency)
-    "live_must_impulse": 1.5,   # impulse ≥ this = real reason to act → always thinks (never rotated)
     "pc_said_impulse": 2.8,   # near hearer pull when the player speaks aloud (L1; tier-scaled). tuned up so L2 hearers also engage
     "give_min": 1,
     # prices: sell to trader / buy from them (from THEIR vision of worth)

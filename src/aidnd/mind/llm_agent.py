@@ -184,6 +184,9 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     oath = ctx.get("oaths", {}).get(cfg.id)
     if oath:
         lines.append(f"  ⚑ {oath}")
+    fore = ctx.get("foreshadow", {}).get(cfg.id)
+    if fore:
+        lines.append(f"  ⚑ {fore}")
     conv = ctx.get("convs", {}).get(cfg.id)
     if conv:
         lines.append("")
@@ -467,3 +470,13 @@ def apply_actions(actions, state, world, clock: int) -> list:
         elif tool == "wait":
             log.append("·")
     return log or ["·"]
+
+
+def _build_prompt_probe(state, ctx: dict) -> str:
+    """Test hook: render just the foreshadow/oath context line for a state (no LLM)."""
+    cfg = state.config
+    out = []
+    fore = ctx.get("foreshadow", {}).get(cfg.id)
+    if fore:
+        out.append(f"  ⚑ {fore}")
+    return "\n".join(out)

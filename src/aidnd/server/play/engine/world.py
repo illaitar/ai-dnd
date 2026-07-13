@@ -930,6 +930,8 @@ def _live_tick(people) -> tuple:
             oaths[d_["actor"]] = _deeds.promise_line(d_, lv["names"])
             if d_["data"].get("due") == _phase():
                 oaths_due.add(d_["actor"])
+    from aidnd.server.play.engine.quests import foreshadow as _fore
+    fore = _fore.lines(order)                          # {pid: line} for cast present this tick
     impulses: dict = {}
     for pid in order:
         st = w.npc_minds[pid]
@@ -941,6 +943,8 @@ def _live_tick(people) -> tuple:
             imp, why = 4.0, "долг ответа"
         elif pid in oaths_due:
             imp, why = 2.6, "слово"                    # deadline reached — given promise pulls
+        elif pid in fore:
+            imp, why = 2.4, "тень дела"                 # foreshadow pulls, below a live event/debt
         elif max(st.emotion.get("fear", 0), st.emotion.get("anger", 0)) >= 0.5:
             imp, why = 3.0, "эмоция"
         elif c is not None and c.get("quiet", 9) <= 1:
@@ -973,6 +977,7 @@ def _live_tick(people) -> tuple:
     if salient:
         ctx["event"] = salient
     ctx["oaths"] = oaths
+    ctx["foreshadow"] = fore
     ctx["market"] = _market_view(order, people, lv)  # co-present goods for sale → buyers can choose to buy
     ctx["pc_said"] = {pid: pc_said for pid in pc_heard} if pc_said else {}
 

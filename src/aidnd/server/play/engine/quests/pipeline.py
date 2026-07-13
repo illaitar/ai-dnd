@@ -240,7 +240,8 @@ def quest_morning() -> list[str]:
             "step": 0, "steps": [c["step"]], **c["step"],
             "reward": reward, "reward_item": reward_item, "reward_name": reward_name,
             "pitch": art["pitch"], "why": seed["giver_name"],
-            "src": "sift", "seed": seed, "arc": {"beat": "foreshadow"}, "roles": roles,
+            "src": "sift", "seed": seed,
+            "arc": {"beat": "foreshadow", "fore_left": PB["quest_foreshadow_ticks"]}, "roles": roles,
             "done_any": bridge.make_done_any(m),
             "framer": art, "dc": c["dc"]}
     if occupied:
@@ -249,7 +250,6 @@ def quest_morning() -> list[str]:
     _store().save_contract(_wid(), cid, "queued", data)
     _store().flag_set(_wid(), f"qrecent|{seed['pattern']}",
                       str(int(_store().flag_get(_wid(), f"qrecent|{seed['pattern']}") or 0) + 1))
-    _surface(cid, {"id": cid, "status": "queued", **data})
     news.append(f"в городе зреет дело: {seed['giver_name']} ищет, кому довериться")
     return news + director.tick_morning()
 

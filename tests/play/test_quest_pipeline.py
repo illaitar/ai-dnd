@@ -35,6 +35,15 @@ class _Stub:
              "reveal": f"{giver} ещё вспомнит обиду."}, ensure_ascii=False)}
 
 
+def _advance_foreshadow(n=None):
+    """Run the foreshadow countdown to completion (or `n` ticks) — mirrors world.py's per-tick call
+    to foreshadow.lines(); the cast list is irrelevant to the countdown itself (only to which pids
+    receive the line), so an empty order still decrements every live foreshadow contract."""
+    from aidnd.server.play.engine.quests import foreshadow as FS
+    for _ in range(n if n is not None else core.PB["quest_foreshadow_ticks"]):
+        FS.lines([])
+
+
 def _person(pid, name, role, agendas=(), rels=None):
     st = NpcState.from_config(NpcConfig(id=pid, name=name, role=role))
     st.agendas = list(agendas)
@@ -73,6 +82,11 @@ def town(monkeypatch):
 def test_one_seed_surfaces_private(town):
     news = P.quest_morning()
     assert news
+    # freshly sifted → FORESHADOW beat, not yet visible as an offer (spec Beat 1)
+    pending = [c for c in town.contracts(core._wid(), "queued") if c.get("src") == "sift"]
+    assert len(pending) == 1 and pending[0]["arc"]["beat"] == "foreshadow"
+    assert not [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"]
+    _advance_foreshadow()                              # quest_foreshadow_ticks pass → offer surfaces
     offered = town.contracts(core._wid(), "offered")
     emergent = [c for c in offered if c.get("src") == "sift"]
     assert len(emergent) == 1
@@ -87,6 +101,7 @@ def test_public_pattern_goes_to_board(town, monkeypatch):
     # заставим просев выдать только публичный паттерн: у Дунна убираем агенду
     core._S["people"]["npc:dunn"].state.agendas = []
     P.quest_morning()
+    _advance_foreshadow()
     board = [c for c in town.contracts(core._wid(), "board") if c.get("src") == "sift"]
     assert board and board[0]["giver"] == "npc:marta"
     # grievance pattern: pipeline materialized a REAL revenge milestone on Марта (mirrors deals.py) →
@@ -105,6 +120,7 @@ def test_accepted_emergent_contract_survives_give_and_talk(town):
     from aidnd.server.play.mechanics import contracts as C
 
     P.quest_morning()
+    _advance_foreshadow()
     ct = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
     assert ct["step"] == 0                            # int, as _make_contract persists it
     # mirror contract_accept (world.py:162-178): flip status to active, data untouched
@@ -120,6 +136,7 @@ def test_accepted_emergent_contract_survives_give_and_talk(town):
 def test_window_one_holds_across_mornings(town):
     news1 = P.quest_morning()
     assert news1
+    _advance_foreshadow()
     first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
     news2 = P.quest_morning()                          # next morning — window still occupied
     assert not any("зреет дело" in n for n in news2)
@@ -128,6 +145,7 @@ def test_window_one_holds_across_mornings(town):
     core._S["gt"] += (core.PB["quest_offer_days"] + 1) * 1440   # compost frees the window
     news3 = P.quest_morning()
     assert any("зреет дело" in n for n in news3)
+    _advance_foreshadow()
     fresh = [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"] + \
             [c for c in town.contracts(core._wid(), "board") if c.get("src") == "sift"]
     assert len(fresh) == 1 and fresh[0]["id"] != first["id"]
@@ -138,6 +156,7 @@ def test_occupied_weak_candidate_blocks_no_llm(town, monkeypatch):
     morning, incumbent untouched, and — crucially — NO LLM call at all (the judge is gated on the
     pure-code salience comparison BEFORE it would ever run)."""
     P.quest_morning()
+    _advance_foreshadow()
     first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
 
     class _NoCallStub:
@@ -160,6 +179,7 @@ def test_occupied_strong_candidate_interrupts(town, monkeypatch):
     broken_promise, public) proceeds through judge→framer→cast→persist→surface; exactly one
     offered/board sift contract remains at the end."""
     P.quest_morning()
+    _advance_foreshadow()
     first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
     assert first["giver"] == "npc:dunn"
 
@@ -178,6 +198,7 @@ def test_occupied_strong_candidate_interrupts(town, monkeypatch):
     bumped = next(c for c in town.contracts(core._wid(), "queued") if c["id"] == first["id"])
     assert bumped["arc"]["beat"] == "foreshadow-pending"          # waiting, not composted
 
+    _advance_foreshadow()                               # the interrupting seed's own foreshadow beat
     offered = [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"]
     board = [c for c in town.contracts(core._wid(), "board") if c.get("src") == "sift"]
     live = offered + board
@@ -191,6 +212,7 @@ def test_occupied_strong_interrupt_framer_fails_keeps_incumbent(town, monkeypatc
     if the framer raises LLMUnavailable mid-interrupt, the incumbent must NOT have been demoted —
     otherwise the window ends the morning with zero live offers and the demoted row is orphaned."""
     P.quest_morning()
+    _advance_foreshadow()
     first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
     assert first["giver"] == "npc:dunn"
 
@@ -256,6 +278,7 @@ def test_bumped_contract_resurfaces_when_window_frees(town, monkeypatch):
     behavior: a fresh Дунн offer surfaces again. The old bumped row shares its birth gt with the
     interrupted offer, so once the same quest_offer_days elapse it composts too — no orphan leak."""
     P.quest_morning()
+    _advance_foreshadow()
     first = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
 
     orig_score = P.salience.score
@@ -270,11 +293,13 @@ def test_bumped_contract_resurfaces_when_window_frees(town, monkeypatch):
     P.quest_morning()                                              # interrupt: Дунн bumped, Марта live
     bumped = next(c for c in town.contracts(core._wid(), "queued") if c["id"] == first["id"])
     assert bumped["arc"]["beat"] == "foreshadow-pending"
+    _advance_foreshadow()                                            # Марта's own foreshadow beat
 
     monkeypatch.setattr(P.salience, "score", orig_score)            # back to real salience weights
     core._S["gt"] += (core.PB["quest_offer_days"] + 1) * 1440       # composts Марта's board offer
     news = P.quest_morning()
     assert any("зреет дело" in n for n in news)                     # window free → normal path resumed
+    _advance_foreshadow()
 
     live = [c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift"] + \
            [c for c in town.contracts(core._wid(), "board") if c.get("src") == "sift"]
@@ -378,6 +403,7 @@ def test_morning_llm_unavailable_during_planning_does_not_crash(town, monkeypatc
 
 def test_expire_compost_closes_offer_and_keeps_agenda(town):
     P.quest_morning()
+    _advance_foreshadow()
     ct = next(c for c in town.contracts(core._wid(), "offered") if c.get("src") == "sift")
     core._S["gt"] += (core.PB["quest_offer_days"] + 1) * 1440   # два дня спустя
     news = P._expire_stale()

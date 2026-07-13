@@ -377,7 +377,10 @@ def _giver_world(ct: dict) -> tuple:
     loot = []
     coins = _store().purse_get(_wid(), giver)
     if coins > 0:
-        loot.append(_MItem("кошель", min(1.0, coins / 40), kind="coin", amount=coins))
+        # PB["wealth"] need = f(purse): the wealth predicate (_wealth sums item .value) reads coins at
+        # face value — the coin item carries the FULL purse as its value, not a capped [0..1] relevance,
+        # so «накопить N монет» can actually be met by the giver receiving coins.
+        loot.append(_MItem("кошель", float(coins), kind="coin", amount=coins))
     for r in _store().inventory(_wid(), giver):
         it = _store().get_item(r["item_id"])
         if it:

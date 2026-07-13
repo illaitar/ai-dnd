@@ -14,6 +14,7 @@ give_item(request) -> dict : Gift or trade items to NPCs via unified resolver.
 from __future__ import annotations
 
 import random
+import re
 
 from fastapi import Request
 
@@ -220,10 +221,35 @@ async def use_item(request: Request):
     return {"item": _item_card(it, _known(iid)), "event": ev}
 
 
+_COINS_RE = re.compile(r"монет|деньг|зм|золот", re.IGNORECASE)
+
+
+def _gift_coins(b: dict) -> int:
+    """Coins the player means to hand over: explicit {"coins": N}, or {"what": "монеты", "amount": N}
+    (the shape the give UI sends when the gift is money rather than an item). 0 → not a coin gift."""
+    if b.get("coins"):
+        try:
+            return int(b["coins"])
+        except (TypeError, ValueError):
+            return 0
+    if _COINS_RE.search(str(b.get("what") or "")) and b.get("amount"):
+        try:
+            return int(b["amount"])
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
 @router.post("/api/play/give")
 async def give_item(request: Request):
-    """Give an item to an interlocutor (gift or fulfillment of a deal) — via unified resolver."""
+    """Give an item OR coins to an interlocutor (gift or fulfillment of a deal) — via unified resolver."""
     _play()
     b = await request.json()
-    res = _attempt({"verb": "give", "npc": b.get("npc"), "item": b.get("item")}, {})
+    coins = _gift_coins(b)
+    intent = (
+        {"verb": "give", "npc": b.get("npc"), "coins": coins}
+        if coins
+        else {"verb": "give", "npc": b.get("npc"), "item": b.get("item")}
+    )
+    res = _attempt(intent, {})
     return {**res, "gt": _gt(), "coins": _pc_coins()}

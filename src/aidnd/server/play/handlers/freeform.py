@@ -45,7 +45,7 @@ from aidnd.server.play.engine.world import (
     _world_tick,
 )
 from aidnd.server.play.mechanics.combat import _combatant_from_npc, _pc_combatant
-from aidnd.server.play.mechanics.contracts import _contract_on_give
+from aidnd.server.play.mechanics.contracts import _contract_on_give, _sift_maybe_close
 from aidnd.server.play.mechanics.items import (
     _apply_consumable,
     _do_craft,
@@ -273,6 +273,41 @@ def _attempt(intent: dict, sc: dict) -> dict:
     if verb == "say" and npc and manner == "persuasively":
         out["open_talk"] = npc  # persuasion — this is dialogue; the key is asked for there
         out["say_first"] = detail or None
+        return out
+
+    if verb == "give" and npc and intent.get("coins"):
+        amount = int(intent["coins"])
+        have = _store().purse_get(_wid(), "pc")
+        if amount <= 0:
+            out["narr"].append("Сколько монет отдать?")
+            out["fail"] = True
+            return out
+        if have < amount:
+            out["narr"].append(f"У тебя всего {have} зм — столько не отсчитать.")
+            out["fail"] = True
+            return out
+        p = people[npc]
+        _store().purse_add(_wid(), "pc", -amount)
+        npc_total = _store().purse_add(_wid(), npc, amount)
+        rel = p.state.rel(PLAYER)
+        rel["affinity"] = min(
+            1.0,
+            rel["affinity"]
+            + min(PB["gift_aff_cap"], PB["gift_aff_base"] + amount / PB["gift_aff_div"]),
+        )
+        p.state.memory.add(f"игрок дал мне {amount} зм", _mt(), 0.55, about=[PLAYER])
+        _pc_remember(f"дал {p.name} {amount} зм", 0.4, about=[npc])
+        _npc_save(npc)
+        _gt_add(PB["give_min"])
+        from aidnd.server.play.engine.journal import j_event
+
+        j_event("gave", f"отдал {p.name} {amount} зм (у {p.name}: {npc_total})")
+        done = _sift_maybe_close()  # a coin gift may satisfy a wealth predicate → close on the spot
+        out["narr"].append(
+            f"Ты отсчитываешь {amount} монет и вкладываешь в ладонь {p.name}."
+            + (f" {done}" if done else "")
+        )
+        out["refresh"] = True
         return out
 
     if verb == "give" and npc and intent.get("item"):

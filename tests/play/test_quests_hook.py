@@ -87,6 +87,19 @@ def test_improvised_completion_never_writes_back(world, monkeypatch):
     assert [c["id"] for c in st.contracts(1, "done")] == ["ct:dunn:2"]   # but still paid/closed
 
 
+def test_giver_world_counts_purse_for_wealth(world):
+    """FIX A: the giver's PURSE feeds the wealth predicate (PB["wealth"] need = f(purse)) — «накопить
+    N монет» is met once the giver actually holds N coins. Exercises the REAL _giver_world (not the
+    monkeypatched _fake), so the coin item's value must equal the full purse, not a capped [0..1]."""
+    from aidnd.server.play.engine.quests import bridge
+    st, people = world
+    ct = {"giver": "npc:dunn", "src": "sift", "done_any": [{"type": "wealth", "value": 50}]}
+    st.purse_add(1, "npc:dunn", 20)                        # fixture 40 → 60
+    assert bridge.done_any_met(ct, contracts._giver_world(ct)) is True
+    st.purse_add(1, "npc:dunn", -50)                       # 60 → 10
+    assert bridge.done_any_met(ct, contracts._giver_world(ct)) is False
+
+
 def test_sift_maybe_close_completes_only_predicate_met_sift(world, monkeypatch):
     st, people = world
     monkeypatch.setattr(contracts, "_giver_world", _giver_holds(st, "гроссбух Марты"))

@@ -191,6 +191,8 @@ def _seed_agendas(people: dict, gt: int) -> None:
 
 
 def quest_morning() -> list[str]:
+    from aidnd.server.play.engine.quests import director
+
     people = _S.get("people") or {}
     if not people:
         return []
@@ -216,42 +218,45 @@ def quest_morning() -> list[str]:
         return news
     if not kept:
         return news
-    for seed in kept[:1]:                            # Inc 2 window=1 — exactly one seed
-        try:
-            art = framing.framer(seed, _allowed(seed), core._model())
-        except LLMUnavailable:
-            log.info("quests: LLM недоступен — фреймер пропущен, утро без нового дела")
-            return news
-        if not art:
-            continue
-        _ensure_milestone(seed)                      # grievance patterns: materialize a real milestone
-        giver = people[seed["giver"]]
-        villain = people.get(seed["cast"].get("villain"))
-        c = casting.cast(seed, giver.state, villain.state if villain else None, _store(), _wid())
-        rw = _reward(seed, c)
-        if rw is None:                               # poor private giver, no item — honest skip
-            log.info("quests: seed %s пропущен — заказчику нечем платить", seed.get("sid"))
-            continue
-        reward, reward_item, reward_name = rw
-        from aidnd.mind.agenda import Milestone
-        m = Milestone(desc="", kind=seed["goal"]["kind"], target=seed["goal"]["target"],
-                      done=dict(seed["goal"]["done"]))
-        cid = f"ct:sift:{seed['giver']}:{gt}"
-        roles = {"giver": seed["giver"], "villain": seed["cast"].get("villain"),
-                 "prize": seed["cast"].get("prize")}
-        data = {"giver": seed["giver"], "giver_name": seed["giver_name"],
-                "step": 0, "steps": [c["step"]], **c["step"],
-                "reward": reward, "reward_item": reward_item, "reward_name": reward_name,
-                "pitch": art["pitch"], "why": seed["giver_name"],
-                "src": "sift", "seed": seed, "arc": {"beat": "foreshadow"}, "roles": roles,
-                "done_any": bridge.make_done_any(m),
-                "framer": art, "dc": c["dc"]}
-        _store().save_contract(_wid(), cid, "queued", data)
-        _store().flag_set(_wid(), f"qrecent|{seed['pattern']}",
-                          str(int(_store().flag_get(_wid(), f"qrecent|{seed['pattern']}") or 0) + 1))
-        _surface(cid, {"id": cid, "status": "queued", **data})
-        news.append(f"в городе зреет дело: {seed['giver_name']} ищет, кому довериться")
-    return news
+    admitted = director.admit(kept)                  # window/interrupt decision (replaces [:1])
+    if admitted is None:
+        return news
+    seed = admitted
+    try:
+        art = framing.framer(seed, _allowed(seed), core._model())
+    except LLMUnavailable:
+        log.info("quests: LLM недоступен — фреймер пропущен, утро без нового дела")
+        return news
+    if not art:
+        return news
+    _ensure_milestone(seed)                          # grievance patterns: materialize a real milestone
+    giver = people[seed["giver"]]
+    villain = people.get(seed["cast"].get("villain"))
+    c = casting.cast(seed, giver.state, villain.state if villain else None, _store(), _wid())
+    rw = _reward(seed, c)
+    if rw is None:                                   # poor private giver, no item — honest skip
+        log.info("quests: seed %s пропущен — заказчику нечем платить", seed.get("sid"))
+        return news
+    reward, reward_item, reward_name = rw
+    from aidnd.mind.agenda import Milestone
+    m = Milestone(desc="", kind=seed["goal"]["kind"], target=seed["goal"]["target"],
+                  done=dict(seed["goal"]["done"]))
+    cid = f"ct:sift:{seed['giver']}:{gt}"
+    roles = {"giver": seed["giver"], "villain": seed["cast"].get("villain"),
+             "prize": seed["cast"].get("prize")}
+    data = {"giver": seed["giver"], "giver_name": seed["giver_name"],
+            "step": 0, "steps": [c["step"]], **c["step"],
+            "reward": reward, "reward_item": reward_item, "reward_name": reward_name,
+            "pitch": art["pitch"], "why": seed["giver_name"],
+            "src": "sift", "seed": seed, "arc": {"beat": "foreshadow"}, "roles": roles,
+            "done_any": bridge.make_done_any(m),
+            "framer": art, "dc": c["dc"]}
+    _store().save_contract(_wid(), cid, "queued", data)
+    _store().flag_set(_wid(), f"qrecent|{seed['pattern']}",
+                      str(int(_store().flag_get(_wid(), f"qrecent|{seed['pattern']}") or 0) + 1))
+    _surface(cid, {"id": cid, "status": "queued", **data})
+    news.append(f"в городе зреет дело: {seed['giver_name']} ищет, кому довериться")
+    return news + director.tick_morning()
 
 
 def _surface(cid: str, ct: dict) -> None:
@@ -285,3 +290,8 @@ def _expire_stale() -> list[str]:
             _store().save_contract(_wid(), ct["id"], "closed", data)
             news.append(f"{ct.get('giver_name', 'кто-то')} махнул рукой — займётся делом сам")
     return news
+
+
+def _recheck_overtaken() -> list[str]:
+    """Morning evidence re-check per live seed (filled in Task 14)."""
+    return []

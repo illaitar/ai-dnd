@@ -7,6 +7,7 @@ double-booked."""
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -89,6 +90,45 @@ def test_delve_untaken_incident_auto_takes_job(wired, monkeypatch):
     j = wired.journal_list(1, kind="quest")
     told = [e for e in j if e["prov"] == "accept"]
     assert len(told) == 1                                # one accept beat, not zero
+
+
+def test_incident_take_giver_is_patron_not_guild(wired, monkeypatch):
+    """Playtest grand-2, находка 5: журнал звал дело «зачистить для Гильдия „Устье"», а accept-бит —
+    «поручение Обер Косой». Податель инцидента — ЧЕЛОВЕК (патрон): active-контракт несёт
+    giver=patron-pid и giver_name=имя патрона, и журнальный title зовёт дело именем патрона —
+    тем же, что и бит. Гильдия остаётся каналом (why: «доска гильдии»)."""
+    inc = _inc()
+    inc["patron"] = "npc:ober"
+    inc["giver"] = "npc:ober"
+    core._S._d()["people"] = {"npc:ober": SimpleNamespace(name="Обер Косой")}
+    monkeypatch.setattr(
+        "aidnd.server.play.engine.incidents.incidents_active", lambda: [inc]
+    )
+    monkeypatch.setattr(
+        "aidnd.server.play.handlers.dungeon.incident_delve", lambda i: _canned_dungeon(i)
+    )
+    from aidnd.server.play.engine.pc import hero as hero_mod
+    monkeypatch.setattr(hero_mod, "_mark_seen", lambda bid, **kw: None, raising=False)
+
+    asyncio.run(board_mod.delve(_Req({"lair": inc["id"]})))
+
+    ct = next((c for c in wired.contracts(1, "active") if c.get("target") == inc["id"]), None)
+    assert ct is not None
+    assert ct["giver"] == "npc:ober", "контракт инцидента должен нести патрона как подателя"
+    assert ct["giver_name"] == "Обер Косой"
+    assert ct["why"] == "доска гильдии"                  # гильдия остаётся каналом
+
+    # журнал: title дела зовёт патрона по имени — согласован с accept-битом
+    from aidnd.server.play.handlers import misc as misc_mod
+    monkeypatch.setattr(misc_mod, "_play", lambda: None)
+    monkeypatch.setattr(core, "_store", lambda: wired, raising=False)
+    monkeypatch.setattr(core, "_wid", lambda: 1, raising=False)
+    dela = misc_mod.journal_endpoint()["dela"]
+    delo = next((d for d in dela if d["cid"] == f"ct:inc:{inc['id']}"), None)
+    assert delo is not None
+    assert delo["giver"] == "Обер Косой"
+    assert "Обер Косой" in delo["title"]
+    assert "Гильдия" not in delo["title"]
 
 
 def test_delve_already_taken_incident_does_not_double_book(wired, monkeypatch):

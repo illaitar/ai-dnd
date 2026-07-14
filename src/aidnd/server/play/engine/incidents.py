@@ -239,6 +239,7 @@ def incident_jobs() -> list:
                     "cr": inc["cr"], "reward": inc.get("reward", 4),
                     "kind": inc["goal"], "pitch": pitch,
                     "giver_name": pn.name if pn else "гильдия", "incident": True,
+                    "patron": inc.get("patron"),       # податель-человек: течёт в active-контракт
                     "bid": bid, "node": inc.get("node")})
     return out
 

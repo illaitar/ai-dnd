@@ -117,7 +117,7 @@ async def guild_redeem(request: Request):
 def _take_incident(job_or_inc: dict) -> None:
     """Guild-board take bookkeeping for a lair-clear OR city-incident job: active contract +
     seen-mark (incidents with a bid) + journal accept beat. Shared by board_take (job dict from
-    _guild_board(), keys: id/lair/name/cr/reward/incident/bid/kind/giver_name) and delve's
+    _guild_board(), keys: id/lair/name/cr/reward/incident/bid/kind/giver_name/patron) and delve's
     inc| branch (raw inc dict from incidents_active(), keys: id/title/cr/reward/bid/goal/patron)
     — reconciled here so both entry points leave the same trace, whichever shape called it."""
     if "lair" in job_or_inc:                            # job dict from _guild_board(): id
@@ -127,19 +127,21 @@ def _take_incident(job_or_inc: dict) -> None:
     name = job_or_inc.get("name") or job_or_inc.get("title")
     reward = job_or_inc.get("reward", 4)
     bid = job_or_inc.get("bid")
-    giver_name = job_or_inc.get("giver_name")
-    if giver_name is None:
-        people = _S.get("people") or {}
-        pn = people.get(job_or_inc.get("patron"))
-        giver_name = pn.name if pn else None
+    people = _S.get("people") or {}
+    patron = job_or_inc.get("patron")                   # податель-человек (оба входа несут ключ)
+    pn = people.get(patron) if patron else None
+    giver_name = (pn.name if pn else job_or_inc.get("giver_name"))
     gb = _guild_bid()
     _store().save_contract(
         _wid(),
         jid,
         "active",
         {
-            "giver": "guild",
-            "giver_name": _binfo(gb)["name"] if gb else "Гильдия",
+            # у инцидента податель — ЧЕЛОВЕК (патрон платит из своего кошелька, и журнал зовёт
+            # дело его именем — тем же, что и accept-бит); гильдия — лишь канал (why ниже).
+            # Ляр без патрона — честно гильдейский заказ, как раньше.
+            "giver": patron if pn else "guild",
+            "giver_name": (pn.name if pn else (_binfo(gb)["name"] if gb else "Гильдия")),
             "kind": "clear",
             "want": None,
             "where": name,

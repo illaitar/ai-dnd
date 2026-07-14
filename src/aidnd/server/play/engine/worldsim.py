@@ -351,9 +351,14 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
             kind_of[pid] = akind
         dest = node if node is not None else origin   # wherever they END UP (same node for a stay —
                                                         # net zero; frees origin for real moves) — the
-                                                        # DESTINATION counts toward load NOW even mid-transit
-                                                        # (walker is committed there; capacity can't be
-                                                        # oversubscribed by in-flight walkers, §5-A)
+                                                        # DESTINATION counts toward load NOW even mid-transit.
+                                                        # This charge holds only WITHIN the current slot: a
+                                                        # walker still in flight at the NEXT routine slot
+                                                        # re-reads origin==dest (crof hasn't flipped yet) and
+                                                        # is charged again there, so oversubscription is
+                                                        # possible in principle — but only for paths longer
+                                                        # than one routine slot (> 30/step_min nodes), which
+                                                        # doesn't happen inside a town. Accepted (§5-A).
         if dest is not None and n2b.get(dest):         # stood in building — took spot
             load[dest] = load.get(dest, 0) + 1
         last[pid] = gt

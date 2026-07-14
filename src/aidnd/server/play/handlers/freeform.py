@@ -95,11 +95,13 @@ def _lethal_present_npc(text: str, npc: str | None, people: dict, loc, crof) -> 
         return None
     if npc and npc in people:
         return npc
-    from aidnd.server.play.engine.core import _here
+    from aidnd.server.play.engine.core import _here_settled
 
     low = text.lower()
+    # interaction surface: name-targeting resolves against SETTLED occupants only — a transit
+    # walker passing through isn't a duel target.
     return next(
-        (pid for pid in _here(loc, crof) if pid in people and people[pid].name.lower() in low),
+        (pid for pid in _here_settled(loc, crof) if pid in people and people[pid].name.lower() in low),
         None,
     )
 

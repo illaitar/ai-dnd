@@ -34,6 +34,7 @@ from aidnd.server.play.engine.core import (
     _gt,
     _gt_add,
     _here,
+    _here_settled,
     _met,
     _mt,
     _npc_save,
@@ -126,7 +127,7 @@ async def talk(request: Request):
     npc = (await request.json()).get("npc")
     if npc not in people:
         return {"error": "нет такого"}
-    if npc not in _here(loc_, crof_):
+    if npc not in _here_settled(loc_, crof_):  # interaction surface: a transit walker is not a talk target
         return {"error": "его здесь нет — говорить можно с тем, кто рядом"}
     p = people[npc]
     first = npc not in _met()

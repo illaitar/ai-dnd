@@ -30,6 +30,7 @@ from aidnd.server.play.engine.core import (
     _gt,
     _gt_add,
     _here,
+    _here_settled,
     _mark_seen,
     _mt,
     _pc_hp,
@@ -240,8 +241,8 @@ async def go_room(request: Request):
             return {"error": "такого помещения тут нет"}
         acc = room["access"]
         if acc in ("staff",):  # staff room — worker trust or stealth
-            worker = next(
-                (people[pid] for pid in _here(loc, crof) if people[pid].work == inside), None
+            worker = next(  # interaction surface: settled-only — a transit walker isn't a worker to ask
+                (people[pid] for pid in _here_settled(loc, crof) if people[pid].work == inside), None
             )
             trust = worker.state.rel(PLAYER)["trust"] if worker else 0.0
             if trust < 0.3:
@@ -339,7 +340,7 @@ def _plan_payload() -> dict:
     if not zones:
         return {"plan": None}
     plan = plan_location(data, seed_key=f"{_wid()}|{bid}")
-    here = [pid for pid in _here(loc, crof) if pid != PLAYER]
+    here = [pid for pid in _here_settled(loc, crof) if pid != PLAYER]  # render surface: settled only
     here.sort(key=lambda i: (people[i].work != bid, i))      # workers at home — first
     more = 0  # no cap — the building map shows everyone present (basic vision is not gated)
     lv = _S.get("live")

@@ -79,4 +79,7 @@ def _apply_routine() -> None:
             _S["econ_news"] = (_S.get("econ_news") or [])[-2:] + en
     except Exception:  # noqa: BLE001 — economy doesn't crash the world
         pass
+    # _here() here runs _flip_arrived globally BEFORE routine_step builds the ledger — that ordering
+    # is load-bearing: it's what guarantees a walker who just arrived is pinned/counted at its
+    # DESTINATION (crof already flipped) rather than its stale origin. Do not reorder.
     routine_step(_S["people"], _S["crof"], pin=set(_here(_S["loc"], _S["crof"])))

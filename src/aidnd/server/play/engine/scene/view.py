@@ -28,7 +28,7 @@ from aidnd.server.play.engine.core import (
     _emo,
     _fatigue,
     _gt,
-    _here,
+    _here_settled,
     _mana,
     _mana_cap,
     _met,
@@ -166,7 +166,9 @@ def _scene_dict(city, people, crof, cr2b, loc):
     # or from reading its sign (sign_ack); the map/legend show only what the player KNOWS.
     plaza = (_S.get("geom") or {}).get("plaza")
     name, kind = _scene_locinfo(city, loc, bid, inside, plaza)
-    here = sorted(_here(loc, crof), key=lambda i: (people[i].work is None, i))
+    # SETTLED-only: a transit walker is pass-through feed, not a scene card (see world.py's
+    # street-feed line) — the folk list here is an interaction/render surface.
+    here = sorted(_here_settled(loc, crof), key=lambda i: (people[i].work is None, i))
     lvl = _looked_level(loc, inside)
     more = 0  # no cap — the scene shows everyone present
     # basic vision: who is in the room is ALWAYS visible; a keen look reveals HIDDEN things.

@@ -466,6 +466,20 @@ def _put_item(
     return iid
 
 
+def _sane_name(s) -> str:
+    """Persona pocket entries are usually plain strings, but pool data sometimes carries
+    dict-shaped entries like {'item': 'Медная пуговица', 'cost': '1 медный'}. Coerce those
+    to a clean display name instead of leaking a Python repr into item names/trade speech."""
+    if isinstance(s, dict):
+        name = s.get("item")
+        if not name:
+            name = next((v for v in s.values() if isinstance(v, str) and v), None)
+        if not name:
+            name = str(s)
+        return str(name).strip()
+    return str(s).strip()
+
+
 def _materialize_npc(pid: str, layer: str = "visible") -> None:
     """NPC inventory from persona → real items, BY LAYER: visible (gear+keys—visible to eye)
     on first touch; pockets (pockets/valuables/coins)—on theft/search."""
@@ -521,11 +535,11 @@ def _materialize_npc(pid: str, layer: str = "visible") -> None:
     else:  # pockets
         c = per.get("carry") or {}
         for i, s in enumerate((c.get("goods") or [])[:3]):
-            _put_item(f"npcinv|{pid}|g{i}", s, "misc", tier="modest", holder=pid)
+            _put_item(f"npcinv|{pid}|g{i}", _sane_name(s), "misc", tier="modest", holder=pid)
         for i, s in enumerate((c.get("personal") or [])[:3]):
-            _put_item(f"npcinv|{pid}|p{i}", s, "misc", tier="poor", holder=pid)
+            _put_item(f"npcinv|{pid}|p{i}", _sane_name(s), "misc", tier="poor", holder=pid)
         for i, s in enumerate((per.get("valuables") or [])[:3]):
-            _put_item(f"npcinv|{pid}|v{i}", s, "valuable", tier="fine", holder=pid)
+            _put_item(f"npcinv|{pid}|v{i}", _sane_name(s), "valuable", tier="fine", holder=pid)
         _store().purse_add(
             _wid(), pid, int(c.get("coins") or 0) + (PB["merchant_float"] if p.work else 0)
         )

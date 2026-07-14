@@ -475,7 +475,7 @@ def _sane_name(s) -> str:
         if not name:
             name = next((v for v in s.values() if isinstance(v, str) and v), None)
         if not name:
-            name = str(s)
+            return "вещица"
         return str(name).strip()
     return str(s).strip()
 

@@ -135,6 +135,8 @@ def _try_build(t: dict, alive: dict, dead: set, rng) -> dict | None:
         kin = [pid for pid, p in alive.items()
                if _fam(p.name) == _fam(vic.name) and pid != vid]
         inc["patron"] = kin[0] if kin else None
+        if inc["patron"]:
+            inc["giver"] = inc["patron"]                # kin pays, matching who the journal names
     elif t["victim"] in ("home", "work"):             # home/homestead of a real resident
         pool_p = [pid for pid, p in alive.items()
                   if p.persona and (t["victim"] == "home" or p.work)]

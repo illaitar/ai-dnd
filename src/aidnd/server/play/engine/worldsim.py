@@ -23,9 +23,10 @@ clear_commit(pid) -> None : Remove commitment override, freeing routine.
 from __future__ import annotations
 
 import random
+from collections import Counter
 
 from aidnd import society
-from aidnd.server.play.engine.core import _S, _gt, _phase, _store, _wid
+from aidnd.server.play.engine.core import _S, PB, _gt, _phase, _store, _wid
 
 
 def _place_index(people, keynode: dict) -> dict:
@@ -94,15 +95,21 @@ def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
     for kind in ("tavern", "temple", "market"):  # tied to buildings places
         nodes = place_idx.get(kind)
         if nodes and _gate_ok(kind, p):
-            if kind == "tavern" and xy and home in xy:   # local pub — nearest to home, so neighbours meet
-                node = min(nodes, key=lambda n: _sqd(xy, home, n))
+            if kind == "tavern" and xy and home in xy:   # local pub — nearest first, then overflow out
+                ordered = sorted(nodes, key=lambda n: _sqd(xy, home, n))
             else:
-                node = nodes[hash((p.state.config.id, kind)) % len(nodes)]
-            if load is not None and n2b is not None:  # capacity: full building doesn't call
-                bid = n2b.get(node)
-                if bid and load.get(node, 0) >= _building_cap(bid):
-                    continue
-            out.append(society.Candidate(kind, node))
+                ordered = [nodes[hash((p.state.config.id, kind)) % len(nodes)]]
+            node = ordered[0]
+            if load is not None and n2b is not None:     # capacity: walk to the next non-full venue
+                node = None
+                for cand in ordered[:1 + PB["overflow_max_hops"]]:
+                    bid = n2b.get(cand)
+                    if bid and load.get(cand, 0) >= _building_cap(bid):
+                        continue                          # full — try the next same-kind node
+                    node = cand
+                    break
+            if node is not None:
+                out.append(society.Candidate(kind, node))
     for kind in ("street", "patrol", "prowl"):  # mobile places — graph node
         if kps and _gate_ok(kind, p):
             out.append(
@@ -248,7 +255,10 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
                         -1.0, obj_p.state.rel(d["actor"]).get("trust", 0) - 0.25)
     n2b = _S.get("cr2b") or {}
     kind_of: dict = _S.setdefault("crof_kind", {})    # pid → activity kind (for GIF/observability)
-    load: dict = {}                                   # node → how many already there (for capacity)
+    load: dict = Counter(crof.values())               # durable: every resident (incl. pinned/scene)
+    ploc = _S.get("loc")
+    if ploc is not None:
+        load[ploc] = load.get(ploc, 0) + 1            # + the player (counted, never a mover — §6)
     last = _S.setdefault("needs_gt", {})
     order = sorted(people.items(), key=lambda kv: (kv[1].work is None, kv[0]))  # workers first
     for pid, p in order:
@@ -265,6 +275,11 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
                                society.PLACE[here].sates if here in society.PLACE else {})
         cnode = appts.get(pid) or _commit_node(pid, phase, people, crof)  # commitment?
         if cnode is not None:                         # override: meeting place/shift/after player
+            cbid = n2b.get(cnode)
+            if cbid and load.get(cnode, 0) >= _building_cap(cbid):
+                kind_of[pid] = "у входа (ждёт)"        # venue full — waits outside, not stacked (§5)
+                last[pid] = gt
+                continue                               # crof unchanged this slot; load not bumped
             node, akind = cnode, ((_S.get("commit") or {}).get(pid, {}).get("kind")
                                   or "appointment")
         else:

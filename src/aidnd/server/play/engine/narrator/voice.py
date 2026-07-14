@@ -103,6 +103,15 @@ def _voice(
     just = (lv.get("last") or {}).get(p.id)
     if just and just != "—":
         bits.append(f"Только что ты: {just}.")
+    never_met = PLAYER not in p.state.relationships  # no mechanical relationship row at all —
+    # a genuine first contact (see mind/appraisal.py: appraise_present no longer auto-seeds one
+    # from mere co-presence, so this is only True/False from REAL interaction, not passive sight)
+    if never_met:
+        bits.append(
+            "Этого человека ты видишь ВПЕРВЫЕ В ЖИЗНИ — никакой прошлой истории с ним нет, ты "
+            "его не помнишь и не мог(ла) его помнить: не выдумывай прежних встреч, общих дел или "
+            "случаев с ним."
+        )
     mems = p.state.memory.recall(player_text or "разговор с чужаком-игроком", now=_mt(), k=5)
     mine = [m for m in mems if PLAYER in (m.about or [])]
     other = [m for m in mems if PLAYER not in (m.about or [])]
@@ -123,8 +132,9 @@ def _voice(
     bits.append(
         f"Симпатия к собеседнику {rel.get('affinity', 0):.2f} (низкая — суше/настороже, высокая — теплее). "
         "Отвечай В ХАРАКТЕРЕ, живой разговорной речью, 1-2 фразы, без ремарок-описаний. "
-        "Помнишь собеседника — покажи это естественно, не пересказывай память дословно. "
-        'ФОРМАТ — строго JSON: {"say": "<реплика>", "player_tone": '
+        + ("" if never_met else
+           "Помнишь собеседника — покажи это естественно, не пересказывай память дословно. ")
+        + 'ФОРМАТ — строго JSON: {"say": "<реплика>", "player_tone": '
         '"friendly|neutral|rude|threat"} (player_tone — как звучали слова СОБЕСЕДНИКА к тебе). '
         "Если для ответа НУЖЕН факт о городе или людях (где что находится, кто есть кто) — "
         'верни СТРОГО JSON {"ask": "<короткий вопрос>"} вместо реплики: получишь справку и ответишь.'

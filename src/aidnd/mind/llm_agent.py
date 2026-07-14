@@ -266,7 +266,9 @@ def _ask(manager, messages, temperature: float, who: str) -> dict:
 def decide_hybrid(state, world, percept, manager, ctx: dict) -> dict:
     """HYBRID: mechanical core provides ranked DRIVES (assertiveness/consistency), LLM
     chooses from top IN CHARACTER, adds dialogue and DESCRIBES what it does/thinks."""
-    appraise_present(state, world, percept, _race_rel())   # seeing them moves emotion/relationships FIRST
+    appraise_present(  # seeing them moves emotion/relationships FIRST (player never auto-seeded)
+        state, world, percept, _race_rel(), skip_seed_id=ctx.get("player_id"),
+    )
     ranked = score(state, world, percept)
     prefs = [(a.label(), (g.kind if g else "idle"), u) for a, g, u in ranked[:5]]
     data = _ask(manager, build_prompt(state, world, percept, ctx, prefs=prefs), 0.55, state.config.id)

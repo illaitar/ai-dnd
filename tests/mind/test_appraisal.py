@@ -12,6 +12,11 @@ test_appraise_present_moves_emotion_and_seeds_prior : appraise_present applies i
     deltas and seeds a fresh relationship prior from a present body.
 test_proxemics_moves_away_from_disliked : move-utility proxemics term scores fleeing a disliked
     other higher than approaching them (Task 7).
+test_appraise_present_never_seeds_relationship_for_skip_id : a stranger stays a stranger — the
+    player (or any id passed as skip_seed_id) never gets a relationship/memory auto-seeded from
+    mere co-presence, even though emotion still moves each tick (regression: brand-new NPC greeted
+    the player as an old acquaintance because appraise_present seeded ~0.2-0.3 trust from a single
+    first-glance impression, before any real interaction).
 """
 
 from aidnd.mind.act import Action
@@ -76,6 +81,23 @@ def test_appraise_present_moves_emotion_and_seeds_prior():
     appraise_present(obs, w, perceive(obs, w), load_race_relations())
     assert obs.emotion["disgust"] > 0.2
     assert "beg" in obs.relationships and obs.relationships["beg"]["affinity"] < 0
+
+
+def test_appraise_present_never_seeds_relationship_for_skip_id():
+    w = World(); w.link("зал", "улица")
+    obs = NpcState.from_config(NpcConfig(id="obs", race="человек", traits={"sociability": 0.5}))
+    w.add(Body(id="obs", place="зал"))
+    w.add(Body(id="pc", place="зал", charisma=0.45))       # a brand-new player body, freshly placed
+    appraise_present(obs, w, perceive(obs, w), load_race_relations(), skip_seed_id="pc")
+    assert "pc" not in obs.relationships             # no mechanical trust/affinity from mere sight
+    assert not any("pc" in (m.about or []) for m in obs.memory.items)   # no first-glance memory either
+
+    # sanity: the SAME body, appraised WITHOUT skip_seed_id, seeds normally (proves the skip
+    # is what suppresses it, not something else about the player-shaped Body)
+    obs2 = NpcState.from_config(NpcConfig(id="obs2", race="человек", traits={"sociability": 0.5}))
+    w.add(Body(id="obs2", place="зал"))
+    appraise_present(obs2, w, perceive(obs2, w), load_race_relations())
+    assert "pc" in obs2.relationships
 
 
 def test_proxemics_moves_away_from_disliked():

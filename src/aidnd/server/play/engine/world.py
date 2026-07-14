@@ -978,6 +978,8 @@ def _live_tick(people) -> tuple:
     for _s in set(rumor_of.values()) | set(news):          # warm every subject offered this tick
         heat[_s] = heat.get(_s, 0.0) + PB["rumor_warm"]
     ctx = {
+        "player_id": PLAYER,  # mind layer is player-agnostic; thread the reserved id through so
+                              # appraise_present can skip auto-seeding a relationship from mere sight
         "roles": roles,
         "names": lv["names"],
         "last_actions": lv["last"],

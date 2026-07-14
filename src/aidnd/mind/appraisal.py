@@ -102,13 +102,19 @@ def _remember(valence: float, other: Body, revulsion: float, cult: float) -> str
     return None
 
 
-def appraise_present(state: NpcState, world, percept, race_rel: dict) -> None:
+def appraise_present(state: NpcState, world, percept, race_rel: dict, skip_seed_id: str | None = None) -> None:
     """Apply the impression of everyone visibly present this tick.
 
     Every present other moves emotion each tick (a lingering threat/delight stays felt).
     A relationship prior and the memorable note are seeded only ONCE, on first encounter —
     once `state.relationships` holds an entry for `other.id`, later ticks skip both (personal
     history, once formed, is no longer overwritten by a fresh first-glance read).
+
+    `skip_seed_id` (the player, threaded in from the caller — this module is otherwise
+    player-agnostic) never gets a relationship/memory auto-seeded from mere co-presence: a
+    stranger stays mechanically a stranger until a REAL interaction (talk/deal/combat) earns
+    trust. Emotion still updates each tick either way — only the silent relationship-prior /
+    memorable-note seeding is skipped for them.
     """
     from .tick import appraise  # local import: avoids a module-load cycle with tick.py
 
@@ -120,6 +126,8 @@ def appraise_present(state: NpcState, world, percept, race_rel: dict) -> None:
         appraise(state, imp.emo, source=other.id)
         if other.id in state.relationships:
             continue                                    # already know them — no re-seed, no re-remember
+        if other.id == skip_seed_id:
+            continue                                     # stranger stays a stranger from mere sight
         state.relationships[other.id] = dict(imp.prior)
         if imp.remember:
             state.memory.add(imp.remember, clock, importance=0.4, about=[other.id])

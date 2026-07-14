@@ -231,7 +231,11 @@ async def go_room(request: Request):
     inside = _S.get("inside")
     if not inside:
         return {"error": "ты не внутри здания"}
-    want = (await request.json()).get("room")
+    try:
+        body = await request.json()
+    except Exception:
+        return {"error": "нужно тело запроса"}
+    want = body.get("room")
     out = {"narr": []}
     if not want:  # return to main hall
         _S["room"] = None
@@ -399,7 +403,10 @@ async def play_plan():
 @router.post("/api/play/zone")
 async def play_zone(request: Request):
     """Approach zone on plan: player position inside building (time from PB)."""
-    b = await request.json()
+    try:
+        b = await request.json()
+    except Exception:
+        return {"error": "нужно тело запроса"}
     zid = str(b.get("zid") or "")
     cur = _plan_payload()
     if not cur.get("plan") or zid not in (cur.get("zones") or {}):

@@ -406,9 +406,14 @@ def _churn_items(prev_who, here, people, active_givers: set, active_targets: set
             out.append({"k": "deed", "who": people[q].name, "pid": q,
                         "text": f"{verb}{hint}"})
         rest = len(pids) - len(named)                     # background + salient over the cap
-        if rest > 0:
+        if rest == 1:                                      # singular grammar: «вошёл»/«вышел» один
+            phrase = "народ прибывает — вошёл один" if arriving else "зал редеет — вышел один"
+        elif rest > 1:
             phrase = (f"народ прибывает — вошли {_ru_count(rest)}" if arriving
                       else f"зал редеет — вышли {_ru_count(rest)}")
+        else:
+            phrase = None
+        if phrase:
             out.append({"k": "deed", "who": "зал", "text": phrase})
     return out
 
@@ -606,13 +611,17 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     # (_world_tick_fast) and must never block on LLM calls. Missing agendas are planned lazily in
     # _live_tick (the streamed /live turn, behind the "…"), so entering a building is instant.
     prev = _S.get("live") or {}
-    # ── Inc1: churn as feed events — diff prev occupant set vs now (same scene only) ──
-    churn: list = []
+    # ── Inc1: churn as a feed QUEUE — diff prev occupant set vs now (same scene only). Never
+    # assign-overwrite: undrained items from a prior rebuild (act/say never drained them — the
+    # client only calls /api/play/live on live_pending) survive the rebuild; the same-loc gate
+    # only gates whether NEW items get generated this rebuild. _live_tick pops the whole queue
+    # atomically exactly once (line ~1151).
+    churn: list = list(prev.get("churn") or [])
     if prev.get("loc") == loc and prev.get("who"):
         cs = _store().contracts(_wid(), "active") + _store().contracts(_wid(), "offered")
         givers = {c["giver"] for c in cs if c.get("giver")}
         targets = {c["target"] for c in cs if c.get("target")}
-        churn = _churn_items(prev["who"], frozenset(here), people, givers, targets)
+        churn.extend(_churn_items(prev["who"], frozenset(here), people, givers, targets))
     prev_places = {pid: b.place for pid, b in (prev.get("world").bodies.items()
                                                if prev.get("world") else {}.items())}
     if zones:

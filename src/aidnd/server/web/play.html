@@ -1160,6 +1160,7 @@ async function converseNow(text){
   }
   if(CARD)Object.assign(CARD,{aff:r.aff,trust:r.trust,fear:r.fear,emotion:r.emotion});
   if(r.portrait&&byId(id)){byId(id).portrait=r.portrait;}
+  if(r.live_pending)reactLive();                     // crowd/churn reaction deferred — same as move
 }
 function say(t){push('me',`<div class="tx">${esc(t)}</div>`);converse(t);}
 function submit(){
@@ -1191,6 +1192,7 @@ async function freeActNow(v){
   if(r.map_open)openParch();
   if(r.refresh)await refreshInv();
   renderJobs();
+  if(r.live_pending)reactLive();                     // crowd/churn reaction deferred — same as move
 }
 $('send').onclick=submit;
 $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')submit();});

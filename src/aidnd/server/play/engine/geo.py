@@ -279,6 +279,12 @@ def geo_answer(pid: str, text: str, from_node) -> dict | None:
 
     if dec["kind"] == "share":
         place = dec["place"]
+        if place["bid"] == _S.get("inside"):
+            # the player is already standing inside the very building being shared — a direction
+            # line here would be a fabricated route to a place he's already in (playtest bug);
+            # no reveal either, since being inside already counts as seen.
+            return {"geo_line": f"да ты уже здесь — это {place['name']} и есть{manera}",
+                    "reveal": None}
         dline = direction_line(from_node, place["bid"])
         if dline == FAR_LINE:
             return {"geo_line": f"ты знаешь про {place['kind']} «{place['name']}», но это далеко: "

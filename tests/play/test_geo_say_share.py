@@ -87,6 +87,22 @@ def test_where_question_shares_direction_and_reveals(town):
     assert "b_smithy" in _seen()                             # map reveal
 
 
+def test_geo_answer_inside_target_building_no_fake_direction(town):
+    """Playtest bug: player asks for a place while already standing inside it (Хельга, «Гнилой
+    зуб») — the router still shares b_smithy, but geo_answer must not invent a direction/route to
+    where the player already stands, and must skip the map-mark (already inside == already seen)."""
+    core._S["inside"] = "b_smithy"
+    try:
+        ga = geo.geo_answer("npc:oda", "где кузница?", core._S.get("loc"))
+    finally:
+        core._S["inside"] = None
+    assert ga is not None
+    assert "уже здесь" in ga["geo_line"]
+    assert "ходу" not in ga["geo_line"]          # no minutes/direction phrase
+    assert "к северу" not in ga["geo_line"]
+    assert ga["reveal"] is None                 # no map-mark for an already-inside share
+
+
 def test_ordinary_line_no_geo_no_mark(town):
     res = asyncio.run(dlg.say(_Req({"npc": "npc:oda", "text": "как твои дела?"})))
     assert res["line"] == "Не знаю, о чём ты."               # no geo fact injected

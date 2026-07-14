@@ -33,7 +33,6 @@ from aidnd.server.play.engine.core import (
     _emo,
     _gt,
     _gt_add,
-    _here,
     _here_settled,
     _met,
     _mt,
@@ -230,7 +229,7 @@ async def say(request: Request):
         return {**res, **t, "gt": _gt(), "coins": _pc_coins(), "hp": _pc_hp()}
     if npc not in people:
         return {"error": "нет такого — рядом никого с таким именем"}
-    if npc not in _here(loc_, crof_):
+    if npc not in _here_settled(loc_, crof_):  # interaction surface: a transit walker isn't a talk partner
         return {"error": "он уже не рядом — разговор оборвался"}
     p = people[npc]
     rel = p.state.relationships.setdefault(PLAYER, {"affinity": 0.0, "trust": 0.0, "fear": 0.0})

@@ -68,7 +68,7 @@ def town(tmp_path, monkeypatch):
     monkeypatch.setattr(dlg, "_play", lambda: (people["npc:oda"], people, crof, cr2b, 50))
     monkeypatch.setattr(dlg, "_world_tick_fast", lambda: {})
     monkeypatch.setattr(dlg, "_pc_coins", lambda: 0)
-    monkeypatch.setattr(dlg, "_here", lambda loc, crof_: list(people))
+    monkeypatch.setattr(dlg, "_here_settled", lambda loc, crof_: list(people))  # say() gate is settled-only
     monkeypatch.setattr(core, "_model", lambda: _Voice())
     saved = dict(core._S._d()); d = core._S._d()
     try:

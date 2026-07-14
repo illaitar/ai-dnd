@@ -116,3 +116,25 @@ def test_talk_to_settled_npc_at_same_node_is_not_rejected_for_absence(wired, mon
     res = asyncio.run(dlg_mod.talk(_Req({"npc": "npc:anna"})))
 
     assert res.get("error") != "его здесь нет — говорить можно с тем, кто рядом"
+
+
+def test_say_to_transit_walker_is_absent(wired, monkeypatch):
+    """say()'s continue-conversation presence gate (dialogue.py) must also reject a walker who is
+    only mid-transit through the player's node — same settled-only interaction surface as talk()."""
+    people, crof = _scene_and_transit_fixture()
+    monkeypatch.setattr(dlg_mod, "_play", lambda: (None, people, crof, {}, LOC))
+
+    res = asyncio.run(dlg_mod.say(_Req({"npc": "npc:mara", "text": "Эй!"})))
+
+    assert res == {"error": "он уже не рядом — разговор оборвался"}
+
+
+def test_say_to_settled_npc_at_same_node_is_not_rejected_for_absence(wired, monkeypatch):
+    people, crof = _scene_and_transit_fixture()
+    monkeypatch.setattr(dlg_mod, "_play", lambda: (None, people, crof, {}, LOC))
+    monkeypatch.setattr(dlg_mod, "_voice", lambda *a, **kw: "Здравствуй.")
+    monkeypatch.setattr(dlg_mod, "_world_tick_fast", lambda: {})
+
+    res = asyncio.run(dlg_mod.say(_Req({"npc": "npc:anna", "text": "Привет!"})))
+
+    assert res.get("error") != "он уже не рядом — разговор оборвался"

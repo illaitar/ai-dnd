@@ -37,6 +37,7 @@ from aidnd.server.play.engine.core import (
     _gt,
     _gt_add,
     _here,
+    _here_settled,
     _inscriber,
     _mana,
     _mana_cap,
@@ -500,7 +501,7 @@ async def learn_glyph(request: Request):
     g = magic_load()
     if gid not in g["all"]:
         return {"error": "нет такого глифа"}
-    if teacher not in people or teacher not in _here(loc, crof):
+    if teacher not in people or teacher not in _here_settled(loc, crof):  # interaction surface: settled only
         return {"error": "наставника нет рядом"}
     p = people[teacher]
     if p.role not in TEACHER_ROLES:
@@ -555,7 +556,7 @@ def teachers_here():
     """Who on location can teach magic (for UI: highlight teacher)."""
     _city, people, crof, _cr2b, loc = _play()
     out = []
-    for pid in _here(loc, crof):
+    for pid in _here_settled(loc, crof):  # render surface: settled only
         p = people[pid]
         if p.role in TEACHER_ROLES and (pid in _met() or p.work):
             out.append(

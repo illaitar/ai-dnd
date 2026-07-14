@@ -638,7 +638,8 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         "convs": prev_convs,
         "clock": (prev.get("clock", 0) if same_loc else 0),
         "loc": loc,
-        "bid": bid,  # truthy only for a building interior — street/plaza scenes have none
+        "bid": bid,  # the node's building mapping (ANY node tied to a building, incl. its street
+                     # door) — NOT interior-only; whether the player has stepped in lives in _S["inside"]
         "place": place,
         "ts": 0.0,
         "who": frozenset(here),
@@ -1127,9 +1128,10 @@ def _live_tick(people) -> tuple:
     _slog = _logging.getLogger("aidnd.scene")
     if _slog.isEnabledFor(_logging.DEBUG):
         _slog.debug("─── ТИК %s · %s · «%s» · душ=%d · LLM-актёров=%d · разговоров=%d · "
-                    "игрок@%s (zone=%s) ───",
+                    "в пути=%d · игрок@%s (zone=%s) ───",
                     lv["clock"], ctx["time"], lv["place"], len(order), len(actors),
                     len(lv.get("convs") or []),
+                    len(_S.get("transit") or {}),  # наблюдаемость Inc3: пешеходы в городе сейчас
                     w.bodies[PLAYER].place if PLAYER in w.bodies else "?", _S.get("zone"))
         for pid in actors:
             st = w.npc_minds[pid]
@@ -1158,7 +1160,9 @@ def _live_tick(people) -> tuple:
                 acts)
 
     feed, address = _S["live"].pop("churn", []) + list(zone_feed), []   # Inc1: door events lead the feed
-    if not lv.get("bid"):                                  # street scene — show walkers passing (Inc3)
+    if not _S.get("inside"):    # снаружи — и улица, и площадь, и двор заведения; внутри здания
+        # прохожих не видно (Inc3). NB: lv["bid"] is truthy for ANY node mapped to a building —
+        # including its street-front door node — so it must NOT gate this; only _S["inside"] does.
         from .worldsim import _transit_node
         _gt_now = _gt()
         for pid, row in (_S.get("transit") or {}).items():

@@ -56,7 +56,7 @@ def _apply_routine() -> None:
     """Sync passive world with current game time: idempotent, cheap — once per day phase
     (key phase+day). Routine of ALL residents built from NEEDS/character/time (society, via
     worldsim.routine_step), not hardcoded roles. At dawn — daily events."""
-    from ..world import _here
+    from ..core import _here
 
     key = (_gt() // 30, _gt() // 1440)               # routine step: every 30 game minutes
     if _S.get("routine_key") == key or not _S.get("people"):

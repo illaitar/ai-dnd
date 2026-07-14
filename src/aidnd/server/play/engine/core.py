@@ -240,8 +240,41 @@ def _role_at(node, people, spot, n2b):
     )
 
 
+def _flip_arrived(spot: dict) -> None:
+    """Lazy, query-shaped: any transit row past its arrive_gt flips into crof and is deleted.
+    Nothing ticks — this runs only when a here-query is made."""
+    tr = _S.get("transit")
+    if not tr:
+        return
+    gt = _gt()
+    for pid, row in list(tr.items()):
+        if pid not in spot:      # orphan row (world rebuilt, resident gone) — compost, never a phantom
+            del tr[pid]
+        elif gt >= row["arrive_gt"]:
+            spot[pid] = row["to"]
+            del tr[pid]
+
+
+def _here_settled(node, spot):
+    """Occupants SETTLED at node: crof members at node MINUS anyone en route (a transit walker is
+    not settled anywhere). Flips arrived walkers first. Used by the rebuild trigger / scene build so
+    brief walkers never thrash a rebuild (§3.3)."""
+    _flip_arrived(spot)
+    tr = _S.get("transit") or {}
+    return [pid for pid, s in spot.items() if s == node and pid not in tr]
+
+
 def _here(node, spot):
-    return [pid for pid, s in spot.items() if s == node]
+    """Everyone AT node right now: settled occupants + walkers whose derived transit position == node."""
+    out = _here_settled(node, spot)
+    tr = _S.get("transit")
+    if tr:
+        from .worldsim import _transit_node
+        gt = _gt()
+        for pid, row in tr.items():
+            if _transit_node(row, gt) == node and pid not in out:
+                out.append(pid)
+    return out
 
 
 def _emo(st) -> str:

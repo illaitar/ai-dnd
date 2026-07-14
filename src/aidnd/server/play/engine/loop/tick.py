@@ -26,11 +26,11 @@ def _world_tick() -> dict:
     """
     from aidnd import config
 
-    from ..world import _here, _live_build, _live_tick
+    from ..world import _here_settled, _live_build, _live_tick
 
     city, people, crof, cr2b, loc = _play()  # _play → _apply_routine: passive world synced
     lv = _S.get("live")
-    if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
+    if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here_settled(loc, crof)):
         _live_build(city, people, crof, cr2b, loc)
     if config.NO_LLM_TICKS:  # debug: the hall stays quiet — no NPC decisions this turn
         return {"feed": [], "address": [], "digest": ""}
@@ -58,10 +58,10 @@ def _world_tick_fast() -> dict:
     half — NPCs think/talk (_live_tick, many LLM calls) — is streamed afterwards by the client
     calling /api/play/live, so entering a crowded tavern never blocks. `live_pending` tells the
     client to fetch that reaction."""
-    from ..world import _here, _live_build
+    from ..world import _here_settled, _live_build
 
     city, people, crof, cr2b, loc = _play()
     lv = _S.get("live")
-    if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here(loc, crof)):
+    if not lv or lv["loc"] != loc or lv.get("who") != frozenset(_here_settled(loc, crof)):
         _live_build(city, people, crof, cr2b, loc)
     return {"feed": [], "address": [], "live_pending": True}

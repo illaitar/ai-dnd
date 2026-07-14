@@ -60,7 +60,7 @@ def npc_schedule(npc: str = ""):
     """NPC daily schedule (Bombers' Notebook card): where at each phase — from predict().
     Visible only for familiar (talk); unfamiliar cannot be read (fog of identity)."""
     from aidnd.server.play.engine.core import _S, _met
-    from aidnd.server.play.engine.worldsim import forecast, predict
+    from aidnd.server.play.engine.worldsim import forecast, predict, transit_of
     people = _S.get("people") or {}
     p = people.get(npc)
     if p is None:
@@ -71,9 +71,11 @@ def npc_schedule(npc: str = ""):
           "market": "на рынке", "street": "на улице", "patrol": "в дозоре",
           "prowl": "на промысле", "appointment": "по уговору", "follow": "с тобой", None: "?"}
     fc = forecast(npc)
+    _t = transit_of(npc)
+    now = _t["kind"] if _t else RU.get(predict(npc)["kind"], "?")   # «в пути» while a transit row is live
     return {"npc": npc, "name": p.name, "role": p.role,
             "day": {ph: RU.get(k, k) for ph, k in fc.items()},
-            "now": RU.get(predict(npc)["kind"], "?")}
+            "now": now}
 
 
 @router.get("/api/play/economy")

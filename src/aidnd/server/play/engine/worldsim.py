@@ -171,6 +171,36 @@ def predict(pid: str, phase: str | None = None) -> dict:
     return {"node": node, "kind": kind, "route": route}
 
 
+def _transit_node(row: dict, gt: int) -> int:
+    """Derived position of a walker at time gt — O(1), nothing ticks. `to` once arrived."""
+    if gt >= row["arrive_gt"]:
+        return row["to"]
+    i = max(0, (gt - row["depart_gt"]) // PB["step_min"])   # not yet departed (stale/rewound gt) → origin
+    return row["path"][min(i, len(row["path"]) - 1)]
+
+
+def transit_of(pid: str) -> dict | None:
+    """A live walker's «в пути» summary for read paths (schedule card / geo) — None if settled.
+    Honors §10: does NOT touch predict/crosses (forecast stays on the utility path)."""
+    row = (_S.get("transit") or {}).get(pid)
+    if not row:
+        return None
+    return {"kind": "в пути", "node": _transit_node(row, _gt()), "to": row["to"]}
+
+
+def _plan_move(pid: str, origin, path: list, gt: int):
+    """Decide instant flip vs transit row for a settled reassignment. Returns (node, row):
+      • short hop (< transit_min_steps) or no usable path → (dest, None): caller flips crof now;
+      • long hop → (None, row): caller writes _S['transit'][pid]=row and does NOT flip crof."""
+    if not path or len(path) < 2:
+        return (path[-1] if path else None), None
+    steps = len(path) - 1
+    if steps < PB["transit_min_steps"]:
+        return path[-1], None
+    return None, {"from": origin, "to": path[-1], "depart_gt": gt,
+                  "arrive_gt": gt + steps * PB["step_min"], "path": list(path)}
+
+
 def forecast(pid: str) -> dict:
     """NPC's daily schedule: {phase: activity_kind} — for schedule card (observability)."""
     return {ph: predict(pid, ph)["kind"] for ph in ("morning", "day", "evening", "night")}
@@ -302,10 +332,28 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
             if node is not None:
                 akind = next((c.kind for c in cands if c.node == node), None)
         if node is not None:
-            crof[pid] = node
+            row = None
+            if cnode is None:   # only a FREE routine reassignment may become a walker; a commitment
+                                # (follow/appointment/shift) must land THIS slot — the destination
+                                # itself may be dynamic (follow tracks the player), so it can't be
+                                # "walked toward" over ticks
+                city = _S.get("city")
+                path: list = []
+                if city is not None and origin is not None and origin != node:
+                    r = city.route(origin, node)
+                    path = list(r.nodes) if getattr(r, "found", False) else [origin, node]
+                flip, row = _plan_move(pid, origin, path, gt) if path else (node, None)
+                node = flip if row is None else node   # instant dest unchanged; else keep node for load
+            if row is not None:
+                _S.setdefault("transit", {})[pid] = row    # walker: crof stays at origin till arrive_gt
+            else:
+                crof[pid] = node                            # instant (commitment / short hop / no route)
             kind_of[pid] = akind
         dest = node if node is not None else origin   # wherever they END UP (same node for a stay —
-                                                        # net zero; frees origin for real moves)
+                                                        # net zero; frees origin for real moves) — the
+                                                        # DESTINATION counts toward load NOW even mid-transit
+                                                        # (walker is committed there; capacity can't be
+                                                        # oversubscribed by in-flight walkers, §5-A)
         if dest is not None and n2b.get(dest):         # stood in building — took spot
             load[dest] = load.get(dest, 0) + 1
         last[pid] = gt

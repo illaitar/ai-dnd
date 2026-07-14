@@ -26,7 +26,7 @@ from aidnd.server.play.engine.core import (
     _display,
     _gt,
     _gt_add,
-    _here,
+    _here_settled,
     _model,
     _mt,
     _npc_save,
@@ -470,7 +470,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     names = {PLAYER: hero if hero != "Странник" else "чужак"}  # NPCs call by name if they know
     known_by = {
         pid
-        for pid in _here(loc, crof)  # who of present ALREADY know player
+        for pid in _here_settled(loc, crof)  # who of present ALREADY know player (settled only)
         if PLAYER in people[pid].state.relationships
     }
     roles = {
@@ -484,7 +484,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     }
     rng = random.Random(f"live|{loc}")
     npc_map: dict = {}  # pid → {thing name: item_id} (thefts real)
-    here_all = _here(loc, crof)  # everyone present — no LOD cap (buildings bounded by _building_cap)
+    here_all = _here_settled(loc, crof)  # everyone SETTLED present — no LOD cap (buildings bounded by _building_cap)
     leisure = PB["leisure_social_lift"] if "tavern" in society.kinds_of(data or {}) else 0.0
     workers = {pid for pid in here_all if people[pid].work == bid}
     _bname = _binfo(bid)["name"] if bid else ""       # 'Кузница «…»' — matches open_hours by type substring
@@ -584,7 +584,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             )
         if bits:
             personas[pid] = ". ".join(bits)
-    here = _here(loc, crof)
+    here = _here_settled(loc, crof)
     # PRE-ACQUAINTANCE: residents of one town know each other (kin > colleagues > neighbors).
     # Seed only absent ties — lived relations untouched.
     for i, a in enumerate(here_all):
@@ -1158,6 +1158,13 @@ def _live_tick(people) -> tuple:
                 acts)
 
     feed, address = _S["live"].pop("churn", []) + list(zone_feed), []   # Inc1: door events lead the feed
+    if not lv.get("bid"):                                  # street scene — show walkers passing (Inc3)
+        from .worldsim import _transit_node
+        _gt_now = _gt()
+        for pid, row in (_S.get("transit") or {}).items():
+            if pid in people and _transit_node(row, _gt_now) == lv["loc"]:
+                feed.append({"k": "deed", "who": people[pid].name, "pid": pid,
+                             "text": "проходит мимо, не задерживаясь"})
     topics = lv.setdefault("topics", [])  # anti-echo REMEMBERS past ticks (signature tail)
     pc = _pc()
 

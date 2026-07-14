@@ -51,7 +51,10 @@ def test_follow_pins_to_player_but_yields_to_need(world):
     assert core._S["crof"][pid] == loc                 # follow: у игрока
     world[pid].state.needs["fatigue"] = 0.95          # валится с ног — критнужда важнее
     ws.routine_step(world, core._S["crof"])
-    assert core._S["crof"][pid] != loc                 # отошёл (спать/есть) — уступил критнужде
+    # отошёл (спать/есть) — уступил критнужде: либо уже на новом узле (короткий шаг),
+    # либо в пути прочь (Inc3: длинный переход = транзит-строка, crof щёлкнет по прибытии)
+    tr = (core._S.get("transit") or {}).get(pid)
+    assert core._S["crof"][pid] != loc or (tr is not None and tr["to"] != loc)
     ws.clear_commit(pid)
 
 

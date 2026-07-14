@@ -360,6 +360,59 @@ def _afford_need(afford: dict, zone_kind: str, is_post: bool) -> tuple[str | Non
     return need, rate
 
 
+_RU_COUNT = {1: "один", 2: "двое", 3: "трое", 4: "четверо", 5: "пятеро", 6: "шестеро"}
+
+
+def _ru_count(n: int) -> str:
+    """Small RU count word for the churn summary; fallback «N человек» past шестеро."""
+    return _RU_COUNT.get(n, f"{n} человек")
+
+
+def _salient(pid, people, active_givers: set, active_targets: set) -> bool:
+    """Is this joiner/leaver worth a NAMED churn line? All signals are real fields (no invention):
+    acquaintance (PLAYER∈relationships, same signal as _live_build known_by), an active/offered
+    contract's giver or target, a guard, or a wounded person. NB: max_hp lives on the CONFIG
+    (NpcState has no max_hp attr)."""
+    p = people.get(pid)
+    if p is None:
+        return False
+    st = p.state
+    return (
+        PLAYER in st.relationships
+        or pid in active_givers
+        or pid in active_targets
+        or p.role == "стражник"
+        or st.hp < st.config.max_hp
+    )
+
+
+def _churn_items(prev_who, here, people, active_givers: set, active_targets: set) -> list[dict]:
+    """Diff prev occupant set vs new → feed items: NAMED for salient (capped churn_named_max per
+    direction), the rest folded into ONE summary line per non-empty direction. Feed shape
+    {k:'deed', who, text} — exactly what scene_digest._event_lines consumes. Pure; no LLM."""
+    prev_s, here_s = set(prev_who or ()), set(here or ())
+    joined = [p for p in (here_s - prev_s) if p in people]
+    left = [p for p in (prev_s - here_s) if p in people]
+    cap = PB["churn_named_max"]
+    out: list[dict] = []
+    for pids, arriving in ((joined, True), (left, False)):
+        if not pids:
+            continue
+        sal = [q for q in pids if _salient(q, people, active_givers, active_targets)]
+        named = sal[:cap]
+        for q in named:
+            verb = "вошёл(ла) в зал" if arriving else "поднялся(лась) и вышел(ла)"
+            hint = ", ищет тебя взглядом" if (q in active_givers and arriving) else ""
+            out.append({"k": "deed", "who": people[q].name, "pid": q,
+                        "text": f"{verb}{hint}"})
+        rest = len(pids) - len(named)                     # background + salient over the cap
+        if rest > 0:
+            phrase = (f"народ прибывает — вошли {_ru_count(rest)}" if arriving
+                      else f"зал редеет — вышли {_ru_count(rest)}")
+            out.append({"k": "deed", "who": "зал", "text": phrase})
+    return out
+
+
 def _live_build(city, people, crof, cr2b, loc) -> None:
     bid = cr2b.get(loc)
     place = _binfo(bid)["name"] if bid else "улица"
@@ -553,6 +606,13 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     # (_world_tick_fast) and must never block on LLM calls. Missing agendas are planned lazily in
     # _live_tick (the streamed /live turn, behind the "…"), so entering a building is instant.
     prev = _S.get("live") or {}
+    # ── Inc1: churn as feed events — diff prev occupant set vs now (same scene only) ──
+    churn: list = []
+    if prev.get("loc") == loc and prev.get("who"):
+        cs = _store().contracts(_wid(), "active") + _store().contracts(_wid(), "offered")
+        givers = {c["giver"] for c in cs if c.get("giver")}
+        targets = {c["target"] for c in cs if c.get("target")}
+        churn = _churn_items(prev["who"], frozenset(here), people, givers, targets)
     prev_places = {pid: b.place for pid, b in (prev.get("world").bodies.items()
                                                if prev.get("world") else {}.items())}
     if zones:
@@ -573,6 +633,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
         "place": place,
         "ts": 0.0,
         "who": frozenset(here),
+        "churn": churn,          # Inc1: prepended to the feed by _live_tick, narrated by scene_digest
         "pc_map": pc_map,
         "npc_map": npc_map,
         "last": {},
@@ -1087,7 +1148,7 @@ def _live_tick(people) -> tuple:
                 "; ".join(f"{p[0]}({p[1]},{p[2]:.2f})" for p in (d.get("prefs") or [])[:5]),
                 acts)
 
-    feed, address = list(zone_feed), []
+    feed, address = _S["live"].pop("churn", []) + list(zone_feed), []   # Inc1: door events lead the feed
     topics = lv.setdefault("topics", [])  # anti-echo REMEMBERS past ticks (signature tail)
     pc = _pc()
 

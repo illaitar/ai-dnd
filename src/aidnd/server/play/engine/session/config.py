@@ -21,6 +21,7 @@ PB = {
     "churn_named_max": 2,       # max NAMED join/leave feed items per direction per tick; rest → summary
     "overflow_max_hops": 2,     # full venue → try this many next same-kind candidates before street
     "transit_min_steps": 3,     # reassignment shorter than this many nodes = instant crof flip (no walker)
+    "depart_postpone_slots": 1,  # slots a mid-conversation NPC's departure is postponed (world politeness)
     # geo (NPC geographic knowledge) — geometric/social tunables, NOT willingness
     "geo_neighbor_hops": 2,     # a home within this many graph hops of yours = "сосед"
     "geo_friend_aff": 0.3,      # affinity above this = friend (reuses seeds.py:203 literal)

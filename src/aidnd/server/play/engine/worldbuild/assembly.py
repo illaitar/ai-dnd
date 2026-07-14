@@ -169,6 +169,12 @@ def _play():
             geom=geom,
             keynode=keynode,
             kps=kps,
+            # a brand-new city/roster invalidates any sim state derived from the OLD graph (Inc3/4:
+            # transit rows reference old node ids, depart_postpone/crof_kind key off the old
+            # roster) — stale entries here would otherwise misreport who is "settled" where.
+            transit={},
+            depart_postpone={},
+            crof_kind={},
         )
         if saved_loc in xy and row.get("inside") in n2b.values():
             _S["inside"], _S["room"] = row["inside"], row.get("room")

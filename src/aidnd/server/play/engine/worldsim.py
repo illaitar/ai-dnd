@@ -243,11 +243,12 @@ def _commit_node(pid: str, phase: str, people: dict, crof: dict) -> int | None:
     return c.get("node")
 
 
-def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
+def routine_step(people: dict, crof: dict) -> None:
     """Recalculate where each resident is based on needs/traits/time. Cheap (no LLM/DB in loop):
     one building index + O(people×places) utility. Mutates crof (spot) and needs in people[*].state.
-    `pin` — residents present in the player's live scene (ring A owns them): skipped here so ring A
-    and ring B never both move the same NPC (docs/loop.md LOD rings)."""
+    (Inc4) Present scene NPCs are NO LONGER pinned out — ring B may relocate anyone; a departure
+    from the player's node rides Inc1's leaver-diff. The one exception is the polite one-slot
+    postpone below for an NPC mid-conversation with the player (world politeness, not a mind gate)."""
     phase = _phase()
     keynode, kps, place_idx, work_kinds, xy = _place_context(people)
     gt = _gt()
@@ -293,8 +294,8 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
     last = _S.setdefault("needs_gt", {})
     order = sorted(people.items(), key=lambda kv: (kv[1].work is None, kv[0]))  # workers first
     for pid, p in order:
-        if pin and pid in pin:  # ring A owns present NPCs — don't move them from the sim (no A/B overlap)
-            continue
+        # (Inc4) NO pin skip — scene NPCs relocate; ring A/ring B overlap resolved by the postpone
+        # guard below + Inc1's leaver-diff (a departing present NPC surfaces as a leave event).
         st = p.state
         origin = crof.get(pid)
         if origin is not None:
@@ -331,6 +332,15 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
                                                  stay=origin), None
             if node is not None:
                 akind = next((c.kind for c in cands if c.node == node), None)
+        if node is not None and node != origin:            # this is a real DEPARTURE from where they stand
+            post = _S.setdefault("depart_postpone", {})
+            if _S.get("dlg") == pid and post.get(pid, 0) < PB["depart_postpone_slots"]:
+                post[pid] = post.get(pid, 0) + 1            # «не срывается на полуслове» — one slot only
+                if origin is not None:
+                    load[origin] = load.get(origin, 0) + 1  # stays put — re-credit the ORIGIN seat
+                last[pid] = gt
+                continue                                    # skip the move: no crof/transit change, no event
+            post.pop(pid, None)                             # bound reached / not talking → move normally
         if node is not None:
             row = None
             if cnode is None:   # only a FREE routine reassignment may become a walker; a commitment

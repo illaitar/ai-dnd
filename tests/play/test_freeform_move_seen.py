@@ -59,7 +59,7 @@ def test_move_to_unknown_place_refuses(world):
     assert "Спроси у людей" in " ".join(res["narr"])
 
 
-def test_arbiter_context_names_seen_buildings(tmp_path):
+def test_arbiter_context_names_seen_buildings(tmp_path, monkeypatch):
     # assemble_context must list the revealed house under МЕСТА ГОРОДА so the parser can emit it
     from aidnd.server.play.engine.session import state as _state
     d = _state._S._d(); saved = dict(d)
@@ -71,7 +71,8 @@ def test_arbiter_context_names_seen_buildings(tmp_path):
         d.update(wid=1, loc=50, seen={"house:9:310_372"},
                  geom={"keys": [{"node": 48, "label": "кузня", "bid": "key:1"}]},
                  live={}, zone=None)
-        persist._STORE = st
+        monkeypatch.setattr(persist, "_STORE", st)   # root-patch — auto-reverts (raw assign leaked
+                                                       # into every later test's default store)
         st.save_building(1, "house:9:310_372", False, 372, "дом Медовара",
                          {"name": "дом Медовара", "type": "жилой дом"})
         sc = {"here": [], "location": {"name": "улица", "containers": []}, "ambient": {}}
@@ -81,7 +82,7 @@ def test_arbiter_context_names_seen_buildings(tmp_path):
         d.clear(); d.update(saved)
 
 
-def test_arbiter_seen_names_capped_at_12(tmp_path):
+def test_arbiter_seen_names_capped_at_12(tmp_path, monkeypatch):
     # F4 review Minor: unbounded seen-list bloats every prompt in a long-lived world — cap it.
     from aidnd.server.play.engine.session import persist
     from aidnd.server.play.engine.session import state as _state
@@ -95,7 +96,7 @@ def test_arbiter_seen_names_capped_at_12(tmp_path):
         d.update(wid=1, loc=50, seen=seen_bids,
                  geom={"keys": [{"node": 48, "label": "кузня", "bid": "key:1"}]},
                  live={}, zone=None)
-        persist._STORE = st
+        monkeypatch.setattr(persist, "_STORE", st)
         for i in range(15):
             st.save_building(1, f"house:{i}", False, 372 + i, f"дом {i}", {"name": f"дом {i}"})
         sc = {"here": [], "location": {"name": "улица", "containers": []}, "ambient": {}}
@@ -107,7 +108,7 @@ def test_arbiter_seen_names_capped_at_12(tmp_path):
         d.clear(); d.update(saved)
 
 
-def test_arbiter_seen_names_rank_generic_fallback_last(tmp_path):
+def test_arbiter_seen_names_rank_generic_fallback_last(tmp_path, monkeypatch):
     # Review Finding 2: a plain Unicode sort puts fallback «Здание» (capital З) before all
     # lowercase real names, so ≥12 generic houses (no factsheet) evict a named, enriched
     # incident house from МЕСТА ГОРОДА — real names must never be crowded out by placeholders.
@@ -123,7 +124,7 @@ def test_arbiter_seen_names_rank_generic_fallback_last(tmp_path):
         d.update(wid=1, loc=50, seen=seen_bids,
                  geom={"keys": [{"node": 48, "label": "кузня", "bid": "key:1"}]},
                  live={}, zone=None)
-        persist._STORE = st
+        monkeypatch.setattr(persist, "_STORE", st)
         for i in range(13):                          # no factsheet data → _binfo falls back to «Здание»
             st.save_building(1, f"house:blank:{i}", False, 372 + i, None, {})
         st.save_building(1, "house:medovar", False, 500, "дом Медовара",

@@ -56,7 +56,7 @@ def _apply_routine() -> None:
     """Sync passive world with current game time: idempotent, cheap — once per day phase
     (key phase+day). Routine of ALL residents built from NEEDS/character/time (society, via
     worldsim.routine_step), not hardcoded roles. At dawn — daily events."""
-    from ..core import _here
+    from ..core import _here_settled
 
     key = (_gt() // 30, _gt() // 1440)               # routine step: every 30 game minutes
     if _S.get("routine_key") == key or not _S.get("people"):
@@ -79,7 +79,9 @@ def _apply_routine() -> None:
             _S["econ_news"] = (_S.get("econ_news") or [])[-2:] + en
     except Exception:  # noqa: BLE001 — economy doesn't crash the world
         pass
-    # _here() here runs _flip_arrived globally BEFORE routine_step builds the ledger — that ordering
-    # is load-bearing: it's what guarantees a walker who just arrived is pinned/counted at its
-    # DESTINATION (crof already flipped) rather than its stale origin. Do not reorder.
-    routine_step(_S["people"], _S["crof"], pin=set(_here(_S["loc"], _S["crof"])))
+    # (Inc4) no more pin — scene NPCs relocate (postpone guard lives inside routine_step). The
+    # _here_settled() call below still runs _flip_arrived globally BEFORE routine_step builds the
+    # ledger — that ordering is load-bearing: it's what guarantees a walker who just arrived is
+    # counted at its DESTINATION (crof already flipped) rather than its stale origin. Do not reorder.
+    _here_settled(_S["loc"], _S["crof"])
+    routine_step(_S["people"], _S["crof"])

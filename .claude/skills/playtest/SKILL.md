@@ -142,6 +142,9 @@ the server log for `402|Payment|5xx|Insufficient`. Provider outage ⇒ every dep
 | «купил, но товар не пришёл» | `/give` is a GIFT — a purchase is market/buy or an executed sale; report which affordance was actually used |
 | «навигация сломана: goto стоит, loc не меняется» | movement executes on /live ticks — did the ticks run (LLM up)? |
 | «хроника пишет чужое/древнее время» | gt is current world time; check journal cap pruning first |
+| player-reported gt/время/«я поспал» | haiku testers FABRICATE time telemetry — trust only gt quoted from raw scene JSON; real sleep = gt jump by hundreds of minutes, else the «сон» was narration (or a coin gift) |
+| «бой сжёг мой ход / фантомная атака» | errored combat_act returns EARLY without end_turn (code-verified); a «lost» attack is usually a промах line the tester overlooked in the log |
+| «NPC исчезли / не те люди в сцене» | unpinned world — people relocate every ~30 game-min; check placements, not memory of a prior tick |
 
 ## Scenario presets
 

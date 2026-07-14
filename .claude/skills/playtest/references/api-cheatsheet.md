@@ -34,8 +34,11 @@ exact error strings, and end your run — do not spend budget probing «broken»
 ## Combat (the part testers keep missing)
 - LAIRS & INCIDENTS (guild board jobs, «твари в подполе» etc.): enter the fight via
   `POST /api/play/delve {"lair":"<lair id from the job, e.g. inc|1|vermin>"}` — NOT by walking
-  into the building and typing «спускаюсь в подпол». Delve starts the dungeon/combat; then drive
-  it with the combat API below (or dungeon_move/dungeon_loot/dungeon_exit for multi-room delves).
+  into the building and typing «спускаюсь в подпол». Then the DUNGEON API (exact shapes):
+  `GET /api/play/dungeon` (room, room_name, exits[{room,eid,kind,locked,hint}], cleared) ·
+  `POST /api/play/dungeon_move {"room":<room id from exits>}` (combat can trigger) ·
+  `POST /api/play/dungeon_loot {"container":..}` · `POST /api/play/dungeon_exit {}`.
+  Combat when it starts — the combat API below. Do NOT invent endpoints (/move_room etc. don't exist).
 - `GET  /api/play/combat` — state: grid w/h, units[] (id, x, y, hp, ac), order, turn, status
 - `POST /api/play/combat_act` — one action per your turn: `{"type":"move","x":X,"y":Y}` · `{"type":"attack","target":"<unit id>"}` · `{"type":"dodge"}` · `{"type":"flee"}` · `{"type":"end"}`. Bad payloads return an error naming the accepted shapes. Repeat GET → act until status ≠ active.
 

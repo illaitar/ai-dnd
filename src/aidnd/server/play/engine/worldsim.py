@@ -97,8 +97,9 @@ def _candidates(p, place_idx: dict, keynode: dict, kps: list, rng,
         if nodes and _gate_ok(kind, p):
             if kind == "tavern" and xy and home in xy:   # local pub — nearest first, then overflow out
                 ordered = sorted(nodes, key=lambda n: _sqd(xy, home, n))
-            else:
-                ordered = [nodes[hash((p.state.config.id, kind)) % len(nodes)]]
+            else:                                        # temple/market: hashed "own" first, then
+                first = nodes[hash((p.state.config.id, kind)) % len(nodes)]  # the rest, stable order —
+                ordered = [first] + sorted(n for n in nodes if n != first)   # so overflow can reach them
             node = ordered[0]
             if load is not None and n2b is not None:     # capacity: walk to the next non-full venue
                 node = None
@@ -265,9 +266,15 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
         if pin and pid in pin:  # ring A owns present NPCs — don't move them from the sim (no A/B overlap)
             continue
         st = p.state
+        origin = crof.get(pid)
+        if origin is not None:
+            load[origin] = load.get(origin, 0) - 1    # leave their own seat — deciding anew, not
+                                                        # a phantom extra body (else a settled resident
+                                                        # reads their OWN occupancy as "full" and
+                                                        # self-evicts every slot — revolving door)
         mins = max(0, gt - last.get(pid, gt - 360))  # time since last step (start: ~phase)
-        here = node2kind.get(crof.get(pid))  # where stood → what sated
-        if here is None and crof.get(pid) == p.home:
+        here = node2kind.get(origin)  # where stood → what sated
+        if here is None and origin == p.home:
             here = "home"
         rng = random.Random(f"rout|{pid}|{phase}|{gt // 30}")
         # needs advance ALWAYS (even under commitment — else follow won't yield to crit-need)
@@ -277,21 +284,28 @@ def routine_step(people: dict, crof: dict, pin: set | None = None) -> None:
         if cnode is not None:                         # override: meeting place/shift/after player
             cbid = n2b.get(cnode)
             if cbid and load.get(cnode, 0) >= _building_cap(cbid):
-                kind_of[pid] = "у входа (ждёт)"        # venue full — waits outside, not stacked (§5)
+                kind_of[pid] = "у входа (ждёт)"        # venue full — waits outside, not stacked (§5);
+                                                        # crof_kind is debug-only today (GIF/UI), not
+                                                        # read back as sim state
+                if origin is not None:
+                    load[origin] = load.get(origin, 0) + 1   # they stay put — re-credit the ORIGIN
+                                                                # seat, not the full venue they didn't enter
                 last[pid] = gt
-                continue                               # crof unchanged this slot; load not bumped
+                continue                               # crof unchanged this slot
             node, akind = cnode, ((_S.get("commit") or {}).get(pid, {}).get("kind")
                                   or "appointment")
         else:
             cands = _candidates(p, place_idx, keynode, kps, rng, work_kinds=work_kinds,
                                 load=load, n2b=n2b, xy=xy)
             node, akind = society.routine.choose(st.needs, st.config.traits, cands, phase, rng,
-                                                 stay=crof.get(pid)), None
+                                                 stay=origin), None
             if node is not None:
                 akind = next((c.kind for c in cands if c.node == node), None)
         if node is not None:
             crof[pid] = node
             kind_of[pid] = akind
-        if node is not None and n2b.get(node):        # stood in building — took spot
-            load[node] = load.get(node, 0) + 1
+        dest = node if node is not None else origin   # wherever they END UP (same node for a stay —
+                                                        # net zero; frees origin for real moves)
+        if dest is not None and n2b.get(dest):         # stood in building — took spot
+            load[dest] = load.get(dest, 0) + 1
         last[pid] = gt

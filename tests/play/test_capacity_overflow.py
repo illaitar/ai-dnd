@@ -74,3 +74,69 @@ def test_player_is_never_a_mover(world):
     worldsim.routine_step(core._S["people"], core._S["crof"])
     assert PLAYER not in core._S["people"]
     assert PLAYER not in core._S["crof"]               # ring B never writes the player's node
+
+
+def test_settled_residents_not_evicted_from_exactly_full_venue(world, monkeypatch):
+    """Revolving-door regression: the pre-slot ledger snapshot must not count a resident's OWN
+    current seat as occupancy when THEY are the one being (re)evaluated — otherwise every settled
+    resident at an exactly-at-cap venue reads their own room as full and self-evicts each slot."""
+    cap = 5
+    monkeypatch.setattr(worldsim, "_building_cap", lambda bid: cap)
+    core._S["cr2b"] = {47: "tav1"}
+    place_idx = {"tavern": [47]}
+    keynode: dict = {}
+    kps = [10, 47]
+    xy = {10: (0.0, 0.0), 47: (1.0, 1.0)}
+    monkeypatch.setattr(worldsim, "_place_context",
+                        lambda people: (keynode, kps, place_idx, {}, xy))
+    core._S["gt"] = 20 * 60                              # evening — tavern window strong
+
+    people, crof = {}, {}
+    needs_gt = core._S.setdefault("needs_gt", {})
+    gt = core._S["gt"]
+    for i in range(cap):
+        pid = f"res{i}"
+        st = NpcState.from_config(NpcConfig(id=pid, name=pid, role="горожанин",
+                                            traits={"sociability": 1.0}))
+        people[pid] = SimpleNamespace(id=pid, name=pid, role="горожанин", state=st, work=None,
+                                      home=10, persona={}, keys=[])
+        crof[pid] = 47                                    # already settled, exactly at the cap
+        needs_gt[pid] = gt                                 # no elapsed time this tick — isolates the
+                                                            # ledger bug from unrelated need-decay drift
+    before = dict(crof)
+
+    worldsim.routine_step(people, crof)
+
+    assert crof == before                                 # nobody evicted — everyone stayed put
+    from collections import Counter
+    assert Counter(crof.values())[47] == cap              # load arithmetic holds: still exactly cap
+
+
+def test_market_overflows_to_next_same_kind_when_full(monkeypatch):
+    # temple/market used to pick ONE hashed node only — a full venue had no sibling to overflow to,
+    # even with a free sibling and overflow_max_hops configured. Fix: hashed node first, then the
+    # rest of same-kind nodes in stable order, walked like tavern's chain.
+    p = _mover("p1", home=10)
+    nodes = [40, 41]
+    place_idx = {"market": nodes}
+    n2b = {40: "mk1", 41: "mk2"}
+    monkeypatch.setattr(worldsim, "_building_cap", lambda bid: 8)
+    first = nodes[hash((p.state.config.id, "market")) % len(nodes)]
+    other = next(n for n in nodes if n != first)
+    load = {first: 8}                                     # the hash-preferred node is full
+    cands = worldsim._candidates(p, place_idx, {}, [10, 40, 41], __import__("random").Random(1),
+                                 work_kinds={}, load=load, n2b=n2b, xy={})
+    mk = [c for c in cands if c.kind == "market"]
+    assert mk and mk[0].node == other                     # overflowed to the sibling market
+
+
+def test_market_no_candidate_when_both_full(monkeypatch):
+    p = _mover("p1", home=10)
+    nodes = [40, 41]
+    place_idx = {"market": nodes}
+    n2b = {40: "mk1", 41: "mk2"}
+    monkeypatch.setattr(worldsim, "_building_cap", lambda bid: 8)
+    load = {40: 8, 41: 8}                                  # both full
+    cands = worldsim._candidates(p, place_idx, {}, [10, 40, 41], __import__("random").Random(1),
+                                 work_kinds={}, load=load, n2b=n2b, xy={})
+    assert [c for c in cands if c.kind == "market"] == []

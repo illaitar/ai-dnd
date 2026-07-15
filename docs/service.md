@@ -37,6 +37,29 @@ Prod — VPS `root@154.222.8.94`: `/root/dnd-ai` → `git reset --hard origin/ma
 shipped by git, `live.db` (player progress) deploy does NOT touch; portraits — rsync to
 `data/portraits`. Home machine 192.168.3.26 — dev only (Ollama tunnel).
 
+## Replay Recorder — the flight recorder (`play/replay.py`)
+
+Every play session is recorded, live, to a plain-text file
+`data/playtest_logs/replay-w{wid}-{ts}.txt` — the game's flight recorder, on **dev and prod**. It is
+the full textual replay of exactly what the player saw, in UI order.
+
+- **Capture seam.** A server-side HTTP middleware `_replay_tap` (`server/app.py`) sits INNER to GZip,
+  reads the raw uncompressed JSON body of the narrative `/api/play/*` responses, and mirrors the
+  frontend render functions in `replay.format_lines`. It **bails UNTOUCHED** for every non-narrative
+  verb (map, inventory, journal, scene, plan, wares…): `replay.should_tap()` is the single whitelist
+  shared by the tap and `record()`, so polled endpoints never pay for body-draining.
+- **What it mirrors** (UI render order per turn): player input echo (`> …` for act/say, stage
+  directions for move/enter/…), a **gt-jump divider** on a >60-min skip/sleep, narration (`narr`),
+  contract resolution, direct address («ИМЯ — тебе. …»), freeform reply («ИМЯ. реплика» via the
+  `_display` identity fog — an unmet speaker is «голос», never a raw pool id), scene **digest** (`⋯`)
+  or **feed** (`·`, overheard speech/deeds ordered most-hearable first by audibility tier), combat
+  wrapup + **combat log delta** (`⚔`, only lines new since the last tick; resets on a fresh
+  encounter), and **errors** (`!`).
+- **Guarantees.** Best-effort — wrapped so it **never raises into the request path** or breaks
+  gameplay; zero LLM; negligible cost (append + flush). Kill-switch **`AIDND_NO_REPLAY=1`**.
+  `newworld` calls `rotate(wid)` to start a fresh timestamped file; an in-progress replay is appended
+  to (no duplicate header). Per-world state (last gt, combat-log length) is kept for the process life.
+
 ## UI Map (play.html)
 
 Permanent map panel on left (SVG, fog of war, click-move, twinkling exits) ·

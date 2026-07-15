@@ -7,38 +7,61 @@ error and retries action.
 ## Tick Tree
 
 ```
-session_step(input)                                         (target: engine/loop.py)
-│  durative (journey N nodes / rest until morning) → LOOP game_tick until arrival|interrupt
-│  instant (dialogue / cast / deal)               → one game_tick
+player action (POST /api/play/*)  →  _gt_add  →  world mutation  →  TICK  →  response
 │
-game_tick(action) → response
-├── player_logic
-│   ├── input
-│   │   ├── UI buttons (ONLY): inventory · map_journey(node, N) · enter/exit ·
-│   │   │   talk (portrait click) · combat/cast buttons
-│   │   └── freeform-text → LLM-intent → routing to handler
-│   └── HANDLERS (by domains, see catalog below)
-├── npc_logic          LOD rings:
-│   │                  A — player scene: full hybrid, LLM-decisions (cap 8 souls = LOD)
-│   │                  B — city: routine from needs, deterministic (society)
-│   │                  C — actors (agendas/purges): rare LLM
-│   │                  D — crowd: pure mechanics
-├── world_simulation   economy (caravan/restock) · monsters · guild · decay  [det; phase/day]
-└── compose_response   scene · feed + addresses · narrator · interrupts
+├── FAST TICK  _world_tick_fast()   [act/say/move/enter/exit/room/look — ZERO LLM]
+│   ├── _apply_routine()   ring B: routine_step relocates ALL residents (needs/character/time)
+│   │                      + daily events + economy catch-up; idempotent per 30-min phase
+│   └── _live_build()      ring A POSITIONS ONLY: who's here (settled), zones, seats; NO minds
+│   → {feed:[], live_pending:True}   → client then fetches /live
+│
+└── SLOW TICK  _world_tick()        [POST /api/play/live — wait button + streamed follow-up]
+    ├── _apply_routine()  +  _live_build()  (as above)
+    ├── _live_tick()       ring A minds: decide_hybrid ∥ on present, apply_actions executes
+    │                      (theft moves items, speech → memory/hist, gossip). LOD: _select_actors
+    │                      — salient REASONS always think, background crowd round-robin
+    └── scene_digest()     weave observable feed → ONE third-person paragraph (launder self-narration)
+
+LOD rings:  A player scene (LLM minds, budgeted)  ·  B city routine (society, det.)
+            C actors (agendas/purges: rare LLM)   ·  D crowd (pure mechanics)
 ```
+
+The stitch between rings A and B (arrivals/departures as feed events, venue capacity, transit
+walkers, unpin) is **[sim-stitching.md](sim-stitching.md)**.
 
 ## Single Action Flow (as in code)
 
 `/api/play/act` → `_play()` (world into session) → `_scene_dict()` → `_intent(text)` [LLM] →
 `_attempt(intent)` — single resolver (primitive × manner × gates: rolls, item transfer,
-memory, consequences) → `_gt_add(PB[...])` → `_world_tick()`:
-`_apply_routine()` (ring B) + `_live_tick()` (ring A: `decide_hybrid` in parallel on
-present, `apply_actions` executes — theft ACTUALLY moves items, speech written to
-memory/hist, gossip spreads) → response `{narr, feed, address, gt, coins, hp, mana}`.
+memory, consequences) → `_gt_add(PB[...])` → **`_world_tick_fast()`** →
+response `{narr, feed, address, live_pending, gt, coins, hp, mana}`.
 
-Modules: `server/play/handlers/freeform.py` · `server/play/engine/world.py` (scene-core) ·
-`server/play/engine/worldsim.py` (society adapter) · `server/play/engine/core.py`
-(session `_S`, table `PB`, time, persist).
+**Fast vs slow tick — the crowd is deferred.** The tick lives in `engine/loop/tick.py` as two
+functions:
+
+- **`_world_tick_fast()`** — syncs the passive world (`_apply_routine` → ring B) and builds the
+  live-scene *positions* (`_live_build`: who's here, where they sit) with **zero LLM**, then
+  returns `{feed:[], address:[], live_pending:True}`. Every player-facing action uses it —
+  `/act`, `/say`, `/move`, `/enter`, `/exit`, `/room`, `/look`, walk-to-table — so speech and
+  movement in a crowded room land **instantly** instead of blocking on N NPC minds.
+- **`_world_tick()`** — the slow half: same passive sync + `_live_build`, then `_live_tick()`
+  (ring A: `decide_hybrid` in parallel on present souls, `apply_actions` executes — theft
+  ACTUALLY moves items, speech written to memory/hist, gossip spreads) and an end-of-tick
+  `scene_digest` that launders the raw feed into one third-person paragraph. Called ONLY by
+  `POST /api/play/live` — the "wait" button AND the follow-up the client fires whenever a fast
+  tick returned `live_pending:True`. So the crowd's reaction *streams in* behind the action.
+
+Modules: `server/play/handlers/freeform.py` · `server/play/engine/loop/tick.py` (tick split) ·
+`server/play/engine/world.py` (scene-core: `_live_build`/`_live_tick`) ·
+`server/play/engine/worldsim.py` (society adapter, `routine_step`) · `server/play/engine/core.py`
+(session `_S`, table `PB`, `_here`/`_here_settled`/`_flip_arrived`, persist) ·
+`server/play/engine/session/time.py` (game clock).
+
+**Game-time write-through.** `_gt_set` (session/time.py) sets `_S["gt"]` **and** persists it to
+`pc_state` immediately (`store.pc_set_gt`); `_gt_add` routes through it. Time therefore never
+rewinds on a server restart / session eviction to a stale sleep-or-combat snapshot — the old
+`_pc_save()`-only path fired on far fewer routes than time advanced. Best-effort: no live
+session/store → skip the persist, never fatal.
 
 ## Handlers Catalog
 
@@ -106,5 +129,6 @@ Traveling the graph ticks the world at each step; interrupted by: encounter (com
   `engine/resolve.py` — map in [structure.md](structure.md).
 - Deed-log as substrate of feed/gossip/guard ([entities.md](entities.md)).
 
-Related: [mind.md](mind.md) (ring A from inside) · [entities.md](entities.md) ·
+Related: [mind.md](mind.md) (ring A from inside) · [sim-stitching.md](sim-stitching.md)
+(ring-A↔B seam) · [citysim.md](citysim.md) (ring B) · [entities.md](entities.md) ·
 [service.md](service.md) (LLM-call limits per tick)

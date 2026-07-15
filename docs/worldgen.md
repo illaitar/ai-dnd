@@ -17,7 +17,7 @@ Testbed: `/citydebug`.
 
 | pool | script | LLM role | what gets forged |
 |---|---|---|---|
-| people (~900) | `scripts/peoplegen.py` | character_writer | mechanics (traits/abilities) + persona (origin/voice/speech/quirks/aspirations/secret/values) + Flux portraits ×4 emotions (fal.ai, key `.secrets/fal.key`; cap ~500 souls) |
+| people (~1354) | `scripts/peoplegen.py` | character_writer | mechanics (traits/abilities) + persona (origin/voice/speech/quirks/aspirations/secret/values) + Flux portraits ×4 emotions (fal.ai, key `.secrets/fal.key`; cap ~500 souls) |
 | buildings (599) | by type-hints | location_writer | factsheet: tier/size/age/condition/features/services/sub_rooms/containers (enum tags, not prose) |
 | city names (100) | — | — | kind `city_name` in building_pool |
 | items | seed-templates | — | data with rarity weights ([items.md](items.md)) |
@@ -38,7 +38,7 @@ the FLAVOR of the layout; the code handles geometry and guarantees traversabilit
 `user_world_create(user)` → new `world_id` (monotonic counter — IDs not reused after permanent
 death) + seed → graph by seed → `_assign_key_buildings` (key buildings from pool by slot
 type-hint) → residential buildings deterministically from res-pool (not written to DB) → city name
-from pool → **resettlement of ALL ~900** (`_fill_from_pool`: home+work → placements; empty pool =
+from pool → **resettlement of ALL ~1354** (`_fill_from_pool`: home+work → placements; empty pool =
 hard error, bare populate is gone) → seed item pool. Container keys — belong to building owner.
 
 ## Lazy enrichment in-game

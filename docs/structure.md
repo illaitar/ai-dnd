@@ -1,95 +1,84 @@
-# Code Structure: Current → Target
+# Code Structure
 
-Map of the `src/aidnd` tree (~16.5k lines), an honest list of issues and migration plan.
+Map of the `src/aidnd` tree (~28k lines). The `server/play` refactor **happened**: the old
+`core.py`/`world.py` megapair has been split into a **module-per-system** tree (`session · pc ·
+worldbuild · scene · narrator · sound · action · loop · quests · mechanics · handlers`). This doc
+**supersedes the old `refactor-map.md`** (deleted) — that map's target became reality; the still-live
+pain points are folded into "What's left" below.
+
 Module dependencies: `server` orchestrates all; domain packages (`mind`, `society`, `citygraph`,
-`items`, `combat`, `magic`, `plot`, `inference`, `worldgen`) do NOT import each other
-(exception: mind → items/society) and don't know about the server.
+`items`, `combat`, `magic`, `plot`, `inference`, `worldgen`) do NOT import each other (exception:
+`mind → items/society`) and don't know about the server. Every file opens with an English
+"Key functions" docstring; the standard is **one focused module per system, no function > 50 lines**.
 
 ## Current Tree
 
 ```
 src/aidnd/
-  inference/   700   client (retries→LLMUnavailable) · backends ollama/openai-compat · structured
-  mind/       2000   mind: model/goals/value/act/brain/modulators/fsm/tick/memory/agenda/
-                     llm_agent (decide_hybrid) / trade / tools / world (test microworld)
-  society/     235   needs · places · routines (declarative catalogs)
-  citygraph/   850   graph generation · A* · model · parameters
-  worldgen/   1800   store (both sqlite) · enrich buildings · personas · imagegen · enrichment ·
-                     furnish (furnisher role: zones+items) · floorplan (footprint+annealing) ·
-                     floorart (paper render plan: parchment/stroke/hatching/glyphs)
-  items/       560   model factsheet · smith · inspect · craft (material graph) · durability · loot_pool
-  combat/      620   Combatant · Encounter · auto · encounters · dungeon
-  magic/       390   grammar (budget/hash/base_law) · inscribe (scribe_law/wild)
-  plot/        260   bible · architect · casting (NOT at runtime)
-  (play/ demolished 2026-07-07 → worldgen/population.py: Townsperson/populate/person_core)
-  content/           bestiary.json (322) · glyphs · materials · zones.json (location zone templates)
-  server/    10950   app · auth · db(postgres) · usage · debug-rigs (+plansdebug: gallery
-                     of plans) · web/ (only play.html/assets — citygen.py moved to citygraph/render.py) ·
-                     play/: engine{core 802, world 1400, worldsim, zones (zone selection by needs)} ·
-                     mechanics{items, contracts, combat} · handlers{10 domain: +building plan
-                     /plan /zone in travel}
-scripts/            furnish.py (furnishing pool with zones) · peoplegen · buildinggen · bench …
-```
-
-## Issues (as of revision 2026-07-04)
-
-1. **`engine/world.py` — 1835 lines** (was 1307 at revision 2026-07-04 — grew, didn't shrink),
-   functions of 200-485 lines (`_live_build` ~258, `_live_tick` ~485, `_world_tick`) know everything
-   at once: generation, routines, LLM-planning, combat. Main goal of Phase B refactoring.
-2. **`_S` — untyped dict-blob** in contextvar, touched from 50+ functions; LLM outputs —
-   raw dicts without schemas.
-3. **mechanics → core directly** (`_S`, `PB`, `_store`) — mechanics are welded to the session.
-4. ✔ PARTIAL: `engine/resolve.py` — arbiter `resolve(text)` + context assembler, prompt from
-   PRIMITIVES registry (`_INTENT_SYS` died, 2026-07-06). Services `_voice`/`_world_lookup`/
-   `_dm_snapshot` MOVED from world.py to resolve.py (2026-07-08, world.py 1835→1632; functions
-   are AST-identical, world→resolve with no cycle — resolve pulls world lazily). Remaining: consequence-
-   layer and `engine/loop.py`.
-5. ✔ (2026-07-07) **Twins demolished**: `aidnd/play` → `worldgen/population.py`;
-   `server/web/citygen.py` → `citygraph/render.py` (normal sibling import instead of importlib).
-   Remaining debt ≤50 lines: `render.build_city` (~398) and `render.render_svg` (~231) — decomposition
-   in a separate pass under visual review /citydebug.
-6. No deed-log: feed/gossip/wanted/chronicle — five ad-hoc mechanisms.
-
-## Target Tree
-
-```
-src/aidnd/
-  inference/       + schemas.py: UNIFIED boundary — pydantic-schemas of ALL LLM outputs
-                     (Intent, Verdict, Consequence, NpcDecision, SpellLaw, Persona, Contract)
-  mind/ society/   as is (purity standard)
-  citygraph/       + render.py (moving server/web/citygen.py — city visuals to graph)
-  worldgen/        + population.py (moving aidnd/play — Townsperson/settlement); play/ package dies
-  items/ combat/ magic/ plot/ content/   as is
-  server/
-    app.py auth db usage debug-rigs web/
-    play/
+  inference/   640   client (retries→LLMUnavailable) · backends ollama/openai-compat · structured
+  mind/       2450   model/goals/value/act/brain/modulators/fsm/tick/sim/memory/agenda ·
+                     appraisal (impression/appraise_present, perception subsystem) ·
+                     llm_agent (decide_hybrid) · trade · tools · world (test microworld)
+  society/     290   needs · places · routine (declarative catalogs)
+  citygraph/  1970   generate · graph · model · params · render (city SVG — was server/web/citygen)
+  worldgen/   4460   store (both sqlite) · population (Townsperson/settle) · enrichment · persona_llm ·
+                     imagegen · furnish · floorplan · floorart · centroids (zone geometry for sound) ·
+                     seed_races · abilities · dungeongen/dungeonlore · watabou · progress
+  items/       860   model factsheet · attrs (attribute graph) · smith · inspect · graph (craft) ·
+                     durability · loot_pool
+  combat/       675   Combatant · Encounter (engine) · auto · encounters · dungeon
+  magic/        425   grammar (budget/hash/base_law) · inscribe (scribe_law/wild)
+  plot/         285   bible · architect · casting (NOT at runtime)
+  content/            bestiary · glyphs · materials · zones.json · race_relations.json · sound_sources
+  server/    15650   app (+ _replay_tap middleware) · auth · db (postgres) · usage · gencode ·
+                     routes_{auth,citydebug,minddebug,npcdebug,usage} · models · debuglog
+    play/    14240   replay.py (flight recorder, docs/service.md)
       engine/
-        session.py   TYPED Session (Player / LiveScene / CombatRef) instead of _S-blob
-        core.py      PB · time · persist (shrinks)
-        loop.py      session_step + game_tick + durative-cycles + interrupts   [from world.py]
-        resolve.py   resolve(text)→{domain,goals,args,verdict} · context_assembler ·
-                     consequence(clamp-menu) · voice · world_lookup            [from world/freeform]
-        world.py     scene only: _live_build/_live_tick/_scene_dict (shrinks to ~500)
-        worldsim.py  society adapter
-        deeds.py     deed-log: append + queries for gossip/watch/chronicle/plot
-      mechanics/     items · contracts · combat — accept (session, store, pb) as PARAMETERS
-      handlers/      thin endpoints: unpack request → service → response
+        session/    state (_S proxy) · time (gt clock) · persist (both DBs) · config (PB · PLAYER)
+        pc/         hero · mana · fatigue · glyphs · luck
+        worldbuild/ assembly · population · jobs · ties · person · building · geom · mappng
+        scene/      view (_scene_dict) · vision (look / fog / _watch_check)
+        narrator/   voice (_voice · DM) · snapshot (_dm_snapshot) · lookup (_world_lookup) · scene_digest
+        sound/      audibility · fidelity (cutout) · ambient  (Pillar 1, docs/sound-attention.md)
+        action/     arbiter (PRIMITIVES · resolve · context assembler)
+        loop/       tick (_world_tick) · routine (Ring B)
+        quests/     pipeline · seeds · casting · offer · director · foreshadow · twist · framing ·
+                    salience · bridge (Milestone→journal)   (docs/quests.md)
+        world.py    STILL BIG (1395) — Ring A live conductor: _live_build / _live_tick / _gossip /
+                    market+trade steps / salience  (the last megafile; see "What's left")
+        core.py     (425) thin re-export shim over session/ + pc/  ·  resolve.py (35) facade → action+narrator
+        convo · economy · incidents · geo · journal · worldsim · zones · open_hours
+      handlers/     act(freeform) · travel · observe · inventory · trade · board · dungeon · magic ·
+                    crime · dialogue · misc   (freeform.py 653 still holds _attempt + verb executors)
+      mechanics/    combat · contracts · deals · haggle · items
+bench/              harness · llmtap · snapshot · trace   (end-to-end bench, Increment 1 only — docs/bench.md)
+scripts/            peoplegen · depgen · furnish · backfill_centroids · bench …
 ```
 
-## Migration Plan (order = priority; each step — green increment to prod)
+## What's left (honest debt)
 
-1. **`engine/resolve.py` + `engine/loop.py`** — extract services and tick from `world.py`/
-   `freeform.py`; behavior unchanged, world.py shrinks by half.
-2. **`inference/schemas.py`** — LLM output schemas, validation+clamp in one place
-   (structured.py becomes a thin parser under schemas).
-3. **Typed `Session`** — behind `_S` facade (incrementally: field by field), mechanics
-   are moved to parameters.
-4. ✔ (2026-07-06) **Unified `resolve()`** — arbiter+context in `engine/resolve.py`,
-   prompt from primitives registry; executors still in `freeform._attempt`.
-5. ✔ (2026-07-07) **Moves**: `aidnd/play` → `worldgen/population.py` (4 importers updated);
-   `server/web/citygen.py` → `citygraph/render.py`. Folder-per-domain restored, `server/web/`
-   holds only assets.
-6. **`deeds.py`** — deed log + transition gossip/wanted/chronicle/requests to it
-   ([entities.md](entities.md) "Further").
+1. **`engine/world.py` — 1395 lines, the last megafile.** It is the Ring A **live conductor**
+   (`_live_build` ~260, `_live_tick` ~200, `_gossip`, market/trade steps, `_salient`). Target home:
+   `loop/live/` (build · conductor · gossip), splitting `_live_tick` into <50-line steps. Everything
+   else the old map named (`session · pc · worldbuild · scene · narrator · sound`) already moved out.
+2. **`handlers/freeform.py` — 653 lines.** Still holds `_attempt` (the primitive×manner executor) and
+   the per-verb gates. Target: `action/attempt.py` + `action/verbs/*` (one executor per verb). The
+   arbiter half (`resolve`) already lives in `action/arbiter.py`.
+3. **`_S` — untyped dict-blob** behind the `session/state.py` proxy, touched from many functions;
+   LLM outputs are still raw dicts. Target: a **typed `Session`** and a single `inference/schemas.py`
+   boundary (pydantic schemas of every LLM output: Intent/Verdict/Consequence/NpcDecision/SpellLaw/
+   Persona/Contract) with validation+clamp in one place.
+4. **`mechanics/` de-weld.** `combat/contracts/deals/items` still reach into `_S`/`PB`/`_store`
+   directly; target is to take `(session, store, PB)` as parameters so mechanics are session-agnostic.
+5. **Attention economy (Pillar 2, [sound-attention.md](sound-attention.md))** — designed, no code;
+   gets an `engine/attention/` home when built. Sound **Pillar 1 shipped** (`sound/` package).
 
-Related: [README.md](README.md) (principles) · [loop.md](loop.md) · [entities.md](entities.md)
+## Migration order (each = one green increment → deploy)
+
+Remaining steps, cleanest seam first: **(a)** `world.py → loop/live/` (the live conductor split);
+**(b)** `freeform._attempt → action/attempt.py + verbs/`; **(c)** `inference/schemas.py` + typed
+`Session`; **(d)** `mechanics/` parameterization. After each: `uv run pytest -q` green, commit,
+`/deploy`.
+
+Related: [README.md](README.md) (principles) · [loop.md](loop.md) · [entities.md](entities.md) ·
+[sound-attention.md](sound-attention.md) · [bench.md](bench.md)

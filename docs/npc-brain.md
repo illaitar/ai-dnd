@@ -1,8 +1,16 @@
-# NPC brain & entity — perception, appraisal, attention (design)
+# NPC brain & entity — perception, appraisal, attention
 
 How an NPC (and the player — they are the *same entity*) sees others, forms opinions from what it
 sees, and spends its one action per tick. Extends [mind.md](mind.md); nothing here rebuilds the
-utility core — it widens the appraisal and attention that already run. Design, not yet built.
+utility core — it widens the appraisal and attention that already run.
+
+**Status.** **Subsystem 1 (perception & appraisal) is on prod** — two-layer surface/hidden ✓,
+`impression`/`appraise_present` with disgust ✓, identity fog ✓, freeform talk ✓, proxemics ✓, seeded
+non-human races ✓ (`mind/appraisal.py`, `content/race_relations.json`, `worldgen/seed_races.py`; see
+[mind.md](mind.md) "Perception & Appraisal"). **The attention economy** (one action per tick as a
+contested resource) **is still design** — its full spec lives in [sound-attention.md](sound-attention.md)
+Pillar 2. **Body lifecycle** (persistent hp/injury/age, the skills system) is **still design** below.
+This doc is the entity's design story; per-section markers say what shipped.
 
 ## Guiding principle: one entity, read not role-checked
 
@@ -56,7 +64,7 @@ Pulled in from the earlier non-goals: the entity is a full body, not a mind on a
   purse a novice can't. Gained by **doing** (practice) and by **learning from a teacher** (same shape
   as glyph-learning in magic).
 
-## Two-layer visibility
+## Two-layer visibility — SHIPPED (surface + identity fog); Hidden gates partial
 
 Same shape as the item factsheet (`surface` may lie · `hidden` behind gates). The boundary is
 **concealability**: what you broadcast across a room and can't hide vs. what you (or effort/skill)
@@ -75,15 +83,18 @@ can conceal.
 
 Reveal reuses existing machinery: `attention` (vigilance stat), the items inspection gates, `_met`
 for identity. The gap between the layers — surface says one thing, hidden says another — is what
-makes disguise, mistaken first impressions, and "something's off about him" real.
+makes disguise, mistaken first impressions, and "something's off about him" real. **Shipped:** the
+visible surface on every `Body`, and **identity fog** — an unmet NPC renders by DESCRIPTOR
+(«мужчина со шрамом») via `_display`, gaining its name only after a real meeting (`jmet|<pid>`).
+Still design: the full concealed-weapon / masked-feeling hidden gates beyond name.
 
-## Emotions: add `disgust`
+## Emotions: `disgust` — SHIPPED
 
-Emotions become **5**: `anger, fear, joy, distress, disgust`. `disgust` is the beggar/squalor
+Emotions are now **5**: `anger, fear, joy, distress, disgust`. `disgust` is the beggar/squalor
 outcome — add it to `EMOTIONS`, give it an `emotion_gain`/`emotion_baseline` entry (driven by
 `pride`), and let appraisal raise it.
 
-## Appraisal: three tiers, author only what personality can't imply
+## Appraisal: three tiers, author only what personality can't imply — SHIPPED
 
 When A appraises B, A's standing attitude toward B's *kind* comes from three tiers. Author only the
 one traits genuinely can't derive.
@@ -109,23 +120,25 @@ resolves to warmth. That single ordering gives you bigotry *and* its redemption.
 
 `impression` is an **Impression** `{valence, emotion-deltas, remember?, relationship-prior}`.
 
-## The pipeline
+## The pipeline — SHIPPED (`appraise_present`)
 
 ```
 perceive present bodies
   → read each Body's SURFACE (HIDDEN only if a gate is passed)
   → appraise: A(traits×surface) + B(culture) + C(memory) → Impression
-  → apply: emotion-deltas (incl. disgust) via appraise() · seed a relationship PRIOR for strangers
-           (today they start neutral) · write memory ("a filthy beggar by the fire")
-  → decide: goals (as today: acquire/harm/safe/converse) + a PROXEMICS term
+  → apply: emotion-deltas (incl. disgust) via appraise() · seed a relationship PRIOR once on first
+           encounter · write memory ("a filthy beggar by the fire")
+  → decide: goals (acquire/harm/safe/converse) + a PROXEMICS term
 ```
 
-This is not a new subsystem — the loop **perceive → appraise other → goal → utility → act** already
+**Player caveat (this session):** the prior/memory seed is skipped for the PLAYER
+(`skip_seed_id=player_id`) — a stranger stays mechanically a stranger from mere co-presence until a
+real interaction earns trust; emotion still moves each tick. This is not a new subsystem — the loop **perceive → appraise other → goal → utility → act** already
 runs in `goals.py` (it reads `b.appearance`/`b.charisma`/`hostility` today; the code even comments
 `← LLM value appraisal connects here`). We widen *what* it reads (full surface) and *what responses*
 it produces (disgust + proxemics + relationship priors).
 
-## Proxemics (emergent)
+## Proxemics (emergent) — SHIPPED
 
 No "avoid" primitive. Add a social term to the existing zone/move utility: prefer positions that
 maximize distance from disliked entities and minimize from liked ones —
@@ -133,7 +146,7 @@ maximize distance from disliked entities and minimize from liked ones —
 high charisma) → the next stool. It gives *approaching* someone attractive for free, and stays
 personality-driven (a kind NPC barely disperses; a proud one crosses the room).
 
-## Attention & relevance economy
+## Attention & relevance economy — DESIGN (Pillar 2, [sound-attention.md](sound-attention.md))
 
 One action per tick (occasionally two). Today the player mobs on entry because (1) entry is the one
 salient event, (2) the keeper's "serving" is **not a modeled action** — his `work` is a *place*, so
@@ -151,7 +164,7 @@ ticks). Make attention a **contested resource**:
   **beat** it, so the bored regular greets you while the harried keeper nods and keeps pouring.
 - **No player privilege.** The player competes for attention exactly like a salient NPC would.
 
-## Conversation is freeform — no dialogue interface
+## Conversation is freeform — no dialogue interface — SHIPPED (freeform talk live)
 
 There is **no separate dialogue mode, panel, or reply-thread**. Talking is a freeform world action:
 

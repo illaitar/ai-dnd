@@ -10,15 +10,20 @@ What EXISTS in the world and where it lives. Two storage layers — a hard rule
 
 | table | what | volume |
 |---|---|---|
-| `people` | NPC bank: `mech` (traits/abilities/hp) + `persona` (origin/voice/quirks/secret/values) + `portraits` (4 emotions) | ~900 (portraits ~500) |
+| `people` | NPC bank: `mech` (traits/abilities/hp/**race**) + `persona` (origin/voice/quirks/secret/values) + `portraits` (4 emotions) | 1354 (portraits ~500) |
 | `building_pool` | building factsheets: kind `key` (significant, by type-hint) / `res` (residential) / `city_name` | 599 + 100 names |
 | `item_pool` | seed-templates for world items (rarity weights) | data |
 
 **`data/live.db`** — RUNTIME (gitignored). `user_worlds` (user→world_id, seed) ·
-`buildings` (dealt key buildings) · `placements` (npc→node/house/job) · `items` + `inventory`
+`buildings` (dealt key buildings) · `placements` (npc→node/house/job — `crof`, the ring-B
+positions, self-heal on generator changes) · `items` + `inventory`
 (holders `pc` / `<npc>` / `cont:<id>`) · `purse` (purses) · `pc_state` / `npc_state`
-(state blobs) · `contracts` · `flags` (universal world key-value: `grim|<hash>`,
-`crimes|pc`, `dead|<pid>`, `cleared|<lair>`, `seen|<bid>`, `coffer|<npc>`, LLM counters…).
+(state blobs; `pc_state` carries **`gt`**—the game clock is write-through, so a restart never
+rewinds time) · `contracts` · `journal` (the player Хроника) · `flags` (universal world key-value:
+`grim|<hash>`, `crimes|pc`, `dead|<pid>`, `cleared|<lair>`, `seen|<bid>` (a building's interior
+learned), `jmet|<pid>` (an NPC actually met—gates name vs. descriptor), `coffer|<npc>`,
+`journal_purged`, LLM counters…). **Transit walkers** (`_S["transit"]`) are ephemeral scene rows,
+NOT persisted.
 
 Service DB (Postgres, [service.md](service.md)): users, sessions, invite codes.
 It's about accounts, not the world.
@@ -33,11 +38,13 @@ Hero death = **world destruction** (permadeath: record is wiped, next visit — 
 ## Person (NPC and player — one entity)
 
 Core — `mind.NpcState` ([mind.md](mind.md)): `config` (immutable: traits ×11, abilities ×6,
-role, hp) + position + FSM mode + needs ×7 + emotions ×4 (with addressee) + relationships
-(trust/affinity/fear per person) + memory (`MemoryStore`) + routine-plan + agendas.
-On top — `persona` from pool (voice/quirks/aspirations/secret) and portraits.
-Player — same `NpcState` + purse/bag/mana/exhaustion/glyphs; special branches — UI only.
-Acquaintance — graph of 'who knows whom': stranger is depersonalized ('silhouette') until introduced.
+role, hp, **race**) + position + FSM mode + needs ×7 + emotions ×5 (anger/fear/joy/distress/**disgust**,
+with addressee) + relationships (trust/affinity/fear per person) + memory (`MemoryStore`) +
+routine-plan + agendas. On top — `persona` from pool (voice/quirks/aspirations/secret) and portraits.
+Player — same `NpcState` + purse/bag/mana/exhaustion/glyphs; special branches — UI only. The player is
+never auto-seeded a relationship from mere co-presence—stays a stranger until real interaction ([mind.md](mind.md)).
+Acquaintance — graph of 'who knows whom' (`jmet|<pid>`): an unmet NPC renders by DESCRIPTOR
+(«мужчина со шрамом») via `_display`, name only after meeting; a stranger is depersonalized until introduced.
 
 ## Building
 
@@ -56,8 +63,17 @@ real items. Details: [items.md](items.md).
 ## Contract
 
 Delegated NPC need: a chain of steps-**predicates over the real world**
-(`bring/deliver/visit/befriend/dead` + guild `clear`), born from an agenda, reward is real
-(purse coins or poor man's item), completion — fact of the world. [quests.md](quests.md).
+(`bring/deliver/visit/befriend/dead` + guild `clear` + `done_any`—any-of predicate), born from an
+agenda, reward is real (purse coins or poor man's item), completion — fact of the world. A contract
+also carries **`bid`/`node`/`patron`** so incidents can pin it to a building, place and issuer.
+[quests.md](quests.md).
+
+## Journal row (Хроника)
+
+The player's chronicle in live.db, one row per beat: `kind=quest` · `prov=beat` · `refs=[cid]`
+(the contract id it bridges). **Quest-only now**—no longer a firehose of every deed; a beat is written
+only when a real quest milestone advances (honest Milestone bridge, [quests.md](quests.md)).
+`journal_purged` flag clears it on world reset.
 
 ## Circle Law (magic)
 

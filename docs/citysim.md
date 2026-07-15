@@ -1,13 +1,15 @@
 # City Simulation
 
 `src/aidnd/society/` (model) + `src/aidnd/server/play/engine/worldsim.py` (`routine_step`).
-~900 NPCs live out a day CHEAPLY without LLM: each at every phase/tick chooses a PLACE via utility-model
+~1354 NPCs live out a day CHEAPLY without LLM: each at every phase/tick chooses a PLACE via utility-model
 over needs. This is the core of the "living frontier": by day the city works, by evening drinks, by night sleeps—
 emergently, from individual needs, not hardcoded "create crowd".
 
 Separate from the LIVE SCENE (LLM, [locations.md](locations.md)): the city is a cheap passive layer
 (zero LLM), the scene around the player is an expensive LLM-layer. Simulation places NPCs on graph nodes;
-the scene takes those nearby.
+the scene takes those nearby. The seam where the two rings finally touch — arrivals/departures the
+player SEES, hard venue capacity, transit walkers, and the end of scene-pinning — is
+[sim-stitching.md](sim-stitching.md).
 
 ## Model (Sims/Zubek needs-utility + RimWorld-windows)
 
@@ -25,12 +27,21 @@ Our `society/` is already the right model, no need to rewrite the core:
 - **Choice** (`routine.py`): `score = window × affinity(traits) × Σ(sate_rate×need_pressure)`;
   `choose_c`—lottery among top choices (≥0.85·best, anti-stickiness) + inertia ×1.12 toward "current place"
   (anti-jitter, lesson from Sims). `explain()`—diagnostics [(kind, score)] for /minddebug and UI.
-- **routine_step**: cycles ALL residents O(people×places), cheaply; building capacity
-  ([locations.md](locations.md)), obligations (deeds, appointments), write chosen activity-kind to
-  `_S["crof_kind"]` (for observability/GIF).
+- **routine_step**: the ONLY writer of `crof` (pid→node placement). Cycles ALL residents
+  O(people×places), cheaply, every ~30 game-min (keyed `_gt()//30`, idempotent per phase);
+  workers ordered first. Reassigns everyone — including NPCs standing in the player's scene
+  (scene-pinning was removed, see [sim-stitching.md](sim-stitching.md) Inc4). Enforces a **durable
+  capacity ledger** `Counter(crof.values()) + player`, recomputed from `crof` each call (never
+  persisted — a pure function of the durable placement, so a restart can't drift it): a full venue
+  (`_building_cap` = Σ social-zone caps, min 6, default 14) is skipped and the mover **overflows**
+  down the same-need candidate chain (`PB.overflow_max_hops`) for ALL venue kinds — tavern/temple/
+  market — falling back to a street node if exhausted. Commitments (deeds/appointments) respect the
+  ledger too: at a full venue the NPC waits «у входа», not phantom-stacked inside. A settled
+  reassignment of ≥ `PB.transit_min_steps` nodes becomes a derived transit walker instead of an
+  instant teleport (Inc3). Writes chosen activity-kind to `_S["crof_kind"]` (observability/GIF).
 
 **Philosophy (principles 6, 7, 10):** LLM only OFFLINE (personas, agendas, day_curve at pool forging);
-runtime—pure arithmetic. Naive LLM-agent ≈ $25/agent/hour (Stanford Smallville)—unacceptable for 900 NPCs;
+runtime—pure arithmetic. Naive LLM-agent ≈ $25/agent/hour (Stanford Smallville)—unacceptable for ~1354 NPCs;
 "day as data" + utility = 50-100× cheaper (Lyfe/AGA/ORACLE).
 
 ## Done (2026-07-07, on prod)
@@ -48,12 +59,24 @@ runtime—pure arithmetic. Naive LLM-agent ≈ $25/agent/hour (Stanford Smallvil
 
 ## GIF "City Day" (`scripts/cityday.py`)
 
-A day in 30 minutes (48 frames) → snapshot of all 900 NPCs' positions on the graph → bubbles ∝ √number at node,
+A day in 30 minutes (48 frames) → snapshot of all ~1354 NPCs' positions on the graph → bubbles ∝ √number at node,
 color = activity (home/work/tavern/temple/market/street/patrol/criminal, palette after "Breathing City"),
 background darkens at night, clock+legend → `ffmpeg` to looped GIF (`data/debug/cityday/day.gif`). Diagnostic tool:
 visually shows whether the rhythm works.
 
-## Designing v2 (design, NOT implemented)
+## Done (2026-07-14, on prod) — the ring-A↔B seam
+
+The "Designing v2" layers below are all shipped (see the ✔ implementation order). The last inert
+layer — the *seam* between the passive sim and the live scene — is now stitched in four increments
+(full canon: [sim-stitching.md](sim-stitching.md)): (1) arrivals/departures are code-generated feed
+events narrated by the existing `scene_digest`; (2) the durable capacity ledger + overflow above;
+(3) cross-town reassignments become derived transit walkers («в пути»/«проходит мимо»); (4)
+scene NPCs are no longer pinned — a resident the routine moves actually LEAVES. Also there: the
+**crowd LOD fix** — how many NPCs think per tick is now REASON-based salience (`_MUST_WHY`), not a
+numeric impulse threshold; crowds rotate through a round-robin, salient reasons always think. Cut a
+130-LLM-call tick down to ~6.
+
+## v2 layers (A–E all ✔ shipped 2026-07-07; design record kept below)
 
 The current model is good cheap **placement** ("where everyone is, by time of day"), but not
 **life**. The design below layers three things (intent, economy, role↔venue) atop the
@@ -205,6 +228,8 @@ with economy—richer: deficit-event from real chain), deal-gate (hire with real
 turn-based (intent—forecast, not real time). Core not rewritten, layers stack.
 
 
-Related: [mind.md](mind.md) (NPC minds) · [locations.md](locations.md) (live scene, capacity,
+Related: [sim-stitching.md](sim-stitching.md) (ring-A↔B seam: churn/capacity/transit/unpin) ·
+[loop.md](loop.md) (fast/slow tick) · [mind.md](mind.md) (NPC minds) ·
+[locations.md](locations.md) (live scene, capacity,
 materialization=layer 2) · [worldgen.md](worldgen.md) (graph, settlement, pool) ·
 [items.md](items.md) (goods=factsheet) · [quests.md](quests.md) · [entities.md](entities.md)

@@ -1,6 +1,6 @@
 # AI-DnD — Documentation (canon)
 
-A Russian-language AI-D&D game: a living frontier town (~900 NPCs — minds, memory, needs, agendas),
+A Russian-language AI-D&D game: a living frontier town (1354 NPCs — minds, memory, needs, agendas),
 per-user world assembled from pre-generated pools, turn-based world (**player action = world tick**).
 The LLM parses intent, resolves ambiguity, speaks through people's voices, and arbitrates freeform;
 deterministic code owns dice, budgets, inventories, and combat — and clamps everything the model
@@ -36,23 +36,25 @@ Each file covers one domain. Together they form a complete picture of the projec
 
 | file | topic |
 |---|---|
-| [entities.md](entities.md) | data entities: world, person, building, item, contract, law, knowledge; both DBs |
+| [entities.md](entities.md) | data entities: world, person, building, item, contract, journal, law, knowledge; flags; both DBs |
 | [locations.md](locations.md) | locations: interior zones and streets, object-items, runtime scenes, conductor |
 | [loop.md](loop.md) | game loop: session_step → game_tick, handlers, services, interrupts |
-| [mind.md](mind.md) | NPC minds: utility core, decide_hybrid, memory, agendas; society (needs→routine) |
-| [npc-brain.md](npc-brain.md) | NPC/player as one entity: two-layer surface/hidden, appraisal (disgust), attention economy, freeform talk (design) |
+| [mind.md](mind.md) | NPC minds: utility core, perception/appraisal (impression, disgust, proxemics), decide_hybrid, memory, agendas; society (needs→routine) |
+| [npc-brain.md](npc-brain.md) | NPC/player as one entity: two-layer surface/hidden + identity fog + appraisal/disgust + freeform talk (shipped); attention economy + body lifecycle (design) |
 | [sound-attention.md](sound-attention.md) | hearing: spatial audibility, 3-tier conversation fidelity, sound sources; attention economy as a utility term (design) |
 | [citysim.md](citysim.md) | city simulation: housing, work, daily rhythm, day GIF |
+| [sim-stitching.md](sim-stitching.md) | ring-A↔B seam: arrival/departure feed events, venue capacity+overflow, transit walkers, unpin, crowd LOD |
 | [worldgen.md](worldgen.md) | generation: city graph → pools → per-user world assembly |
-| [combat.md](combat.md) | combat BG-lite: grid, initiative, auto-resolve, lairs, permanent death |
+| [combat.md](combat.md) | combat BG-lite: grid, initiative, auto-resolve, gear via derivation graph, delve entry, permadeath reset |
 | [dungeons.md](dungeons.md) | dungeons: cyclic generation, vignette machines, rooms as scene zones |
-| [magic.md](magic.md) | circle magic: drawing → budget → law from LLM → clamp; wild magic |
-| [items.md](items.md) | items: fact sheet surface/hidden, inspection gates, rarity, crafting by material graph |
-| [quests.md](quests.md) | predicate contracts, board, guild with ranks |
+| [magic.md](magic.md) | circle magic: drawing → budget → law from LLM → clamp; wild magic; enchanting |
+| [items.md](items.md) | items: surface/hidden/known, attribute derivation graph → effects/worth, inspection gates, rarity, spark-ladder craft, NPC & player trade + haggle |
+| [quests.md](quests.md) | emergent quest pipeline (sift→judge→cast→offer→arc), predicate contracts, board+incidents, guild ranks |
+| [journal.md](journal.md) | player chronicle «Хроника → дела»: quest-only, one first-person thread per quest via `j_beat` |
+| [geo.md](geo.md) | NPC geographic knowledge: known_places, geometry-true directions, one mind-router, map reveal |
 | [plot.md](plot.md) | main plot: regressor player, LLM bible (design doc, not in runtime) |
-| [service.md](service.md) | service: auth, LLM limits, invite codes, deploy, UI scaffold |
-| [structure.md](structure.md) | code tree: current, pain points, target + migration plan |
-| [refactor-map.md](refactor-map.md) | full module-per-system current→target map for server/play (supersedes structure.md target) |
+| [service.md](service.md) | service: auth, LLM limits, invite codes, deploy, replay recorder, UI scaffold |
+| [structure.md](structure.md) | code tree: current module-per-system tree (refactor done), remaining debt + migration order |
 
 ## How to read
 

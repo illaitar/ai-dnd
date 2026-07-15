@@ -71,6 +71,7 @@ from .session.state import current_world_id as current_world_id
 from .session.time import _PHASE_RU as _PHASE_RU
 from .session.time import _gt as _gt
 from .session.time import _gt_add as _gt_add
+from .session.time import _gt_set as _gt_set
 from .session.time import _mt
 from .session.time import _phase as _phase
 

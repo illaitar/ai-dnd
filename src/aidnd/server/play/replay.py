@@ -215,7 +215,9 @@ def format_lines(verb: str, req: dict, resp: dict, st: _WidState) -> list[str]:
     if isinstance(line, dict) and line.get("text"):  # scene freeform single reply {who,text}
         lines.append(f"{_clean_name(line.get('who'))}. {line['text']}")
     elif isinstance(line, str) and line.strip():     # talk/say reply — speaker is the addressee
-        who = _clean_name(resp.get("name") or req.get("npc"))
+        # /say returns the fog-aware display name in line_who; fall back to «голос» only when
+        # it is genuinely absent (a raw pool id in req.npc would leak, so never trust that alone)
+        who = _clean_name(resp.get("line_who") or resp.get("name") or req.get("npc"))
         lines.append(f"{who}. {line.strip()}")
 
     if resp.get("digest"):

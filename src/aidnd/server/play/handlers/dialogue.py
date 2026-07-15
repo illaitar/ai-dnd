@@ -30,6 +30,7 @@ from aidnd.server.play.engine.core import (
     _S,
     PB,
     PLAYER,
+    _display,
     _emo,
     _gt,
     _gt_add,
@@ -308,6 +309,7 @@ async def say(request: Request):
     return {
         **t,
         "line": line,
+        "line_who": _display(npc, people),  # fog-aware speaker → replay names the voice, not «голос»
         "aff": round(rel["affinity"], 2),
         "trust": round(rel.get("trust", 0), 2),
         "fear": round(rel.get("fear", 0), 2),

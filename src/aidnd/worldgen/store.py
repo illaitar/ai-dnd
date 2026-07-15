@@ -419,6 +419,17 @@ class WorldStore:
             c.execute("INSERT OR REPLACE INTO pc_state (world_id,data) VALUES (?,?)",
                       (world_id, json.dumps(data, ensure_ascii=False)))
 
+    def pc_set_gt(self, world_id: int, gt: int) -> None:
+        """Targeted write-through of just the `gt` field — used every tick so we don't race a
+        whole-row _pc_save() with a stale copy of the other fields. INSERT..ON CONFLICT so the
+        very first tick of a fresh world (no pc_state row yet) still lands."""
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO pc_state (world_id,data) VALUES (?,json_object('gt',?)) "
+                "ON CONFLICT(world_id) DO UPDATE SET data=json_set(data,'$.gt',?)",
+                (world_id, int(gt), int(gt)),
+            )
+
     def get_pc(self, world_id: int) -> dict | None:
         with self._conn() as c:
             r = c.execute("SELECT data FROM pc_state WHERE world_id=?", (world_id,)).fetchone()

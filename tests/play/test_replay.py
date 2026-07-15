@@ -143,6 +143,25 @@ def test_talk_hides_raw_pool_id():
     assert lines == ["> [подхожу: голос]", "голос. Чего надо?"]
 
 
+def test_say_line_who_names_the_speaker_not_voice():
+    """Live replay-fidelity bug: /say returns the reply in `line` but the recorder had only the raw
+    pool id (req.npc) to attribute it to → _clean_name turned that into «голос». The endpoint now
+    ships the fog-aware display name in `line_who`; the formatter must use it as the prefix."""
+    resp = {"gt": 1180, "line": "Чего надо, странник?", "line_who": "седой оружейник"}
+    lines = replay.format_lines("say", {"npc": "pool:8842", "text": "Здорово."}, resp, _st())
+    assert lines == [
+        "> Здорово.",
+        "седой оружейник. Чего надо, странник?",   # named, NOT «голос»
+    ]
+
+
+def test_say_falls_back_to_voice_without_line_who():
+    """No line_who and only a raw pool id in req.npc → still «голос» (never leak the id)."""
+    resp = {"line": "Молчит."}
+    lines = replay.format_lines("say", {"npc": "pool:8842", "text": "Эй!"}, resp, _st())
+    assert lines == ["> Эй!", "голос. Молчит."]
+
+
 def test_error_line():
     lines = replay.format_lines("act", {"text": "лечу на луну"}, {"error": "так не выйдет"}, _st())
     assert lines == ["> лечу на луну", "  ! так не выйдет"]

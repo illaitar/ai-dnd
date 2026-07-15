@@ -24,6 +24,7 @@ from aidnd.server.play.engine.core import (
     _binfo,
     _gt,
     _gt_add,
+    _gt_set,
     _mana_sleep,
     _model,
     _mt,
@@ -524,7 +525,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
         wake = (now // 1440) * 1440 + PB["rest_until_h"] * 60
         if wake <= now:
             wake += 1440
-        _S["gt"] = wake
+        _gt_set(wake)
         _mana_sleep((wake - now) / 60.0)  # sleep replenishes candle ×3
         _apply_routine()
         _pc_hp(set_to=PB["pc_max_hp"])

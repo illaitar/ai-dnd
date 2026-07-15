@@ -10,6 +10,7 @@ docs/superpowers/specs/2026-07-10-scene-digest-chat-design.md (Increment 2).
 from __future__ import annotations
 
 from aidnd.server.play.engine.core import _model
+from aidnd.server.play.engine.narrator.voice import _NO_DASH_SEMICOLON
 
 _SYS = (
     "Ты — рассказчик сцены в мрачном фэнтези. Тебе дают список наблюдаемых событий вокруг "
@@ -26,7 +27,7 @@ _SYS = (
     "к словам.\n"
     "4. Не выдумывай ничего сверх списка. Не обращайся к игроку на «ты» и не описывай его "
     "действия; если он попал в кадр — отстранённо («путник», «чужак у входа»).\n"
-    "Верни только прозу сцены, без пояснений и списков."
+    "Верни только прозу сцены, без пояснений и списков. " + _NO_DASH_SEMICOLON
 )
 
 _NEAR = {1: "близко", 2: "поодаль", 3: "издалека"}

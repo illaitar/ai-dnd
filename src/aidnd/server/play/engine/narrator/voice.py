@@ -34,6 +34,15 @@ from .lookup import _world_lookup
 
 # ─── Narrator/arbiter services moved from world.py (docs/structure.md, Phase B) ────────
 # NPC voice, world lookup and DM snapshot — these are arbiter/narrator-layer, not scene; home is here.
+
+# Style rule for every prose-producing narrator prompt (AI-tell suppression, not a hard fallback):
+# appended once to each such system prompt in this repo (voice bits, _DM_SYS, scene_digest,
+# journal, geo router, quest framer).
+_NO_DASH_SEMICOLON = (
+    "В тексте НЕ используй тире «—» и точку с запятой «;» — вместо них запятые, точки, скобки "
+    "или двоеточие."
+)
+
 _VOICE = {
     "gruff": "грубовато",
     "warm": "тепло",
@@ -182,6 +191,7 @@ def _voice(
             " У тебя есть к нему дело/просьба — дай это понять между делом, полунамёком, "
             "не выкладывая суть и не называя награду: подробности только если сам спросит о работе."
         )
+    bits.append(_NO_DASH_SEMICOLON)
     msgs = [{"role": "system", "content": " ".join(bits)}, {"role": "user", "content": user}]
     resp = mgr.call("narrator", msgs, options={"temperature": 0.85})
     content = (resp.get("content") if resp else "").strip()
@@ -244,5 +254,6 @@ _DM_SYS = (
     "описывай, как реагируют окружающие — их ответ придёт следующим ходом. Не решай за мир чужую "
     "участь (попал ли удар, погиб ли кто-то) — только то, что делает сам игрок. НИКОГДА не "
     "описывай смерть, смертельные раны или беспомощность живых персонажей — исход насилия решает "
-    "только бой, а не свободное повествование. Ответь 1-2 фразами: 2-е лицо, настоящее время, сухо."
+    "только бой, а не свободное повествование. Ответь 1-2 фразами: 2-е лицо, настоящее время, сухо. "
+    + _NO_DASH_SEMICOLON
 )

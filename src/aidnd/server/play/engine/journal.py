@@ -14,6 +14,7 @@ purge_legacy_once(wid)     : one-shot compost of pre-existing non-quest rows for
 from __future__ import annotations
 
 from aidnd.inference.client import LLMUnavailable
+from aidnd.server.play.engine.narrator.voice import _NO_DASH_SEMICOLON
 from aidnd.server.play.engine.session.persist import _store
 from aidnd.server.play.engine.session.state import _wid
 from aidnd.server.play.engine.session.time import _gt
@@ -40,7 +41,8 @@ _BEATS = {"offer", "accept", "step", "twist", "reveal", "done", "overtaken", "fa
 _J_SYS = (
     "Ты — герой этой истории, ведёшь дневник дел. Опиши событие ниже ОДНОЙ короткой "
     "фразой: от ПЕРВОГО лица, в ПРОШЕДШЕМ времени, по-русски, только по фактам — "
-    "ничего не домысливай и не добавляй. Верни ТОЛЬКО фразу, без кавычек и пояснений."
+    "ничего не домысливай и не добавляй. Верни ТОЛЬКО фразу, без кавычек и пояснений. "
+    + _NO_DASH_SEMICOLON
 )
 
 

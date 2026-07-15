@@ -41,3 +41,6 @@ frame_*.png
 
 tavern_playtest.txt
 data/live.db
+
+# текстовые реплеи игрока (flight recorder) — логи, не артефакты репозитория
+data/playtest_logs/

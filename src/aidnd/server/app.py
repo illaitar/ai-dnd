@@ -32,6 +32,41 @@ from .routes_usage import router as _usage_router
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 app = FastAPI(title="AI-DnD Engine")
 
+
+# ── replay recorder: tap /api/play/* JSON responses, mirror the UI render into a per-session text
+# file (data/playtest_logs). Registered FIRST so it sits INNER to GZip — it reads the raw
+# uncompressed JSON body before compression. Best-effort; never breaks the request path. ──
+@app.middleware("http")
+async def _replay_tap(request: Request, call_next):
+    from fastapi.responses import Response as _Response
+
+    from .play import replay
+
+    path = request.url.path
+    if not path.startswith("/api/play/"):
+        return await call_next(request)
+    resp = await call_next(request)
+    try:
+        wid = getattr(request.state, "wid", None)
+        ctype = resp.headers.get("content-type", "")
+        if wid is not None and "application/json" in ctype and hasattr(resp, "body_iterator"):
+            body = b""
+            async for chunk in resp.body_iterator:
+                body += chunk
+            resp = _Response(content=body, status_code=resp.status_code,
+                             headers=dict(resp.headers), media_type=resp.media_type)
+            import json as _json
+            try:
+                data = _json.loads(body) if body else {}
+            except Exception:  # noqa: BLE001
+                data = {}
+            req_json = getattr(request.state, "replay_req", None)
+            replay.record(wid, path[len("/api/play/"):], req_json, data, resp.status_code)
+    except Exception:  # noqa: BLE001 — recorder is best-effort, must never break gameplay
+        pass
+    return resp
+
+
 # Compress responses — the city map SVG alone is ~650KB uncompressed; gzip cuts it ~85%.
 from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
 

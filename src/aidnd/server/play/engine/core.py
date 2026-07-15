@@ -80,6 +80,14 @@ async def _play_session(request: Request):
     Dev/tests: AIDND_OPEN_PLAY=1 (or service DB is down) → shared world 1 without login."""
     uid, db_ok = None, True
     token = request.cookies.get("aidnd_session", "")
+    # Prime the request body cache here (dependency shares the Request with the endpoint) so the
+    # replay recorder can read the player's input from request.state without re-reading the ASGI
+    # body stream in middleware (which would starve the endpoint).
+    if request.method == "POST":
+        try:
+            request.state.replay_req = await request.json()
+        except Exception:  # noqa: BLE001 — non-JSON / empty body
+            request.state.replay_req = {}
     try:
         from aidnd.server.auth import user_for_token
         from aidnd.server.db import SessionLocal
@@ -97,6 +105,7 @@ async def _play_session(request: Request):
                 dev_seed = int(_store().flag_get(0, "dev_seed") or 1)
                 _SESS[1] = _fresh_sess(1, dev_seed)  # dev/demo: shared world; seed grows after death
             _CUR.set(_SESS[1])
+            request.state.wid = 1  # replay recorder: which world file to append to
             return
         raise HTTPException(401, "требуется вход")
     _UID.set(uid)
@@ -108,6 +117,7 @@ async def _play_session(request: Request):
     row = _store().user_world(str(uid)) or _store().user_world_create(str(uid))
     wid, seed = row
     _CUR.set(_SESS.setdefault(wid, _fresh_sess(wid, seed)))
+    request.state.wid = wid  # replay recorder: which world file to append to
 
 
 router = APIRouter(tags=["play"], dependencies=[Depends(_play_session)])

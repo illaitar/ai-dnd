@@ -6,6 +6,74 @@ combat-log dedup, the gt-jump divider, and end-to-end file writing into a tmp di
 from aidnd.server.play import replay
 
 
+def _make_test_app():
+    """Minimal app replicating server/app.py's exact middleware wiring — no existing test
+    bootstraps the real FastAPI app (heavy DB/session setup), so this locks the ASGI plumbing
+    (tap registered INNER to GZip, body-cache/reconstruction) against Starlette version bumps
+    without dragging in real /api/play/* session dependencies.
+    """
+    from fastapi import FastAPI, Request
+    from fastapi.responses import JSONResponse
+    from starlette.middleware.gzip import GZipMiddleware
+
+    from aidnd.server.app import _replay_tap
+
+    test_app = FastAPI()
+    test_app.middleware("http")(_replay_tap)  # registered first → sits INNER to GZip
+    test_app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    @test_app.post("/api/play/say")
+    async def _say(request: Request):
+        request.state.wid = 9001
+        request.state.replay_req = await request.json()
+        return JSONResponse({"gt": 100, "line": "Здорово.", "name": "Марта"})
+
+    @test_app.get("/api/play/map")
+    async def _map(request: Request):
+        request.state.wid = 9001
+        return JSONResponse({"viewBox": [0, 0, 1, 1]})
+
+    return test_app
+
+
+def test_asgi_tap_narrative_endpoint_writes_replay_and_passes_body(tmp_path, monkeypatch):
+    """POST to a narrative endpoint: the client still receives the intact JSON body, and the
+    replay file picks up the line — end-to-end through the real middleware stack (gzip inner,
+    body-iterator drain, response reconstruction), not just the pure formatter."""
+    from starlette.testclient import TestClient
+
+    monkeypatch.setattr(replay, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(replay, "_STATES", {})
+    monkeypatch.delenv("AIDND_NO_REPLAY", raising=False)
+
+    client = TestClient(_make_test_app())
+    resp = client.post("/api/play/say", json={"npc": "n", "text": "Привет!"})
+    assert resp.status_code == 200
+    assert resp.json() == {"gt": 100, "line": "Здорово.", "name": "Марта"}
+
+    files = list(tmp_path.glob("replay-w9001-*.txt"))
+    assert len(files) == 1
+    text = files[0].read_text(encoding="utf-8")
+    assert "> Привет!" in text
+    assert "Марта. Здорово." in text
+
+
+def test_asgi_tap_non_narrative_endpoint_untouched(tmp_path, monkeypatch):
+    """GET a non-narrative (polled) endpoint: response passes through unmodified and nothing is
+    recorded — the early bail in _replay_tap must fire before any body draining."""
+    from starlette.testclient import TestClient
+
+    monkeypatch.setattr(replay, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(replay, "_STATES", {})
+    monkeypatch.delenv("AIDND_NO_REPLAY", raising=False)
+
+    client = TestClient(_make_test_app())
+    resp = client.get("/api/play/map")
+    assert resp.status_code == 200
+    assert resp.json() == {"viewBox": [0, 0, 1, 1]}
+    assert list(tmp_path.glob("*.txt")) == []
+
+
 def _st():
     return replay._WidState()
 
@@ -124,6 +192,41 @@ def test_combat_new_encounter_resets_dedup():
     lines = replay.format_lines("combat", {}, v, st)
     assert lines == ["  ⚔ Новый бой.", "  ⚔ Волк рычит."]
     assert st.combat_len == 2
+
+
+def test_combat_new_encounter_at_or_above_prior_length_not_dropped():
+    """A second encounter's log, first observed at a length >= the first encounter's final length,
+    must not have its opening lines silently swallowed by the shrink-only dedup check."""
+    st = _st()
+    fight1 = {"combat": {"log": ["Бой начался.", "Гоблин бьёт — 4 урона.", "Гоблин падает."]}}
+    assert replay.format_lines("combat", {}, fight1, st) == [
+        "  ⚔ Бой начался.",
+        "  ⚔ Гоблин бьёт — 4 урона.",
+        "  ⚔ Гоблин падает.",
+    ]
+    assert st.combat_len == 3
+    # a tick with no combat in between (fight ended, combat block absent from the response)
+    replay.format_lines("act", {"text": "иду дальше"}, {"narr": ["Тихо."]}, st)
+    assert st.had_combat is False
+    # second encounter first observed with a log length >= the first fight's final length (3)
+    fight2 = {"combat": {"log": ["Новый бой начался.", "Волк рычит.", "Волк кусает.", "Ты бьёшь."]}}
+    lines = replay.format_lines("combat", {}, fight2, st)
+    assert lines == [
+        "  ⚔ Новый бой начался.",
+        "  ⚔ Волк рычит.",
+        "  ⚔ Волк кусает.",
+        "  ⚔ Ты бьёшь.",
+    ]
+    assert st.combat_len == 4
+
+
+def test_should_tap_predicate_matches_narrative_whitelist():
+    for verb in replay._NARR_POST:
+        assert replay.should_tap(verb) is True
+    assert replay.should_tap("combat") is True
+    for verb in ("map", "inventory", "journal", "contracts", "scene", "wares", "plan",
+                 "newworld", "debuglog", "state", ""):
+        assert replay.should_tap(verb) is False, verb
 
 
 def test_combat_over_wrapup_and_death():

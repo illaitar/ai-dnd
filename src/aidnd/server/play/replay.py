@@ -70,6 +70,13 @@ _STAGE = {
 _PHASE_RU = {"morning": "утро", "day": "день", "evening": "вечер", "night": "ночь"}
 
 
+def should_tap(verb: str) -> bool:
+    """Whether verb's response is narrative and worth buffering/parsing at all — the single source
+    of truth shared by record() and the ASGI tap in server/app.py, which bails BEFORE draining the
+    body/json-parsing for every polled non-narrative endpoint (map, inventory, journal, …)."""
+    return verb in _NARR_POST or verb == "combat"
+
+
 def _phase_ru(gt: int) -> str:
     h = (int(gt) // 60) % 24
     key = (
@@ -88,6 +95,7 @@ class _WidState:
         self.force_new = False
         self.last_gt: int | None = None
         self.combat_len = 0  # last-seen length of the combat log (dedup across ticks)
+        self.had_combat = False  # was combat present on the previous response for this wid?
 
 
 _STATES: dict[int, _WidState] = {}
@@ -101,6 +109,7 @@ def rotate(wid: int) -> None:
     st.force_new = True
     st.last_gt = None
     st.combat_len = 0
+    st.had_combat = False
 
 
 # ── pure formatting (unit-tested directly) ──────────────────────────────────────────────────────
@@ -226,13 +235,18 @@ def format_lines(verb: str, req: dict, resp: dict, st: _WidState) -> list[str]:
 
     # combat log — emit only lines new since the last tick of THIS encounter
     cb = resp.get("combat")
-    if isinstance(cb, dict) and isinstance(cb.get("log"), list):
+    has_combat = isinstance(cb, dict) and isinstance(cb.get("log"), list)
+    if has_combat:
         log = cb["log"]
-        if len(log) < st.combat_len:  # log shrank → a fresh encounter began
+        # a fresh encounter began if the log shrank, OR this is the first tick with combat present
+        # since the last one without it (a new fight observed with log length >= the previous
+        # fight's final length must not silently swallow its opening lines).
+        if len(log) < st.combat_len or not st.had_combat:
             st.combat_len = 0
         for entry in log[st.combat_len:]:
             lines.append(f"  ⚔ {entry}")
         st.combat_len = len(log)
+    st.had_combat = has_combat
 
     if resp.get("error"):
         lines.append(f"  ! {resp['error']}")
@@ -269,7 +283,7 @@ def record(wid, verb: str, req: dict | None, resp: dict | None, status: int = 20
         if verb == "newworld":
             rotate(wid)
             return
-        if not (verb in _NARR_POST or verb == "combat"):
+        if not should_tap(verb):
             return
         st = _STATES.setdefault(wid, _WidState())
         lines = format_lines(verb, req or {}, resp or {}, st)

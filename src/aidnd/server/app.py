@@ -45,6 +45,14 @@ async def _replay_tap(request: Request, call_next):
     path = request.url.path
     if not path.startswith("/api/play/"):
         return await call_next(request)
+    verb = path[len("/api/play/"):]
+    # Bail out UNTOUCHED for every non-narrative verb (map/inventory/journal/contracts/scene/…) —
+    # these are polled far more often than the narrative ones and must not pay for body-draining +
+    # json.loads + response reconstruction just to be dropped inside record(). replay.should_tap()
+    # is the single source of truth, shared with record()'s own whitelist check. "newworld" is let
+    # through too — record() special-cases it to rotate() the replay file, not to buffer a body.
+    if verb != "newworld" and not replay.should_tap(verb):
+        return await call_next(request)
     resp = await call_next(request)
     try:
         wid = getattr(request.state, "wid", None)
@@ -53,6 +61,9 @@ async def _replay_tap(request: Request, call_next):
             body = b""
             async for chunk in resp.body_iterator:
                 body += chunk
+            # dict(resp.headers) collapses repeated header keys (e.g. multiple Set-Cookie) into one —
+            # fine today since no /api/play/* narrative endpoint sets cookies; if that ever changes,
+            # switch to resp.raw_headers to preserve duplicates.
             resp = _Response(content=body, status_code=resp.status_code,
                              headers=dict(resp.headers), media_type=resp.media_type)
             import json as _json
@@ -61,7 +72,7 @@ async def _replay_tap(request: Request, call_next):
             except Exception:  # noqa: BLE001
                 data = {}
             req_json = getattr(request.state, "replay_req", None)
-            replay.record(wid, path[len("/api/play/"):], req_json, data, resp.status_code)
+            replay.record(wid, verb, req_json, data, resp.status_code)
     except Exception:  # noqa: BLE001 — recorder is best-effort, must never break gameplay
         pass
     return resp

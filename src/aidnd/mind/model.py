@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 from .memory import MemoryStore
 
 TRAITS = ("bravery", "greed", "honesty", "curiosity", "pride", "loyalty",
-          "sociability", "ambition", "lawful", "irritability", "malice")
+          "sociability", "ambition", "lawful", "irritability", "malice",
+          "empathy", "vengefulness")
 ABILITIES = ("str", "dex", "con", "int", "wis", "cha")
 NEEDS = ("fatigue", "hunger", "social", "purpose", "wealth", "comfort", "novelty")
 EMOTIONS = ("anger", "fear", "joy", "distress", "disgust")
@@ -35,6 +36,13 @@ class NpcConfig:
     max_hp: int = 10
     traits: dict = field(default_factory=lambda: dict.fromkeys(TRAITS, 0.5))
     abilities: dict = field(default_factory=lambda: dict.fromkeys(ABILITIES, 10))
+    # enriched entity slices (docs/.../npc-entity-enrichment-design.md §3) — code-readable;
+    # empty defaults so un-enriched/legacy rows degrade to neutral (never crash, §4.3).
+    worldview: dict = field(default_factory=dict)        # faith/morals{6}/taboos/mood_baseline
+    skills: dict = field(default_factory=dict)           # combat/craft{}/magic/literacy
+    allegiances: list = field(default_factory=list)      # [{group,kind,role,standing}]
+    standing: dict = field(default_factory=dict)         # {rank,notoriety}
+    perception: dict = field(default_factory=dict)       # {vigilance}
 
 
 @dataclass
@@ -89,7 +97,12 @@ class NpcState:
 
     def emotion_baseline(self, channel: str) -> float:
         t = self.config.traits
-        return {"fear": (1 - t.get("bravery", 0.5)) * 0.1}.get(channel, 0.0)
+        # mood_baseline (§3.2/§3.10) = the two-speed decay TARGET: a cheerful soul rests
+        # warm (joy floor), a melancholic rests low (distress floor). 0 for un-enriched rows.
+        mood = self.config.worldview.get("mood_baseline", 0.0)
+        return {"fear": (1 - t.get("bravery", 0.5)) * 0.1,
+                "joy": max(0.0, mood) * 0.15,
+                "distress": max(0.0, -mood) * 0.15}.get(channel, 0.0)
 
     def rel(self, entity: str) -> dict:
         return self.relationships.setdefault(entity, {"trust": 0.0, "affinity": 0.0, "fear": 0.0})

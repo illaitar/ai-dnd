@@ -90,6 +90,25 @@ from aidnd.server.play.mechanics.items import (
 )
 
 
+def _body_power(cfg) -> float:
+    """Combat power for a Body from the entity's `skills.combat` (§3.5 → C7). Replaces the
+    flat 1.0 every NPC carried. Un-enriched row (no skills) → 1.0 fallback (legacy parity)."""
+    combat = (getattr(cfg, "skills", None) or {}).get("combat")
+    return float(combat) if combat is not None else 1.0
+
+
+def _body_attention(cfg) -> float:
+    """Vigilance for a Body from `perception.vigilance` (§3.9 → C11). Deterministic, replaces
+    the per-tick rng.uniform. Un-enriched → neutral 0.5."""
+    return float((getattr(cfg, "perception", None) or {}).get("vigilance", 0.5))
+
+
+def _body_faction(cfg) -> str:
+    """Faction for a Body = the primary allegiance group (§3.3 → C3), else "town"."""
+    al = getattr(cfg, "allegiances", None) or []
+    return al[0].get("group", "town") if al else "town"
+
+
 def _overheard(text, player_zone, speaker_zone, zone_name, seed, boost=0):
     """(tier_int|None, display_text, mem_weight) for a conversation line the player
     overhears — spatial audibility tier drives the fidelity (docs/sound-attention.md)."""
@@ -482,7 +501,6 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             "наглец, или у кого к нему дело/любопытство пересилило"
         )
     }
-    rng = random.Random(f"live|{loc}")
     npc_map: dict = {}  # pid → {thing name: item_id} (thefts real)
     here_all = _here_settled(loc, crof)  # everyone SETTLED present — no LOD cap (buildings bounded by _building_cap)
     leisure = PB["leisure_social_lift"] if "tavern" in society.kinds_of(data or {}) else 0.0
@@ -515,13 +533,16 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
             imap[it["name"]] = iid
         npc_map[pid] = imap
         surf = _npc_surface(p)
+        cfg = p.state.config
         w.add(
             Body(
                 id=pid,
                 place=(zone_names.get(zonemap.get(pid)) or ent) if zones else place,
                 charisma=p.charisma,
                 appearance=p.appearance,
-                attention=round(rng.uniform(0.45, 0.85), 2),
+                power=_body_power(cfg),               # §3.5 skills.combat (was flat 1.0)
+                attention=_body_attention(cfg),       # §3.9 perception.vigilance (was rng.uniform)
+                faction=_body_faction(cfg),           # §3.3 allegiances[0].group (was all "town")
                 loot=loot,
                 race=surf["race"],
                 squalor=surf["squalor"],

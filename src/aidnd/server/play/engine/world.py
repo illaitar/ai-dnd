@@ -403,7 +403,7 @@ def _churn_items(prev_who, here, people, active_givers: set, active_targets: set
         for q in named:
             verb = "вошёл(ла) в зал" if arriving else "поднялся(лась) и вышел(ла)"
             hint = ", ищет тебя взглядом" if (q in active_givers and arriving) else ""
-            out.append({"k": "deed", "who": people[q].name, "pid": q,
+            out.append({"k": "deed", "who": _display(q, people), "pid": q,
                         "text": f"{verb}{hint}"})
         rest = len(pids) - len(named)                     # background + salient over the cap
         if rest == 1:                                      # singular grammar: «вошёл»/«вышел» один
@@ -1169,7 +1169,7 @@ def _live_tick(people) -> tuple:
         _gt_now = _gt()
         for pid, row in (_S.get("transit") or {}).items():
             if pid in people and _transit_node(row, _gt_now) == lv["loc"]:
-                feed.append({"k": "deed", "who": people[pid].name, "pid": pid,
+                feed.append({"k": "deed", "who": _display(pid, people), "pid": pid,
                              "text": "проходит мимо, не задерживаясь"})
     topics = lv.setdefault("topics", [])  # anti-echo REMEMBERS past ticks (signature tail)
     pc = _pc()

@@ -11,14 +11,30 @@ from types import SimpleNamespace
 import pytest
 
 from aidnd.mind import NpcConfig, NpcState
+from aidnd.server.play.engine import core
 from aidnd.server.play.engine.core import PLAYER
 from aidnd.server.play.engine.world import _churn_items, _ru_count, _salient
+
+
+@pytest.fixture(autouse=True)
+def _pc_state():
+    """_churn_items now renders NAMED lines via _display, which fogs anyone the PLAYER hasn't
+    met (_met() reads _pc().relationships). Give every test a clean, empty player-relationship
+    slate so `_npc(..., knows_player=True)` (below) is the single, explicit way a joiner counts
+    as 'met' — everything else defaults to unmet (descriptor), matching real fog-of-war."""
+    saved = dict(core._S._d())
+    core._S["pc"] = SimpleNamespace(relationships={})
+    yield
+    d = core._S._d()
+    d.clear()
+    d.update(saved)
 
 
 def _npc(pid, name, role="горожанин", knows_player=False, hp=None):
     st = NpcState.from_config(NpcConfig(id=pid, name=name, role=role))
     if knows_player:
         st.relationships[PLAYER] = {"trust": 0.2, "affinity": 0.3, "fear": 0.0}
+        core._S["pc"].relationships[pid] = {"trust": 0.2, "affinity": 0.3, "fear": 0.0}
     if hp is not None:
         st.hp = hp
     return SimpleNamespace(id=pid, name=name, role=role, state=st, work=None, home=None, persona={})
@@ -64,7 +80,10 @@ def test_five_joins_two_salient_two_named_plus_summary():
     items = _churn_items(prev, here, ppl, {"p_roza"}, set())
     named = [i for i in items if i.get("pid")]
     summary = [i for i in items if not i.get("pid")]
-    assert {i["who"] for i in named} == {"Мара", "Роза Медовар"}   # 2 named (== churn_named_max)
+    assert {i["pid"] for i in named} == {"p_mara", "p_roza"}       # 2 named (== churn_named_max)
+    who_by_pid = {i["pid"]: i["who"] for i in named}
+    assert who_by_pid["p_mara"] == "Мара"                           # acquaintance — real name
+    assert who_by_pid["p_roza"] != "Роза Медовар"                   # unmet giver — fog, no name leak
     assert len(summary) == 1                                        # one arrival summary
     assert _ru_count(3) in summary[0]["text"]                       # «трое»
     assert all(i["k"] == "deed" for i in items)                    # feed-shape compat (scene_digest)
@@ -107,6 +126,30 @@ def test_rest_of_one_is_grammatically_singular():
     items = _churn_items(here, prev, ppl, set(), set())            # symmetric: one leaves
     assert len(items) == 1
     assert items[0]["text"] == "зал редеет — вышел один"
+
+
+def test_unmet_salient_joiner_named_with_descriptor_not_name():
+    # A guard is salient (role=='стражник') but the PLAYER has never met them — the NAMED churn
+    # line must still fog the identity (descriptor), exactly like _display everywhere else.
+    ppl = _people(_npc("host", "Гром"), _npc("p_guard", "Дарен", role="стражник"))
+    prev = frozenset({"host"})
+    here = frozenset({"host", "p_guard"})
+    items = _churn_items(prev, here, ppl, set(), set())
+    named = [i for i in items if i.get("pid") == "p_guard"]
+    assert len(named) == 1
+    assert named[0]["who"] != "Дарен"      # real name must not leak for a stranger
+    assert named[0]["who"] == "мужчина"    # fallback descriptor — empty test persona
+
+
+def test_met_joiner_named_with_real_name():
+    # An acquaintance (PLAYER already has a relationship record) is displayed by real name.
+    ppl = _people(_npc("host", "Гром"), _npc("p_ac", "Мара", knows_player=True))
+    prev = frozenset({"host"})
+    here = frozenset({"host", "p_ac"})
+    items = _churn_items(prev, here, ppl, set(), set())
+    named = [i for i in items if i.get("pid") == "p_ac"]
+    assert len(named) == 1
+    assert named[0]["who"] == "Мара"
 
 
 # ─────────────────────── Inc1 review fix: churn is a QUEUE, not a slot ───────────────────────

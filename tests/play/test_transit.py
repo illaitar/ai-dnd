@@ -156,3 +156,18 @@ def test_passerby_hidden_once_player_steps_inside(live_world):
     assert not any(i.get("pid") == walker for i in feed), (
         "once inside, the street walker must not appear in the feed"
     )
+
+
+def test_passerby_shows_descriptor_not_real_name_for_unmet_stranger(live_world):
+    # Fog-of-war leak (live-confirmed): a never-met walker passing by at the doorstep must be
+    # rendered via _display's descriptor, not their raw name — same rule as everywhere else.
+    world_m, core_m, city, people, crof, cr2b, _loc0 = live_world
+    walker, doorstep = _doorstep_scene(world_m, core_m, city, people, crof, cr2b)
+    core_m._S["inside"] = None                                  # player still outside
+
+    feed, _address = world_m._live_tick(people)
+
+    item = next(i for i in feed if i.get("pid") == walker)
+    assert item["who"] != people[walker].name, (
+        "unmet stranger passing by must not leak the real name"
+    )

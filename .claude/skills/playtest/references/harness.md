@@ -46,6 +46,12 @@ sqlite3 data/live.db "UPDATE purse SET coins=100 WHERE world_id=1 AND holder='pc
 Give the player only an IN-FICTION rumor as a starting hint (name + node) — never the contract id,
 never the predicate.
 
+## Replay (source of truth for НИТЬ)
+Every play session is recorded server-side to `data/playtest_logs/replay-w{wid}-{ts}.txt` —
+exactly what the UI rendered, in order. After a playtest: `ls -t data/playtest_logs/ | head -1`,
+slice the session's window (headers carry gt), paste the relevant excerpt into the report's НИТЬ.
+`newworld` rotates the file. Kill-switch: AIDND_NO_REPLAY=1 (don't set it during playtests).
+
 ## Output file
 `data/debug/playtests/YYYY-MM-DD-HHMM-<slug>.md` — the player's ЛОГ/ВЕРДИКТЫ/НАХОДКИ/ЖИВОЕ verbatim,
 then your appendix:

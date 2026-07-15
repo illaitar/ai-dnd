@@ -59,10 +59,12 @@ written to `data/debug/playtests/YYYY-MM-DD-HHMM-<slug>.md` and summarized in ch
 ## ЖИВОЕ      (1-3 quoted moments that felt alive)
 ## МЁРТВОЕ    (1-3 quoted moments that felt canned, static, or template — or «не было»)
 ```
-**НИТЬ is the primary artifact** — the frontend experience: every rendered narr/line/feed/digest
-string VERBATIM (full, uncut), in play order; player actions as `〔…〕` stage directions; NPC lines
-as `ИМЯ. текст`, yours as `ТЫ. текст`. No JSON, no coordinates, no failed-payload noise — only what
-a human at the screen would read. Collect it AS YOU PLAY (append after every call), not from memory.
+**НИТЬ is the primary artifact** — and since the replay recorder shipped, its SOURCE OF TRUTH is
+the server-side replay: `data/playtest_logs/replay-w{wid}-*.txt` mirrors the UI verbatim (player
+input echoes, narration, `ИМЯ. реплика`, feed `·`, digest `⋯`, combat `⚔`, errors `!`). The
+CONTROLLER extracts the session's slice from that file for the report — never reconstruct НИТЬ
+from an agent's memory (haiku testers fabricate). The player agent still notes tick numbers and
+its own impressions; the verbatim thread comes from the replay.
 ЛОГ is the compact mechanical trace (one line per call, replies ≤80 chars). Analysis goes ONLY in
 the sections after. Budget discipline: НИТЬ entries after EVERY call — when the call budget
 tightens, cut exploration, never the НИТЬ. Navigation: don't lattice-walk node numbers — if lost

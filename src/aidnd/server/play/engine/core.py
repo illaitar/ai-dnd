@@ -353,7 +353,7 @@ def _crime_signature(what: str) -> tuple[list[str], float, float, float]:
     if "силой" in low or "отнял" in low or "отнять" in low:          # robbery (force, no wound)
         return ["грабёж"], 0.6, 0.3, 0.0
     if "убийств" in low or "убить" in low or "душегубств" in low:    # solicitation of murder
-        return ["вероломство"], 0.6, 0.0, 0.0
+        return ["убийство", "вероломство"], 0.6, 0.0, 0.0
     return ["воровство"], 0.4, 0.0, 0.0                              # pickpocket / take from owner
 
 

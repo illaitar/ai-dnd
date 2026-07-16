@@ -30,6 +30,7 @@ PB = {
     "ev_taboo_mult": 1.6,                          # outrage × when a tag ∈ witness taboos
     "ev_approval_k": 0.25,                         # positive-stance → grim-satisfaction joy scale
     "ev_rel_fear": 0.5, "ev_rel_aff": 0.4, "ev_warmth": 0.2,  # bystander rel-delta scales
+    "ev_control_brave": 0.6,  # смелость свидетеля гасит страх/дистресс — control=к·bravery
     # МОЗГ — familiarity accrual + newcomer greet (Inc3)
     "familiarity_k": 4,              # co-presence ticks before a faint unanchored tie seeds
     "familiarity_affinity": 0.05,    # faint warmth/trust of the seeded acquaintance tie
@@ -68,6 +69,8 @@ PB = {
     "live_full_upto": 3,        # ≤ this many present → EVERYONE thinks this tick
     "live_active_ratio": 0.5,   # else ~this fraction of the crowd thinks per tick
     "live_active_cap": 6,       # hard ceiling on LLM actors per tick (latency)
+    "live_hard_cap": 10,        # жёсткий потолок волны: must-акторы сверх него переносятся на
+                                 # следующий тик — их импульс не гаснет, он просто ждёт
     "pc_said_impulse": 2.8,   # near hearer pull when the player speaks aloud (L1; tier-scaled). tuned up so L2 hearers also engage
     "give_min": 1,
     # prices: sell to trader / buy from them (from THEIR vision of worth)

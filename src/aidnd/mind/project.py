@@ -29,6 +29,7 @@ _K = {
     "ev_harm_base": 0.6, "ev_harm_familiar": 0.4, "ev_viol_damp": 0.5,
     "ev_empathy_care": 0.5, "ev_taboo_mult": 1.6, "ev_approval_k": 0.25,
     "ev_rel_fear": 0.5, "ev_rel_aff": 0.4, "ev_warmth": 0.2,
+    "ev_control_brave": 0.6,  # смелость свидетеля гасит страх/дистресс — control=к·bravery
 }
 
 
@@ -106,6 +107,10 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
                                          # because test_project_event.py asserts on it pre-gain)
         "revulsion": outrage,           # → disgust in appraise
         "intent": True,                 # a witnessed act is deliberate
+        "control": _K["ev_control_brave"] * float(traits.get("bravery", 0.5)),
+        # ^ agency dampens fear/distress in appraise (fear/distress × (1−control)); bravery 1.0 → −60%,
+        # 0.5 (default) → −30%, 0 → full fear. norm (reparative-act channel) still awaits its emitter —
+        # left un-wired here on purpose, do not touch.
     }
     rel = {
         "actor_fear": harm * _K["ev_rel_fear"] if event.actor else 0.0,

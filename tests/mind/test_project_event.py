@@ -102,6 +102,37 @@ def test_self_harm_anchors_bystander_loose():
     assert out["actor_fear"] == pytest.approx(0.21, abs=0.02)  # harm 0.42 × ev_rel_fear 0.5
 
 
+def test_control_emitted_from_bravery_dampens_fear():
+    """control was never emitted anywhere (only sim.py's testbed set it) — appraise's
+    fear = harm×(1−control) always saw control≡0. project_event now emits
+    control = ev_control_brave(0.6) × bravery. Two witnesses, identical except bravery,
+    diverge sharply in the resulting fear once piped through tick.appraise:
+
+    harm = physical_threat(0.7) × (ev_harm_base 0.6 + ev_harm_familiar 0.4 × fear_prior 0)
+           × perc(1.0) × (1 − ev_viol_damp 0.5 × viol_approval 0) = 0.7×0.6 = 0.42
+    coward (bravery 0.1): control = 0.6×0.1 = 0.06 → fear_pre = 0.42×(1−0.06) = 0.3948
+       × emotion_gain('fear') = 0.6+(1−0.1) = 1.5  → fear = 0.3948×1.5 = 0.5922
+    brave  (bravery 0.9): control = 0.6×0.9 = 0.54 → fear_pre = 0.42×(1−0.54) = 0.1932
+       × emotion_gain('fear') = 0.6+(1−0.9) = 0.7  → fear = 0.1932×0.7 = 0.13524
+    """
+    def _make(bravery):
+        cfg = NpcConfig(id="npc:w", name="w", role="x",
+                        traits={"bravery": bravery, "empathy": 0.5}, worldview={})
+        return NpcState.from_config(cfg)
+
+    coward, brave = _make(0.1), _make(0.9)
+    d_coward = project_event(KILL, coward, perc=1.0)["dims"]
+    d_brave = project_event(KILL, brave, perc=1.0)["dims"]
+    assert d_coward["control"] == pytest.approx(0.06, abs=0.001)
+    assert d_brave["control"] == pytest.approx(0.54, abs=0.001)
+
+    appraise(coward, d_coward, source="pc")
+    appraise(brave, d_brave, source="pc")
+    assert coward.emotion["fear"] == pytest.approx(0.5922, abs=0.001)
+    assert brave.emotion["fear"] == pytest.approx(0.13524, abs=0.001)
+    assert brave.emotion["fear"] < coward.emotion["fear"] * 0.3   # substantially lower
+
+
 def test_gift_warmth_only_no_fear():
     """A gift (target_harm 0, no threat) → warmth-to-target, no fear/outrage."""
     gift = Event("npc:0301", "npc:0142", intensity=0.2, physical_threat=0.0, target_harm=0.0,
@@ -142,32 +173,41 @@ def _project_and_appraise(pool_id: str) -> dict:
 
 
 def test_specA_merek_cultist_calm_and_glad():
-    """§5A Мерек pool:0225 (Багровый): fear ≈0.20, joy ≈0.11, disgust 0 — barely stirred, faintly glad."""
+    """§5A Мерек pool:0225 (Багровый): joy ≈0.11, disgust 0 — barely stirred, faintly glad.
+
+    control now emits from bravery (0.6·0.78=0.468, was 0 pre-fix), so fear drops from the old
+    ≈0.20 to fear_pre(0.246)×(1−0.468)=0.131 × gain(0.6+(1−0.78)=0.82) ≈0.107; goal_impact/joy/
+    disgust are untouched — control only enters fear/distress, not joy/disgust/anger."""
     e = _project_and_appraise("pool:0225")
-    assert e["fear"] == pytest.approx(0.20, abs=0.03)
+    assert e["fear"] == pytest.approx(0.107, abs=0.03)
     assert e["joy"] == pytest.approx(0.11, abs=0.03)
     assert e["disgust"] == pytest.approx(0.0, abs=0.02)
     assert e["distress"] == pytest.approx(0.0, abs=0.02)
 
 
 def test_specA_selma_shopkeeper_fear_and_disgust():
-    """§5A Сельма pool:0645 (Светлая-Мать, no убийство taboo): fear ≈0.45, disgust ≈0.22,
-    distress ≈0.21, anger ≈0.06."""
+    """§5A Сельма pool:0645 (Светлая-Мать, no убийство taboo): disgust ≈0.22, anger ≈0.06 (both
+    untouched by control). fear/distress drop with control=0.6·0.524=0.314 (was 0):
+    fear_pre(0.42)×(1−0.314)=0.288 × gain(0.6+(1−0.524)=1.076) ≈0.31 (was ≈0.45);
+    distress_pre(0.245)×(1−0.314)=0.168 × gain(0.6+(1−0.524)·0.5=0.838) ≈0.14 (was ≈0.21)."""
     e = _project_and_appraise("pool:0645")
-    assert e["fear"] == pytest.approx(0.45, abs=0.03)
+    assert e["fear"] == pytest.approx(0.31, abs=0.03)
     assert e["disgust"] == pytest.approx(0.22, abs=0.03)
-    assert e["distress"] == pytest.approx(0.21, abs=0.03)
+    assert e["distress"] == pytest.approx(0.14, abs=0.03)
     assert e["anger"] == pytest.approx(0.06, abs=0.03)
     assert e["joy"] == pytest.approx(0.0, abs=0.02)
 
 
 def test_specA_osvin_priest_recoils_hardest():
-    """§5A Освин pool:0102 (жрец, taboos∋убийство → ×1.6): disgust highest, anger at the killer,
-    deep distress. Real traits give disgust ≈0.79 / anger ≈0.24 (spec's 0.76/0.26 used rounded
-    pride/irritability 0.5 — see report drift note)."""
+    """§5A Освин pool:0102 (жрец, taboos∋убийство → ×1.6): disgust highest, anger at the killer —
+    both untouched by control (disgust/anger derive from revulsion/desert, not harm/goal_impact).
+    Real traits give disgust ≈0.79 / anger ≈0.24 (spec's 0.76/0.26 used rounded pride/irritability
+    0.5 — see report drift note). control=0.6·0.478=0.287 (bravery 0.48, was 0) now damps
+    fear/distress: fear_pre(0.42)×(1−0.287)=0.30 × gain(0.6+(1−0.478)=1.122) ≈0.336 (was ≈0.47);
+    distress_pre(0.465)×(1−0.287)=0.332 × gain(0.6+(1−0.478)·0.5=0.861) ≈0.286 (was ≈0.40)."""
     e = _project_and_appraise("pool:0102")
     assert e["disgust"] == pytest.approx(0.79, abs=0.03)
     assert e["disgust"] > 0.6                              # taboo ×1.6 pushes it highest
     assert e["anger"] == pytest.approx(0.25, abs=0.03)
-    assert e["distress"] == pytest.approx(0.40, abs=0.03)
-    assert e["fear"] == pytest.approx(0.47, abs=0.03)
+    assert e["distress"] == pytest.approx(0.286, abs=0.03)
+    assert e["fear"] == pytest.approx(0.336, abs=0.03)

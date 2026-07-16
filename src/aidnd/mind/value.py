@@ -20,7 +20,9 @@ utility(a, g, state, world, percept) -> float : Main dispatcher for action utili
 T(state, name: str) -> float : Gets trait value from NPC config.
 proximity(d: int) -> float : Proximity factor (1.0/(1.0+d)) for distance decay.
 gamma(state) -> float : Opportunity discount factor derived from irritability.
-pwin(att, deff) -> float : Combat win probability clamped to [0.02, 0.98].
+pwin(att, deff) -> float : TRUE combat win probability clamped to [0.02, 0.98] (combat.py resolves with this).
+self_regard(state) -> float : Derived [0..1] over/under-confidence from pride/bravery/ambition.
+perceived_pwin(att, deff, state) -> float : DECISION estimate of pwin, biased by self_regard.
 hostility(state, me, b) -> float : Threat level [0..1] of entity to self.
 witnesses(percept, state, target_id: str) -> int : Count third-party observers.
 """
@@ -46,6 +48,11 @@ BAL = {
     "proxemics": 0.2,                                 # social distance pull: small, never overrides needs/safety
     "feel_nudge_cap": 0.25,   # mirrors PB["feel_nudge_cap"] (session/config.py) — mind-internal
                               # consumer (llm_agent.py) can't import play-layer PB (import cycle)
+    # self_regard (§4.5/§4.6) — derived over/under-confidence biasing the PERCEIVED pwin the
+    # DECISION reads. Mirrors PB["sr_*"]; voice.py's boast beat uses the same PB weights (import
+    # cycle keeps them separate — guarded by tests/mind/test_knob_sync.py).
+    "sr_pride": 0.35, "sr_brave": 0.35, "sr_amb": 0.30,   # self_regard trait weights
+    "sr_span": 1.5,                                        # perceived-pwin bias span around 0.5
 }
 
 
@@ -66,7 +73,29 @@ def gamma(state) -> float:
 
 
 def pwin(att, deff) -> float:
+    """TRUE win probability from raw power. This is what threat-danger reads and what combat.py
+    resolves the real fight with — NEVER biased. Only the DECISION estimate (perceived_pwin) bends."""
     return _clamp(att.power / (att.power + deff.power + 1e-9), 0.02, 0.98)
+
+
+def self_regard(state) -> float:
+    """Derived [0..1] over-/under-confidence from pride/bravery/ambition (§4.5). Computed on demand
+    from traits — no stored field, no regen. 0.5 = calibrated; >0.5 braggart; <0.5 timid."""
+    return _clamp(BAL["sr_pride"] * T(state, "pride")
+                  + BAL["sr_brave"] * T(state, "bravery")
+                  + BAL["sr_amb"] * T(state, "ambition"))
+
+
+def perceived_pwin(att, deff, state) -> float:
+    """The DECISION's estimate of a fight, biased by self_regard around the TRUE pwin.
+    bias = 1 + sr_span·(self_regard−0.5): a braggart inflates own power and discounts the foe
+    (and so also under-weights the risk of losing, since the same estimate feeds selfrisk); a meek
+    one inverts it. At self_regard 0.5 the bias is 1.0 and perceived == pwin. The TRUE pwin
+    (threat-danger, combat.py) is untouched — only this estimate bends (§3c/§4.5/§5C)."""
+    bias = 1.0 + BAL["sr_span"] * (self_regard(state) - 0.5)
+    own = att.power * bias
+    opp = deff.power * (2.0 - bias)
+    return _clamp(own / (own + opp + 1e-9), 0.02, 0.98)
 
 
 def hostility(state, me, b) -> float:
@@ -177,7 +206,7 @@ def clean_acquire(g, state, world, me) -> float:
     if not tb:
         return 0.0
     pay = _acq_pay(g, state)
-    pw = pwin(me, tb)
+    pw = perceived_pwin(me, tb, state)            # DECISION reads the self_regard-biased estimate
     subdue = pw * 0.9 * pay - _cost_moral("attack", state) - (1 - pw) * BAL["selfrisk"]
     steal = (BAL["take_distracted"] if tb.attention < 0.4 else BAL["take_alert"]) * pay \
         - _cost_moral("take", state)
@@ -198,7 +227,7 @@ def _u_acquire(a, g, state, world, percept, me) -> float:
     wit = witnesses(percept, state, g.target)
 
     if same and a.kind == "say" and a.say == "threat" and a.target == g.target:
-        comply = _clamp(pwin(me, tb) - 0.1 + 0.3 * T(state, "pride")) / (1 + 0.8 * wit)
+        comply = _clamp(perceived_pwin(me, tb, state) - 0.1 + 0.3 * T(state, "pride")) / (1 + 0.8 * wit)
         return comply * pay - _caught("threat", wit) * _cost_caught("threat", state) \
             - _cost_moral("threat", state) - _eff(a)
     if same and a.kind == "take" and a.target == g.target:
@@ -206,7 +235,7 @@ def _u_acquire(a, g, state, world, percept, me) -> float:
               else BAL["take_distracted"] if tb.attention < 0.4 else BAL["take_alert"])
         return ps * pay - _caught("take", wit) * _cost_caught("take", state) - _cost_moral("take", state)
     if same and a.kind == "attack" and a.target == g.target and not tb.down():
-        pw = pwin(me, tb)
+        pw = perceived_pwin(me, tb, state)           # DECISION reads the self_regard-biased estimate
         return pw * 0.9 * pay - _caught("attack", wit) * _cost_caught("attack", state) \
             - _cost_moral("attack", state) - (1 - pw) * BAL["selfrisk"]
 
@@ -228,12 +257,12 @@ def _u_harm(a, g, state, world, percept, me) -> float:
     same = me.place == tb.place
     wit = witnesses(percept, state, g.target)
     if same and a.kind == "attack" and a.target == g.target and not tb.down():
-        pw = pwin(me, tb)
+        pw = perceived_pwin(me, tb, state)           # DECISION reads the self_regard-biased estimate
         return pw * pay - _caught("attack", wit) * _cost_caught("attack", state) \
             - _cost_moral("attack", state) - (1 - pw) * BAL["selfrisk"]
     reach = _approach(a, tb.place, me, world)
     if reach is not None:
-        pw = pwin(me, tb)
+        pw = perceived_pwin(me, tb, state)           # DECISION reads the self_regard-biased estimate
         clean = pw * pay - _cost_moral("attack", state) - (1 - pw) * BAL["selfrisk"]
         return gamma(state) * max(0.0, clean) * reach - _eff(a) - _risk(a, world, state)
     return -_eff(a)

@@ -27,3 +27,9 @@ def test_project_knobs_match_pb():
 
 def test_feel_nudge_cap_matches_pb():
     assert BAL["feel_nudge_cap"] == PB["feel_nudge_cap"]
+
+
+def test_self_regard_knobs_match_pb():
+    # value.BAL mirrors PB's self_regard weights (Inc5) — voice.py reads PB, mind/ reads BAL
+    for k in ("sr_pride", "sr_brave", "sr_amb", "sr_span"):
+        assert BAL[k] == PB[k], f"value.BAL[{k!r}] ({BAL[k]!r}) != PB[{k!r}] ({PB[k]!r})"

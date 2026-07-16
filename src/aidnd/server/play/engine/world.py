@@ -746,9 +746,13 @@ def _accrue_familiarity(st, other_id: str) -> None:
     tick a FAINT UNANCHORED tie appears (small affinity/trust; anchored=False → loose Inc1 decay,
     fades if contact lapses until a real interaction anchors it), flipping `other ∈ relationships`
     true so greetings warm. A person already known accrues nothing — the counter is pre-acquaintance
-    only. Applies to the PLAYER and NPC↔NPC alike."""
+    only. In PRACTICE the K-tick path is live mainly for the PLAYER: NPC↔NPC pairs are already seeded
+    by the pre-acquaintance loop (_live_build) / appraise_present before accrual matters, so a townsfolk
+    pair rarely reaches here un-related — the player is the one persistent stranger this warms."""
     if other_id in st.relationships:
         return
+    # NB: st.familiarity is UNBOUNDED — no cap/eviction (consistent with the deferred memory-pruning
+    # non-goal, spec §2/§9); every fresh face ever co-present keeps a counter. Backlog: cap/evict later.
     fam = st.familiarity
     fam[other_id] = fam.get(other_id, 0) + 1
     if fam[other_id] >= PB["familiarity_k"]:
@@ -757,6 +761,25 @@ def _accrue_familiarity(st, other_id: str) -> None:
         rel["affinity"] = max(rel.get("affinity", 0.0), aff)
         rel["trust"] = max(rel.get("trust", 0.0), aff)
         rel["anchored"] = False                          # loose — not earned by a real interaction
+
+
+def _greeted_toward(d: dict, newcomer: str, w) -> bool:
+    """Did this decision actually GREET the newcomer — a say directed at them, or a move ONTO their
+    spot (an approach)? The ≤1-greeter lock keys on THIS (Fix B), not on mere selection: a drawn NPC
+    that instead ate/worked/waited leaves the slot open for another to greet. The mind speaks through
+    its own voice — code only READS whether the greeting happened, never fabricates the line."""
+    for a in (d.get("actions") or []):
+        if not isinstance(a, dict):
+            continue
+        tool = a.get("tool")
+        if tool == "say" and str(a.get("text") or "").strip():
+            tgt = str(a.get("to") or "").strip()
+            if (getattr(w, "aliases", None) or {}).get(tgt.lower(), tgt) == newcomer:
+                return True
+        elif tool == "move" and a.get("to"):
+            if newcomer in w.bodies and str(a["to"]) == w.bodies[newcomer].place:
+                return True
+    return False
 
 
 def _pick_newcomer(st, others, greeted: set) -> str | None:
@@ -1098,7 +1121,12 @@ def _live_tick(people) -> tuple:
     for _gpid, _gln in _fore.open_lines(order).items():  # offered/active givers: LINE for the whole
         fore.setdefault(_gpid, _gln)                     # open arc (no impulse spike — like oaths)
     impulses: dict = {}
-    greeted = lv.setdefault("greeted", set())              # newcomers already claimed this scene (≤1 greeter)
+    greeted = lv.setdefault("greeted", set())              # newcomers already GREETED this scene (≤1 greeter,
+                                                           # locked on the ACTUAL greeting below — Fix B)
+    claimed_this_tick: set = set()                          # newcomers a sociable NPC is drawn to THIS tick —
+                                                           # dedup only (two NPCs don't double-target one face),
+                                                           # NOT the persisted lock (that fires on a real greeting)
+    greet_target: dict = {}                                # pid → newcomer this NPC will SEE as an opportunity
     pc_here = PLAYER in w.bodies and (
         w.bodies[PLAYER].place in inz if inz else w.bodies[PLAYER].place == lv["place"])
     for pid in order:
@@ -1137,12 +1165,15 @@ def _live_tick(people) -> tuple:
         copresent = ([PLAYER] if pc_here else []) + [q for q in order if q != pid]
         for other in copresent:
             _accrue_familiarity(st, other)
-        newcomer = _pick_newcomer(st, copresent, greeted)
+        newcomer = _pick_newcomer(st, copresent, greeted | claimed_this_tick)
         if newcomer is not None:
             gi = _greet_impulse(soc)
             if gi > imp:
                 imp, why = gi, "новичок"
-                greeted.add(newcomer)                      # claimed — next sociable NPC sees it greeted
+                claimed_this_tick.add(newcomer)            # dedup THIS tick — the persisted ≤1-greeter lock
+                greet_target[pid] = newcomer               # fires later, on the ACTUAL greeting (Fix B).
+                #                                            Fix A: make this fresh face VISIBLE in pid's ctx →
+                #                                            the mind can CHOOSE to approach (or not — emergent)
         imp += (soc - 0.5) * 0.5
         impulses[pid] = (round(imp, 2), why)
     ranked_imp = sorted(order, key=lambda p: -impulses[p][0])
@@ -1162,6 +1193,9 @@ def _live_tick(people) -> tuple:
         ctx["event"] = salient
     ctx["oaths"] = oaths
     ctx["foreshadow"] = fore
+    ctx["newcomer"] = {gp: ("новоприбывший гость" if nc == PLAYER      # Fix A: the drawn NPC SEES the
+                            else lv["names"].get(nc, "новоприбывший"))  # fresh face in its decision ctx
+                       for gp, nc in greet_target.items()}
     ctx["market"] = _market_view(order, people, lv)  # co-present goods for sale → buyers can choose to buy
     ctx["pc_said"] = {pid: pc_said for pid in pc_heard} if pc_said else {}
 
@@ -1207,6 +1241,15 @@ def _live_tick(people) -> tuple:
                           if (c := _claim(pid_, decisions[pid_]))]
             decisions.update(ex.map(think_one, wave))
     ctx.pop("now", None)
+
+    # Fix B — the ≤1-greeter lock fires on the ACTUAL greeting, NOT on selection. Only a drawn NPC
+    # who really said-to / stepped toward the newcomer marks it greeted (persisted across ticks). One
+    # who drifted to its own business leaves the slot OPEN — another sociable NPC may greet next tick,
+    # so a missed greeter no longer permanently wastes the scene's one greeting.
+    for _gp, _nc in greet_target.items():
+        _gd = decisions.get(_gp)
+        if _gd is not None and _greeted_toward(_gd, _nc, w):
+            greeted.add(_nc)
 
     # ── detailed scene log (data/debug/play.log): 'why' of each NPC per tick ──
     import logging as _logging

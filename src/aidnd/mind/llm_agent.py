@@ -195,6 +195,10 @@ def build_prompt(state, world, percept, ctx: dict, prefs=None):
     fore = ctx.get("foreshadow", {}).get(cfg.id)
     if fore:
         lines.append(f"  ⚑ {fore}")
+    newc = ctx.get("newcomer", {}).get(cfg.id)   # Inc3: a fresh face you're DRAWN to (greet impulse won)
+    if newc:
+        lines.append(f"  ⚑ Рядом {newc} — новое лицо, к которому ты приглядываешься. Можешь подойти "
+                     "и заговорить ПЕРВЫМ, если тебе по нраву — или занимайся своим (никто не неволит).")
     conv = ctx.get("convs", {}).get(cfg.id)
     if conv:
         lines.append("")

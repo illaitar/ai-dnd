@@ -348,6 +348,7 @@ def _contract_complete(ct: dict) -> str:
     })
     p.state.rel(PLAYER)["trust"] = min(1.0, p.state.rel(PLAYER)["trust"] + PB["complete_trust"])
     p.state.rel(PLAYER)["affinity"] = min(1.0, p.state.rel(PLAYER)["affinity"] + PB["complete_aff"])
+    p.state.rel(PLAYER)["anchored"] = True               # исполненная просьба — прочная связь (медленный спад)
     p.state.memory.add("чужак исполнил мою просьбу. Надёжный человек", _mt(), 0.85, about=[PLAYER])
     from aidnd.server.play.engine import deeds as _deeds
 

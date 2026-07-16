@@ -54,3 +54,27 @@ def decay_lazy(state: NpcState, now_gt: int) -> None:
             hl = _K["decay_rel_loose_days"]
             for k in ("affinity", "fear", "trust"):
                 rel[k] = _relax(rel.get(k, 0.0), 0.0, dt_days, hl)
+
+
+def decay_scene_entrants(states: dict, here, prev_who, now_gt: int) -> list:
+    """Apply ``decay_lazy`` exactly ONCE to each scene ENTRANT — a mind present in ``here`` now but
+    absent from ``prev_who`` (the previous tick's settled set). This is THE integration split:
+
+    * an entrant catches up its whole out-of-scene gap here (emotions AND relationships) in one pass,
+      then keeps relaxing its *emotions* per-tick via ``tick._decay_emotion`` while it stays in scene;
+    * a mind that was already in scene last tick is SKIPPED — re-running ``decay_lazy`` each tick
+      would double-apply against the per-tick emotion decay, and relationships have no per-tick
+      carrier, so ``decay_lazy`` on entry is their sole (and one-time) decay event.
+
+    Returns the ids that were decayed (present entrants with a live mind). See spec §4.4/§5B.
+    """
+    entered = []
+    prev = set(prev_who)
+    for pid in here:
+        if pid in prev:
+            continue
+        st = states.get(pid)
+        if st is not None:
+            decay_lazy(st, now_gt)
+            entered.append(pid)
+    return entered

@@ -48,7 +48,8 @@ def _hydrate_rels(st, rels: list) -> None:
         kind = e.get("kind", "")
         fear = round(-w * 0.5, 2) if (w < 0 and kind in ("rival", "enemy")) else 0.0
         st.relationships[other] = {"affinity": round(w, 2),
-                                   "trust": round(max(0.0, w), 2), "fear": fear}
+                                   "trust": round(max(0.0, w), 2), "fear": fear,
+                                   "anchored": True}          # авторские родство/вражда пожизненны (§4.3)
 
 
 def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
@@ -76,6 +77,7 @@ def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
     if saved:
         st.relationships.update(saved.get("relationships") or {})  # lived edges win over seed
         st.needs.update(saved.get("needs") or {})
+        st.last_decay_gt = int(saved.get("last_decay_gt") or 0)  # decay clock survives restart (Inc1)
         for m in saved.get("memory") or []:
             mm = st.memory.add(
                 m["text"],

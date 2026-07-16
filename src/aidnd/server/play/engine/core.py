@@ -349,6 +349,7 @@ def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
     p = people[npc]
     rel = p.state.rel(PLAYER)
     rel["affinity"] = min(rel["affinity"], -0.5)
+    rel["anchored"] = True                               # обида жертвы — медленный носитель (§4.3)
     p.state.emotion["anger"] = min(1.0, p.state.emotion.get("anger", 0) + 0.7)
     p.state.emotion_target["anger"] = PLAYER
     p.state.memory.add(f"чужак {what} — я этого не забуду!", _mt(), 0.9, about=[PLAYER])

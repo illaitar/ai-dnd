@@ -404,6 +404,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             rel["affinity"]
             + min(PB["gift_aff_cap"], PB["gift_aff_base"] + amount / PB["gift_aff_div"]),
         )
+        rel["anchored"] = True                            # подарок — настоящее взаимодействие (медленный спад)
         p.state.memory.add(f"игрок дал мне {amount} зм", _mt(), 0.55, about=[PLAYER])
         _pc_remember(f"дал {p.name} {amount} зм", 0.4, about=[npc])
         _npc_save(npc)
@@ -431,6 +432,7 @@ def _attempt(intent: dict, sc: dict) -> dict:
             rel["affinity"]
             + min(PB["gift_aff_cap"], PB["gift_aff_base"] + it["worth"] / PB["gift_aff_div"]),
         )
+        rel["anchored"] = True                            # подарок — настоящее взаимодействие (медленный спад)
         p.state.memory.add(f"игрок подарил мне «{it['name']}»", _mt(), 0.55, about=[PLAYER])
         _pc_remember(f"подарил {p.name} «{it['name']}»", 0.4, about=[npc])
         _npc_save(npc)

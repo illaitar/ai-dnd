@@ -108,9 +108,9 @@ def test_hydrate_rels_weight_to_affect_mapping():
         {"other": "pool:enemy", "kind": "enemy", "weight": -0.7},
     ])
     friend = st.relationships["pool:friend"]
-    assert friend == {"affinity": 0.8, "trust": 0.8, "fear": 0.0}
+    assert friend == {"affinity": 0.8, "trust": 0.8, "fear": 0.0, "anchored": True}
     enemy = st.relationships["pool:enemy"]
-    assert enemy == {"affinity": -0.7, "trust": 0.0, "fear": 0.35}
+    assert enemy == {"affinity": -0.7, "trust": 0.0, "fear": 0.35, "anchored": True}
 
 
 def test_saved_edge_beats_day0_seed(live_store):
@@ -137,5 +137,6 @@ def test_seed_only_pid_survives_when_absent_from_saved_state(live_store):
         "relationships": {"pool:someoneelse": {"affinity": 0.2, "trust": 0.2, "fear": 0.0}},
     })
     tp = _person_from_row(row, home=1, work=None)
-    assert tp.state.relationships["pool:onlyseed"] == {"affinity": 0.4, "trust": 0.4, "fear": 0.0}
+    assert tp.state.relationships["pool:onlyseed"] == {
+        "affinity": 0.4, "trust": 0.4, "fear": 0.0, "anchored": True}      # авторская связь → anchored
     assert tp.state.relationships["pool:someoneelse"] == {"affinity": 0.2, "trust": 0.2, "fear": 0.0}

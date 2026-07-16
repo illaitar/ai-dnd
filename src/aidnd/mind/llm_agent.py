@@ -394,6 +394,7 @@ def apply_actions(actions, state, world, clock: int) -> list:
                     r = vs.rel(me.id)
                     r["fear"] = max(r["fear"], 0.85)
                     r["affinity"] = min(r["affinity"], -0.3)
+                    r["anchored"] = True                 # прямое насилие → стойкая обида (медленный спад)
                     vs.emotion["fear"] = min(1.0, vs.emotion.get("fear", 0.0) + 0.6)
                     vs.emotion_target["fear"] = me.id
                     vs.memory.add(f"{me.id} напал на меня", clock, importance=0.9, kind="event", about=[me.id])

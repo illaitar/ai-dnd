@@ -632,6 +632,13 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
     # (_world_tick_fast) and must never block on LLM calls. Missing agendas are planned lazily in
     # _live_tick (the streamed /live turn, behind the "…"), so entering a building is instant.
     prev = _S.get("live") or {}
+    # ── Inc1: lazy two-speed decay fires ONCE per scene entrant (present now, absent last tick),
+    # catching up its out-of-scene gap. Continuously-present minds are skipped — their emotions keep
+    # relaxing via the per-tick _decay_emotion (:1094/:1108) and relationships have no per-tick
+    # carrier, so decay_lazy on entry is their one-and-only rel-decay event (no double-apply).
+    from aidnd.mind.decay import decay_scene_entrants
+    _prev_who = prev.get("who") or () if prev.get("loc") == loc else ()
+    decay_scene_entrants(w.npc_minds, here, _prev_who, _now_gt)
     # ── Inc1: churn as a feed QUEUE — diff prev occupant set vs now (same scene only). Never
     # assign-overwrite: undrained items from a prior rebuild (act/say never drained them — the
     # client only calls /api/play/live on live_pending) survive the rebuild; the same-loc gate

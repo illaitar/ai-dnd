@@ -54,6 +54,7 @@ async def steal(request: Request):
     if roll + _PC_CAP.mod("dex") < dc:  # CAUGHT
         rel = p.state.rel(PLAYER)
         rel["affinity"] = min(rel["affinity"], -0.5)
+        rel["anchored"] = True                           # пойманная кража — обида жертвы (медленный спад)
         p.state.emotion["anger"] = min(1.0, p.state.emotion.get("anger", 0) + 0.7)
         p.state.emotion_target["anger"] = PLAYER
         p.state.memory.add(

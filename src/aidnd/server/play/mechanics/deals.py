@@ -89,6 +89,7 @@ def deal_attempt(npc: str, deal: dict, manner: str, out: dict,
             p.state.memory.add(f"чужак предлагал мне убить {tname} — СВОЕГО", _mt(), 0.9,
                                about=[PLAYER, target])
             rel["affinity"] = min(rel["affinity"], -0.4)
+            rel["anchored"] = True                       # сговор об убийстве СВОЕГО — не забудется (медленный спад)
             _deeds.record(PLAYER, "solicit", obj=npc, place=str(loc), witnesses=wit,
                           data={"kind": kind, "target": target, "stake": stake})
             _npc_save(npc)

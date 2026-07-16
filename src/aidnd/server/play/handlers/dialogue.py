@@ -281,6 +281,8 @@ async def say(request: Request):
         p.state.emotion["anger"] = min(1.0, p.state.emotion.get("anger", 0) + 0.35)
         p.state.emotion_target["anger"] = PLAYER
         p.state.memory.add(f"игрок УГРОЖАЛ мне: «{text[:80]}»", _mt(), 0.8, about=[PLAYER])
+    if tone in ("friendly", "rude", "threat"):
+        rel["anchored"] = True                            # разговор сдвинул симпатию → медленный носитель
     p.state.memory.add(
         f"игрок сказал мне: «{text[:100]}», я ответил(а): «{line[:100]}»",
         _mt(),

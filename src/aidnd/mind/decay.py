@@ -27,7 +27,16 @@ def _relax(cur: float, target: float, dt_days: float, half_life_days: float) -> 
 def decay_lazy(state: NpcState, now_gt: int) -> None:
     """Relax affect toward its floor for the elapsed game-time. Idempotent within a gt; a rewound
     clock (now_gt < last_decay_gt) is a no-op that only resets the clock — never amplifies affect.
+
+    A falsy ``last_decay_gt`` (0) means first-seen: either a brand-new world (now_gt is 0 too) or a
+    legacy/never-decayed NPC hydrated after this clock was introduced. gt is monotonic-cumulative, so
+    treating 0 as a real timestamp would compute dt = the WHOLE world's age and flatten every emotion
+    and loose relationship to ~0 on first hydrate. The state hasn't lived that gap — it was simply
+    never stamped — so we just stamp the clock to now and skip decay this one time.
     """
+    if not state.last_decay_gt:
+        state.last_decay_gt = now_gt
+        return
     dt_days = max(0.0, (now_gt - state.last_decay_gt) / 1440.0)
     state.last_decay_gt = now_gt
     if dt_days <= 0.0:

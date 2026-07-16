@@ -438,6 +438,10 @@ def _duel_wrapup(enc, cb) -> dict:
             _store().purse_add(_wid(), pid, take)
         rel = p.state.rel(PLAYER)
         rel["affinity"] = min(rel["affinity"], -0.6)
+        rel["anchored"] = True  # МОЗГ Inc1: strongest grudge in the game → SLOW carrier, not loose 2-day
+        # NB: this branch is currently unreachable — a duel loss returns via _death() (permadeath) at
+        # the `if st == "lost"` gate above, so `elif st == "lost"` never fires. Kept forward-compatible
+        # (pattern of 3bce9d6: direct-interaction rel writes anchor) pending the permadeath-branch triage.
         p.state.memory.add(
             "чужак напал на меня — я его избил(а) и обобрал(а)", _mt(), 0.9, about=[PLAYER]
         )

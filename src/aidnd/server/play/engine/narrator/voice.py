@@ -206,11 +206,26 @@ def _voice(
     never_met = PLAYER not in p.state.relationships  # no mechanical relationship row at all —
     # a genuine first contact (see mind/appraisal.py: appraise_present no longer auto-seeds one
     # from mere co-presence, so this is only True/False from REAL interaction, not passive sight)
-    if never_met:
+    # A THIRD tier sits between never_met and a real (known) tie: world.py's _accrue_familiarity
+    # (Inc3) seeds a FAINT UNANCHORED row after mere co-presence (familiarity_k ticks) — that flips
+    # never_met False, but it is NOT a real interaction, so it must not read as an old acquaintance
+    # either. `rel` here is the caller's already-fetched relationships row for PLAYER (same dict
+    # world.py seeded) — reuse it rather than recomputing a fresh one.
+    faint = (not never_met) and rel.get("anchored") is False and (
+        abs(float(rel.get("affinity", 0.0))) <= PB["familiarity_affinity"] + 1e-6
+    )
+    tier = "never" if never_met else ("faint" if faint else "known")
+    if tier == "never":
         bits.append(
             "Этого человека ты видишь ВПЕРВЫЕ В ЖИЗНИ — никакой прошлой истории с ним нет, ты "
             "его не помнишь и не мог(ла) его помнить: не выдумывай прежних встреч, общих дел или "
             "случаев с ним."
+        )
+    elif tier == "faint":
+        bits.append(
+            "Этот человек тебе лишь смутно знаком, примелькался, где-то мельком видел, но по-"
+            "настоящему вы не знакомы. Не выдумывай общих дел, прежних разговоров или дружбы, "
+            "держись сдержанно и нейтрально."
         )
     mems = p.state.memory.recall(player_text or "разговор с чужаком-игроком", now=_mt(), k=5)
     mine = [m for m in mems if PLAYER in (m.about or [])]
@@ -232,8 +247,8 @@ def _voice(
     bits.append(
         f"Симпатия к собеседнику {rel.get('affinity', 0):.2f} (низкая — суше/настороже, высокая — теплее). "
         "Отвечай В ХАРАКТЕРЕ, живой разговорной речью, 1-2 фразы, без ремарок-описаний. "
-        + ("" if never_met else
-           "Помнишь собеседника — покажи это естественно, не пересказывай память дословно. ")
+        + ("Помнишь собеседника — покажи это естественно, не пересказывай память дословно. "
+           if tier == "known" else "")
         + 'ФОРМАТ — строго JSON: {"say": "<реплика>", "player_tone": '
         '"friendly|neutral|rude|threat"} (player_tone — как звучали слова СОБЕСЕДНИКА к тебе). '
         "Если для ответа НУЖЕН факт о городе или людях (где что находится, кто есть кто) — "

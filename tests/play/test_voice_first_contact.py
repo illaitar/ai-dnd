@@ -13,6 +13,13 @@ interacted. Root cause had two parts:
      hard signal and could still invent a shared past. This file covers that half: the prompt must
      say «видишь ВПЕРВЫЕ» when no relationship row exists, and must NOT say that once a real
      relationship row exists (built by a genuine prior interaction).
+
+A THIRD tier: world.py's _accrue_familiarity (Inc3) seeds a FAINT UNANCHORED tie after mere
+co-presence (familiarity_k ticks) with affinity/trust == familiarity_affinity and anchored=False.
+That flips `PLAYER in relationships` true, so the never_met branch above stops firing — but the
+tie is NOT a real interaction, so "Помнишь собеседника" (warm, old-friend framing) must ALSO not
+fire for it. Tests below cover this middle tier: neither "ВПЕРВЫЕ" (never met) nor "Помнишь
+собеседника" (known) — a distinct "смутно знаком" (vaguely familiar) line instead.
 """
 
 from types import SimpleNamespace
@@ -22,7 +29,7 @@ import pytest
 from aidnd.mind import NpcConfig, NpcState
 from aidnd.server.play.engine import core
 from aidnd.server.play.engine.narrator import voice as voice_mod
-from aidnd.server.play.engine.session.config import PLAYER
+from aidnd.server.play.engine.session.config import PB, PLAYER
 
 
 class _CaptureStub:
@@ -88,4 +95,22 @@ def test_existing_relationship_suppresses_first_contact_marker(wired, monkeypatc
     voice_mod._voice(npc_obj, {"affinity": 0.35}, "greet")
 
     sys_content = stub.calls[-1][0]["content"]
+    assert "ВПЕРВЫЕ" not in sys_content
+    assert "Помнишь собеседника" in sys_content
+
+
+def test_faint_familiarity_does_not_get_old_friend_treatment(wired, monkeypatch):
+    npc_obj = _npc()
+    # exactly what world.py's _accrue_familiarity seeds after familiarity_k co-presence ticks —
+    # a FAINT UNANCHORED tie, not a real interaction
+    fam_aff = PB["familiarity_affinity"]
+    faint_rel = {"trust": fam_aff, "affinity": fam_aff, "fear": 0.0, "anchored": False}
+    npc_obj.state.relationships[PLAYER] = faint_rel
+    stub = _stub_model(monkeypatch)
+
+    voice_mod._voice(npc_obj, faint_rel, "greet")
+
+    sys_content = stub.calls[-1][0]["content"]
+    assert "смутно знаком" in sys_content
+    assert "Помнишь собеседника" not in sys_content
     assert "ВПЕРВЫЕ" not in sys_content

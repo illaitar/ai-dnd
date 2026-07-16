@@ -78,5 +78,20 @@ def test_gift_warms_only_recipient_view_of_giver():
     gift = Event(giver, recipient, 0.2, 0.0, 0.0, ["дар"], zone="зал")
     project_and_apply(gift, [r, b], perceive=lambda x: 1.0)
     assert r.rel(giver)["affinity"] > 0.0                    # recipient warms to the giver
+    assert r.rel(giver)["anchored"] is True                  # gift acceptance is anchored (spec §4.3)
     assert giver not in b.relationships or b.rel(giver)["affinity"] == 0.0  # bystander unmoved
     assert all(v == 0.0 for v in r.emotion.values())         # a gift stirs no emotion channel
+
+
+def test_gift_warmth_clamped_and_stays_anchored():
+    """Repeated gifts must not blow past affinity's ±1.0 ceiling (spec §4.3 anchored write), and the
+    tie stays anchored (slow decay) rather than reverting to a loose bystander-style read."""
+    giver, recipient = "npc:giver", "npc:recip"
+    r = _st("recip", {"empathy": 0.9}, {})
+    r.config.id = recipient
+    gift = Event(giver, recipient, 0.9, 0.0, 0.0, ["дар"], zone="зал")
+    for _ in range(6):
+        project_and_apply(gift, [r], perceive=lambda x: 1.0)
+    assert r.rel(giver)["affinity"] <= 1.0
+    assert r.rel(giver)["affinity"] >= -1.0
+    assert r.rel(giver)["anchored"] is True

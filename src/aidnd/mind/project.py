@@ -101,7 +101,9 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
         "goal_impact": goal_impact,     # >0 grim satisfaction → joy; <0 distress/grief
         "desert": desert,               # stance sign gates anger in appraise (deserved → no anger)
         "harm": harm,                   # visceral danger → fear (appraise: harm×(1−control))
-        "fear": harm,                   # readable alias; outside combat control=0 so fear == harm
+        "fear": harm,                   # NB: appraise derives fear from `harm`; this key is NOT
+                                         # read — do not wire it or fear double-counts (kept only
+                                         # because test_project_event.py asserts on it pre-gain)
         "revulsion": outrage,           # → disgust in appraise
         "intent": True,                 # a witnessed act is deliberate
     }
@@ -144,4 +146,5 @@ def project_and_apply(event: Event, witnesses, perceive) -> None:
             rel["anchored"] = rel.get("anchored", False) or r["anchored"]
         if r["target_warmth"] > 0.0 and event.actor and w.config.id == event.target:
             rt = w.rel(event.actor)                         # beneficiary warms toward the giver
-            rt["affinity"] = rt.get("affinity", 0.0) + r["target_warmth"]
+            rt["affinity"] = max(-1.0, min(1.0, rt.get("affinity", 0.0) + r["target_warmth"]))
+            rt["anchored"] = True                            # gift acceptance is a real interaction (spec §4.3)

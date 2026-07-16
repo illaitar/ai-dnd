@@ -40,6 +40,7 @@ Each file covers one domain. Together they form a complete picture of the projec
 | [locations.md](locations.md) | locations: interior zones and streets, object-items, runtime scenes, conductor |
 | [loop.md](loop.md) | game loop: session_step → game_tick, handlers, services, interrupts |
 | [mind.md](mind.md) | NPC minds: utility core, perception/appraisal (impression, disgust, proxemics), decide_hybrid, memory, agendas; society (needs→routine) |
+| [brain.md](brain.md) | affective/social loop over the mind core: two-speed decay, worldview-lensed Event bus, familiarity+greet, character-true voice, self-regard, attention Pillar 2 — composes with mind.md (utility core) and npc-brain.md (entity shape) |
 | [npc-brain.md](npc-brain.md) | NPC/player as one entity: two-layer surface/hidden + identity fog + appraisal/disgust + freeform talk (shipped); attention economy + body lifecycle (design) |
 | [sound-attention.md](sound-attention.md) | hearing: spatial audibility, 3-tier conversation fidelity, sound sources; attention economy as a utility term (design) |
 | [citysim.md](citysim.md) | city simulation: housing, work, daily rhythm, day GIF |

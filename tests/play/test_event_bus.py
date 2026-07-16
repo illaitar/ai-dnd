@@ -83,6 +83,24 @@ def test_gift_warms_only_recipient_view_of_giver():
     assert all(v == 0.0 for v in r.emotion.values())         # a gift stirs no emotion channel
 
 
+def test_targetless_menace_splits_crowd_by_worldview():
+    """A drawn weapon aimed at NO ONE still radiates fear to the room: target="" → aff_t=0,
+    target_warmth=0, but the VISCERAL channel (harm = physical_threat × rel(actor).fear-prior ×
+    (1 − viol_damp × violence_approval)) fires purely off physical_threat. A peasant (violence
+    morals negative) flinches; a violence-approving cutthroat barely reacts."""
+    peasant = _st("peasant", {"empathy": 0.5, "bravery": 0.3},
+                  {"morals": {"violence": -0.4}, "taboos": []})
+    cutthroat = _st("cutthroat", {"empathy": 0.2, "bravery": 0.8},
+                     {"morals": {"violence": 0.9}, "taboos": []})
+    ev = Event("pc", "", 0.5, 0.5, 0.0, ["угроза", "насилие"], zone="зал")
+    project_and_apply(ev, [peasant, cutthroat], perceive=lambda w: 1.0)
+    assert peasant.emotion["fear"] > 0.1
+    assert cutthroat.emotion["fear"] < peasant.emotion["fear"]
+    assert peasant.rel("pc")["fear"] > 0.0
+    assert peasant.rel("pc")["anchored"] is False           # ambient menace stays a loose read
+    assert "" not in peasant.relationships                  # empty target never gets a rel entry
+
+
 def test_gift_warmth_clamped_and_stays_anchored():
     """Repeated gifts must not blow past affinity's ±1.0 ceiling (spec §4.3 anchored write), and the
     tie stays anchored (slow decay) rather than reverting to a loose bystander-style read."""

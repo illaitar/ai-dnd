@@ -25,7 +25,9 @@ from aidnd.server.play.engine.core import (
     _gt,
     _gt_add,
     _gt_set,
+    _here,
     _mana_sleep,
+    _menace_affect,
     _model,
     _mt,
     _npc_save,
@@ -541,6 +543,10 @@ def _attempt(intent: dict, sc: dict) -> dict:
     if verb == "attack" and npc:
         return _start_duel(npc, people, crof, loc, cr2b, out)
 
+    if verb == "attack" and not npc:
+        text = str(intent.get("_text") or detail or "")
+        return _brandish(text, people, crof, loc, out)
+
     if verb == "take":
         # A take that reached here resolved NO real target (item not materialized in the zone,
         # or item=null): honest refusal — NEVER let the narration arbiter describe a phantom
@@ -586,6 +592,23 @@ def _start_duel(npc: str, people: dict, crof: dict, loc, cr2b: dict, out: dict) 
         _lv["salient"] = f"чужак выхватил оружие на {p.name}!"
     out["combat"] = True
     out["narr"].append(f"Ты бросаешься на {p.name}. Назад дороги нет.")
+    return out
+
+
+def _brandish(text: str, people: dict, crof: dict, loc, out: dict) -> dict:
+    """Attack with NO named target — a weapon drawn at no one in particular. Not a duel (no foe to
+    fight), not silent narration either: a bared blade in a crowded room radiates fear to everyone
+    present. Fan a targetless МОЗГ Inc2 Event onto the co-present crowd (`_menace_affect`) and
+    narrate the room's wary flinch — a real menace, never harm actually done."""
+    wit = _here(loc, crof)
+    _menace_affect(people, wit, loc)
+    _lv = _S.get("live")
+    if _lv is not None:
+        _lv["salient"] = "чужак обнажил оружие, никого не назвав!"
+    out["narr"].append(
+        "Сталь со свистом выходит из ножен. Разговоры обрываются, взгляды напрягаются — "
+        "никто не знает, на кого ты бросишься."
+    )
     return out
 
 

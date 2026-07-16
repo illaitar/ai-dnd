@@ -371,6 +371,29 @@ def _crime_affect(people, wit: list, npc: str, what: str, loc) -> None:
     project_and_apply(ev, ws, perceive=lambda w: 1.0)
 
 
+def _menace_affect(people, wit: list, loc) -> int:
+    """МОЗГ Inc2: a drawn weapon aimed at NO ONE still radiates fear to the room. Fan a TARGETLESS
+    Event (empty target) onto everyone co-present, so project.py's visceral channel (physical_threat
+    × rel(actor).fear-prior, damped by each witness's own approval of violence) lands as fear through
+    each witness's lens — a peasant flinches, a cutthroat barely blinks. NOT a crime (no victim): no
+    wanted points, no karma stain — a bared blade in the open harms no one yet."""
+    ws = [people[w].state for w in wit if w in people]
+    if not ws:
+        return 0
+    from aidnd.mind.event import Event
+    from aidnd.mind.project import project_and_apply
+    ev = Event(PLAYER, "", 0.5, 0.5, 0.0, ["угроза", "насилие"], zone=str(loc))
+    project_and_apply(ev, ws, perceive=lambda w: 1.0)
+    for w in wit:
+        if w not in people:
+            continue
+        people[w].state.memory.add(
+            "видел(а): чужак обнажил оружие в зале", _mt(), 0.6, about=[PLAYER]
+        )
+        _npc_save(w)
+    return len(wit)
+
+
 def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
     """Crime in plain sight: victim enraged, witnesses record memory (gossip spreads),
     wanted points grow (victim reports + more eyes = hotter)."""

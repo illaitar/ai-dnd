@@ -343,6 +343,34 @@ def _wanted_clear() -> None:
     _store().flag_set(_wid(), "crimes|pc", "")
 
 
+def _crime_signature(what: str) -> tuple[list[str], float, float, float]:
+    """Code-derive an objective Event signature (tags, intensity, physical_threat, target_harm) from
+    the crime's own verb phrase — no LLM. Coarse keyword classes over the `what` line the crime sites
+    already pass (assault/rob/solicit/theft); un-matched → plain theft."""
+    low = what.lower()
+    if "оружием" in low or "бросился" in low or "напал" in low:      # assault (weapon drawn)
+        return ["насилие"], 0.7, 0.6, 0.0
+    if "силой" in low or "отнял" in low or "отнять" in low:          # robbery (force, no wound)
+        return ["грабёж"], 0.6, 0.3, 0.0
+    if "убийств" in low or "убить" in low or "душегубств" in low:    # solicitation of murder
+        return ["вероломство"], 0.6, 0.0, 0.0
+    return ["воровство"], 0.4, 0.0, 0.0                              # pickpocket / take from owner
+
+
+def _crime_affect(people, wit: list, npc: str, what: str, loc) -> None:
+    """МОЗГ Inc2: fan the player's crime onto the co-present crowd (already gated to this scene node
+    by `_here` → perc 1.0) as an Event, so bystanders FEEL it through their own worldview lens (the
+    lawful recoil, a cutthroat shrugs), not merely log a memory line. Zero LLM."""
+    ws = [people[w].state for w in wit if w in people]
+    if not ws:
+        return
+    from aidnd.mind.event import Event
+    from aidnd.mind.project import project_and_apply
+    tags, intensity, threat, harm = _crime_signature(what)
+    ev = Event(PLAYER, npc, intensity, threat, harm, tags, zone=str(loc))
+    project_and_apply(ev, ws, perceive=lambda w: 1.0)
+
+
 def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
     """Crime in plain sight: victim enraged, witnesses record memory (gossip spreads),
     wanted points grow (victim reports + more eyes = hotter)."""
@@ -354,6 +382,7 @@ def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
     p.state.emotion_target["anger"] = PLAYER
     p.state.memory.add(f"чужак {what} — я этого не забуду!", _mt(), 0.9, about=[PLAYER])
     wit = [w for w in _here(loc, crof) if w != npc]
+    _crime_affect(people, wit, npc, what, loc)               # МОЗГ Inc2: bystanders FEEL it, not only remember
     for w in wit:
         people[w].state.memory.add(
             f"видел(а): чужак {what} ({p.name})", _mt(), 0.6, about=[PLAYER, npc]

@@ -112,3 +112,36 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
         "anchored": bool(event.target and event.target == witness_state.config.id),
     }
     return {"dims": dims, "rel": rel}
+
+
+def project_and_apply(event: Event, witnesses, perceive) -> None:
+    """Land one Event on every witness who perceived it — the fan-out (МОЗГ Inc2, spec §3b).
+
+    ``perceive(witness_state) -> perc[0..1]`` maps a witness to its perception tier weight from the
+    audibility/sight machinery (same-zone/co-present → 1.0, farther → ev_perc_l2/l3, unperceived →
+    0). For each perceiving witness (the actor never appraises its own act here): project the
+    signature, apply the PRE-gain ``dims`` through ``tick.appraise`` (which multiplies each channel
+    by the witness's ``emotion_gain``), then write the bystander relationship deltas onto the Inc1
+    floor — fear-of-actor (loose unless the witness IS the target → anchored grudge), and, for a
+    non-harmful act (a gift), warmth from the *beneficiary* toward the *giver* (gratitude; bystanders
+    unmoved). Zero LLM — pure arithmetic per witness. Not every tick carries an Event; cost is bounded
+    to the co-present crowd of a real act."""
+    from .tick import appraise  # local import: mind/tick imports model → avoid a load cycle
+
+    for w in witnesses:
+        if event.actor and w.config.id == event.actor:
+            continue
+        perc = float(perceive(w) or 0.0)
+        if perc <= 0.0:
+            continue                                        # didn't hear/see → no delta at all
+        aff_t = float(w.rel(event.target).get("affinity", 0.0)) if event.target else 0.0
+        out = project_event(event, w, perc, affinity_target=aff_t)
+        appraise(w, out["dims"], source=event.actor)
+        r = out["rel"]
+        if r["actor_fear"] > 0.0 and event.actor:
+            rel = w.rel(event.actor)
+            rel["fear"] = max(rel.get("fear", 0.0), r["actor_fear"])
+            rel["anchored"] = rel.get("anchored", False) or r["anchored"]
+        if r["target_warmth"] > 0.0 and event.actor and w.config.id == event.target:
+            rt = w.rel(event.actor)                         # beneficiary warms toward the giver
+            rt["affinity"] = rt.get("affinity", 0.0) + r["target_warmth"]

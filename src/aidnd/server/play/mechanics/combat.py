@@ -416,6 +416,12 @@ def _duel_wrapup(enc, cb) -> dict:
             _store().purse_add(_wid(), pid, -cnp)
             _store().purse_add(_wid(), "pc", cnp)
         wit = [w for w in _here(cb.get("loc"), _S["crof"]) if w != pid and w in _S["people"]]
+        if wit:  # МОЗГ Inc2: the crowd FEELS the kill through its worldview lens (split), not just remembers
+            from aidnd.mind.event import Event
+            from aidnd.mind.project import project_and_apply
+            ev = Event(PLAYER, pid, 0.9, 0.7, 1.0, ["убийство", "насилие", "смерть"],
+                       zone=str(cb.get("loc")))
+            project_and_apply(ev, [_S["people"][w].state for w in wit], perceive=lambda w: 1.0)
         for w in wit:
             _S["people"][w].state.memory.add(
                 f"чужак УБИЛ {p.name} у меня на глазах", _mt(), 0.95, about=[PLAYER, pid]

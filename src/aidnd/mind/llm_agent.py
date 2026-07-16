@@ -366,8 +366,27 @@ def _find_item(items, name):
     return next((i for i in items if low in i.name.lower() or i.name.lower() in low), None)
 
 
+def _fanout(world, event, me_place, exclude=()) -> None:
+    """Emit an Event onto the co-present crowd of this mind-world (МОЗГ Inc2). Witnesses = minds
+    whose Body shares the actor's place (same conversational zone → perc 1.0); the actor and any
+    `exclude` id (a target whose affect was already written directly) are dropped. No LLM — the
+    signature is built from the tool's own mechanics."""
+    minds = getattr(world, "npc_minds", None)
+    if not minds:
+        return
+    from .project import project_and_apply
+    ex = set(exclude) | {event.actor}
+    wit = [s for pid, s in minds.items()
+           if pid not in ex and world.bodies.get(pid) and world.bodies[pid].place == me_place]
+    if wit:
+        project_and_apply(event, wit, perceive=lambda w: 1.0)
+
+
 def apply_actions(actions, state, world, clock: int) -> list:
     """Execute tool sequence. Returns list of event strings (for log)."""
+    from .event import (
+        Event,  # local: keep next to its use so ruff doesn't strip it (formatter runs)
+    )
     me = world.bodies[state.config.id]
     log = []
     for a in actions:
@@ -398,6 +417,13 @@ def apply_actions(actions, state, world, clock: int) -> list:
                     vs.emotion["fear"] = min(1.0, vs.emotion.get("fear", 0.0) + 0.6)
                     vs.emotion_target["fear"] = me.id
                     vs.memory.add(f"{me.id} напал на меня", clock, importance=0.9, kind="event", about=[me.id])
+                killed = tb.down()
+                _fanout(world,           # bystanders feel it; the victim's affect was written above
+                        Event(me.id, tb.id, 0.9 if killed else 0.6, 0.7 if killed else 0.5,
+                              1.0 if killed else min(1.0, 6 / max(1, tb.hp + 6)),
+                              (["убийство", "насилие", "смерть"] if killed else ["насилие"]),
+                              zone=me.place),
+                        me.place, exclude=(tb.id,))
                 log.append(f"⚔{tb.id}" + ("☠" if tb.down() else f"→hp{tb.hp}"))
             else:
                 log.append("attack✗")
@@ -406,6 +432,8 @@ def apply_actions(actions, state, world, clock: int) -> list:
             if tb and tb.place == me.place and tb.loot:
                 got = tb.loot.pop(0)
                 me.loot.append(got)
+                _fanout(world, Event(me.id, tb.id, 0.4, 0.0, 0.0, ["воровство"], zone=me.place),
+                        me.place, exclude=(tb.id,))
                 log.append(f"💰{got.name}")
             else:
                 it = _find_item(world.ground.get(me.place, []), a.get("item"))
@@ -421,6 +449,8 @@ def apply_actions(actions, state, world, clock: int) -> list:
             if tb and it and tb.place == me.place:
                 me.carrying.remove(it)
                 tb.carrying.append(it)
+                _fanout(world, Event(me.id, tb.id, 0.2, 0.0, 0.0, ["дар"], zone=me.place),
+                        me.place)   # warms the recipient toward the giver (gratitude)
                 log.append(f"🎁{it.name}→{tb.id}")
             else:
                 log.append("give✗")

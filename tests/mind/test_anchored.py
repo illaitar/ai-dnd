@@ -42,9 +42,10 @@ def test_attack_write_anchors_victim_not_bystander():
     apply_actions([{"tool": "attack", "target": "npc:vic"}], attacker, w, clock=1)
 
     assert victim.rel("npc:att")["anchored"] is True          # прямое насилие → медленный носитель
-    # the bystander was never touched — no rel at all → an impression, not a lasting grudge
-    assert "npc:att" not in bystander.relationships
-    # and a fresh, uninteracted rel defaults to loose
+    # Inc2: the bystander now FEELS the violence via the Event bus — a loose fear-of-attacker, but
+    # NOT an anchored grudge (that stays reserved for the direct target). Loose → fades fast (Inc1).
+    assert "npc:att" in bystander.relationships               # projected onto him (was a memory-only sight)
+    assert bystander.rel("npc:att")["fear"] > 0.0
     assert bystander.rel("npc:att")["anchored"] is False
 
 
@@ -81,8 +82,11 @@ def test_witness_crime_victim_anchored_bystander_loose(session):
 
     from aidnd.server.play.engine.session.config import PLAYER
     assert victim.state.rel(PLAYER)["anchored"] is True       # обида жертвы — медленный носитель
-    # the bystander got a MEMORY only, never a relationship → stays loose (no projected anchor)
-    assert PLAYER not in bystander.state.relationships
+    # Inc2: the bystander now feels the robbery too (Event bus) — a LOOSE fear-of-actor, unanchored,
+    # so it fades fast; only the victim carries the slow anchored grudge.
+    assert PLAYER in bystander.state.relationships
+    assert bystander.state.rel(PLAYER)["fear"] > 0.0
+    assert bystander.state.rel(PLAYER)["anchored"] is False
 
 
 # ── 3. last_decay_gt round-trips through save → store → load ────────────────────────────

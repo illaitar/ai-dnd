@@ -44,6 +44,8 @@ BAL = {
     "need_urgency_coin": 0.5,                         # bird in hand — poverty accelerates the deal
     "info_value": 0.6,
     "proxemics": 0.2,                                 # social distance pull: small, never overrides needs/safety
+    "feel_nudge_cap": 0.25,   # mirrors PB["feel_nudge_cap"] (session/config.py) — mind-internal
+                              # consumer (llm_agent.py) can't import play-layer PB (import cycle)
 }
 
 

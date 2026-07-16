@@ -17,6 +17,9 @@ PB = {
     "start_gt": 19 * 60 + 40,
     "start_coins": 12,
     "step_min": 1,
+    # MIND affect floor (docs/superpowers/specs/2026-07-15-brain-design.md §4.6): max ±delta a
+    # feel/need tool may move a channel per call — model NUDGES, never sets (mind/llm_agent.py).
+    "feel_nudge_cap": 0.25,
     # sim-stitching (docs/superpowers/plans/2026-07-14-sim-stitching.md)
     "churn_named_max": 2,       # max NAMED join/leave feed items per direction per tick; rest → summary
     "overflow_max_hops": 2,     # full venue → try this many next same-kind candidates before street

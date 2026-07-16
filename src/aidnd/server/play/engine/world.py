@@ -10,6 +10,7 @@ import random
 from fastapi import Request
 
 from aidnd import society
+from aidnd.inference import LLMBadOutput, LLMUnavailable
 from aidnd.mind import Body, advance_agendas
 from aidnd.mind import Item as MItem
 from aidnd.mind import World as MWorld
@@ -1235,7 +1236,22 @@ def _live_tick(people) -> tuple:
         _decay_needs(st)
         _decay_emotion(st)
         advance_agendas(st, w)  # long-term goals advance
-        return pid, decide_hybrid(st, w, mind_perceive(st, w), mgr, ctx)
+        # FRAGILITY FIX: ThreadPoolExecutor.map re-raises the FIRST worker exception on
+        # iteration — one actor's transient LLM hiccup must not abort the WHOLE wave (and thus
+        # the player's whole turn, 502/503). Retry once; on a second failure the actor simply
+        # idles this tick (None decision, skipped below) — no fabricated action/narration.
+        for _attempt in range(2):
+            try:
+                return pid, decide_hybrid(st, w, mind_perceive(st, w), mgr, ctx)
+            except (LLMBadOutput, LLMUnavailable) as exc:
+                if _attempt == 1:
+                    import logging as _lg
+                    _lg.getLogger("aidnd").warning(
+                        "npc думает мимо такта — не думает вовсе (%s): %s: %s",
+                        pid, type(exc).__name__, exc,
+                    )
+                    return pid, None
+        return pid, None  # unreachable, keeps linters happy
 
     def _claim(pid, d) -> str:
         """Actor's claim for next wave: what they DOING/SAYING RIGHT NOW."""
@@ -1269,7 +1285,7 @@ def _live_tick(people) -> tuple:
             if not wave:
                 continue
             ctx["now"] = [c for pid_ in decisions
-                          if (c := _claim(pid_, decisions[pid_]))]
+                          if decisions[pid_] is not None and (c := _claim(pid_, decisions[pid_]))]
             decisions.update(ex.map(think_one, wave))
     ctx.pop("now", None)
 
@@ -1294,8 +1310,10 @@ def _live_tick(people) -> tuple:
                     len(_S.get("transit") or {}),  # наблюдаемость Inc3: пешеходы в городе сейчас
                     w.bodies[PLAYER].place if PLAYER in w.bodies else "?", _S.get("zone"))
         for pid in actors:
-            st = w.npc_minds[pid]
             d = decisions[pid]
+            if d is None:  # idled this tick after a retried-out LLM failure — nothing to log
+                continue
+            st = w.npc_minds[pid]
             nm = lv["names"].get(pid, pid)
             zn = w.bodies[pid].place if zones_l else "—"
             needs = ", ".join(f"{k}:{v:.2f}" for k, v in st.needs.items() if v >= 0.35) or "норма"
@@ -1343,6 +1361,8 @@ def _live_tick(people) -> tuple:
     used_items: set = set()                           # physics: one item — one hands per tick
     for pid in actors:  # apply sequentially (honest order)
         d = decisions[pid]
+        if d is None:  # retried-out LLM failure this tick — the NPC simply idles, no fabricated act
+            continue
         for a in d.get("actions") or []:
             if not (isinstance(a, dict) and a.get("tool") == "use" and a.get("item")):
                 continue

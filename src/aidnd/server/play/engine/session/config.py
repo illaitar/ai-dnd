@@ -37,6 +37,11 @@ PB = {
     # MIND affect floor (docs/superpowers/specs/2026-07-15-brain-design.md §4.6): max ±delta a
     # feel/need tool may move a channel per call — model NUDGES, never sets (mind/llm_agent.py).
     "feel_nudge_cap": 0.25,
+    # МОЗГ — self_regard (§4.6): derived clamp01(w_pride·pride + w_brave·bravery + w_amb·ambition)
+    # → over/under-confidence. Consumed NOW for the Inc4 voice boast beat (self_regard>0.8);
+    # Inc5 reuses these same weights to bias perceived pwin (sr_span).
+    "sr_pride": 0.35, "sr_brave": 0.35, "sr_amb": 0.30,   # self_regard trait weights
+    "sr_span": 1.5,                                        # perceived-pwin bias span (Inc5)
     # sim-stitching (docs/superpowers/plans/2026-07-14-sim-stitching.md)
     "churn_named_max": 2,       # max NAMED join/leave feed items per direction per tick; rest → summary
     "overflow_max_hops": 2,     # full venue → try this many next same-kind candidates before street

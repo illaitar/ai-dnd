@@ -60,6 +60,96 @@ _STANCE = {
     "hostile": "враждебно",
 }
 
+# RU labels for the salient-character bits (Inc4, spec §5 Example D). Mirrors mind/llm_agent.py's
+# TRAIT_RU/EMO_RU (kept local so voice.py doesn't import the mind agent); extended with the traits
+# that map lacks (empathy/vengefulness) and the faith slice's devotion.
+_TRAIT_RU = {
+    "bravery": "храбрость", "greed": "жадность", "honesty": "честность",
+    "curiosity": "любопытство", "pride": "гордость", "loyalty": "верность",
+    "sociability": "общительность", "ambition": "амбиции", "lawful": "законопослушность",
+    "irritability": "вспыльчивость", "malice": "злонравие", "empathy": "сострадание",
+    "vengefulness": "мстительность", "devotion": "набожность",
+}
+_MORAL_RU = {
+    "death": "смерть", "violence": "насилие", "theft": "воровство",
+    "magic": "колдовство", "authority": "закон", "outsiders": "чужаки",
+}
+_EMO_RU = {
+    "anger": "гнев", "fear": "страх", "joy": "радость",
+    "distress": "подавленность", "disgust": "отвращение",
+}
+
+
+def _self_regard(traits: dict) -> float:
+    """Derived self-esteem [0..1] = clamp01(w_pride·pride + w_brave·bravery + w_amb·ambition)
+    (spec §4.5). Computed inline here for the Inc4 voice boast beat; Inc5 adds the perceived-pwin
+    consumer reusing these same PB weights (sr_pride/sr_brave/sr_amb)."""
+    v = (PB["sr_pride"] * traits.get("pride", 0.5)
+         + PB["sr_brave"] * traits.get("bravery", 0.5)
+         + PB["sr_amb"] * traits.get("ambition", 0.5))
+    return max(0.0, min(1.0, v))
+
+
+def _character_bits(p) -> list[str]:
+    """Salient structured character + current emotion (spec §5 Example D): the 2-3 most EXTREME
+    traits, faith + non-neutral moral stances + taboos + notable standing, and the HOTTEST current
+    emotion — a compact SELECTION, not a data dump. self_regard>0.8 adds a boast beat. Un-enriched
+    NPC (neutral worldview/traits, empty standing) degrades gracefully: empty slices are skipped.
+    The top drive is NOT re-emitted here — it already flows into the prompt as persona.wants
+    («Стремишься …») in the persona block, so folding it in again would only duplicate."""
+    cfg = getattr(p.state, "config", None)
+    if cfg is None:
+        return []
+    tr = cfg.traits or {}
+    wv = cfg.worldview or {}
+    out: list[str] = []
+    # НАТУРА — the few traits farthest from the 0.5 midpoint (skip near-neutral: nothing salient)
+    top = [(k, v) for k, v in sorted(tr.items(), key=lambda kv: -abs(kv[1] - 0.5))[:3]
+           if abs(v - 0.5) >= 0.08]
+    if top:
+        out.append(
+            "НАТУРА: " + ", ".join(f"{_TRAIT_RU.get(k, k)} {v:.2f}" for k, v in top)
+            + " — держись этих черт в речи."
+        )
+    # ВЕРА и НРАВ — faith (dict {deity,devotion} in live data, plain str in tests), the salient
+    # (|v|≥0.25) moral stances, taboos, and a notable standing
+    faith = wv.get("faith")
+    if isinstance(faith, dict):
+        dv = faith.get("deity")
+        faith = dv if dv and dv != "нет" else None
+    morals = {k: v for k, v in (wv.get("morals") or {}).items() if abs(v) >= 0.25}
+    taboos = wv.get("taboos") or []
+    standing = cfg.standing or {}
+    rank = standing.get("rank")
+    parts: list[str] = []
+    if faith:
+        parts.append(f"чтишь {faith}")
+    for k, v in morals.items():
+        parts.append(f"{_MORAL_RU.get(k, k)} тебе {'претит' if v < 0 else 'нипочём'}")
+    if taboos:
+        parts.append("для тебя мерзость: " + ", ".join(taboos[:3]))
+    if rank and rank not in ("простолюдин", "горожанин"):
+        parts.append(f"ты родом {rank}")
+    if standing.get("notoriety", 0) >= 0.5:
+        parts.append("о тебе идёт дурная слава")
+    if parts:
+        out.append("ВЕРА и НРАВ: " + "; ".join(parts) + ".")
+    # СЕЙЧАС — the hottest live emotion, named, so the reply carries the moment's feeling (Inc2's
+    # event affect now shows in speech)
+    hot = max(p.state.emotion.items(), key=lambda kv: kv[1], default=(None, 0.0))
+    if hot[0] and hot[1] >= 0.2:
+        out.append(
+            f"СЕЙЧАС ТЫ ЧУВСТВУЕШЬ: {_EMO_RU.get(hot[0], hot[0])} ({hot[1]:.1f}) — "
+            "пусть это звучит в твоих словах."
+        )
+    # boast beat (§10 LOCKED) — high self-regard talks bigger than warranted (emergent, not scripted)
+    if _self_regard(tr) > 0.8:
+        out.append(
+            "Ты держишься с бахвальством, говоришь о себе БОЛЬШЕ, чем заслужил, "
+            "рисуешься и заносишься."
+        )
+    return out
+
 
 def _voice(
     p, rel, kind, player_text=None, has_offer: bool = False, offer_pitch: str | None = None,
@@ -91,6 +181,7 @@ def _voice(
             bits.append(
                 f"У тебя есть тайна (НЕ выдавай без веской причины): {per['secret'].get('what', '')}."
             )
+    bits += _character_bits(p)  # salient structured character + current emotion (Inc4, spec §5 D)
     if _spurns(p):  # grievance/anger OUTWEIGH persona's warmth
         bits.append(
             "Ты ЗОЛ на этого человека (вспомни, почему) — никакого радушия: "

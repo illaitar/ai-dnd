@@ -1,0 +1,513 @@
+// ============================================================================
+//  NPC "BRAIN" — EXHAUSTIVE BLOCK-SCHEME  (AI-D&D living-town, mind/ + play/engine)
+//  Every parameter, every logic element, every ENTRY POINT. No simplifications.
+//  Rendered: dot -Tpng docs/diagrams/npc-brain.dot -o docs/diagrams/npc-brain.png
+//  Node-shape key + МОЗГ Inc1-6 map + LIVE-vs-TESTBED status → see cluster_legend.
+// ============================================================================
+digraph npc_brain {
+  graph [dpi=140, rankdir=TB, fontname="Arial", fontsize=16, labelloc=t, nodesep=0.35, ranksep=0.7,
+         label="NPC BRAIN — полная схема принятия решений (mind/*.py + server/play/engine/*)  ·  LIVE-путь сплошной, TESTBED пунктир", compound=true, splines=spline];
+  node  [fontname="Arial", fontsize=10];
+  edge  [fontname="Arial", fontsize=9, color="gray30"];
+
+  // shape conventions ------------------------------------------------------
+  //  doubleoctagon gold  = ENTRY POINT (outside world drives the brain)
+  //  box lightblue       = LIVE logic
+  //  note lightyellow    = PARAMETER (value shown)
+  //  cylinder lightgreen = STATE field (read/written)
+  //  box dashed gray     = TESTBED / DEBUG / ALTERNATIVE (not in the live play tick)
+
+  // ==========================================================================
+  //  LEGEND
+  // ==========================================================================
+  subgraph cluster_legend {
+    label="ЛЕГЕНДА  ·  формы узлов + карта МОЗГ Inc1-6 + статус LIVE/TESTBED";
+    style="rounded,filled"; fillcolor="#f4f4f4"; fontsize=13;
+    lg_entry [shape=doubleoctagon, style="bold,filled", fillcolor=gold, label="ТОЧКА ВХОДА\n(мир двигает мозг)"];
+    lg_logic [shape=box, style=filled, fillcolor="#cfe6ff", label="LIVE-логика"];
+    lg_param [shape=note, style=filled, fillcolor="#fff6c8", label="ПАРАМЕТР (значение)"];
+    lg_state [shape=cylinder, style=filled, fillcolor="#d6f5d6", label="ПОЛЕ СОСТОЯНИЯ\nNpcState (чит./зап.)"];
+    lg_test  [shape=box, style="filled,dashed", fillcolor="#e5e5e5", color="gray50",
+              label="TESTBED / DEBUG / ALT\n(НЕ в живом /play тике)"];
+    lg_map [shape=plaintext, fillcolor=none, label=<
+      <table border="0" cellborder="1" cellspacing="0" cellpadding="3">
+      <tr><td bgcolor="#ffe0b0"><b>МОЗГ Inc-карта</b></td><td>модуль</td></tr>
+      <tr><td>Inc1 двускоростной ленивый спад</td><td>decay.py</td></tr>
+      <tr><td>Inc2 шина событий (Event→висцер+нрав.линза)</td><td>event.py / project.py</td></tr>
+      <tr><td>Inc3 фамильярность + приветствие</td><td>world.py _accrue/_greet</td></tr>
+      <tr><td>Inc4 голос говорит характером</td><td>narrator/voice.py</td></tr>
+      <tr><td>Inc5 самомнение → perceived_pwin</td><td>value.self_regard</td></tr>
+      <tr><td>Inc6 внимание = бдит.×активность</td><td>world.py _body_attention</td></tr>
+      </table>>];
+    lg_entry -> lg_logic [style=invis]; lg_logic -> lg_param [style=invis];
+    lg_param -> lg_state [style=invis]; lg_state -> lg_test [style=invis];
+    lg_test -> lg_map [style=invis];
+  }
+
+  // ==========================================================================
+  //  ENTRY POINTS  (all the ways the outside world drives the brain)
+  // ==========================================================================
+  subgraph cluster_entry {
+    label="ТОЧКИ ВХОДА В МОЗГ  ·  всё, что двигает разум извне";
+    style="rounded,filled"; fillcolor="#fff8e1"; fontsize=13;
+    node [shape=doubleoctagon, style="bold,filled", fillcolor=gold];
+    E_think    [label="world.py::think_one\n(живой тик: волна LLM-актёров)\n_decay_needs+_decay_emotion+\nadvance_agendas → decide_hybrid"];
+    E_lod      [shape=note, style=filled, fillcolor="#fff6c8",
+                label="LOD-бюджет актёров (_active_budget/_select_actors):\nlive_full_upto 3 · live_active_ratio 0.5 · live_active_cap 6\n≤3 present→все думают; иначе ротация; salient всегда.\nФон (не актёр): _decay_needs+_decay_emotion+advance_agendas (без LLM)"];
+    E_scene    [label="scene entry → decay_scene_entrants\n(_live_build world.py:665)\nInc1 однократный спад входящему"];
+    E_pertick  [label="per-tick → _decay_needs / _decay_emotion\n(actor:1228-1229, фон:1211-1212)"];
+    E_witness  [label="player/NPC act → _witness_crime\n(core.py:397) жертва+свидетели"];
+    E_crime    [label="_crime_affect / _crime_signature\n(core.py:346/360) Event→толпа"];
+    E_menace   [label="_menace_affect\n(core.py:374) обнажённый клинок→страх"];
+    E_npcact   [label="NPC act → apply_actions → _fanout\n(llm_agent.py:373/389) Event эмиссия"];
+    E_feelneed [label="LLM-инструменты feel / need\n(llm_agent apply_actions) ±nudge клэмп"];
+    E_appres   [label="со-присутствие → appraise_present\n(appraisal.py:105, из decide_hybrid)"];
+    E_project  [label="project_and_apply fan-out\n(project.py:119) Event→каждый свидетель"];
+    E_plan     [label="reflective → plan_agenda\n(world.py:1019 лениво) новая агенда"];
+    E_voice    [label="разговор с игроком → _voice\n(voice.py:154) речь персонажа"];
+    E_greetacc [label="со-присутствие → _accrue_familiarity\n+_greet_impulse+_pick_newcomer (Inc3)"];
+  }
+
+  // ==========================================================================
+  //  ENTITY / STATE  (model.py)  — the fields the brain reads/writes
+  // ==========================================================================
+  subgraph cluster_state {
+    label="СОСТОЯНИЕ / СУЩНОСТЬ  ·  model.py NpcState + NpcConfig  (что мозг читает/пишет)";
+    style="rounded,filled"; fillcolor="#eaffea"; fontsize=13;
+    node [shape=cylinder, style=filled, fillcolor="#d6f5d6"];
+    S_emotion  [label="emotion{anger,fear,joy,\ndistress,disgust}  [0..1]"];
+    S_emotgt   [label="emotion_target{channel→id}\n(на кого эмоция)"];
+    S_needs    [label="needs{fatigue,hunger,social,\npurpose,wealth,comfort,novelty} 0.2"];
+    S_rels     [label="relationships{id→{trust,\naffinity,fear,anchored}}"];
+    S_famil    [label="familiarity{id→счётчик\nсо-присутствия} (Inc3)"];
+    S_lastdecay[label="last_decay_gt\n(часы Inc1)"];
+    S_agendas  [label="agendas[]  (долгосрочные,\nLLM-планировщик)"];
+    S_memory   [label="memory: MemoryStore\n(наблюдения/факты/заметки)"];
+    S_mode     [label="mode: routine|leisure|\nconverse|threat"];
+    S_plan     [label="plan (Plan: goal,steps,\nimportance,cursor)"];
+    S_misc     [label="engagement · venue_social ·\non_shift · mode_history · hp · node"];
+    node [shape=note, style=filled, fillcolor="#fff6c8"];
+    S_traits   [label="config.traits{13}:\nbravery greed honesty curiosity pride\nloyalty sociability ambition lawful\nirritability malice empathy vengefulness =0.5"];
+    S_wv       [label="config.worldview:\nfaith · morals{death,violence,theft,magic,\nauthority,outsiders} · taboos · mood_baseline"];
+    S_enrich   [label="config: skills{combat,craft,magic,literacy}\nallegiances[] · standing{rank,notoriety}\nperception{vigilance} · abilities{str..cha}=10"];
+    // derived-from-traits parameter nodes
+    S_egain    [label="emotion_gain(e)  [model.py:92]\nanger=0.6+irritability · fear=0.6+(1-bravery)\njoy=0.6+sociability · distress=0.6+(1-bravery)*0.5\ndisgust=0.6+pride"];
+    S_ebase    [label="emotion_baseline(e) [model.py:100]\nfear=(1-bravery)*0.1\njoy=max(0,mood)*0.15\ndistress=max(0,-mood)*0.15"];
+    S_traits -> S_egain [style=invis]; S_wv -> S_ebase [style=invis];
+  }
+
+  // ==========================================================================
+  //  PERCEPTION  (sim.perceive — LIVE via mind_perceive)
+  // ==========================================================================
+  subgraph cluster_perc {
+    label="ВОСПРИЯТИЕ  ·  sim.perceive (LIVE) → Percept";
+    style="rounded,filled"; fillcolor="#eaf3ff"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#cfe6ff"];
+    P_perceive [label="perceive(state,world,radius=1)\nPercept{here, exits, present, nearby, me}"];
+    P_body     [label="Body: place,hp,power,appearance(богатство),\ncharisma,attention(бдительность),faction,race,\nsqualor,marks,carrying,loot,attacking,talking_to"];
+    P_world    [label="World: places(граф) · bodies · ground · risk\ndist()=BFS · present_at() · neighbors()"];
+  }
+
+  // ==========================================================================
+  //  GOALS  (goals.py — LIVE via act.score)
+  // ==========================================================================
+  subgraph cluster_goals {
+    label="ЦЕЛИ  ·  goals.py propose_goals — ЖЕЛАЕМЫЕ ИСХОДЫ, формируются каждый тик";
+    style="rounded,filled"; fillcolor="#f3eaff"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#e2d0ff"];
+    G_propose [label="propose_goals(state,world,percept)\nполный набор кандидатов (не выбирает — выбирает utility)"];
+    G_standing[label="standing_needs: Goal('need',nd)\nval=lvl×(trait_weight+0.5); purpose+=on_shift; порог>0.08"];
+    G_agenda  [label="_agenda_goals: текущая веха активной агенды\n→ Goal(m.kind,m.target, ag.importance)  (гейты формирования сняты)"];
+    G_safe    [label="Goal('safe',threat_id)\nhostility по present; safe_val=max(fear,danger)>0.08"];
+    G_acquire [label="Goal('acquire',b.id, b.appearance)\nтолько если predatory>0.30 И appearance>0.25"];
+    G_harm    [label="Goal('harm',b.id, malice)\nтолько если malice>0.6 И не повержен"];
+    G_conv    [label="Goal('converse',b.id, draw)\nsoc>0.12; draw=soc·(0.3+socbl)·(0.3+0.5·acq+0.6·charisma+lz·acq)\n÷(1+_CROWD_REPEL·crowd); ×1.6 если talking_to==me"];
+    G_protect [label="Goal('protect',b.id)\nсоюзник под атакой: val=min(1.1,0.5+0.3·peril)\nperil=attacker.power/(hp+ε)"];
+    G_inject  [label="extra_goals[] (сценарий):\ntrade / affiliate / inform"];
+    node [shape=note, style=filled, fillcolor="#fff6c8"];
+    G_kinds   [label="Goal.kind ∈ {acquire, harm, safe, trade,\naffiliate, protect, inform, need, converse}"];
+    G_needw   [label="NEED_WEIGHT: social→sociability · purpose→ambition\nwealth→greed · novelty→curiosity  (иначе 1.0)"];
+    G_pred    [label="predatory = greed·(1-honesty)·(1-0.5·lawful)\nmalice · _CROWD_REPEL=0.6"];
+    G_ally    [label="_is_ally: affinity>0.2\nhostility (value.py): attack→pwin; enemy_faction→pwin;\nзанят другим ×0.2; remembered fear"];
+  }
+
+  // ==========================================================================
+  //  UTILITY / VALUE  (value.py — LIVE)  всё BAL + все _u_* + self_regard
+  // ==========================================================================
+  subgraph cluster_value {
+    label="СЛОЙ ЦЕННОСТИ (UTILITY)  ·  value.py  ·  BAL + все _u_* скореры + патиенс/риск/proxemics/self_regard";
+    style="rounded,filled"; fillcolor="#fff0f0"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#ffd9d9"];
+    V_util   [label="utility(a,g,state,world,percept)\n= _GOAL[kind](…) + _proxemics(…)"];
+    V_uacq   [label="_u_acquire  (захват добра)\nthreat=extort · take=theft(ps по attention) · attack=subdue\nmove/wait = γ·clean_acquire·reach − eff − risk"];
+    V_uharm  [label="_u_harm (хищный удар от malice)\npay=agenda?0.5+0.5·malice+0.7·val : 0.8+malice\nattack: pw·pay − caught − moral − (1-pw)·selfrisk"];
+    V_usafe  [label="_u_safe (уцелеть)\nmove: pay·(flee_base+flee_gain·gain) · attack: pw·pay−(1-pw)·pay·1.2\nwait: −pay·prox·0.3"];
+    V_utrade [label="_u_trade (лучшие условия)\naccept=surplus+urgency·val · counter=hold·(surplus+prob·concede·(0.3+greed))\nhold=clamp(0.35+0.7·greed−0.2·irritab,0.2,0.97)"];
+    V_uaffl  [label="_u_affiliate (расположить)\ngive: val·eff − item.value·(0.3+greed) · flatter: val·eff_flatter\neff_flatter=(0.2+0.4·sociab)·recept"];
+    V_uprot  [label="_u_protect (защита союзника)\npay=val·(0.4+loyalty); clean=pw·pay−(1-pw)·selfrisk·(1.3-bravery)"];
+    V_uinfo  [label="_u_inform (снять неизвестность)\npay=val·(0.2+curiosity)·info_value; ask co-loc / move к source"];
+    V_uneed  [label="_u_need (закрыть нужду)\nuse ресурса(satisfies==target) / move к source (γ·pay·prox)\nwait@src: γ·pay·0.5"];
+    V_uconv  [label="_u_converse (говорить)\nsay chat/flatter/ask co-loc: pay−eff\nmove: γ·pay·reach"];
+    node [shape=box, style=filled, fillcolor="#ffc4c4"];
+    V_clean  [label="clean_acquire: max(subdue,steal,extort)\nsubdue=pw·0.9·pay−moral−(1-pw)·selfrisk\nsteal=(take_distracted|take_alert)·pay−moral\nextort=comply·pay−moral"];
+    V_gamma  [label="gamma(state)=gamma_base+gamma_focus·(1-irritability)\nпатиенс γ"];
+    V_pcaught[label="_caught(kind,n)=min(caught_cap, caught_per_witness·n)\n_cost_caught=transgress·(cost_lawbase+cost_lawful·lawful)\n_cost_moral=transgress·honesty·moral"];
+    V_eff    [label="_eff(a): move→eff_move, say→eff_say, иначе 0\n_risk(move)=world.risk[to]+Σ hostility·0.6\nidle_floor=idle для wait/move"];
+    V_prox   [label="_proxemics(move)=BAL.proxemics·Σ affinity(other)·prox(dest,other)\nproximity(d)=1/(1+d)"];
+    V_srg    [label="self_regard(state)=clamp(sr_pride·pride+sr_brave·bravery+sr_amb·ambition)\n(Inc5) [0..1]"];
+    V_pwin   [label="pwin(att,def)=clamp(P/(P+P),0.02,0.98)  ИСТИННЫЙ (бой/угроза)\nperceived_pwin: bias=1+sr_span·(self_regard−0.5) — РЕШЕНИЕ читает смещённую"];
+    V_wit    [label="witnesses(percept,state,target)\nтретьи лица (не я/не цель/не союзник)"];
+    // BAL parameters
+    node [shape=note, style=filled, fillcolor="#fff6c8"];
+    BAL1 [label="BAL: gamma_base 0.55 · gamma_focus 0.40\neff_move 0.04 · eff_say 0.01\ncaught_per_witness 0.5 · caught_cap 0.95"];
+    BAL2 [label="BAL.transgress: attack 1.0 · take 0.55 · threat 0.45\ncost_lawbase 0.4 · cost_lawful 1.5 · moral 1.0 · selfrisk 0.6"];
+    BAL3 [label="BAL.ps кражи: take_alert 0.15 · take_distracted 0.78 · take_down 0.92\nflee_base 0.5 · flee_gain 2.2 · idle 0.05"];
+    BAL4 [label="BAL: need_urgency_coin 0.5 · info_value 0.6\nproxemics 0.2 · feel_nudge_cap 0.25"];
+    BAL5 [label="BAL self_regard (Inc5): sr_pride 0.35 · sr_brave 0.35\nsr_amb 0.30 · sr_span 1.5"];
+  }
+
+  // ==========================================================================
+  //  ACTION SELECTION  (act.py)
+  // ==========================================================================
+  subgraph cluster_action {
+    label="ВЫБОР ДЕЙСТВИЯ  ·  act.py  ·  enumerate/score = LIVE, decide(argmax/softmax) = TESTBED";
+    style="rounded,filled"; fillcolor="#eef7ff"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#cfe6ff"];
+    A_enum  [label="enumerate_actions(state,world,percept)  LIVE\nprimitives: wait · move(exits) · attack · take · say(SAY_ACTS)\ngive · use  ·  SAY_ACTS=chat,threat,flatter,ask,counter,accept"];
+    A_score [label="score(state,world,percept)  LIVE\nдля каждого action: best goal по utility; idle_floor база\nсортировка по −u → ranked[]"];
+    node [shape=box, style="filled,dashed", fillcolor="#e5e5e5", color="gray50"];
+    A_decide[label="decide(temp,rng)  TESTBED\ntemp=0→argmax; temp>0→softmax по exp(u/temp) над top4\n(живой путь берёт ranked[:5] как DRIVES, выбор — LLM)"];
+  }
+
+  // ==========================================================================
+  //  AGENDAS  (agenda.py)
+  // ==========================================================================
+  subgraph cluster_agenda {
+    label="АГЕНДЫ  ·  agenda.py  ·  долгосрочные цели над реактивным ядром";
+    style="rounded,filled"; fillcolor="#f0fff0"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#c8f0c8"];
+    AG_model  [label="Agenda{summary,kind,importance,milestones,cursor,status}\nMilestone{desc,kind(need|affiliate|trade|acquire|harm),target,meta,done}"];
+    AG_adv    [label="advance_agendas(state,world)  LIVE\nвеха закрыта _met(done) → cursor++; исчерпана → status=done"];
+    AG_met    [label="_met(done): wealth≥N · dead(id) · affinity(id)≥v · at(place) · have(item)\n'never' — стоячая веха, сама не закрывается"];
+    node [shape=box, style="filled,dashed", fillcolor="#e5e5e5", color="gray50"];
+    AG_stub   [label="StubPlanner + factory (wealth/courtship/revenge/predation)\nТОЛЬКО тесты/демо — рантайм строит через LLM"];
+  }
+
+  // ==========================================================================
+  //  LLM-HYBRID PATH  (llm_agent.py — LIVE)
+  // ==========================================================================
+  subgraph cluster_llm {
+    label="LLM-ГИБРИДНЫЙ ПУТЬ  ·  llm_agent.py  ·  живой путь /play (decide_hybrid)";
+    style="rounded,filled"; fillcolor="#fffbe6"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#ffe9a8"];
+    L_hybrid [label="decide_hybrid(state,world,percept,manager,ctx)  LIVE\n1) appraise_present (эмоции/связи ПЕРВЫМ, игрок не сидится)\n2) score→prefs=ranked[:5] (DRIVES)\n3) _ask LLM temp=0.55 → {think,does,actions[:3]}"];
+    L_prompt [label="build_prompt: черты/нужды/эмоции/связи, место+выходы,\nвсе видимые NPC + их прошлый ход, история 10, время,\nnews/rumor/topics/pc_said/event/now/oaths/foreshadow/newcomer/market\nprefs='ТВОИ ПОБУЖДЕНИЯ' (следуй сильнейшему)"];
+    L_apply  [label="apply_actions(actions,state,world,clock)  LIVE\nmove·attack(-6hp)·take·give·say·know·use·feel·need·note·promise·wait"];
+    L_fanout [label="_fanout → project_and_apply\nсвидетели = тела в том же place (perc=1.0)\nattack→Event(убийство/насилие) · take→Event(воровство) · give→Event(дар)"];
+    node [shape=box, style=filled, fillcolor="#ffd97a"];
+    L_nudge  [label="_nudge(cur,want)=clamp(cur ± feel_nudge_cap 0.25)\nfeel/need НУДЖ ±0.25, не перезапись (спад не стереть)"];
+    L_plan   [label="plan_agenda(state,world,ctx,manager)  LIVE (лениво)\nрефлексия натура+память+ситуация → ОДНА агенда\nkind: wealth|courtship|ambition|revenge|predation"];
+    node [shape=box, style="filled,dashed", fillcolor="#e5e5e5", color="gray50"];
+    L_llmpure[label="decide_llm(…temp=0.7)  ALT\nчистый LLM без prefs — определён, не подключён к /play"];
+  }
+
+  // ==========================================================================
+  //  AFFECT — DECAY  (Inc1, decay.py + tick decay)
+  // ==========================================================================
+  subgraph cluster_decay {
+    label="АФФЕКТ: СПАД  ·  МОЗГ Inc1  ·  decay.py (ленивый, на входе в сцену) + tick per-tick";
+    style="rounded,filled"; fillcolor="#eef9ff"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#cfe6ff"];
+    D_lazy   [label="decay_lazy(state,now_gt)  LIVE\ndt_days=(now_gt−last)/1440; ПЕРВЫЙ-ВИДЕН guard:\nfalsy last_decay_gt → штампуем, спад пропускаем"];
+    D_relax  [label="_relax(cur,tgt,dt,hl)=tgt+(cur−tgt)·0.5^(dt/hl)\nэмоции→mood_baseline · anchored→faint_prior(×знак aff) · loose→0"];
+    D_entr   [label="decay_scene_entrants(states,here,prev_who,now_gt)  LIVE\nОДНОКРАТНО каждому ВХОДЯЩЕМУ (в here, не в prev); сидящий — skip\n(двойного спада с per-tick нет)"];
+    D_tickN  [label="tick._decay_needs  LIVE\nneeds += _NEED_RATE"];
+    D_tickE  [label="tick._decay_emotion(dt=1)  LIVE\ncur += (base−cur)·(1−exp(−dt/_HALFLIFE))\nбаза=emotion_baseline; ≤base+ε → снять target"];
+    node [shape=note, style=filled, fillcolor="#fff6c8"];
+    D_K      [label="decay._K: decay_emo_days 0.5\ndecay_rel_anchored_days 14.0 · decay_rel_loose_days 2.0\nrel_faint_prior 0.10\nanchored half-life = 14.0×(1+vengefulness)"];
+    D_rate   [label="tick._NEED_RATE: fatigue .015 hunger .02 social .012\npurpose .01 wealth .006 comfort .008 novelty .014"];
+    D_hl     [label="tick._HALFLIFE (тики): anger 6.0 · fear 4.0\njoy 8.0 · distress 36.0"];
+  }
+
+  // ==========================================================================
+  //  AFFECT — EVENT BUS  (Inc2, event.py + project.py)
+  // ==========================================================================
+  subgraph cluster_event {
+    label="АФФЕКТ: ШИНА СОБЫТИЙ  ·  МОЗГ Inc2  ·  event.py + project.py  ·  Event → висцер + нрав.линза → appraise";
+    style="rounded,filled"; fillcolor="#fff0f6"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#ffcfe6"];
+    EV_event  [label="Event (объективный, без суда)\nactor · target · intensity[0..1] · physical_threat[0..1]\ntarget_harm[0..1] · tags[] · zone"];
+    EV_proj   [label="project_event(event,witness,perc,affinity_target)\nдва канала → dims(pre-gain) + rel-дельты"];
+    EV_visc   [label="ВИСЦЕР: harm=physical_threat·(ev_harm_base+ev_harm_familiar·fear_prior)\n·perc·(1−ev_viol_damp·viol_approval)\ncare=affinity_target+ev_empathy_care·empathy"];
+    EV_moral  [label="НРАВ.ЛИНЗА: dom tag→morals[axis]=stance\ndesert=stance · outrage=max(0,−stance)·intensity·perc (×ev_taboo_mult если taboo)\napproval=max(0,stance)·intensity·perc·ev_approval_k"];
+    EV_dims   [label="dims: goal_impact=−target_harm·care+approval\ndesert · harm · revulsion=outrage · intent=True\nrel: actor_fear=harm·ev_rel_fear · target_warmth=ev_warmth·care (дар) · anchored=(я==цель)"];
+    EV_apply  [label="project_and_apply(event,witnesses,perceive)  LIVE\nактёр себя не апрейзит; perc≤0→skip;\nappraise(dims) → fear-of-actor(max) → target_warmth (дар, бенефициар)"];
+    node [shape=note, style=filled, fillcolor="#fff6c8"];
+    EV_K      [label="project._K: ev_perc_l2 0.6 · ev_perc_l3 0.3\nev_harm_base 0.6 · ev_harm_familiar 0.4 · ev_viol_damp 0.5\nev_empathy_care 0.5 · ev_taboo_mult 1.6 · ev_approval_k 0.25\nev_rel_fear 0.5 · ev_rel_aff 0.4 · ev_warmth 0.2"];
+    EV_tagax  [shape=plaintext, fillcolor=none, label=<
+      <table border="0" cellborder="1" cellspacing="0" cellpadding="2" bgcolor="#fff6c8">
+      <tr><td colspan="2"><b>event.TAG_AXIS  (тег → ось morals)</b></td></tr>
+      <tr><td>убийство, смерть, осквернение-мёртвых, людоедство</td><td>death</td></tr>
+      <tr><td>насилие, избиение</td><td>violence</td></tr>
+      <tr><td>воровство, грабёж, кража</td><td>theft</td></tr>
+      <tr><td>колдовство, кощунство</td><td>magic</td></tr>
+      <tr><td>клятвопреступление, вероломство</td><td>authority</td></tr>
+      <tr><td>чужак-насилие</td><td>outsiders</td></tr>
+      <tr><td colspan="2"><b>TABOO_KEYS:</b> убийство, воровство, кощунство,<br/>людоедство, клятвопреступление,<br/>осквернение-мёртвых, кровосмешение</td></tr>
+      </table>>];
+    EV_sig    [label="_crime_signature (core.py) → (tags,intensity,threat,harm):\nнападение(оружием/бросился/напал)→[насилие] .7/.6/0\nграбёж(силой/отнял)→[грабёж] .6/.3/0\nдушегубство(убить)→[вероломство] .6/0/0\nиначе→[воровство] .4/0/0\napply_actions (три строителя сигнатур): kill .9/.7/1.0 [убийство,насилие,смерть]\nattack .6/.5/harm [насилие] · gift/give .2/0/0 [дар] · take .4/0/0 [воровство]\nco-presence пример: Event(other,me, .05/0/0, [видит])"];
+  }
+
+  // ==========================================================================
+  //  APPRAISE  (tick.appraise — the dims→emotion mapping, LIVE)
+  // ==========================================================================
+  subgraph cluster_appraise {
+    label="АПРЕЙЗАЛ  ·  tick.appraise (LIVE)  ·  dims → дельты эмоций (× emotion_gain)  +  appraisal.appraise_present (непрерывный со-канал)";
+    style="rounded,filled"; fillcolor="#fdf0ff"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#efd0ff"];
+    AP_appraise [label="appraise(state,dims,source)  LIVE\njoy=max(0,gi) · distress=max(0,−gi)·(1−control)\nanger=max(0,−gi)·max(0,−desert)·(1 если deliberate иначе 0.3)\nfear=harm·(1−control) · disgust=max(0,rev)\nкаждый ×emotion_gain(e); norm>0 → anger −= norm·0.6 (адресно)"];
+    AP_present  [label="appraise_present(state,world,percept,race_rel,skip_seed_id)  LIVE\nкаждый present двигает эмоцию КАЖДЫЙ тик;\nprior связи + memory-заметка — ОДИН раз (незнакомец/игрок не сидится)"];
+    AP_impr     [label="impression = _tier_a(черты×поверхность) + _tier_b(раса, ×0.5+malice)\n+ _tier_c(личная история 0.7·aff+0.3·ab)\nemo{revulsion,harm=wary,desert,goal_impact=valence,intent=False}"];
+    node [shape=note, style=filled, fillcolor="#fff6c8"];
+    AP_race     [label="race_sentiment: self→0.15; таблица race_relations.json\n_tier_a: revulsion=pride·(1-appearance)·squalor · warmth=sociability·charisma\nwary=(1-bravery)·armed · contempt=malice·(1-honesty)"];
+  }
+
+  // ==========================================================================
+  //  FAMILIARITY + GREET  (Inc3, world.py)
+  // ==========================================================================
+  subgraph cluster_famil {
+    label="ФАМИЛЬЯРНОСТЬ + ПРИВЕТСТВИЕ  ·  МОЗГ Inc3  ·  world.py";
+    style="rounded,filled"; fillcolor="#f0fff8"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#c8f0dc"];
+    F_accrue  [label="_accrue_familiarity(st,other)  LIVE\nсчётчик++; на K-м тике → faint UNANCHORED tie\n(affinity/trust=familiarity_affinity, anchored=False)"];
+    F_greet   [label="_greet_impulse(sociability)=greet_sociability_base·max(0,soc−0.5)\nsociability-гейт: несоциальный (≤0.5) → 0"];
+    F_pick    [label="_pick_newcomer(st,others,greeted)\nпервое НИКОГДА не встреченное тело, ещё не приветствованное"];
+    F_greeted [label="_greeted_toward(d,newcomer,w)\nsay→newcomer ИЛИ move на его place → пометить greeted (≤1 greeter/сцена)"];
+    node [shape=note, style=filled, fillcolor="#fff6c8"];
+    F_pb      [label="PB: familiarity_k 4 · familiarity_affinity 0.05\ngreet_sociability_base 1.4"];
+  }
+
+  // ==========================================================================
+  //  VOICE  (Inc4, narrator/voice.py)
+  // ==========================================================================
+  subgraph cluster_voice {
+    label="ГОЛОС  ·  МОЗГ Inc4  ·  narrator/voice.py  ·  эмоция/черты/worldview/self_regard → речь";
+    style="rounded,filled"; fillcolor="#fff7ee"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#ffe0c0"];
+    VO_voice  [label="_voice(p,rel,kind,player_text,…)  LIVE\nLLM narrator temp=0.85 → {say, player_tone}\nсклейка persona+bits+память+lookup; ask→lookup→2-й проход"];
+    VO_bits   [label="_character_bits(p): НАТУРА (2-3 самые крайние черты |v−0.5|≥0.08)\nВЕРА и НРАВ (faith, morals |v|≥0.25, taboos, rank, notoriety≥0.5)\nСЕЙЧАС (самая горячая эмоция ≥0.2)"];
+    VO_tier   [label="три яруса: never_met (нет rel-строки)\nfaint (anchored=False И |aff|≤familiarity_affinity)\nknown (реальная связь)"];
+    VO_boast  [label="boast beat: _self_regard(traits)>0.8 → бахвальство\n_self_regard=clamp(sr_pride·pride+sr_brave·bravery+sr_amb·ambition)"];
+    VO_spurn  [label="_spurns(p): affinity<hostile_aff ИЛИ (anger>0.5 И target==игрок)\n→ холод/резкость"];
+  }
+
+  // ==========================================================================
+  //  SELF-REGARD  (Inc5) — cross-cluster derived (value.py + voice.py)
+  // ==========================================================================
+  subgraph cluster_selfr {
+    label="САМОМНЕНИЕ  ·  МОЗГ Inc5  ·  выводится из черт, гнёт perceived_pwin (решение) и boast (голос)";
+    style="rounded,filled"; fillcolor="#f6f0ff"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#ddc8ff"];
+    SR_core [label="self_regard = clamp(sr_pride·pride+sr_brave·bravery+sr_amb·ambition)\n0.5=калибр · >0.5 бахвал (завышает свою силу, недооценивает риск) · <0.5 робкий\nИСТИННЫЙ pwin (бой/угроза) НЕ гнётся — гнётся только оценка РЕШЕНИЯ"];
+  }
+
+  // ==========================================================================
+  //  ATTENTION  (Inc6, world.py _body_attention)
+  // ==========================================================================
+  subgraph cluster_attn {
+    label="ВНИМАНИЕ  ·  МОЗГ Inc6  ·  world.py  ·  внимание = бдительность × множитель активности";
+    style="rounded,filled"; fillcolor="#eefaf0"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#c8eecc"];
+    AT_body  [label="_body_attention(cfg,state)=clamp(vigilance × PB[_ATT_MULT[act]], 0.05, 1.0)\nvig=perception.vigilance (0.5 default); питает Body.attention → окно кражи (<0.4)"];
+    AT_act   [label="_activity_of(state,gt):\nroutine+ночь→asleep · threat|fear≥0.6|стражник→alert\nconverse|on_shift→absorbed · иначе→alert  (drunk-плечо недостижимо)"];
+    node [shape=note, style=filled, fillcolor="#fff6c8"];
+    AT_mult  [label="_ATT_MULT → PB: att_asleep 0.2 · att_drunk 0.4\natt_absorbed 0.6 · att_alert 1.3"];
+  }
+
+  // ==========================================================================
+  //  MEMORY  (memory.py)
+  // ==========================================================================
+  subgraph cluster_mem {
+    label="ПАМЯТЬ  ·  memory.py  ·  add / recall (retrieve→rerank)";
+    style="rounded,filled"; fillcolor="#f2f2ff"; fontsize=13;
+    node [shape=box, style=filled, fillcolor="#d0d0ff"];
+    M_store [label="MemoryStore.add(text,t,importance,kind,about)\nMemory{id,text,t,importance,last_access,kind,about}"];
+    M_recall[label="recall(query,now,k=10,pool=30)  LIVE\nscore=W_REC·rec+W_IMP·imp+W_REL·rel (норм) → shortlist → rerank; refresh last_access"];
+    node [shape=box, style="filled,dashed", fillcolor="#e5e5e5", color="gray50"];
+    M_rerank[label="LLMReranker (cognition, temp=0)  опц.\nтвёрдый top-k; None → механический shortlist"];
+    node [shape=note, style=filled, fillcolor="#fff6c8"];
+    M_w     [label="W_REC 0.5 · W_IMP 1.0 · W_REL 1.5\nrecency halflife 144 тика (~день) · pool 30 · k 10"];
+  }
+
+  // ==========================================================================
+  //  TRADE  (dormant — ported to haggle.py)
+  // ==========================================================================
+  subgraph cluster_trade {
+    label="ОБМЕН (абстрактный)  ·  mind/trade.py  ·  DORMANT — логика перенесена в play/mechanics/haggle.py";
+    style="rounded,filled"; fillcolor="#f0f0f0"; fontsize=13;
+    node [shape=box, style="filled,dashed", fillcolor="#e5e5e5", color="gray50"];
+    T_worth  [label="worth(item,st,world): coin→amount·money_demand\ngood→value/(1+0.4·have) + needs[satisfies]·0.7\nmoney_demand=0.4+0.8·wealth+0.3·greed+0.2·ambition"];
+    T_deal   [label="propose_sale: коридор [sw/cw_s … bw/cw_b] в монетах\nprice=min(midpoint,purse); gain=bw−price·cw_b>0\nsettle_sale через тот же give (товар↔монеты)"];
+  }
+
+  // ==========================================================================
+  //  TESTBED / DEBUG / ALTERNATIVE CORES  (not in the live play tick)
+  // ==========================================================================
+  subgraph cluster_testbed {
+    label="TESTBED / DEBUG / ALT  ·  НЕ в живом /play тике (сохранены — целый мозг, но статус честный)";
+    style="rounded,filled"; fillcolor="#ededed"; fontsize=13;
+    node [shape=box, style="filled,dashed", fillcolor="#dcdcdc", color="gray50"];
+    TB_sim    [label="sim.tick / sim.apply  TESTBED\nдетерминированный стенд: perceive→decide→apply→appraise\n(sim.perceive ОТДЕЛЬНО = LIVE, зовётся world.py как mind_perceive)"];
+    TB_fsm    [label="fsm.py  DEBUG-harness (routes_npcdebug)\nmode routine|leisure|converse|threat; urgency/hold/step; HYST=0.1\n_PLAN_BY_NEED шаблоны; зовётся из tick.advance"];
+    TB_adv    [label="tick.advance(state,scene,ticks,stim)  DEBUG-harness\nцикл: _decay_needs → fsm_step → _decay_emotion (routes_npcdebug:135)"];
+    TB_tools  [label="tools.py READ/WRITE  DEBUG-harness (routes_npcdebug:145)\nperceive/recall/assess/locate/move; TOOLS реестр + run_tool"];
+    TB_brain  [label="brain.py MODULARBRAIN think()  EXPERIMENTAL\nграф-узлы n0..n21 + трассировка PATH; modulate_ranked по классу действия\nимпасс gap<0.08 → 'нужен S2'; только экспорт, нет вызова в play/debug"];
+    TB_mod    [label="modulators.py  EXPERIMENTAL (только через brain)\nurges(urge/urgency/priority) + 6 модуляторов:\narousal · valence · dominance · resolution · selection_threshold · securing"];
+  }
+
+  // ==========================================================================
+  //  EDGES — the live decision loop
+  // ==========================================================================
+  // Entry → per-tick bookkeeping → decide
+  E_think -> D_tickN [label="1. needs+=rate"];
+  E_think -> D_tickE [label="2. эмоции→base"];
+  E_think -> AG_adv  [label="3. вехи"];
+  E_think -> L_hybrid[label="4. decide_hybrid", color="blue", penwidth=2];
+  E_lod -> E_think [label="кто думает", style=dotted];
+  E_pertick -> D_tickN; E_pertick -> D_tickE;
+  E_scene -> D_entr [color="blue", penwidth=2];
+  E_greetacc -> F_accrue; E_greetacc -> F_greet; E_greetacc -> F_pick;
+  E_plan -> L_plan; E_voice -> VO_voice; E_appres -> AP_present;
+  E_feelneed -> L_nudge;
+
+  // decide_hybrid internals
+  L_hybrid -> AP_present [label="1) видеть = двигать аффект", style=dashed];
+  L_hybrid -> A_score    [label="2) prefs=ranked[:5]", color="blue", penwidth=2];
+  L_hybrid -> L_prompt   [label="3) собрать промпт"];
+  L_prompt -> L_apply    [label="LLM actions[:3]", color="blue", penwidth=2];
+
+  // score pipeline
+  A_score -> G_propose [label="цели", dir=back];
+  G_propose -> A_score;
+  A_score -> A_enum [label="действия"];
+  A_score -> V_util [label="utility(a,g)", color="firebrick"];
+  A_score -> A_decide [style=dashed, label="TESTBED argmax"];
+
+  // goals formation from perception/state
+  P_perceive -> G_propose [label="present/nearby/exits"];
+  S_needs   -> G_standing; G_standing -> G_propose;
+  S_agendas -> G_agenda;   G_agenda   -> G_propose;
+  P_perceive -> G_safe; P_perceive -> G_acquire; P_perceive -> G_harm;
+  P_perceive -> G_conv; P_perceive -> G_protect;
+  G_safe -> G_propose; G_acquire -> G_propose; G_harm -> G_propose;
+  G_conv -> G_propose; G_protect -> G_propose; G_inject -> G_propose;
+  S_traits -> G_pred [label="predatory/malice", style=dotted];
+  G_pred -> G_acquire [style=dotted]; G_pred -> G_harm [style=dotted];
+
+  // utility internals
+  V_util -> V_uacq; V_util -> V_uharm; V_util -> V_usafe; V_util -> V_utrade;
+  V_util -> V_uaffl; V_util -> V_uprot; V_util -> V_uinfo; V_util -> V_uneed; V_util -> V_uconv;
+  V_util -> V_prox [label="+proxemics всегда"];
+  V_uacq -> V_clean; V_uacq -> V_gamma; V_uacq -> V_pcaught; V_uacq -> V_pwin;
+  V_uharm -> V_pwin; V_uharm -> V_pcaught;
+  V_uprot -> V_pwin; V_usafe -> V_pwin;
+  V_pwin -> V_srg [label="perceived гнётся self_regard", dir=back, color="purple"];
+  V_util -> V_eff; V_util -> V_wit;
+  BAL1 -> V_gamma [style=dotted]; BAL2 -> V_pcaught [style=dotted];
+  BAL3 -> V_clean [style=dotted]; BAL4 -> V_util [style=dotted]; BAL5 -> V_srg [style=dotted];
+  S_traits -> V_srg [style=dotted, label="pride/bravery/ambition"];
+
+  // hostility / ally from value used by goals
+  G_ally -> G_safe [style=dotted]; G_ally -> G_conv [style=dotted];
+
+  // ---- affect write paths (the two channels + decay pull) ----
+  // Episodic channel (Event bus)
+  E_witness -> E_crime [label="свидетели"];
+  E_crime -> EV_event; E_menace -> EV_event; E_npcact -> L_fanout;
+  E_project -> EV_apply;
+  L_apply -> L_fanout [label="attack/take/give"];
+  L_fanout -> EV_event;
+  EV_event -> EV_proj; EV_proj -> EV_visc; EV_proj -> EV_moral;
+  EV_visc -> EV_dims; EV_moral -> EV_dims;
+  EV_sig -> EV_event [label="tags/intensity/threat/harm", style=dotted];
+  EV_tagax -> EV_moral [label="axis=morals[tag]", style=dotted];
+  EV_K -> EV_visc [style=dotted]; EV_K -> EV_moral [style=dotted];
+  EV_dims -> EV_apply;
+  EV_apply -> AP_appraise [label="dims(pre-gain) → appraise", color="firebrick", penwidth=2];
+  EV_apply -> S_rels [label="actor_fear / target_warmth", color="firebrick"];
+  S_wv -> EV_moral [label="morals[axis]", style=dotted];
+  S_rels -> EV_visc [label="fear_prior", style=dotted];
+
+  // Continuous channel (co-presence)
+  AP_present -> AP_impr; AP_impr -> AP_appraise [label="imp.emo → appraise", color="darkgreen"];
+  AP_present -> S_rels [label="prior 1 раз", color="darkgreen"];
+  AP_race -> AP_impr [style=dotted];
+
+  // appraise writes emotion, with gain
+  AP_appraise -> S_emotion [label="+=delta×emotion_gain", color="firebrick", penwidth=2];
+  AP_appraise -> S_emotgt  [label="source→channel"];
+  S_egain -> AP_appraise [label="×gain", style=dotted];
+
+  // Decay pulls emotion back to baseline (third force)
+  D_tickE -> S_emotion [label="→ mood_baseline", color="navy"];
+  D_lazy  -> S_emotion [label="эмоции→base", color="navy"];
+  D_lazy  -> S_rels    [label="anchored→faint / loose→0", color="navy"];
+  D_lazy  -> D_relax;  D_entr -> D_lazy;
+  D_tickN -> S_needs [label="рост нужд"];
+  D_K -> D_lazy [style=dotted]; D_rate -> D_tickN [style=dotted]; D_hl -> D_tickE [style=dotted];
+  S_ebase -> D_tickE [label="floor", style=dotted]; S_ebase -> D_lazy [style=dotted];
+  S_lastdecay -> D_lazy [label="last_decay_gt", style=dotted];
+  D_lazy -> S_lastdecay [label="штамп now_gt"];
+  S_traits -> D_lazy [label="vengefulness → half-life", style=dotted];
+
+  // familiarity → relationships → voice tiers
+  F_accrue -> S_famil; F_accrue -> S_rels [label="faint tie @K"];
+  F_pick -> F_greet; F_greet -> F_greeted;
+  F_pb -> F_accrue [style=dotted]; F_pb -> F_greet [style=dotted];
+  F_greeted -> L_prompt [label="ctx.newcomer", style=dashed];
+
+  // voice reads state
+  S_emotion -> VO_bits [label="hottest", style=dotted];
+  S_traits  -> VO_bits [style=dotted]; S_wv -> VO_bits [style=dotted];
+  S_rels    -> VO_tier [label="never/faint/known", style=dotted];
+  SR_core   -> VO_boast [label=">0.8 бахвальство", color="purple"];
+  SR_core   -> V_pwin   [label="perceived_pwin bias", color="purple"];
+  S_traits  -> SR_core  [style=dotted, label="pride/bravery/ambition"];
+  VO_bits -> VO_voice; VO_tier -> VO_voice; VO_boast -> VO_voice; VO_spurn -> VO_voice;
+  S_memory -> VO_voice [label="recall память", style=dotted];
+
+  // attention feeds Body.attention → theft window in _u_acquire
+  AT_act -> AT_body; AT_mult -> AT_body [style=dotted];
+  S_enrich -> AT_body [label="perception.vigilance", style=dotted];
+  S_mode -> AT_act [label="mode/on_shift/fear", style=dotted];
+  AT_body -> P_body [label="attention"];
+  P_body -> V_uacq [label="attention<0.4 → take_distracted", style=dotted];
+
+  // memory used by llm prompt and recall
+  L_apply -> M_store [label="note/know/say/promise"];
+  M_recall -> M_rerank [style=dashed]; M_w -> M_recall [style=dotted];
+  M_store -> S_memory; S_memory -> M_recall;
+  L_prompt -> M_recall [label="notes/mems", style=dotted];
+
+  // agenda plan → state, advance reads world
+  L_plan -> S_agendas [label="new agenda"];
+  AG_model -> AG_adv; AG_adv -> AG_met; AG_stub -> AG_model [style=dashed];
+  AG_adv -> S_agendas [label="cursor++/done"];
+
+  // apply_actions mutates world & attacked victim's mind
+  L_apply -> S_emotion [label="victim fear+0.6 (attack)", style=dashed, color="firebrick"];
+  L_apply -> S_rels    [label="victim fear/anchored", style=dashed, color="firebrick"];
+  L_nudge -> S_emotion [label="feel ±0.25"]; L_nudge -> S_needs [label="need ±0.25"];
+
+  // testbed wiring (kept truthful)
+  TB_adv -> TB_fsm; TB_adv -> D_tickN [style=dashed]; TB_adv -> D_tickE [style=dashed];
+  TB_sim -> A_decide [style=dashed]; TB_sim -> AP_appraise [style=dashed];
+  TB_brain -> TB_mod [style=dashed]; TB_brain -> A_score [style=dashed]; TB_brain -> A_decide [style=dashed];
+  TB_tools -> M_recall [style=dashed];
+
+  // perception substrate
+  P_world -> P_perceive; P_body -> P_perceive;
+
+  // trade dormant note (no live edge into the tick)
+  T_worth -> T_deal [style=dashed];
+}

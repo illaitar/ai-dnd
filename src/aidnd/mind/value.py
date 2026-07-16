@@ -112,15 +112,19 @@ def hostility(state, me, b) -> float:
     return _clamp(h)
 
 
-def _is_ally(state, b) -> bool:
+def _is_ally(state, me, b) -> bool:
     rel = state.relationships.get(b.id) or {}
-    return rel.get("affinity", 0.0) > 0.2
+    if rel.get("affinity", 0.0) > 0.2:
+        return True
+    mf = getattr(me, "faction", None)
+    return bool(mf) and mf != "town" and mf == getattr(b, "faction", None)
 
 
 def witnesses(percept, state, target_id: str) -> int:
     """Third parties nearby (not me, not target, not ally) — who can report/interfere."""
+    me = percept.me
     return sum(1 for b in percept.present
-               if b.id != target_id and not _is_ally(state, b))
+               if b.id != target_id and not _is_ally(state, me, b))
 
 
 def _caught(kind: str, n_wit: int) -> float:

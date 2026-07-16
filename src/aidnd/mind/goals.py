@@ -90,7 +90,7 @@ def propose_goals(state, world, percept) -> list:
     predatory = tr.get("greed", 0.5) * (1 - tr.get("honesty", 0.5)) * (1 - 0.5 * tr.get("lawful", 0.5))
     malice = tr.get("malice", 0.5)
     for b in percept.present + percept.nearby:
-        if b.id == me.id or _is_ally(state, b):
+        if b.id == me.id or _is_ally(state, me, b):
             continue
         if predatory > 0.30 and b.appearance > 0.25:        # ← LLM value appraisal connects here
             goals.append(Goal("acquire", b.id, b.appearance))
@@ -130,7 +130,7 @@ def propose_goals(state, world, percept) -> list:
 
     # ally protection: co-location — nearby ally under attack
     for b in percept.present:
-        if not _is_ally(state, b):
+        if not _is_ally(state, me, b):
             continue
         attacker = next((x for x in percept.present if x.attacking == b.id), None)
         if attacker:

@@ -420,6 +420,8 @@ def apply_actions(actions, state, world, clock: int) -> list:
                     r["anchored"] = True                 # прямое насилие → стойкая обида (медленный спад)
                     vs.emotion["fear"] = min(1.0, vs.emotion.get("fear", 0.0) + 0.6)
                     vs.emotion_target["fear"] = me.id
+                    vs.emotion["anger"] = min(1.0, vs.emotion.get("anger", 0.0) + 0.6)
+                    vs.emotion_target["anger"] = me.id
                     vs.memory.add(f"{me.id} напал на меня", clock, importance=0.9, kind="event", about=[me.id])
                 killed = tb.down()
                 _fanout(world,           # bystanders feel it; the victim's affect was written above

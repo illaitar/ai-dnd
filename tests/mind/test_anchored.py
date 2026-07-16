@@ -49,6 +49,24 @@ def test_attack_write_anchors_victim_not_bystander():
     assert bystander.rel("npc:att")["anchored"] is False
 
 
+# ── 1b. attack gives the victim ANGER too, not only fear — feuds between equals ──────────
+def test_attack_write_gives_victim_anger_not_only_fear():
+    from aidnd.mind.llm_agent import apply_actions
+
+    attacker = _state("npc:att")
+    victim = _state("npc:vic")
+    w = World()
+    w.add(Body(id="npc:att", place="площадь"))
+    w.add(Body(id="npc:vic", place="площадь", hp=12))
+    w.npc_minds = {"npc:att": attacker, "npc:vic": victim}
+
+    apply_actions([{"tool": "attack", "target": "npc:vic"}], attacker, w, clock=1)
+
+    assert victim.emotion["fear"] >= 0.6
+    assert victim.emotion["anger"] >= 0.6                     # retaliation drive, not just flight
+    assert victim.emotion_target["anger"] == "npc:att"
+
+
 # ── 2. crime-victim grudge is anchored; a bystander gets only memory → unanchored ───────
 class _Person:
     def __init__(self, st: NpcState, name: str):

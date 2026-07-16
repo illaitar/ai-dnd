@@ -42,6 +42,11 @@ PB = {
     # Inc5 reuses these same weights to bias perceived pwin (sr_span).
     "sr_pride": 0.35, "sr_brave": 0.35, "sr_amb": 0.30,   # self_regard trait weights
     "sr_span": 1.5,                                        # perceived-pwin bias span (Inc5)
+    # МОЗГ — attention Pillar 2 (Inc6, §4.6/§3c): Body.attention = vigilance × activity multiplier,
+    # clamped [0.05, 1.0]. A sleeping/absorbed target dips below the value.py 0.4 theft window so
+    # take_distracted (0.78) finally fires; an alert guard (×1.3) caps at 1.0 and stays un-pickable.
+    # 'att_drunk' has no runtime signal yet — kept for the knob set + _activity= unit seam (unreachable).
+    "att_asleep": 0.2, "att_drunk": 0.4, "att_absorbed": 0.6, "att_alert": 1.3,
     # sim-stitching (docs/superpowers/plans/2026-07-14-sim-stitching.md)
     "churn_named_max": 2,       # max NAMED join/leave feed items per direction per tick; rest → summary
     "overflow_max_hops": 2,     # full venue → try this many next same-kind candidates before street

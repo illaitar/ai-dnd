@@ -97,10 +97,34 @@ def _body_power(cfg) -> float:
     return float(combat) if combat is not None else 1.0
 
 
-def _body_attention(cfg) -> float:
-    """Vigilance for a Body from `perception.vigilance` (§3.9 → C11). Deterministic, replaces
-    the per-tick rng.uniform. Un-enriched → neutral 0.5."""
-    return float((getattr(cfg, "perception", None) or {}).get("vigilance", 0.5))
+_ATT_MULT = {"asleep": "att_asleep", "drunk": "att_drunk",
+             "absorbed": "att_absorbed", "alert": "att_alert"}
+
+
+def _activity_of(state, gt: int) -> str:
+    """Coarse current-activity label driving the attention multiplier (§6/§3c). Derived from the
+    REAL runtime signals on NpcState — mode / on_shift / the game clock / current fear / role.
+    There is NO drunkenness signal yet, so the 'drunk' arm is unreachable from here (the knob stays
+    for the §4.6 set + the _activity= unit seam); refine when a tipsy need/flag lands."""
+    mode = getattr(state, "mode", "leisure")
+    if mode == "routine" and _phase(gt) == "night":                 # abed at home in the dark → dead to the world
+        return "asleep"
+    if (mode == "threat" or state.emotion.get("fear", 0.0) >= 0.6   # frightened / on-guard / a watchman on his beat
+            or state.config.role == "стражник"):
+        return "alert"
+    if mode == "converse" or getattr(state, "on_shift", 0.0) > 0.0:  # deep in talk / heads-down at the bench
+        return "absorbed"
+    return "alert"                                                   # up-and-about, ordinary watchfulness
+
+
+def _body_attention(cfg, state=None, _activity=None) -> float:
+    """Vigilance (§3.9 → C11) × current-activity multiplier (§6, Pillar 2), clamped [0.05, 1.0].
+    A sleeping/absorbed target dips below the value.py 0.4 theft window so take_distracted fires;
+    an alert guard caps at 1.0. Re-read per scene build so activity is live. Un-enriched vig → 0.5.
+    `_activity` overrides the derivation (unit seam for the multiplier table)."""
+    vig = float((getattr(cfg, "perception", None) or {}).get("vigilance", 0.5))
+    act = _activity or (_activity_of(state, _gt()) if state is not None else "alert")
+    return max(0.05, min(1.0, vig * PB[_ATT_MULT.get(act, "att_alert")]))
 
 
 def _body_faction(cfg) -> str:
@@ -541,7 +565,7 @@ def _live_build(city, people, crof, cr2b, loc) -> None:
                 charisma=p.charisma,
                 appearance=p.appearance,
                 power=_body_power(cfg),               # §3.5 skills.combat (was flat 1.0)
-                attention=_body_attention(cfg),       # §3.9 perception.vigilance (was rng.uniform)
+                attention=_body_attention(cfg, p.state),  # §3.9 vigilance × activity (Inc6: asleep/absorbed drop it)
                 faction=_body_faction(cfg),           # §3.3 allegiances[0].group (was all "town")
                 loot=loot,
                 race=surf["race"],

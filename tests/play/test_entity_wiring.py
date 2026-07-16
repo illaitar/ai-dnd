@@ -14,6 +14,7 @@ import pytest
 
 from aidnd.mind import NpcConfig, NpcState
 from aidnd.server.play.engine.session import persist
+from aidnd.server.play.engine.session.config import PB
 from aidnd.server.play.engine.session.state import _wid
 from aidnd.server.play.engine.world import _body_attention, _body_faction, _body_power
 from aidnd.server.play.engine.worldbuild.person import _hydrate_rels, _person_from_row
@@ -47,7 +48,8 @@ def test_body_fields_sourced_from_entity():
         allegiances=[{"group": "шайка-оврага", "kind": "gang", "role": "initiate", "standing": 0.2}],
     )
     assert _body_power(cfg) == 0.35          # was flat 1.0
-    assert _body_attention(cfg) == 0.72      # was rng.uniform(.45,.85)
+    # Inc6: attention = vigilance × activity multiplier; no state → default 'alert' (×1.3, capped 1.0)
+    assert _body_attention(cfg) == pytest.approx(min(1.0, 0.72 * PB["att_alert"]))  # 0.936
     assert _body_faction(cfg) == "шайка-оврага"   # was all "town"
 
 
@@ -63,7 +65,7 @@ def test_mood_baseline_ties_emotion_baseline():
 def test_unenriched_config_neutral_no_crash():
     cfg = NpcConfig(id="pool:legacy", name="Старьё", role="горожанин")   # no mech slices
     assert _body_power(cfg) == 1.0           # legacy parity fallback
-    assert _body_attention(cfg) == 0.5       # neutral vigilance
+    assert _body_attention(cfg) == pytest.approx(0.5 * PB["att_alert"])  # neutral vig × default alert
     assert _body_faction(cfg) == "town"      # no allegiance → town
     st = NpcState.from_config(cfg)
     assert st.emotion_baseline("joy") == 0.0
@@ -73,7 +75,7 @@ def test_unenriched_config_neutral_no_crash():
 def test_empty_slice_dicts_neutral():
     cfg = _cfg(skills={}, perception={}, allegiances=[])
     assert _body_power(cfg) == 1.0
-    assert _body_attention(cfg) == 0.5
+    assert _body_attention(cfg) == pytest.approx(0.5 * PB["att_alert"])  # neutral vig × default alert
     assert _body_faction(cfg) == "town"
 
 

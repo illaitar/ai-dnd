@@ -30,6 +30,10 @@ PB = {
     "ev_taboo_mult": 1.6,                          # outrage × when a tag ∈ witness taboos
     "ev_approval_k": 0.25,                         # positive-stance → grim-satisfaction joy scale
     "ev_rel_fear": 0.5, "ev_rel_aff": 0.4, "ev_warmth": 0.2,  # bystander rel-delta scales
+    # МОЗГ — familiarity accrual + newcomer greet (Inc3)
+    "familiarity_k": 4,              # co-presence ticks before a faint unanchored tie seeds
+    "familiarity_affinity": 0.05,    # faint warmth/trust of the seeded acquaintance tie
+    "greet_sociability_base": 1.4,   # newcomer-greet impulse = base × max(0, sociability−0.5)
     # MIND affect floor (docs/superpowers/specs/2026-07-15-brain-design.md §4.6): max ±delta a
     # feel/need tool may move a channel per call — model NUDGES, never sets (mind/llm_agent.py).
     "feel_nudge_cap": 0.25,

@@ -82,6 +82,7 @@ class NpcState:
     mode_history: list = field(default_factory=list)     # [(tick, mode, switched, reason)] — history
     agendas: list = field(default_factory=list)          # long-term goals (LLM scheduler, mind/agenda)
     last_decay_gt: int = 0                               # gt-min of the last decay_lazy (Inc1 clock)
+    familiarity: dict = field(default_factory=dict)      # id → co-presence tick count (Inc3; seeds a faint tie at familiarity_k)
 
     @classmethod
     def from_config(cls, cfg: NpcConfig, node: int | None = None) -> NpcState:

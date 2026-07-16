@@ -78,6 +78,7 @@ def _person_from_row(row: dict, home: int, work: str | None) -> Townsperson:
         st.relationships.update(saved.get("relationships") or {})  # lived edges win over seed
         st.needs.update(saved.get("needs") or {})
         st.last_decay_gt = int(saved.get("last_decay_gt") or 0)  # decay clock survives restart (Inc1)
+        st.familiarity.update(saved.get("familiarity") or {})    # pre-acquaintance counters survive restart (Inc3)
         for m in saved.get("memory") or []:
             mm = st.memory.add(
                 m["text"],

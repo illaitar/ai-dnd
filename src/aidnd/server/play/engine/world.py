@@ -727,9 +727,46 @@ def _gossip(actor_st, actor_name: str, target_st) -> None:
 
 # Salience by REASON, not by a numeric threshold: these impulse-labels mean the NPC has a
 # concrete reason to act THIS tick (a live event, an owed answer, a due promise, a foreshadow
-# beat, a hot emotion, or overhearing the player) → it always gets an LLM turn, never rotated
-# out. The rest («беседа»/«нужда»/«агенда»/«фон») join the staggered background round-robin.
-_MUST_WHY = frozenset({"событие", "долг ответа", "слово", "тень дела", "эмоция", "услышал чужака"})
+# beat, a hot emotion, overhearing the player, or a sociable pull to greet a fresh face) → it
+# always gets an LLM turn, never rotated out. The rest («беседа»/«нужда»/«агенда»/«фон») join the
+# staggered background round-robin. «новичок» is sociability-GATED upstream (a wary room raises no
+# greet impulse, so nobody is pulled — §10 keeps it emergent, never a forced actor).
+_MUST_WHY = frozenset({"событие", "долг ответа", "слово", "тень дела", "эмоция",
+                       "услышал чужака", "новичок"})
+
+
+def _greet_impulse(sociability: float) -> float:
+    """Pull to approach a fresh face — sociability-gated: an unsociable NPC (≤0.5) feels none."""
+    return round(PB["greet_sociability_base"] * max(0.0, sociability - 0.5), 2)
+
+
+def _accrue_familiarity(st, other_id: str) -> None:
+    """One co-presence tick toward acquaintance. Below familiarity_k the counter just grows and the
+    other stays mechanically a STRANGER (no rel row — voice.py still reads 'never met'). At the K-th
+    tick a FAINT UNANCHORED tie appears (small affinity/trust; anchored=False → loose Inc1 decay,
+    fades if contact lapses until a real interaction anchors it), flipping `other ∈ relationships`
+    true so greetings warm. A person already known accrues nothing — the counter is pre-acquaintance
+    only. Applies to the PLAYER and NPC↔NPC alike."""
+    if other_id in st.relationships:
+        return
+    fam = st.familiarity
+    fam[other_id] = fam.get(other_id, 0) + 1
+    if fam[other_id] >= PB["familiarity_k"]:
+        aff = PB["familiarity_affinity"]
+        rel = st.rel(other_id)                           # setdefault → the faint tie now exists
+        rel["affinity"] = max(rel.get("affinity", 0.0), aff)
+        rel["trust"] = max(rel.get("trust", 0.0), aff)
+        rel["anchored"] = False                          # loose — not earned by a real interaction
+
+
+def _pick_newcomer(st, others, greeted: set) -> str | None:
+    """First co-present body this NPC has NEVER met (no rel row) and nobody has greeted yet — a
+    fresh face that can pull a sociable NPC to approach. A known person (rel row) or an
+    already-greeted newcomer is not a candidate (≤1 greeter/scene)."""
+    for other in others:
+        if other not in st.relationships and other not in greeted:
+            return other
+    return None
 
 
 def _active_budget(present: int) -> int:
@@ -1061,6 +1098,9 @@ def _live_tick(people) -> tuple:
     for _gpid, _gln in _fore.open_lines(order).items():  # offered/active givers: LINE for the whole
         fore.setdefault(_gpid, _gln)                     # open arc (no impulse spike — like oaths)
     impulses: dict = {}
+    greeted = lv.setdefault("greeted", set())              # newcomers already claimed this scene (≤1 greeter)
+    pc_here = PLAYER in w.bodies and (
+        w.bodies[PLAYER].place in inz if inz else w.bodies[PLAYER].place == lv["place"])
     for pid in order:
         st = w.npc_minds[pid]
         imp, why = 0.35, "фон"
@@ -1087,7 +1127,23 @@ def _live_tick(people) -> tuple:
         ph = _pc_said_impulse(pc_heard.get(pid, ""))
         if ph > imp:
             imp, why = ph, "услышал чужака"
-        imp += (st.config.traits.get("sociability", 0.5) - 0.5) * 0.5
+        # Inc3: a co-presence tick with every fresh face (builds toward a faint tie at
+        # familiarity_k), then a pull to GREET an un-met, un-greeted newcomer. The pull is
+        # sociability-gated (_greet_impulse: ≤0.5 → 0) so a wary room raises no greeter, and it only
+        # wins `why` when it beats the NPC's other impulses (a busy/afraid NPC won't drift off to say
+        # hi). NO forced actor: it flows through the normal impulse→_select_actors path (§10). The
+        # first sociable NPC to claim the newcomer marks it greeted → nobody else approaches (≤1).
+        soc = st.config.traits.get("sociability", 0.5)
+        copresent = ([PLAYER] if pc_here else []) + [q for q in order if q != pid]
+        for other in copresent:
+            _accrue_familiarity(st, other)
+        newcomer = _pick_newcomer(st, copresent, greeted)
+        if newcomer is not None:
+            gi = _greet_impulse(soc)
+            if gi > imp:
+                imp, why = gi, "новичок"
+                greeted.add(newcomer)                      # claimed — next sociable NPC sees it greeted
+        imp += (soc - 0.5) * 0.5
         impulses[pid] = (round(imp, 2), why)
     ranked_imp = sorted(order, key=lambda p: -impulses[p][0])
     # LOD LAYERS: not everyone thinks each tick. Small scenes — all; crowds — a rotating subset,

@@ -153,6 +153,7 @@ def _npc_save(pid: str) -> None:
             "relationships": st.relationships,
             "needs": st.needs,
             "last_decay_gt": st.last_decay_gt,           # Inc1 decay clock — grudges survive restart
+            "familiarity": st.familiarity,               # Inc3 pre-acquaintance counters — re-visits accumulate
             "memory": [
                 {
                     "text": m.text,

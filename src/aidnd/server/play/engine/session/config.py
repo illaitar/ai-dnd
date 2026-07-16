@@ -22,6 +22,14 @@ PB = {
     "decay_rel_anchored_days": 14,   # anchored-rel half-life (days) → faint prior (SLOW); ×(1+vengefulness)
     "decay_rel_loose_days": 2,       # unanchored-rel half-life (days) → 0 (LOOSE)
     "rel_faint_prior": 0.10,         # anchored affinity relaxes toward sign×this, not 0
+    # МОЗГ — Event projection: visceral + moral-lens channels (Inc2; mirrored in mind.project._K)
+    "ev_perc_l2": 0.6, "ev_perc_l3": 0.3,          # perception weight at audibility tier L2 / L3
+    "ev_harm_base": 0.6, "ev_harm_familiar": 0.4,  # visceral fear base + familiarity-with-actor lift
+    "ev_viol_damp": 0.5,                           # positive morals.violence damps witnessed-fear
+    "ev_empathy_care": 0.5,                        # empathy → care-for-target (distress for a stranger)
+    "ev_taboo_mult": 1.6,                          # outrage × when a tag ∈ witness taboos
+    "ev_approval_k": 0.25,                         # positive-stance → grim-satisfaction joy scale
+    "ev_rel_fear": 0.5, "ev_rel_aff": 0.4, "ev_warmth": 0.2,  # bystander rel-delta scales
     # MIND affect floor (docs/superpowers/specs/2026-07-15-brain-design.md §4.6): max ±delta a
     # feel/need tool may move a channel per call — model NUDGES, never sets (mind/llm_agent.py).
     "feel_nudge_cap": 0.25,

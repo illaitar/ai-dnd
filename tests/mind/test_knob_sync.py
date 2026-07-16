@@ -4,6 +4,7 @@ play layer, and value.py can't import play-layer PB — see decay.py:12 and valu
 guarded the three copies stayed equal. A future PB-only tune could silently drift mind/ out of sync
 with the play layer it mirrors. This is ONE guard test, not a restructure."""
 from aidnd.mind.decay import _K
+from aidnd.mind.project import _K as _PK
 from aidnd.mind.value import BAL
 from aidnd.server.play.engine.session.config import PB
 
@@ -16,6 +17,12 @@ _SHARED_DECAY_KEYS = (
 def test_decay_knobs_match_pb():
     for k in _SHARED_DECAY_KEYS:
         assert _K[k] == PB[k], f"mind.decay._K[{k!r}] ({_K[k]!r}) != PB[{k!r}] ({PB[k]!r})"
+
+
+def test_project_knobs_match_pb():
+    # every ev_* knob project.py mirrors must equal the canonical PB copy (Inc2, §4.6)
+    for k in _PK:
+        assert _PK[k] == PB[k], f"mind.project._K[{k!r}] ({_PK[k]!r}) != PB[{k!r}] ({PB[k]!r})"
 
 
 def test_feel_nudge_cap_matches_pb():

@@ -17,6 +17,11 @@ PB = {
     "start_gt": 19 * 60 + 40,
     "start_coins": 12,
     "step_min": 1,
+    # МОЗГ — affect two-speed lazy decay floor (Inc1; mirrored in mind.decay._K)
+    "decay_emo_days": 0.5,           # emotion half-life (days) → mood_baseline (FAST)
+    "decay_rel_anchored_days": 14,   # anchored-rel half-life (days) → faint prior (SLOW); ×(1+vengefulness)
+    "decay_rel_loose_days": 2,       # unanchored-rel half-life (days) → 0 (LOOSE)
+    "rel_faint_prior": 0.10,         # anchored affinity relaxes toward sign×this, not 0
     # MIND affect floor (docs/superpowers/specs/2026-07-15-brain-design.md §4.6): max ±delta a
     # feel/need tool may move a channel per call — model NUDGES, never sets (mind/llm_agent.py).
     "feel_nudge_cap": 0.25,

@@ -81,6 +81,7 @@ class NpcState:
     on_shift: float = 0.0                                # workplace 'keep working' purpose lift (set by live scene)
     mode_history: list = field(default_factory=list)     # [(tick, mode, switched, reason)] — history
     agendas: list = field(default_factory=list)          # long-term goals (LLM scheduler, mind/agenda)
+    last_decay_gt: int = 0                               # gt-min of the last decay_lazy (Inc1 clock)
 
     @classmethod
     def from_config(cls, cfg: NpcConfig, node: int | None = None) -> NpcState:
@@ -105,7 +106,8 @@ class NpcState:
                 "distress": max(0.0, -mood) * 0.15}.get(channel, 0.0)
 
     def rel(self, entity: str) -> dict:
-        return self.relationships.setdefault(entity, {"trust": 0.0, "affinity": 0.0, "fear": 0.0})
+        return self.relationships.setdefault(
+            entity, {"trust": 0.0, "affinity": 0.0, "fear": 0.0, "anchored": False})
 
     def view(self) -> dict:
         return {"id": self.config.id, "name": self.config.name, "role": self.config.role,

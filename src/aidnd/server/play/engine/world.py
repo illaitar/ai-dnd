@@ -837,7 +837,14 @@ def _select_actors(ranked_imp: list, impulses: dict, lv: dict) -> list:
     budget = _active_budget(present)
     if present <= budget:
         return ranked_imp
-    must = {p for p in ranked_imp if impulses[p][1] in _MUST_WHY}
+    must_ranked = [p for p in ranked_imp if impulses[p][1] in _MUST_WHY]   # already impulse-ordered
+    hard = PB["live_hard_cap"]
+    if len(must_ranked) >= hard:
+        # a drama wave (e.g. menace fanning "эмоция" across a whole tavern) can dwarf the LOD
+        # budget by 10x — cap the wave itself. Dropped must-actors are NOT lost: their impulse
+        # doesn't decay here, so they simply surface again (likely still "must") next tick.
+        return must_ranked[:hard]
+    must = set(must_ranked)
     bg = sorted((p for p in ranked_imp if p not in must), key=str)  # stable order for fair rotation
     slots = max(0, budget - len(must))
     if bg and slots < len(bg):

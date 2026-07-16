@@ -340,11 +340,11 @@ Sequencing: 1 before 2 (the bus writes affect that must have a floor); 3–6 ind
 
 ---
 
-## 10. Open questions
-- **Decay half-lives** — is `decay_rel_anchored_days = 14` the right "weeks" feel, or should it scale with `vengefulness` (a vindictive NPC's grudge decays even slower)? (Enrichment spec §3.1 flags `vengefulness → slower grudge decay`.)
-- **Dominant-tag selection** — first-in-`TAG_AXIS` (severity order) vs the tag with the strongest |stance| for that witness (a theft-hating pacifist scoring `воровство` over `насилие` on a mugging). Start with severity order; revisit if lands feel off.
-- **self_regard in voice** — settled *yes* (folded into the NATURE line); open whether it should also gate a distinct "boast" beat when `self_regard > 0.8`.
-- **Greet vs LOD** — should the greet impulse force the newcomer's greeter into the LLM actor set even in a crowd (bypassing `_select_actors`)? Leaning yes for the player (guarantees *someone* greets a fresh player), emergent for NPC-NPC.
+## 10. Resolved (user, 2026-07-16)
+- **Decay half-lives → RESOLVED: scale anchored-grudge decay with `vengefulness`.** `decay_rel_anchored_days` becomes a per-NPC value: `PB.decay_rel_anchored_days × (1 + vengefulness)` (a vindictive NPC at vengefulness 0.8 → grudge half-life ≈ 25 days vs 14 baseline; a forgiving 0.1 → ≈15). fear/loose decay unchanged.
+- **Greet vs LOD → RESOLVED: NO guarantee.** The greet impulse is fully emergent for player AND NPC-NPC — it does NOT force the greeter into the LLM actor set. If LOD rotation and sociability don't pick a greeter this tick, no one greets (frontier wariness). The impulse only *raises the odds* a curious/host NPC is selected.
+- **self_regard in voice → RESOLVED: yes, a distinct boast beat.** When `self_regard > 0.8`, the voice bits gain a swagger/boast line (NPC talks bigger than warranted), in addition to folding self_regard into the nature line.
+- **Dominant-tag selection** — first-in-`TAG_AXIS` (severity order). Start there; revisit in playtest if lands feel off.
 
 ---
 

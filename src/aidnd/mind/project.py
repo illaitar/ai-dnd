@@ -91,11 +91,14 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
     goal_impact = -event.target_harm * care + approval
     control = BRAIN["ev_control_brave"] * float(traits.get("bravery", 0.5))
 
-    # is_victim requires an actual violation signal (mapped tag or physical threat), not merely
-    # target==witness — a bare structural match also covers gift recipients ("дар", untagged in
-    # TAG_AXIS) and self-directed co-presence reads ("видит"), which must stay unharmed/no-op.
+    # is_victim requires an actual violation signal (mapped tag, physical threat, or real harm done),
+    # not merely target==witness — a bare structural match also covers gift recipients ("дар",
+    # untagged in TAG_AXIS) and self-directed co-presence reads ("видит"), which must stay
+    # unharmed/no-op. target_harm>0 is definitionally a victim even under a future unmapped tag
+    # (poisoning/trap); gifts/co-presence carry harm 0 and never overlap beneficiary (harm<=0).
     is_victim = bool(event.target and event.target == witness_state.config.id
-                     and (dom is not None or event.physical_threat > 0.0))
+                     and (dom is not None or event.physical_threat > 0.0
+                          or event.target_harm > 0.0))
 
     if is_victim:                                    # VICTIM branch (U1, §3b) — the one struck
         harm = harm * BRAIN["ev_victim_harm_mult"]   # 0 stays 0 → no fear on a threatless crime

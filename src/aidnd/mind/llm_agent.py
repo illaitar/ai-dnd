@@ -27,14 +27,7 @@ from ..inference import LLMBadOutput
 from .act import score
 from .agenda import Agenda, Milestone
 from .appraisal import _race_rel, appraise_present
-from .tunables import BRAIN  # feel_nudge_cap single-sourced (U4); play-layer PB would cycle
-
-
-def _nudge(cur: float, want: float) -> float:
-    """feel/need tools NUDGE a channel by at most ±feel_nudge_cap, never overwrite it outright
-    (spec §5 E) — a model reply can no longer erase a justified grudge or hunger in one call."""
-    cap = BRAIN["feel_nudge_cap"]
-    return round(max(0.0, min(1.0, cur + max(-cap, min(cap, want - cur)))), 6)
+from .project import _land  # U3: feel/need self-events land through the one sink
 
 NEED_RU = {"fatigue": "усталость", "hunger": "голод", "social": "тяга к общению",
            "purpose": "нужда в деле", "wealth": "жажда наживы", "comfort": "тяга к уюту",
@@ -485,12 +478,16 @@ def apply_actions(actions, state, world, clock: int) -> list:
         elif tool == "feel":
             e, v = a.get("emotion"), a.get("value")
             if e in state.emotion and isinstance(v, (int, float)):
-                state.emotion[e] = _nudge(state.emotion.get(e, 0.0), float(v))
+                ev = Event(state.config.id, state.config.id,          # self-event (U3): actor==target==me
+                           abs(float(v) - state.emotion.get(e, 0.0)), 0.0, 0.0, ["чувство"])
+                _land(state, {}, {}, source=ev.actor, feel={"channel": e, "want": float(v)})
                 log.append(f"~{EMO_RU.get(e, e)}={v}")
         elif tool == "need":
             n, v = a.get("need"), a.get("value")
             if n in state.needs and isinstance(v, (int, float)):
-                state.needs[n] = _nudge(state.needs.get(n, 0.0), float(v))
+                ev = Event(state.config.id, state.config.id,          # self-event (U3): a felt need
+                           abs(float(v) - state.needs.get(n, 0.0)), 0.0, 0.0, ["нужда"])
+                _land(state, {}, {}, source=ev.actor, feel={"channel": n, "want": float(v), "need": True})
                 log.append(f"~{NEED_RU.get(n, n)}={v}")
         elif tool == "note":
             state.memory.add(str(a.get("text", ""))[:120], clock, importance=0.5, kind="note")

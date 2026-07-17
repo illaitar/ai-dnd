@@ -132,13 +132,30 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
     return {"dims": dims, "rel": rel}
 
 
-def _land(state, dims, rel, source=None, seed=None) -> None:
-    """THE apply sink (U2). Every writer — the fan-out, co-presence, (U3) self-feeling — lands its
+def _nudge(cur: float, want: float) -> float:
+    """A feel/need tool NUDGES a channel by at most ±feel_nudge_cap, never overwrites it (spec §5-U3)
+    — a model reply cannot erase a justified grudge or hunger in one call."""
+    cap = BRAIN["feel_nudge_cap"]
+    return round(max(0.0, min(1.0, cur + max(-cap, min(cap, want - cur)))), 6)
+
+
+def _land(state, dims, rel, source=None, seed=None, feel=None) -> None:
+    """THE apply sink (U2/U3). Every writer — the fan-out, co-presence, (U3) self-feeling — lands its
     already-projected `dims`/`rel` on ONE witness through here, so emotion/emotion_target/relationships
     are mutated in exactly one place. `dims` → tick.appraise (×emotion_gain); `rel` → the bystander/
     victim/beneficiary relationship writes (keyed on `source`); `seed` (co-presence only) → the
-    once-only relationship prior + memory note. Zero LLM. Spec §3b/§5-U2."""
+    once-only relationship prior + memory note. `feel` (U3): a self-feeling self-event
+    {"channel","want","need"} — nudge the named channel by ±feel_nudge_cap and self-target it, NOT
+    an appraisal of an external act. Zero LLM. Spec §3b/§5-U2/§5-U3."""
     from .tick import appraise  # local import: mind/tick imports model → avoid a load cycle
+
+    if feel is not None:                                 # SELF-FEELING arm (U3) — nudge, not appraise
+        channel, want = feel["channel"], feel["want"]
+        pool = state.needs if feel.get("need") else state.emotion
+        pool[channel] = _nudge(pool.get(channel, 0.0), want)
+        if not feel.get("need") and source:
+            state.emotion_target[channel] = source       # an emotion self-targets (channel = me)
+        return
 
     appraise(state, dims, source=source)
     if source:

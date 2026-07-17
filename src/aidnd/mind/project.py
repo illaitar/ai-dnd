@@ -132,20 +132,51 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
     return {"dims": dims, "rel": rel}
 
 
+def _land(state, dims, rel, source=None, seed=None) -> None:
+    """THE apply sink (U2). Every writer — the fan-out, co-presence, (U3) self-feeling — lands its
+    already-projected `dims`/`rel` on ONE witness through here, so emotion/emotion_target/relationships
+    are mutated in exactly one place. `dims` → tick.appraise (×emotion_gain); `rel` → the bystander/
+    victim/beneficiary relationship writes (keyed on `source`); `seed` (co-presence only) → the
+    once-only relationship prior + memory note. Zero LLM. Spec §3b/§5-U2."""
+    from .tick import appraise  # local import: mind/tick imports model → avoid a load cycle
+
+    appraise(state, dims, source=source)
+    if source:
+        if rel.get("actor_fear", 0.0) > 0.0:
+            r = state.rel(source)
+            r["fear"] = max(r.get("fear", 0.0), rel["actor_fear"])
+            r["anchored"] = r.get("anchored", False) or rel.get("anchored", False)
+        if rel.get("victim_affinity") is not None:               # the victim's anchored grudge (U1)
+            r = state.rel(source)
+            r["affinity"] = min(r.get("affinity", 0.0), rel["victim_affinity"])
+            r["anchored"] = True
+        if rel.get("target_warmth", 0.0) > 0.0 and rel.get("beneficiary"):
+            r = state.rel(source)                                # beneficiary warms toward the giver
+            r["affinity"] = max(-1.0, min(1.0, r.get("affinity", 0.0) + rel["target_warmth"]))
+            r["anchored"] = True
+    if seed is not None and source:                              # co-presence once-seed (U2)
+        if seed.get("once") and source in state.relationships:
+            return                                               # already know them — no re-seed
+        prior = seed.get("prior")
+        if prior is not None:
+            state.relationships[source] = dict(prior)
+            remember = seed.get("remember")
+            if remember:
+                state.memory.add(remember, seed.get("clock", 0), importance=0.4, about=[source])
+
+
 def project_and_apply(event: Event, witnesses, perceive) -> None:
     """Land one Event on every witness who perceived it — the fan-out (МОЗГ Inc2, spec §3b).
 
     ``perceive(witness_state) -> perc[0..1]`` maps a witness to its perception tier weight from the
     audibility/sight machinery (same-zone/co-present → 1.0, farther → ev_perc_l2/l3, unperceived →
     0). For each perceiving witness (the actor never appraises its own act here): project the
-    signature, apply the PRE-gain ``dims`` through ``tick.appraise`` (which multiplies each channel
-    by the witness's ``emotion_gain``), then write the bystander relationship deltas onto the Inc1
-    floor — fear-of-actor (loose unless the witness IS the target → anchored grudge), and, for a
-    non-harmful act (a gift), warmth from the *beneficiary* toward the *giver* (gratitude; bystanders
-    unmoved). Zero LLM — pure arithmetic per witness. Not every tick carries an Event; cost is bounded
-    to the co-present crowd of a real act."""
-    from .tick import appraise  # local import: mind/tick imports model → avoid a load cycle
-
+    signature, then land the PRE-gain ``dims``/``rel`` onto the witness through ``_land`` — the ONE
+    apply sink (tick.appraise, which multiplies each channel by the witness's ``emotion_gain``, then
+    the bystander relationship deltas: fear-of-actor (loose unless the witness IS the target →
+    anchored grudge), and, for a non-harmful act (a gift), warmth from the *beneficiary* toward the
+    *giver* (gratitude; bystanders unmoved)). Zero LLM — pure arithmetic per witness. Not every tick
+    carries an Event; cost is bounded to the co-present crowd of a real act."""
     for w in witnesses:
         if event.actor and w.config.id == event.actor:
             continue
@@ -154,17 +185,4 @@ def project_and_apply(event: Event, witnesses, perceive) -> None:
             continue                                        # didn't hear/see → no delta at all
         aff_t = float(w.rel(event.target).get("affinity", 0.0)) if event.target else 0.0
         out = project_event(event, w, perc, affinity_target=aff_t)
-        appraise(w, out["dims"], source=event.actor)
-        r = out["rel"]
-        if r["actor_fear"] > 0.0 and event.actor:
-            rel = w.rel(event.actor)
-            rel["fear"] = max(rel.get("fear", 0.0), r["actor_fear"])
-            rel["anchored"] = rel.get("anchored", False) or r["anchored"]
-        if r.get("victim_affinity") is not None and event.actor:   # U1: the victim's anchored grudge
-            rel = w.rel(event.actor)
-            rel["affinity"] = min(rel.get("affinity", 0.0), r["victim_affinity"])
-            rel["anchored"] = True
-        if r["target_warmth"] > 0.0 and event.actor and r.get("beneficiary"):
-            rt = w.rel(event.actor)                         # beneficiary warms toward the giver
-            rt["affinity"] = max(-1.0, min(1.0, rt.get("affinity", 0.0) + r["target_warmth"]))
-            rt["anchored"] = True                            # gift acceptance is a real interaction
+        _land(w, out["dims"], out["rel"], source=event.actor)

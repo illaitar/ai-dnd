@@ -116,21 +116,19 @@ def appraise_present(state: NpcState, world, percept, race_rel: dict, skip_seed_
     trust. Emotion still updates each tick either way — only the silent relationship-prior /
     memorable-note seeding is skipped for them.
     """
-    from .tick import appraise  # local import: avoids a module-load cycle with tick.py
+    from .project import _land  # local import: project imports tick → keep it lazy, no load cycle
 
     clock = getattr(world, "clock", 0)
     for other in percept.present:
         if other.id == state.config.id:
             continue
         imp = impression(state, other, race_rel)
-        appraise(state, imp.emo, source=other.id)
-        if other.id in state.relationships:
-            continue                                    # already know them — no re-seed, no re-remember
-        if other.id == skip_seed_id:
-            continue                                     # stranger stays a stranger from mere sight
-        state.relationships[other.id] = dict(imp.prior)
-        if imp.remember:
-            state.memory.add(imp.remember, clock, importance=0.4, about=[other.id])
+        seed = None
+        if other.id not in state.relationships and other.id != skip_seed_id:
+            seed = {"prior": imp.prior, "remember": imp.remember, "clock": clock, "once": True}
+        # the flat presence read is the payload (a bare Event carries no appearance/armed/charisma →
+        # would DESTROY the tier-a/b/c content); _land is the ONE sink for the mutation (§5-U2).
+        _land(state, imp.emo, rel={}, source=other.id, seed=seed)
 
 
 def impression(observer: NpcState, other: Body, race_rel: dict) -> Impression:

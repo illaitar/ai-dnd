@@ -14,7 +14,9 @@ from aidnd.inference import LLMBadOutput, LLMUnavailable
 from aidnd.mind import Body, advance_agendas
 from aidnd.mind import Item as MItem
 from aidnd.mind import World as MWorld
+from aidnd.mind import attention as _attn
 from aidnd.mind import perceive as mind_perceive
+from aidnd.mind import social as _social
 from aidnd.mind.llm_agent import apply_actions, decide_hybrid, plan_agenda
 from aidnd.mind.tick import _decay_emotion, _decay_needs
 from aidnd.server.play.engine.core import (
@@ -98,34 +100,19 @@ def _body_power(cfg) -> float:
     return float(combat) if combat is not None else 1.0
 
 
-_ATT_MULT = {"asleep": "att_asleep", "drunk": "att_drunk",
-             "absorbed": "att_absorbed", "alert": "att_alert"}
-
-
 def _activity_of(state, gt: int) -> str:
-    """Coarse current-activity label driving the attention multiplier (§6/§3c). Derived from the
-    REAL runtime signals on NpcState — mode / on_shift / the game clock / current fear / role.
-    There is NO drunkenness signal yet, so the 'drunk' arm is unreachable from here (the knob stays
-    for the §4.6 set + the _activity= unit seam); refine when a tipsy need/flag lands."""
-    mode = getattr(state, "mode", "leisure")
-    if mode == "routine" and _phase(gt) == "night":                 # abed at home in the dark → dead to the world
-        return "asleep"
-    if (mode == "threat" or state.emotion.get("fear", 0.0) >= 0.6   # frightened / on-guard / a watchman on his beat
-            or state.config.role == "стражник"):
-        return "alert"
-    if mode == "converse" or getattr(state, "on_shift", 0.0) > 0.0:  # deep in talk / heads-down at the bench
-        return "absorbed"
-    return "alert"                                                   # up-and-about, ordinary watchfulness
+    """Play-side call-through (U5): resolves the day phase from the play clock and delegates to
+    aidnd.mind.attention._activity_of. Kept as world._activity_of so existing tests/callers hold."""
+    return _attn._activity_of(state, gt, _phase(gt))
 
 
 def _body_attention(cfg, state=None, _activity=None) -> float:
-    """Vigilance (§3.9 → C11) × current-activity multiplier (§6, Pillar 2), clamped [0.05, 1.0].
-    A sleeping/absorbed target dips below the value.py 0.4 theft window so take_distracted fires;
-    an alert guard caps at 1.0. Re-read per scene build so activity is live. Un-enriched vig → 0.5.
-    `_activity` overrides the derivation (unit seam for the multiplier table)."""
-    vig = float((getattr(cfg, "perception", None) or {}).get("vigilance", 0.5))
-    act = _activity or (_activity_of(state, _gt()) if state is not None else "alert")
-    return max(0.05, min(1.0, vig * PB[_ATT_MULT.get(act, "att_alert")]))
+    """Play-side call-through (U5): supplies the play clock (_gt/_phase) to the moved
+    aidnd.mind.attention._body_attention only when the runtime derivation is actually needed."""
+    if _activity is None and state is not None:
+        gt = _gt()
+        return _attn._body_attention(cfg, state, gt=gt, phase=_phase(gt))
+    return _attn._body_attention(cfg, state, _activity=_activity)
 
 
 def _body_faction(cfg) -> str:
@@ -761,60 +748,19 @@ _MUST_WHY = frozenset({"событие", "долг ответа", "слово", 
 
 
 def _greet_impulse(sociability: float) -> float:
-    """Pull to approach a fresh face — sociability-gated: an unsociable NPC (≤0.5) feels none."""
-    return round(PB["greet_sociability_base"] * max(0.0, sociability - 0.5), 2)
+    return _social._greet_impulse(sociability)
 
 
 def _accrue_familiarity(st, other_id: str) -> None:
-    """One co-presence tick toward acquaintance. Below familiarity_k the counter just grows and the
-    other stays mechanically a STRANGER (no rel row — voice.py still reads 'never met'). At the K-th
-    tick a FAINT UNANCHORED tie appears (small affinity/trust; anchored=False → loose Inc1 decay,
-    fades if contact lapses until a real interaction anchors it), flipping `other ∈ relationships`
-    true so greetings warm. A person already known accrues nothing — the counter is pre-acquaintance
-    only. In PRACTICE the K-tick path is live mainly for the PLAYER: NPC↔NPC pairs are already seeded
-    by the pre-acquaintance loop (_live_build) / appraise_present before accrual matters, so a townsfolk
-    pair rarely reaches here un-related — the player is the one persistent stranger this warms."""
-    if other_id in st.relationships:
-        return
-    # NB: st.familiarity is UNBOUNDED — no cap/eviction (consistent with the deferred memory-pruning
-    # non-goal, spec §2/§9); every fresh face ever co-present keeps a counter. Backlog: cap/evict later.
-    fam = st.familiarity
-    fam[other_id] = fam.get(other_id, 0) + 1
-    if fam[other_id] >= PB["familiarity_k"]:
-        aff = PB["familiarity_affinity"]
-        rel = st.rel(other_id)                           # setdefault → the faint tie now exists
-        rel["affinity"] = max(rel.get("affinity", 0.0), aff)
-        rel["trust"] = max(rel.get("trust", 0.0), aff)
-        rel["anchored"] = False                          # loose — not earned by a real interaction
+    _social._accrue_familiarity(st, other_id)
 
 
 def _greeted_toward(d: dict, newcomer: str, w) -> bool:
-    """Did this decision actually GREET the newcomer — a say directed at them, or a move ONTO their
-    spot (an approach)? The ≤1-greeter lock keys on THIS (Fix B), not on mere selection: a drawn NPC
-    that instead ate/worked/waited leaves the slot open for another to greet. The mind speaks through
-    its own voice — code only READS whether the greeting happened, never fabricates the line."""
-    for a in (d.get("actions") or []):
-        if not isinstance(a, dict):
-            continue
-        tool = a.get("tool")
-        if tool == "say" and str(a.get("text") or "").strip():
-            tgt = str(a.get("to") or "").strip()
-            if (getattr(w, "aliases", None) or {}).get(tgt.lower(), tgt) == newcomer:
-                return True
-        elif tool == "move" and a.get("to"):
-            if newcomer in w.bodies and str(a["to"]) == w.bodies[newcomer].place:
-                return True
-    return False
+    return _social._greeted_toward(d, newcomer, w)
 
 
 def _pick_newcomer(st, others, greeted: set) -> str | None:
-    """First co-present body this NPC has NEVER met (no rel row) and nobody has greeted yet — a
-    fresh face that can pull a sociable NPC to approach. A known person (rel row) or an
-    already-greeted newcomer is not a candidate (≤1 greeter/scene)."""
-    for other in others:
-        if other not in st.relationships and other not in greeted:
-            return other
-    return None
+    return _social._pick_newcomer(st, others, greeted)
 
 
 def _active_budget(present: int) -> int:

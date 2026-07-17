@@ -425,7 +425,7 @@ def apply_actions(actions, state, world, clock: int) -> list:
                 got = tb.loot.pop(0)
                 me.loot.append(got)
                 _fanout(world, Event(me.id, tb.id, 0.4, 0.0, 0.0, ["воровство"], zone=me.place),
-                        me.place, exclude=(tb.id,))
+                        me.place, exclude=())            # U1: victim included → hits victim branch
                 log.append(f"💰{got.name}")
             else:
                 it = _find_item(world.ground.get(me.place, []), a.get("item"))

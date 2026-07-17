@@ -20,13 +20,10 @@ from aidnd.server.play.engine.core import (
     PLAYER,
     _gt,
     _gt_add,
-    _here,
-    _mt,
-    _npc_save,
     _pc_remember,
     _store,
-    _wanted_add,
     _wid,
+    _witness_crime,
     router,
 )
 from aidnd.server.play.engine.resolve import _voice
@@ -52,26 +49,15 @@ async def steal(request: Request):
     dc = PB["steal_dc_base"] + round(att * PB["steal_dc_att"])
     _gt_add(PB["act_min"])
     if roll + _PC_CAP.mod("dex") < dc:  # CAUGHT
+        # U1/last-two-warts: ride the SAME funnel the other crime sites use — victim affect (anger,
+        # anchored grudge, affinity floor) now owned by project_event's victim branch, not hand-written
+        # here; bystanders get their memory line; wanted+karma stain applied inside.
+        wit = _witness_crime(people, crof, loc, npc, "лез мне в карман", weight=PB["crime_pickpocket"])
         rel = p.state.rel(PLAYER)
-        rel["affinity"] = min(rel["affinity"], -0.5)
-        rel["anchored"] = True                           # пойманная кража — обида жертвы (медленный спад)
-        p.state.emotion["anger"] = min(1.0, p.state.emotion.get("anger", 0) + 0.7)
-        p.state.emotion_target["anger"] = PLAYER
-        p.state.memory.add(
-            "поймал(а) игрока, когда тот лез мне в карман!", _mt(), 0.9, about=[PLAYER]
-        )
-        wit = [w for w in _here(loc, crof) if w != npc]
-        for w in wit:
-            people[w].state.memory.add(
-                f"видел(а), как чужак лез в карман к {p.name}", _mt(), 0.6, about=[PLAYER, npc]
-            )
-            _npc_save(w)
-        _pc_remember(f"попался на краже у {p.name} — при {len(wit)} свидетелях", 0.7, about=[npc])
-        _npc_save(npc)
-        _wanted_add(PB["crime_pickpocket"] + min(3, len(wit)), "попался на карманной краже")
+        _pc_remember(f"попался на краже у {p.name} — при {wit} свидетелях", 0.7, about=[npc])
         return {
             "caught": True,
-            "witnesses": len(wit),
+            "witnesses": wit,
             "line": _voice(p, rel, "reply", "(Ты поймал этого человека за руку в своём кармане!)"),
             "gt": _gt(),
         }

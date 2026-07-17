@@ -13,7 +13,7 @@ import pytest
 
 from aidnd.mind import NpcConfig, NpcState
 from aidnd.mind.decay import decay_scene_entrants
-from aidnd.mind.world import Body, World
+from aidnd.mind.world import Body, Item, World
 from aidnd.server.play.engine import core
 from aidnd.server.play.engine.pc.hero import _npc_save
 from aidnd.server.play.engine.session import persist
@@ -65,6 +65,30 @@ def test_attack_write_gives_victim_anger_not_only_fear():
     assert victim.emotion["fear"] == pytest.approx(0.59, abs=0.02)  # U1 victim tier (was raw 0.6)
     assert victim.emotion["anger"] >= 0.6                     # retaliation drive, not just flight
     assert victim.emotion_target["anger"] == "npc:att"
+
+
+# ── 1c. NPC-on-NPC theft anchors the victim too — the take fan must not exclude them ─────
+def test_take_write_anchors_victim_not_bystander():
+    """The attack fan (:418) was un-excluded in U1 so the struck NPC hits the victim branch. The
+    take fan (:427-428) still passed `exclude=(tb.id,)`, so a robbed NPC got NO victim treatment —
+    only a bystander could ever feel the theft. `exclude=()` (matching attack) must let the theft
+    Event reach the victim branch too: anger + an anchored grudge, no fear (threat=0)."""
+    from aidnd.mind.llm_agent import apply_actions
+
+    thief = _state("npc:att")
+    victim = _state("npc:vic")
+    bystander = _state("npc:by")
+    w = World()
+    w.add(Body(id="npc:att", place="площадь"))
+    w.add(Body(id="npc:vic", place="площадь", loot=[Item(name="кошель")]))
+    w.add(Body(id="npc:by", place="площадь"))
+    w.npc_minds = {"npc:att": thief, "npc:vic": victim, "npc:by": bystander}
+
+    apply_actions([{"tool": "take", "target": "npc:vic"}], thief, w, clock=1)
+
+    assert victim.rel("npc:att")["anchored"] is True          # прямая кража → медленный носитель
+    assert victim.emotion["anger"] > 0.0                      # жертва злится, а не просто запоминает
+    assert victim.rel("npc:att")["affinity"] < 0.0            # обида, не только память
 
 
 # ── 2. crime-victim grudge is anchored; a bystander gets only memory → unanchored ───────

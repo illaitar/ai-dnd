@@ -89,26 +89,42 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
         approval = max(0.0, stance) * event.intensity * perc * BRAIN["ev_approval_k"]
 
     goal_impact = -event.target_harm * care + approval
+    control = BRAIN["ev_control_brave"] * float(traits.get("bravery", 0.5))
+
+    # is_victim requires an actual violation signal (mapped tag or physical threat), not merely
+    # target==witness — a bare structural match also covers gift recipients ("дар", untagged in
+    # TAG_AXIS) and self-directed co-presence reads ("видит"), which must stay unharmed/no-op.
+    is_victim = bool(event.target and event.target == witness_state.config.id
+                     and (dom is not None or event.physical_threat > 0.0))
+
+    if is_victim:                                    # VICTIM branch (U1, §3b) — the one struck
+        harm = harm * BRAIN["ev_victim_harm_mult"]   # 0 stays 0 → no fear on a threatless crime
+        goal_impact = min(goal_impact, -BRAIN["ev_victim_gi"])    # floor → distress + couples anger
+        desert = min(desert, -BRAIN["ev_victim_desert"])          # floor → deserved-anger fires
+        control = 0.0                                # no bravery agency-dampening under the blow
 
     dims = {
         "goal_impact": goal_impact,     # >0 grim satisfaction → joy; <0 distress/grief
         "desert": desert,               # stance sign gates anger in appraise (deserved → no anger)
         "harm": harm,                   # visceral danger → fear (appraise: harm×(1−control))
-        "fear": harm,                   # NB: appraise derives fear from `harm`; this key is NOT
-                                         # read — do not wire it or fear double-counts (kept only
-                                         # because test_project_event.py asserts on it pre-gain)
+        "fear": harm,                   # NB: appraise derives fear from `harm`; this key is NOT read
         "revulsion": outrage,           # → disgust in appraise
         "intent": True,                 # a witnessed act is deliberate
-        "control": BRAIN["ev_control_brave"] * float(traits.get("bravery", 0.5)),
-        # ^ agency dampens fear/distress in appraise (fear/distress × (1−control)); bravery 1.0 → −60%,
-        # 0.5 (default) → −30%, 0 → full fear. norm (reparative-act channel) still awaits its emitter —
-        # left un-wired here on purpose, do not touch.
+        "control": control,             # agency dampens fear/distress in appraise (0 for the victim)
     }
     rel = {
-        "actor_fear": harm * BRAIN["ev_rel_fear"] if event.actor else 0.0,
+        "actor_fear": ((BRAIN["ev_victim_rel_fear"] if is_victim and event.physical_threat > 0.0
+                        else harm * BRAIN["ev_rel_fear"]) if event.actor else 0.0),
         "target_warmth": (BRAIN["ev_warmth"] * care
                           if event.target and event.target_harm <= 0.0 else 0.0),
-        "anchored": bool(event.target and event.target == witness_state.config.id),
+        "anchored": is_victim,
+        # NEW (U1): the grudge affinity ceiling the raw block wrote by hand; applied in the apply loop
+        "victim_affinity": (-BRAIN["ev_victim_aff"] if is_victim else None),
+        # NEW: gates gift-warmth to the beneficiary only (was the apply-loop `w == event.target` check)
+        # `not is_victim` keeps a victim's grudge from being watered down by warmth on a threatless
+        # crime (theft: target_harm==0 too) — a real victim event never also counts as a gift.
+        "beneficiary": bool(event.target and event.target == witness_state.config.id
+                            and event.target_harm <= 0.0 and not is_victim),
     }
     return {"dims": dims, "rel": rel}
 
@@ -141,7 +157,11 @@ def project_and_apply(event: Event, witnesses, perceive) -> None:
             rel = w.rel(event.actor)
             rel["fear"] = max(rel.get("fear", 0.0), r["actor_fear"])
             rel["anchored"] = rel.get("anchored", False) or r["anchored"]
-        if r["target_warmth"] > 0.0 and event.actor and w.config.id == event.target:
+        if r.get("victim_affinity") is not None and event.actor:   # U1: the victim's anchored grudge
+            rel = w.rel(event.actor)
+            rel["affinity"] = min(rel.get("affinity", 0.0), r["victim_affinity"])
+            rel["anchored"] = True
+        if r["target_warmth"] > 0.0 and event.actor and r.get("beneficiary"):
             rt = w.rel(event.actor)                         # beneficiary warms toward the giver
             rt["affinity"] = max(-1.0, min(1.0, rt.get("affinity", 0.0) + r["target_warmth"]))
-            rt["anchored"] = True                            # gift acceptance is a real interaction (spec §4.3)
+            rt["anchored"] = True                            # gift acceptance is a real interaction

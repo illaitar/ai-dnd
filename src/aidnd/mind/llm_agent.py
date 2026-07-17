@@ -413,23 +413,16 @@ def apply_actions(actions, state, world, clock: int) -> list:
                 if tb.hp <= 0:
                     tb.alive = False
                 vs = world.npc_minds.get(tb.id) if hasattr(world, "npc_minds") else None
-                if vs is not None:
-                    r = vs.rel(me.id)
-                    r["fear"] = max(r["fear"], 0.85)
-                    r["affinity"] = min(r["affinity"], -0.3)
-                    r["anchored"] = True                 # прямое насилие → стойкая обида (медленный спад)
-                    vs.emotion["fear"] = min(1.0, vs.emotion.get("fear", 0.0) + 0.6)
-                    vs.emotion_target["fear"] = me.id
-                    vs.emotion["anger"] = min(1.0, vs.emotion.get("anger", 0.0) + 0.6)
-                    vs.emotion_target["anger"] = me.id
-                    vs.memory.add(f"{me.id} напал на меня", clock, importance=0.9, kind="event", about=[me.id])
+                if vs is not None:                       # U1: affect owned by project_event's victim
+                    vs.memory.add(f"{me.id} напал на меня", clock, importance=0.9,  # branch now; keep
+                                  kind="event", about=[me.id])                        # the memory line
                 killed = tb.down()
                 _fanout(world,           # bystanders feel it; the victim's affect was written above
                         Event(me.id, tb.id, 0.9 if killed else 0.6, 0.7 if killed else 0.5,
                               1.0 if killed else min(1.0, 6 / max(1, tb.hp + 6)),
                               (["убийство", "насилие", "смерть"] if killed else ["насилие"]),
                               zone=me.place),
-                        me.place, exclude=(tb.id,))
+                        me.place, exclude=())            # U1: victim included → hits the victim branch
                 log.append(f"⚔{tb.id}" + ("☠" if tb.down() else f"→hp{tb.hp}"))
             else:
                 log.append("attack✗")

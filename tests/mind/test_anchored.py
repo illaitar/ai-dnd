@@ -62,7 +62,7 @@ def test_attack_write_gives_victim_anger_not_only_fear():
 
     apply_actions([{"tool": "attack", "target": "npc:vic"}], attacker, w, clock=1)
 
-    assert victim.emotion["fear"] >= 0.6
+    assert victim.emotion["fear"] == pytest.approx(0.59, abs=0.02)  # U1 victim tier (was raw 0.6)
     assert victim.emotion["anger"] >= 0.6                     # retaliation drive, not just flight
     assert victim.emotion_target["anger"] == "npc:att"
 

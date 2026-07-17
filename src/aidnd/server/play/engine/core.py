@@ -398,14 +398,11 @@ def _witness_crime(people, crof, loc, npc, what: str, weight: int = 2) -> int:
     """Crime in plain sight: victim enraged, witnesses record memory (gossip spreads),
     wanted points grow (victim reports + more eyes = hotter)."""
     p = people[npc]
-    rel = p.state.rel(PLAYER)
-    rel["affinity"] = min(rel["affinity"], -0.5)
-    rel["anchored"] = True                               # обида жертвы — медленный носитель (§4.3)
-    p.state.emotion["anger"] = min(1.0, p.state.emotion.get("anger", 0) + 0.7)
-    p.state.emotion_target["anger"] = PLAYER
     p.state.memory.add(f"чужак {what} — я этого не забуду!", _mt(), 0.9, about=[PLAYER])
-    wit = [w for w in _here(loc, crof) if w != npc]
-    _crime_affect(people, wit, npc, what, loc)               # МОЗГ Inc2: bystanders FEEL it, not only remember
+    wit = [w for w in _here(loc, crof) if w != npc]         # bystanders (memory + wanted below)
+    # U1: the victim rides the SAME fan-out — target=npc hits project_event's victim branch; affect
+    # (grudge + anger/fear) is owned there now, no hand-write. Bystanders still only remember.
+    _crime_affect(people, [npc] + wit, npc, what, loc)
     for w in wit:
         people[w].state.memory.add(
             f"видел(а): чужак {what} ({p.name})", _mt(), 0.6, about=[PLAYER, npc]

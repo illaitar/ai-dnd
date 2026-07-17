@@ -14,9 +14,9 @@ _ORIG_RANDOM = random.Random
 
 
 class _P:
-    def __init__(self, name, role, traits):
+    def __init__(self, pid, name, role, traits):
         self.name, self.role, self.work, self.persona = name, role, None, {}
-        cfg = NpcConfig()
+        cfg = NpcConfig(id=pid)          # real id: the victim branch matches event.target == config.id
         cfg.traits.update(traits)
         self.state = NpcState(config=cfg)
 
@@ -32,10 +32,10 @@ def world(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "_wid", lambda: 1, raising=False)
     st.purse_add(1, "pc", 100)
     people = {
-        "bravo": _P("Горм", "головорез", {"malice": 0.85, "honesty": 0.2, "greed": 0.8,
-                                          "bravery": 0.8}),
-        "clerk": _P("Ветл", "лавочник", {"malice": 0.1, "honesty": 0.9, "greed": 0.3}),
-        "mark": _P("Дунн", "горожанин", {"bravery": 0.3}),
+        "bravo": _P("bravo", "Горм", "головорез", {"malice": 0.85, "honesty": 0.2, "greed": 0.8,
+                                                   "bravery": 0.8}),
+        "clerk": _P("clerk", "Ветл", "лавочник", {"malice": 0.1, "honesty": 0.9, "greed": 0.3}),
+        "mark": _P("mark", "Дунн", "горожанин", {"bravery": 0.3}),
     }
     core._S["people"] = people
     core._S["live"] = {"zonemap": {}}

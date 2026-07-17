@@ -29,6 +29,7 @@ witnesses(percept, state, target_id: str) -> int : Count third-party observers.
 
 from __future__ import annotations
 
+from .tunables import BRAIN  # sr_*, feel_nudge_cap now single-sourced (U4)
 from .world import ENEMY_FACTIONS
 
 # the only config for coefficients (what is tuned by the optimizer to spec)
@@ -46,13 +47,6 @@ BAL = {
     "need_urgency_coin": 0.5,                         # bird in hand — poverty accelerates the deal
     "info_value": 0.6,
     "proxemics": 0.2,                                 # social distance pull: small, never overrides needs/safety
-    "feel_nudge_cap": 0.25,   # mirrors PB["feel_nudge_cap"] (session/config.py) — mind-internal
-                              # consumer (llm_agent.py) can't import play-layer PB (import cycle)
-    # self_regard (§4.5/§4.6) — derived over/under-confidence biasing the PERCEIVED pwin the
-    # DECISION reads. Mirrors PB["sr_*"]; voice.py's boast beat uses the same PB weights (import
-    # cycle keeps them separate — guarded by tests/mind/test_knob_sync.py).
-    "sr_pride": 0.35, "sr_brave": 0.35, "sr_amb": 0.30,   # self_regard trait weights
-    "sr_span": 1.5,                                        # perceived-pwin bias span around 0.5
 }
 
 
@@ -81,9 +75,9 @@ def pwin(att, deff) -> float:
 def self_regard(state) -> float:
     """Derived [0..1] over-/under-confidence from pride/bravery/ambition (§4.5). Computed on demand
     from traits — no stored field, no regen. 0.5 = calibrated; >0.5 braggart; <0.5 timid."""
-    return _clamp(BAL["sr_pride"] * T(state, "pride")
-                  + BAL["sr_brave"] * T(state, "bravery")
-                  + BAL["sr_amb"] * T(state, "ambition"))
+    return _clamp(BRAIN["sr_pride"] * T(state, "pride")
+                  + BRAIN["sr_brave"] * T(state, "bravery")
+                  + BRAIN["sr_amb"] * T(state, "ambition"))
 
 
 def perceived_pwin(att, deff, state) -> float:
@@ -92,7 +86,7 @@ def perceived_pwin(att, deff, state) -> float:
     (and so also under-weights the risk of losing, since the same estimate feeds selfrisk); a meek
     one inverts it. At self_regard 0.5 the bias is 1.0 and perceived == pwin. The TRUE pwin
     (threat-danger, combat.py) is untouched — only this estimate bends (§3c/§4.5/§5C)."""
-    bias = 1.0 + BAL["sr_span"] * (self_regard(state) - 0.5)
+    bias = 1.0 + BRAIN["sr_span"] * (self_regard(state) - 0.5)
     own = att.power * bias
     opp = deff.power * (2.0 - bias)
     return _clamp(own / (own + opp + 1e-9), 0.02, 0.98)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from .event import Event
 from .model import NpcState
+from .tunables import BRAIN  # the single brain-affect knob registry (U4) — one source for ev_*
 
 TAG_AXIS = {                       # which worldview.morals axis a tag is scored against
     "убийство": "death", "смерть": "death", "осквернение-мёртвых": "death", "людоедство": "death",
@@ -22,15 +23,6 @@ TAG_AXIS = {                       # which worldview.morals axis a tag is scored
 TABOO_KEYS = {"убийство", "воровство", "кощунство", "людоедство",
               "клятвопреступление", "осквернение-мёртвых", "кровосмешение"}
 
-# mirror of the ev_* PB knobs (§4.6) — mind/ is import-clean of the play layer, matching value.BAL
-# and mind.decay._K. session/config.py:PB is the canonical source; keep the two in sync.
-_K = {
-    "ev_perc_l2": 0.6, "ev_perc_l3": 0.3,
-    "ev_harm_base": 0.6, "ev_harm_familiar": 0.4, "ev_viol_damp": 0.5,
-    "ev_empathy_care": 0.5, "ev_taboo_mult": 1.6, "ev_approval_k": 0.25,
-    "ev_rel_fear": 0.5, "ev_rel_aff": 0.4, "ev_warmth": 0.2,
-    "ev_control_brave": 0.6,  # смелость свидетеля гасит страх/дистресс — control=к·bravery
-}
 
 
 def _zero() -> dict:
@@ -79,10 +71,10 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
         fear_prior = float(witness_state.rel(event.actor).get("fear", 0.0))
     viol_approval = max(0.0, float(morals.get("violence", 0.0)))
     harm = (event.physical_threat
-            * (_K["ev_harm_base"] + _K["ev_harm_familiar"] * fear_prior)
+            * (BRAIN["ev_harm_base"] + BRAIN["ev_harm_familiar"] * fear_prior)
             * perc
-            * (1.0 - _K["ev_viol_damp"] * viol_approval))
-    care = affinity_target + _K["ev_empathy_care"] * float(traits.get("empathy", 0.5))
+            * (1.0 - BRAIN["ev_viol_damp"] * viol_approval))
+    care = affinity_target + BRAIN["ev_empathy_care"] * float(traits.get("empathy", 0.5))
 
     # ── MORAL LENS ────────────────────────────────────────────────────────────────────────────
     desert = outrage = approval = 0.0
@@ -93,8 +85,8 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
         desert = stance
         outrage = max(0.0, -stance) * event.intensity * perc
         if tag in taboos:
-            outrage *= _K["ev_taboo_mult"]
-        approval = max(0.0, stance) * event.intensity * perc * _K["ev_approval_k"]
+            outrage *= BRAIN["ev_taboo_mult"]
+        approval = max(0.0, stance) * event.intensity * perc * BRAIN["ev_approval_k"]
 
     goal_impact = -event.target_harm * care + approval
 
@@ -107,14 +99,14 @@ def project_event(event: Event, witness_state: NpcState, perc: float,
                                          # because test_project_event.py asserts on it pre-gain)
         "revulsion": outrage,           # → disgust in appraise
         "intent": True,                 # a witnessed act is deliberate
-        "control": _K["ev_control_brave"] * float(traits.get("bravery", 0.5)),
+        "control": BRAIN["ev_control_brave"] * float(traits.get("bravery", 0.5)),
         # ^ agency dampens fear/distress in appraise (fear/distress × (1−control)); bravery 1.0 → −60%,
         # 0.5 (default) → −30%, 0 → full fear. norm (reparative-act channel) still awaits its emitter —
         # left un-wired here on purpose, do not touch.
     }
     rel = {
-        "actor_fear": harm * _K["ev_rel_fear"] if event.actor else 0.0,
-        "target_warmth": (_K["ev_warmth"] * care
+        "actor_fear": harm * BRAIN["ev_rel_fear"] if event.actor else 0.0,
+        "target_warmth": (BRAIN["ev_warmth"] * care
                           if event.target and event.target_harm <= 0.0 else 0.0),
         "anchored": bool(event.target and event.target == witness_state.config.id),
     }

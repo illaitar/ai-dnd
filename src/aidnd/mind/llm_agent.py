@@ -27,13 +27,13 @@ from ..inference import LLMBadOutput
 from .act import score
 from .agenda import Agenda, Milestone
 from .appraisal import _race_rel, appraise_present
-from .value import BAL  # feel_nudge_cap (mirrors PB — importing PB here cycles play↔mind)
+from .tunables import BRAIN  # feel_nudge_cap single-sourced (U4); play-layer PB would cycle
 
 
 def _nudge(cur: float, want: float) -> float:
     """feel/need tools NUDGE a channel by at most ±feel_nudge_cap, never overwrite it outright
     (spec §5 E) — a model reply can no longer erase a justified grudge or hunger in one call."""
-    cap = BAL["feel_nudge_cap"]
+    cap = BRAIN["feel_nudge_cap"]
     return round(max(0.0, min(1.0, cur + max(-cap, min(cap, want - cur)))), 6)
 
 NEED_RU = {"fatigue": "усталость", "hunger": "голод", "social": "тяга к общению",

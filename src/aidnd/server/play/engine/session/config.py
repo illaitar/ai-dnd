@@ -9,6 +9,10 @@ _GT0 : int : Starting game-time in minutes (derived from PB["start_gt"]).
 
 from __future__ import annotations
 
+from aidnd.mind.tunables import (
+    BRAIN,  # brain-affect knobs single-sourced in mind/ (U4); spliced below
+)
+
 PLAYER = "pc"
 
 # UNIFIED balance table for play layer (after mind.value.BAL pattern): all thresholds/coefficients/times
@@ -17,37 +21,8 @@ PB = {
     "start_gt": 19 * 60 + 40,
     "start_coins": 12,
     "step_min": 1,
-    # МОЗГ — affect two-speed lazy decay floor (Inc1; mirrored in mind.decay._K)
-    "decay_emo_days": 0.5,           # emotion half-life (days) → mood_baseline (FAST)
-    "decay_rel_anchored_days": 14,   # anchored-rel half-life (days) → faint prior (SLOW); ×(1+vengefulness)
-    "decay_rel_loose_days": 2,       # unanchored-rel half-life (days) → 0 (LOOSE)
-    "rel_faint_prior": 0.10,         # anchored affinity relaxes toward sign×this, not 0
-    # МОЗГ — Event projection: visceral + moral-lens channels (Inc2; mirrored in mind.project._K)
-    "ev_perc_l2": 0.6, "ev_perc_l3": 0.3,          # perception weight at audibility tier L2 / L3
-    "ev_harm_base": 0.6, "ev_harm_familiar": 0.4,  # visceral fear base + familiarity-with-actor lift
-    "ev_viol_damp": 0.5,                           # positive morals.violence damps witnessed-fear
-    "ev_empathy_care": 0.5,                        # empathy → care-for-target (distress for a stranger)
-    "ev_taboo_mult": 1.6,                          # outrage × when a tag ∈ witness taboos
-    "ev_approval_k": 0.25,                         # positive-stance → grim-satisfaction joy scale
-    "ev_rel_fear": 0.5, "ev_rel_aff": 0.4, "ev_warmth": 0.2,  # bystander rel-delta scales
-    "ev_control_brave": 0.6,  # смелость свидетеля гасит страх/дистресс — control=к·bravery
-    # МОЗГ — familiarity accrual + newcomer greet (Inc3)
-    "familiarity_k": 4,              # co-presence ticks before a faint unanchored tie seeds
-    "familiarity_affinity": 0.05,    # faint warmth/trust of the seeded acquaintance tie
-    "greet_sociability_base": 1.4,   # newcomer-greet impulse = base × max(0, sociability−0.5)
-    # MIND affect floor (docs/superpowers/specs/2026-07-15-brain-design.md §4.6): max ±delta a
-    # feel/need tool may move a channel per call — model NUDGES, never sets (mind/llm_agent.py).
-    "feel_nudge_cap": 0.25,
-    # МОЗГ — self_regard (§4.6): derived clamp01(w_pride·pride + w_brave·bravery + w_amb·ambition)
-    # → over/under-confidence. Consumed NOW for the Inc4 voice boast beat (self_regard>0.8);
-    # Inc5 reuses these same weights to bias perceived pwin (sr_span).
-    "sr_pride": 0.35, "sr_brave": 0.35, "sr_amb": 0.30,   # self_regard trait weights
-    "sr_span": 1.5,                                        # perceived-pwin bias span (Inc5)
-    # МОЗГ — attention Pillar 2 (Inc6, §4.6/§3c): Body.attention = vigilance × activity multiplier,
-    # clamped [0.05, 1.0]. A sleeping/absorbed target dips below the value.py 0.4 theft window so
-    # take_distracted (0.78) finally fires; an alert guard (×1.3) caps at 1.0 and stays un-pickable.
-    # 'att_drunk' has no runtime signal yet — kept for the knob set + _activity= unit seam (unreachable).
-    "att_asleep": 0.2, "att_drunk": 0.4, "att_absorbed": 0.6, "att_alert": 1.3,
+    # МОЗГ brain-affect knobs (decay/ev_*/familiarity/greet/feel_nudge/sr_*/att_*) live in ONE
+    # registry — aidnd.mind.tunables.BRAIN — and are spliced into PB below (U4). See tunables.py.
     # sim-stitching (docs/superpowers/plans/2026-07-14-sim-stitching.md)
     "churn_named_max": 2,       # max NAMED join/leave feed items per direction per tick; rest → summary
     "overflow_max_hops": 2,     # full venue → try this many next same-kind candidates before street
@@ -268,4 +243,5 @@ PB = {
     # PLAYER JOURNAL «Хроника»: rows kept per world; prune oldest on insert (docs/.../player-journal-design.md)
     "journal_cap": 2000,
 }
+PB.update(BRAIN)  # U4: single-source the brain-affect knobs; guarded by tests/mind/test_knob_sync.py
 _GT0 = PB["start_gt"]

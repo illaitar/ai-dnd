@@ -8,14 +8,7 @@ docs/superpowers/specs/2026-07-15-brain-design.md §4.4/§5B.
 from __future__ import annotations
 
 from .model import EMOTIONS, NpcState
-
-# mirror of the PB knobs (§4.6) — mind/ is import-clean of the play layer, matching value.BAL.
-_K = {
-    "decay_emo_days": 0.5,
-    "decay_rel_anchored_days": 14.0,
-    "decay_rel_loose_days": 2.0,
-    "rel_faint_prior": 0.10,
-}
+from .tunables import BRAIN  # the single brain-affect knob registry (U4) — one source for decay_*
 
 
 def _relax(cur: float, target: float, dt_days: float, half_life_days: float) -> float:
@@ -45,7 +38,7 @@ def decay_lazy(state: NpcState, now_gt: int) -> None:
     # FAST — emotions toward each channel's mood_baseline
     for e in EMOTIONS:
         base = state.emotion_baseline(e)
-        state.emotion[e] = _relax(state.emotion.get(e, 0.0), base, dt_days, _K["decay_emo_days"])
+        state.emotion[e] = _relax(state.emotion.get(e, 0.0), base, dt_days, BRAIN["decay_emo_days"])
         if state.emotion[e] <= base + 1e-3:
             state.emotion_target.pop(e, None)
 
@@ -53,14 +46,14 @@ def decay_lazy(state: NpcState, now_gt: int) -> None:
     veng = float(state.config.traits.get("vengefulness", 0.5))
     for rel in state.relationships.values():
         if rel.get("anchored"):
-            hl = _K["decay_rel_anchored_days"] * (1.0 + veng)          # §10 LOCKED
+            hl = BRAIN["decay_rel_anchored_days"] * (1.0 + veng)          # §10 LOCKED
             aff = rel.get("affinity", 0.0)
-            tgt = (1.0 if aff >= 0 else -1.0) * _K["rel_faint_prior"] if aff else 0.0
+            tgt = (1.0 if aff >= 0 else -1.0) * BRAIN["rel_faint_prior"] if aff else 0.0
             rel["affinity"] = _relax(aff, tgt, dt_days, hl)
             rel["fear"] = _relax(rel.get("fear", 0.0), 0.0, dt_days, hl)
             rel["trust"] = _relax(rel.get("trust", 0.0), 0.0, dt_days, hl)
         else:
-            hl = _K["decay_rel_loose_days"]
+            hl = BRAIN["decay_rel_loose_days"]
             for k in ("affinity", "fear", "trust"):
                 rel[k] = _relax(rel.get(k, 0.0), 0.0, dt_days, hl)
 
